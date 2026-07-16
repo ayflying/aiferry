@@ -17,6 +17,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if self.path.startswith("/v1/catalog"):
+            self.send_json(200, {"payload": {"items": [
+                {"model_name": "custom-zeta"},
+                {"model_name": "custom-alpha"},
+            ]}})
+            return
+        if self.path.startswith("/v1/balance"):
+            self.send_json(200, {"quota": {"used": 3.25, "left": 18.75, "unit": "USD"}})
+            return
         if self.path.startswith("/v1/models"):
             self.send_json(200, {"object": "list", "data": [
                 {"id": "zeta-model", "object": "model"},

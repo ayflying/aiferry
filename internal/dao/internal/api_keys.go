@@ -21,32 +21,36 @@ type ApiKeysDao struct {
 
 // ApiKeysColumns defines and stores column names for the table api_keys.
 type ApiKeysColumns struct {
-	Id         string //
-	UserId     string //
-	Name       string //
-	KeyPrefix  string //
-	KeyHash    string //
-	Status     string //
-	ExpiresAt  string //
-	LastUsedAt string //
-	CreatedAt  string //
-	UpdatedAt  string //
-	DeletedAt  string //
+	Id          string //
+	UserId      string //
+	Name        string //
+	KeyPrefix   string //
+	KeyHash     string //
+	Status      string //
+	SpendLimit  string //
+	SpentAmount string //
+	ExpiresAt   string //
+	LastUsedAt  string //
+	CreatedAt   string //
+	UpdatedAt   string //
+	DeletedAt   string //
 }
 
 // apiKeysColumns holds the columns for the table api_keys.
 var apiKeysColumns = ApiKeysColumns{
-	Id:         "id",
-	UserId:     "user_id",
-	Name:       "name",
-	KeyPrefix:  "key_prefix",
-	KeyHash:    "key_hash",
-	Status:     "status",
-	ExpiresAt:  "expires_at",
-	LastUsedAt: "last_used_at",
-	CreatedAt:  "created_at",
-	UpdatedAt:  "updated_at",
-	DeletedAt:  "deleted_at",
+	Id:          "id",
+	UserId:      "user_id",
+	Name:        "name",
+	KeyPrefix:   "key_prefix",
+	KeyHash:     "key_hash",
+	Status:      "status",
+	SpendLimit:  "spend_limit",
+	SpentAmount: "spent_amount",
+	ExpiresAt:   "expires_at",
+	LastUsedAt:  "last_used_at",
+	CreatedAt:   "created_at",
+	UpdatedAt:   "updated_at",
+	DeletedAt:   "deleted_at",
 }
 
 // NewApiKeysDao creates and returns a new DAO object for table data access.

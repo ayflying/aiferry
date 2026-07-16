@@ -2,8 +2,8 @@ package channel
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -12,12 +12,15 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/tidwall/gjson"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/service/app"
+	"github.com/yunloli/aiferry/internal/service/channelgroup"
+	"github.com/yunloli/aiferry/internal/service/channeltype"
 )
 
 const (
@@ -28,34 +31,37 @@ const (
 )
 
 type Service struct {
-	app *app.Service
+	app    *app.Service
+	types  *channeltype.Service
+	groups *channelgroup.Service
 }
 
 type View struct {
-	Id                uint64                   `json:"id"`
-	Name              string                   `json:"name"`
-	Type              string                   `json:"type"`
-	BaseURL           string                   `json:"baseUrl"`
-	HasAPIKey         bool                     `json:"hasApiKey"`
-	HasManagementKey  bool                     `json:"hasManagementKey"`
-	OrganizationID    string                   `json:"organizationId"`
-	ProjectID         string                   `json:"projectId"`
-	Status            int                      `json:"status"`
-	Priority          int                      `json:"priority"`
-	Weight            uint                     `json:"weight"`
-	CostQueryMode     string                   `json:"costQueryMode"`
-	CostQueryConfig   adminapi.CostQueryConfig `json:"costQueryConfig"`
-	EnabledModelCount int                      `json:"enabledModelCount"`
-	DiscoveredModels  int                      `json:"discoveredModels"`
-	LastTestStatus    string                   `json:"lastTestStatus"`
-	LastTestLatencyMs uint                     `json:"lastTestLatencyMs"`
-	LastTestError     string                   `json:"lastTestError"`
-	LastTestAt        *time.Time               `json:"lastTestAt"`
-	LastCostUsed      *float64                 `json:"lastCostUsed"`
-	LastCostRemaining *float64                 `json:"lastCostRemaining"`
-	LastCostCurrency  string                   `json:"lastCostCurrency"`
-	LastCostAt        *time.Time               `json:"lastCostAt"`
-	CreatedAt         time.Time                `json:"createdAt"`
+	Id                uint64     `json:"id"`
+	Name              string     `json:"name"`
+	Type              string     `json:"type"`
+	TypeName          string     `json:"typeName"`
+	BaseURL           string     `json:"baseUrl"`
+	HasAPIKey         bool       `json:"hasApiKey"`
+	HasManagementKey  bool       `json:"hasManagementKey"`
+	OrganizationID    string     `json:"organizationId"`
+	ProjectID         string     `json:"projectId"`
+	Status            int        `json:"status"`
+	Priority          int        `json:"priority"`
+	Weight            uint       `json:"weight"`
+	CostQueryMode     string     `json:"costQueryMode"`
+	EnabledModelCount int        `json:"enabledModelCount"`
+	DiscoveredModels  int        `json:"discoveredModels"`
+	LastTestStatus    string     `json:"lastTestStatus"`
+	LastTestLatencyMs uint       `json:"lastTestLatencyMs"`
+	LastTestError     string     `json:"lastTestError"`
+	LastTestAt        *time.Time `json:"lastTestAt"`
+	LastCostUsed      *float64   `json:"lastCostUsed"`
+	LastCostRemaining *float64   `json:"lastCostRemaining"`
+	LastCostCurrency  string     `json:"lastCostCurrency"`
+	LastCostAt        *time.Time `json:"lastCostAt"`
+	GroupIDs          []uint64   `json:"groupIds"`
+	CreatedAt         time.Time  `json:"createdAt"`
 }
 
 type ModelView struct {
@@ -82,8 +88,8 @@ type DiscoveredModel struct {
 	Selected bool   `json:"selected"`
 }
 
-func New(appSvc *app.Service) *Service {
-	return &Service{app: appSvc}
+func New(appSvc *app.Service, typeSvc *channeltype.Service, groupSvc *channelgroup.Service) *Service {
+	return &Service{app: appSvc, types: typeSvc, groups: groupSvc}
 }
 
 func (s *Service) List(ctx context.Context) ([]View, error) {
@@ -92,11 +98,29 @@ func (s *Service) List(ctx context.Context) ([]View, error) {
 		return nil, gerror.Wrap(err, "list channels")
 	}
 	views := make([]View, 0, len(rows))
+	types, err := s.types.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	typeByCode := make(map[string]channeltype.View, len(types))
+	for _, item := range types {
+		typeByCode[item.Code] = item
+	}
 	for i := range rows {
 		view := s.toView(rows[i])
+		if item, ok := typeByCode[rows[i].Type]; ok {
+			view.TypeName = item.Name
+			view.CostQueryMode = item.Config.Costs.Adapter
+		} else {
+			view.TypeName = rows[i].Type
+		}
 		view.DiscoveredModels, _ = dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().ChannelId, rows[i].Id).Count()
 		view.EnabledModelCount, _ = dao.ChannelModels.Ctx(ctx).
 			Where(do.ChannelModels{ChannelId: rows[i].Id, Enabled: 1}).Count()
+		view.GroupIDs, err = s.groups.ChannelIDs(ctx, rows[i].Id)
+		if err != nil {
+			return nil, err
+		}
 		views = append(views, view)
 	}
 	return views, nil
@@ -125,9 +149,13 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 	if err != nil {
 		return 0, err
 	}
+	typeRow, typeConfig, err := s.writableType(ctx, input.Type)
+	if err != nil {
+		return 0, err
+	}
 	data := do.Channels{
 		Name:            strings.TrimSpace(input.Name),
-		Type:            "openai",
+		Type:            typeRow.Code,
 		BaseUrl:         baseURL,
 		ApiKeyCipher:    apiKeyCipher,
 		OrganizationId:  strings.TrimSpace(input.OrganizationID),
@@ -135,8 +163,8 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 		Status:          boolStatus(input.Status),
 		Priority:        input.Priority,
 		Weight:          normalizeWeight(input.Weight),
-		CostQueryMode:   normalizeCostMode(input.CostQueryMode),
-		CostQueryConfig: encodeCostConfig(input.CostQueryConfig),
+		CostQueryMode:   typeConfig.Costs.Adapter,
+		CostQueryConfig: "{}",
 	}
 	if input.ManagementKey != nil && strings.TrimSpace(*input.ManagementKey) != "" {
 		data.ManagementKeyCipher, err = s.app.Secrets.Encrypt(strings.TrimSpace(*input.ManagementKey))
@@ -144,11 +172,19 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 			return 0, err
 		}
 	}
-	id, err := dao.Channels.Ctx(ctx).Data(data).InsertAndGetId()
+	var id uint64
+	err = dao.Channels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		created, createErr := dao.Channels.Ctx(txCtx).Data(data).InsertAndGetId()
+		if createErr != nil {
+			return gerror.Wrap(createErr, "create channel")
+		}
+		id = uint64(created)
+		return s.groups.SetChannelIDs(txCtx, id, input.GroupIDs)
+	})
 	if err != nil {
-		return 0, gerror.Wrap(err, "create channel")
+		return 0, err
 	}
-	return uint64(id), nil
+	return id, nil
 }
 
 func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelInput) error {
@@ -160,16 +196,21 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 	if err != nil {
 		return err
 	}
+	typeRow, typeConfig, err := s.writableType(ctx, input.Type)
+	if err != nil {
+		return err
+	}
 	data := do.Channels{
 		Name:            strings.TrimSpace(input.Name),
+		Type:            typeRow.Code,
 		BaseUrl:         baseURL,
 		OrganizationId:  strings.TrimSpace(input.OrganizationID),
 		ProjectId:       strings.TrimSpace(input.ProjectID),
 		Status:          boolStatus(input.Status),
 		Priority:        input.Priority,
 		Weight:          normalizeWeight(input.Weight),
-		CostQueryMode:   normalizeCostMode(input.CostQueryMode),
-		CostQueryConfig: encodeCostConfig(input.CostQueryConfig),
+		CostQueryMode:   typeConfig.Costs.Adapter,
+		CostQueryConfig: "{}",
 	}
 	if input.APIKey != nil && strings.TrimSpace(*input.APIKey) != "" {
 		data.ApiKeyCipher, err = s.app.Secrets.Encrypt(strings.TrimSpace(*input.APIKey))
@@ -187,8 +228,13 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 			}
 		}
 	}
-	if _, err = dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().Id, current.Id).Data(data).Update(); err != nil {
-		return gerror.Wrap(err, "update channel")
+	if err = dao.Channels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		if _, updateErr := dao.Channels.Ctx(txCtx).Where(dao.Channels.Columns().Id, current.Id).Data(data).Update(); updateErr != nil {
+			return gerror.Wrap(updateErr, "update channel")
+		}
+		return s.groups.SetChannelIDs(txCtx, current.Id, input.GroupIDs)
+	}); err != nil {
+		return err
 	}
 	return s.invalidateRoutes(ctx)
 }
@@ -211,30 +257,35 @@ func (s *Service) DiscoverModels(ctx context.Context, channelID uint64) ([]Disco
 	if err != nil {
 		return nil, err
 	}
-	apiKey, err := s.app.Secrets.Decrypt(channel.ApiKeyCipher)
+	_, config, err := s.types.GetByCode(ctx, channel.Type)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, channel.BaseUrl+"/models", nil)
+	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Models.Path)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, config.Models.Method, endpoint, nil)
 	if err != nil {
 		return nil, gerror.Wrap(err, "create model discovery request")
 	}
-	setUpstreamHeaders(req, channel, apiKey)
+	if err = s.setConfiguredHeaders(ctx, req, channel, config.Models.AuthType, config.Models.HeaderName, config.Models.HeaderPrefix); err != nil {
+		return nil, err
+	}
 	resp, err := s.app.HTTP.Do(req)
 	if err != nil {
 		return nil, gerror.Wrap(err, "fetch upstream models")
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, gerror.Newf("upstream model query returned HTTP %d", resp.StatusCode)
 	}
-	var payload struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, gerror.Wrap(err, "read upstream models")
 	}
-	if err = json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, gerror.Wrap(err, "decode upstream models")
+	if !gjson.ValidBytes(body) {
+		return nil, gerror.New("upstream model query returned invalid JSON")
 	}
 	var existing []entity.ChannelModels
 	if err = dao.ChannelModels.Ctx(ctx).
@@ -247,13 +298,9 @@ func (s *Service) DiscoverModels(ctx context.Context, channelID uint64) ([]Disco
 		selected[model.UpstreamName] = struct{}{}
 	}
 
-	names := make([]string, 0, len(payload.Data))
-	for _, item := range payload.Data {
-		name := strings.TrimSpace(item.ID)
-		if name == "" {
-			continue
-		}
-		names = append(names, name)
+	names, err := modelNamesFromJSON(body, config.Models.ListPath, config.Models.IDPath)
+	if err != nil {
+		return nil, err
 	}
 	names = normalizeModelNames(names)
 	models := make([]DiscoveredModel, 0, len(names))
@@ -363,6 +410,24 @@ func normalizeModelNames(values []string) []string {
 	return result
 }
 
+func modelNamesFromJSON(body []byte, listPath, idPath string) ([]string, error) {
+	items := gjson.ParseBytes(body)
+	if listPath != "" {
+		items = gjson.GetBytes(body, listPath)
+	}
+	if !items.IsArray() {
+		return nil, gerror.New("model list path did not resolve to an array")
+	}
+	names := make([]string, 0, len(items.Array()))
+	for _, item := range items.Array() {
+		name := strings.TrimSpace(item.Get(idPath).String())
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return normalizeModelNames(names), nil
+}
+
 func (s *Service) UpdateModel(ctx context.Context, id uint64, input adminapi.ModelInput) error {
 	data := do.ChannelModels{
 		PublicName:   strings.TrimSpace(input.PublicName),
@@ -402,7 +467,6 @@ func (s *Service) toView(row entity.Channels) View {
 		LastCostCurrency:  row.LastCostCurrency,
 		CreatedAt:         row.CreatedAt,
 	}
-	_ = json.Unmarshal([]byte(row.CostQueryConfig), &view.CostQueryConfig)
 	if !row.LastTestAt.IsZero() {
 		view.LastTestAt = &row.LastTestAt
 	}
@@ -420,21 +484,49 @@ func normalizeBaseURL(value string) (string, error) {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return "", gerror.New("baseUrl must be an absolute HTTP(S) URL")
 	}
-	if !strings.HasSuffix(parsed.Path, "/v1") {
-		return "", gerror.New("baseUrl must end with /v1")
-	}
 	return value, nil
 }
 
-func setUpstreamHeaders(req *http.Request, channel entity.Channels, apiKey string) {
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+func (s *Service) writableType(ctx context.Context, code string) (entity.ChannelTypes, channeltype.Config, error) {
+	row, config, err := s.types.GetByCode(ctx, code)
+	if err != nil {
+		return row, config, err
+	}
+	if row.Status != 1 {
+		return row, config, gerror.New("channel type is disabled")
+	}
+	return row, config, nil
+}
+
+func (s *Service) setConfiguredHeaders(ctx context.Context, req *http.Request, channel entity.Channels, authType, headerName, headerPrefix string) error {
 	req.Header.Set("Accept", "application/json")
+	switch authType {
+	case channeltype.AuthNone:
+	case channeltype.AuthChannelKey:
+		key, err := s.app.Secrets.Decrypt(channel.ApiKeyCipher)
+		if err != nil {
+			return err
+		}
+		req.Header.Set(headerName, headerPrefix+key)
+	case channeltype.AuthManagementKey:
+		if channel.ManagementKeyCipher == "" {
+			return gerror.New("channel type requires a management key")
+		}
+		key, err := s.app.Secrets.Decrypt(channel.ManagementKeyCipher)
+		if err != nil {
+			return err
+		}
+		req.Header.Set(headerName, headerPrefix+key)
+	default:
+		return gerror.New("unsupported channel type auth")
+	}
 	if channel.OrganizationId != "" {
 		req.Header.Set("OpenAI-Organization", channel.OrganizationId)
 	}
 	if channel.ProjectId != "" {
 		req.Header.Set("OpenAI-Project", channel.ProjectId)
 	}
+	return nil
 }
 
 func boolStatus(value int) int {
@@ -456,20 +548,6 @@ func normalizeWeight(value uint) uint {
 		return 1
 	}
 	return value
-}
-
-func normalizeCostMode(value string) string {
-	switch value {
-	case ModeOpenAICosts, ModeSub2API, ModeCustomJSON:
-		return value
-	default:
-		return ModeNone
-	}
-}
-
-func encodeCostConfig(config adminapi.CostQueryConfig) string {
-	encoded, _ := json.Marshal(config)
-	return string(encoded)
 }
 
 func nullableNumber(value *float64) any {

@@ -28,10 +28,69 @@ export interface CostQueryConfig {
   fixedCurrency: string
 }
 
+export interface ChannelTypeModelConfig {
+  method: string
+  path: string
+  listPath: string
+  idPath: string
+  authType: 'none' | 'channel_key' | 'management_key'
+  headerName: string
+  headerPrefix: string
+}
+
+export interface ChannelTypeCostConfig {
+  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'custom_json'
+  method: string
+  path: string
+  authType: 'none' | 'channel_key' | 'management_key'
+  headerName: string
+  headerPrefix: string
+  usedPath: string
+  remainingPath: string
+  currencyPath: string
+  fixedCurrency: string
+}
+
+export interface ChannelTypePricingConfig {
+  adapter: 'none' | 'json'
+  method: string
+  path: string
+  authType: 'none' | 'channel_key' | 'management_key'
+  headerName: string
+  headerPrefix: string
+  listPath: string
+  modelPath: string
+  namePath: string
+  currencyPath: string
+  conditionsPath: string
+  ratesPath: string
+  inputPricePath: string
+  cachedInputPricePath: string
+  outputPricePath: string
+}
+
+export interface ChannelTypeConfig {
+  models: ChannelTypeModelConfig
+  costs: ChannelTypeCostConfig
+  pricing: ChannelTypePricingConfig
+}
+
+export interface ChannelType {
+  id: number
+  name: string
+  code: string
+  config: ChannelTypeConfig
+  status: number
+  builtIn: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Channel {
   id: number
   name: string
   type: string
+  typeName: string
   baseUrl: string
   hasApiKey: boolean
   hasManagementKey: boolean
@@ -52,11 +111,13 @@ export interface Channel {
   lastCostRemaining?: number
   lastCostCurrency: string
   lastCostAt?: string
+  groupIds: number[]
   createdAt: string
 }
 
 export interface ChannelInput {
   name: string
+  type: string
   baseUrl: string
   apiKey?: string
   managementKey?: string
@@ -65,8 +126,7 @@ export interface ChannelInput {
   status: number
   priority: number
   weight: number
-  costQueryMode: string
-  costQueryConfig: CostQueryConfig
+  groupIds: number[]
 }
 
 export interface ChannelModel {
@@ -104,19 +164,50 @@ export interface ModelTestResult {
   message: string
 }
 
+export interface CreatedAPIKey extends APIKey {
+  key: string
+}
+
+export interface ChannelGroup {
+  id: number
+  name: string
+  code: string
+  description: string
+  status: number
+  channelIds: number[]
+  createdAt: string
+  updatedAt: string
+}
+
 export interface APIKey {
   id: number
   userId: number
   name: string
   keyPrefix: string
   status: number
+  spendLimit?: number
+  spentAmount: number
+  availableAmount?: number
+  allowedModels: string[]
+  channelGroupIds: number[]
   expiresAt?: string
   lastUsedAt?: string
   createdAt: string
 }
 
-export interface CreatedAPIKey extends APIKey {
-  key: string
+export interface PriceRule {
+  id: number
+  channelModelId: number
+  name: string
+  source: 'manual' | 'sync'
+  sourceRef: string
+  priority: number
+  currency: string
+  conditions: Record<string, unknown>
+  rates: Record<string, number>
+  status: number
+  syncedAt?: string
+  updatedAt: string
 }
 
 export interface Summary {

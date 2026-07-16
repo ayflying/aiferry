@@ -28,10 +28,11 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 }
 
 func (c *Controller) models(r *ghttp.Request) {
-	if _, ok := c.authenticate(r); !ok {
+	key, ok := c.authenticate(r)
+	if !ok {
 		return
 	}
-	data, err := c.relay.Models(r.Context())
+	data, err := c.relay.Models(r.Context(), key)
 	if err != nil {
 		writeError(r, http.StatusInternalServerError, "server_error", err.Error())
 		return

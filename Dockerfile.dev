@@ -4,7 +4,14 @@ FROM golang:1.24-bookworm
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=node-runtime /usr/local /usr/local
+# Copy Node without replacing Go's /usr/local/go toolchain.
+# npm/npx/corepack are symlinks into node_modules; copy their targets and
+# recreate the links instead of following a broken cross-stage symlink.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
 RUN go install github.com/gogf/gf/cmd/gf/v2@v2.10.0
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

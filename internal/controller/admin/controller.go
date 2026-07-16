@@ -9,17 +9,21 @@ import (
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	"github.com/yunloli/aiferry/internal/service/channel"
+	"github.com/yunloli/aiferry/internal/service/channelgroup"
+	"github.com/yunloli/aiferry/internal/service/channeltype"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
 type Controller struct {
 	channels *channel.Service
+	types    *channeltype.Service
+	groups   *channelgroup.Service
 	apiKeys  *apikey.Service
 	usage    *usage.Service
 }
 
-func New(channelSvc *channel.Service, apiKeySvc *apikey.Service, usageSvc *usage.Service) *Controller {
-	return &Controller{channels: channelSvc, apiKeys: apiKeySvc, usage: usageSvc}
+func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, apiKeySvc *apikey.Service, usageSvc *usage.Service) *Controller {
+	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, apiKeys: apiKeySvc, usage: usageSvc}
 }
 
 func (c *Controller) Register(group *ghttp.RouterGroup) {
@@ -27,12 +31,25 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/channels", c.createChannel)
 	group.PUT("/channels/{id}", c.updateChannel)
 	group.DELETE("/channels/{id}", c.deleteChannel)
+	group.GET("/channel-types", c.listChannelTypes)
+	group.POST("/channel-types", c.createChannelType)
+	group.PUT("/channel-types/{id}", c.updateChannelType)
+	group.DELETE("/channel-types/{id}", c.deleteChannelType)
+	group.GET("/channel-groups", c.listChannelGroups)
+	group.POST("/channel-groups", c.createChannelGroup)
+	group.PUT("/channel-groups/{id}", c.updateChannelGroup)
+	group.DELETE("/channel-groups/{id}", c.deleteChannelGroup)
 	group.POST("/channels/{id}/models/discover", c.discoverModels)
 	group.GET("/channels/{id}/models", c.listChannelModels)
 	group.PUT("/channels/{id}/models/selection", c.selectChannelModels)
 	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
+	group.POST("/channels/{id}/prices/sync", c.syncChannelPrices)
 	group.GET("/models", c.listModels)
 	group.PUT("/models/{id}", c.updateModel)
+	group.GET("/models/{id}/price-rules", c.listPriceRules)
+	group.POST("/models/{id}/price-rules", c.createPriceRule)
+	group.PUT("/price-rules/{id}", c.updatePriceRule)
+	group.DELETE("/price-rules/{id}", c.deletePriceRule)
 	group.POST("/models/test", c.testModel)
 	group.GET("/api-keys", c.listAPIKeys)
 	group.POST("/api-keys", c.createAPIKey)
@@ -41,6 +58,55 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.GET("/dashboard", c.dashboard)
 	group.GET("/usage", c.listUsage)
 	group.GET("/system", c.systemInfo)
+}
+
+func (c *Controller) listChannelGroups(r *ghttp.Request) {
+	data, err := c.groups.List(r.Context())
+	respond(r, data, err)
+}
+func (c *Controller) createChannelGroup(r *ghttp.Request) {
+	var input adminapi.ChannelGroupInput
+	if !parse(r, &input) {
+		return
+	}
+	id, err := c.groups.Create(r.Context(), input)
+	respond(r, map[string]any{"id": id}, err)
+}
+func (c *Controller) updateChannelGroup(r *ghttp.Request) {
+	var input adminapi.ChannelGroupInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, map[string]any{}, c.groups.Update(r.Context(), routeID(r), input))
+}
+func (c *Controller) deleteChannelGroup(r *ghttp.Request) {
+	respond(r, map[string]any{}, c.groups.Delete(r.Context(), routeID(r)))
+}
+
+func (c *Controller) listChannelTypes(r *ghttp.Request) {
+	data, err := c.types.List(r.Context())
+	respond(r, data, err)
+}
+
+func (c *Controller) createChannelType(r *ghttp.Request) {
+	var input adminapi.ChannelTypeInput
+	if !parse(r, &input) {
+		return
+	}
+	id, err := c.types.Create(r.Context(), input)
+	respond(r, map[string]any{"id": id}, err)
+}
+
+func (c *Controller) updateChannelType(r *ghttp.Request) {
+	var input adminapi.ChannelTypeInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, map[string]any{}, c.types.Update(r.Context(), routeID(r), input))
+}
+
+func (c *Controller) deleteChannelType(r *ghttp.Request) {
+	respond(r, map[string]any{}, c.types.Delete(r.Context(), routeID(r)))
 }
 
 func (c *Controller) listChannels(r *ghttp.Request) {
@@ -118,6 +184,37 @@ func (c *Controller) queryChannelCost(r *ghttp.Request) {
 	}
 	data, err := c.channels.QueryCost(r.Context(), routeID(r), input)
 	respond(r, data, err)
+}
+
+func (c *Controller) syncChannelPrices(r *ghttp.Request) {
+	count, err := c.channels.SyncPrices(r.Context(), routeID(r))
+	respond(r, map[string]any{"count": count}, err)
+}
+
+func (c *Controller) listPriceRules(r *ghttp.Request) {
+	data, err := c.channels.ListPriceRules(r.Context(), routeID(r))
+	respond(r, data, err)
+}
+
+func (c *Controller) createPriceRule(r *ghttp.Request) {
+	var input adminapi.PriceRuleInput
+	if !parse(r, &input) {
+		return
+	}
+	id, err := c.channels.CreatePriceRule(r.Context(), routeID(r), input)
+	respond(r, map[string]any{"id": id}, err)
+}
+
+func (c *Controller) updatePriceRule(r *ghttp.Request) {
+	var input adminapi.PriceRuleInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, map[string]any{}, c.channels.UpdatePriceRule(r.Context(), routeID(r), input))
+}
+
+func (c *Controller) deletePriceRule(r *ghttp.Request) {
+	respond(r, map[string]any{}, c.channels.DeletePriceRule(r.Context(), routeID(r)))
 }
 
 func (c *Controller) listAPIKeys(r *ghttp.Request) {

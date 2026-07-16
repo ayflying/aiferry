@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/shopspring/decimal"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
@@ -33,6 +34,7 @@ type Service struct {
 }
 
 type Candidate struct {
+	ChannelModelID   uint64   `orm:"channel_model_id"`
 	ChannelID        uint64   `orm:"channel_id"`
 	ChannelName      string   `orm:"channel_name"`
 	BaseURL          string   `orm:"base_url"`
@@ -46,6 +48,7 @@ type Candidate struct {
 	InputPrice       *float64 `orm:"input_price"`
 	CachedInputPrice *float64 `orm:"cached_input_price"`
 	OutputPrice      *float64 `orm:"output_price"`
+	GroupIDs         []uint64
 }
 
 type Model struct {
@@ -72,7 +75,7 @@ func New(appSvc *app.Service, usageSvc *usage.Service) *Service {
 	return &Service{app: appSvc, usage: usageSvc}
 }
 
-func (s *Service) Models(ctx context.Context) (ModelList, error) {
+func (s *Service) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
 	var rows []struct {
 		PublicName string `orm:"public_name"`
 	}
@@ -87,7 +90,16 @@ func (s *Service) Models(ctx context.Context) (ModelList, error) {
 	}
 	models := make([]Model, 0, len(rows))
 	for _, row := range rows {
-		models = append(models, Model{ID: row.PublicName, Object: "model", Created: 0, OwnedBy: "aiferry"})
+		if len(key.AllowedModels) > 0 && !containsString(key.AllowedModels, row.PublicName) {
+			continue
+		}
+		candidates, routeErr := s.route(ctx, row.PublicName, key)
+		if routeErr != nil {
+			return ModelList{}, routeErr
+		}
+		if len(candidates) > 0 {
+			models = append(models, Model{ID: row.PublicName, Object: "model", Created: 0, OwnedBy: "aiferry"})
+		}
 	}
 	return ModelList{Object: "list", Data: models}, nil
 }
@@ -107,7 +119,10 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	if endpoint == "/chat/completions" && isStream {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
-	candidates, err := s.route(ctx, requestedModel)
+	if !keyAllowsModel(key, requestedModel) {
+		return gerror.New("API key is not allowed to use model " + requestedModel)
+	}
+	candidates, err := s.route(ctx, requestedModel, key)
 	if err != nil {
 		return err
 	}
@@ -222,10 +237,10 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	return result, true, nil
 }
 
-func (s *Service) route(ctx context.Context, model string) ([]Candidate, error) {
+func (s *Service) route(ctx context.Context, model string, key apikey.AuthKey) ([]Candidate, error) {
 	var candidates []Candidate
 	err := dao.ChannelModels.Ctx(ctx).As("m").Fields(`
-		m.public_name,m.upstream_name,m.input_price,m.cached_input_price,m.output_price,
+		m.id AS channel_model_id,m.public_name,m.upstream_name,m.input_price,m.cached_input_price,m.output_price,
 		c.id AS channel_id,c.name AS channel_name,c.base_url,c.api_key_cipher,
 		c.organization_id,c.project_id,c.priority,c.weight`).
 		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id AND c.status=1").
@@ -237,7 +252,15 @@ func (s *Service) route(ctx context.Context, model string) ([]Candidate, error) 
 	}
 	available := candidates[:0]
 	for _, candidate := range candidates {
+		groupIDs, groupErr := s.channelGroupIDs(ctx, candidate.ChannelID)
+		if groupErr != nil {
+			return nil, groupErr
+		}
+		if !keyAllowsGroups(key, groupIDs) {
+			continue
+		}
 		if exists, _ := s.app.Redis.Exists(ctx, cooldownKey(candidate.ChannelID)).Result(); exists == 0 {
+			candidate.GroupIDs = groupIDs
 			available = append(available, candidate)
 		}
 	}
@@ -280,7 +303,7 @@ func weightedOrder(candidates []Candidate) []Candidate {
 }
 
 func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) {
-	cost := usage.EstimateCost(result.tokens, candidate.InputPrice, candidate.CachedInputPrice, candidate.OutputPrice)
+	cost := s.estimateCost(ctx, candidate, endpoint, result.tokens)
 	_ = s.usage.Record(ctx, usage.RecordInput{
 		RequestID:      requestID,
 		UserID:         key.UserId,
@@ -298,6 +321,130 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		Attempts:       attempts,
 		ErrorMessage:   result.errorMessage,
 	})
+	if cost != nil && result.status >= 200 && result.status < 300 {
+		_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
+	}
+}
+
+func (s *Service) estimateCost(ctx context.Context, candidate Candidate, endpoint string, tokens usage.TokenUsage) *decimal.Decimal {
+	var rules []struct {
+		ConditionsJSON string `orm:"conditions_json"`
+		RatesJSON      string `orm:"rates_json"`
+	}
+	err := dao.ModelPriceRules.Ctx(ctx).
+		Fields("conditions_json,rates_json").
+		Where("channel_model_id", candidate.ChannelModelID).
+		Where("status", 1).
+		OrderDesc("priority").
+		OrderDesc("source = 'manual'").
+		OrderDesc("id").
+		Scan(&rules)
+	if err == nil {
+		for _, rule := range rules {
+			if cost, ok := ruleCost(rule.ConditionsJSON, rule.RatesJSON, endpoint, tokens); ok {
+				return cost
+			}
+		}
+	}
+	return usage.EstimateCost(tokens, candidate.InputPrice, candidate.CachedInputPrice, candidate.OutputPrice)
+}
+
+func ruleCost(conditionsJSON, ratesJSON, endpoint string, tokens usage.TokenUsage) (*decimal.Decimal, bool) {
+	conditions := gjson.Parse(conditionsJSON)
+	if configured := strings.TrimSpace(conditions.Get("endpoint").String()); configured != "" && configured != endpoint {
+		return nil, false
+	}
+	input := uint64(0)
+	if tokens.Input != nil {
+		input = *tokens.Input
+	}
+	if min := conditions.Get("inputTokensAtLeast"); min.Exists() && input < min.Uint() {
+		return nil, false
+	}
+	if max := conditions.Get("inputTokensAtMost"); max.Exists() && input > max.Uint() {
+		return nil, false
+	}
+	output := uint64(0)
+	if tokens.Output != nil {
+		output = *tokens.Output
+	}
+	if min := conditions.Get("outputTokensAtLeast"); min.Exists() && output < min.Uint() {
+		return nil, false
+	}
+	if max := conditions.Get("outputTokensAtMost"); max.Exists() && output > max.Uint() {
+		return nil, false
+	}
+	total := input + output
+	if min := conditions.Get("totalTokensAtLeast"); min.Exists() && total < min.Uint() {
+		return nil, false
+	}
+	if max := conditions.Get("totalTokensAtMost"); max.Exists() && total > max.Uint() {
+		return nil, false
+	}
+	rates := gjson.Parse(ratesJSON)
+	inputRate := rates.Get("inputPerMillion")
+	outputRate := rates.Get("outputPerMillion")
+	if !inputRate.Exists() || !outputRate.Exists() {
+		return nil, false
+	}
+	cachedRate := rates.Get("cachedInputPerMillion")
+	cached := uint64(0)
+	if tokens.CachedInput != nil {
+		cached = min(*tokens.CachedInput, input)
+	}
+	normalInput := input - cached
+	denominator := decimal.NewFromInt(1_000_000)
+	cost := decimal.NewFromInt(int64(normalInput)).Mul(decimal.NewFromFloat(inputRate.Float())).Div(denominator)
+	if cached > 0 {
+		rate := inputRate.Float()
+		if cachedRate.Exists() {
+			rate = cachedRate.Float()
+		}
+		cost = cost.Add(decimal.NewFromInt(int64(cached)).Mul(decimal.NewFromFloat(rate)).Div(denominator))
+	}
+	if tokens.Output != nil {
+		cost = cost.Add(decimal.NewFromInt(int64(output)).Mul(decimal.NewFromFloat(outputRate.Float())).Div(denominator))
+	}
+	if requestRate := rates.Get("request"); requestRate.Exists() {
+		cost = cost.Add(decimal.NewFromFloat(requestRate.Float()))
+	}
+	return &cost, true
+}
+
+func (s *Service) channelGroupIDs(ctx context.Context, channelID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := dao.ChannelGroupMembers.Ctx(ctx).As("m").
+		Fields("m.channel_group_id").
+		InnerJoin(dao.ChannelGroups.Table()+" g", "g.id=m.channel_group_id AND g.status=1").
+		Where("m.channel_id", channelID).
+		OrderAsc("m.channel_group_id").
+		Scan(&ids)
+	return ids, gerror.Wrap(err, "load channel groups")
+}
+
+func keyAllowsModel(key apikey.AuthKey, model string) bool {
+	return len(key.AllowedModels) == 0 || containsString(key.AllowedModels, model)
+}
+func keyAllowsGroups(key apikey.AuthKey, groupIDs []uint64) bool {
+	if len(key.ChannelGroupIDs) == 0 {
+		return true
+	}
+	for _, groupID := range groupIDs {
+		for _, allowed := range key.ChannelGroupIDs {
+			if allowed == groupID {
+				return true
+			}
+		}
+	}
+	return false
+}
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) markFailure(ctx context.Context, channelID uint64) {

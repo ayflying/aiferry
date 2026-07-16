@@ -1,6 +1,11 @@
 package relay
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/shopspring/decimal"
+	"github.com/yunloli/aiferry/internal/service/usage"
+)
 
 func TestParseJSONUsageVariants(t *testing.T) {
 	tokens := parseJSONUsage([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":30},"total_tokens":120}}`))
@@ -43,4 +48,23 @@ func TestRetryableStatus(t *testing.T) {
 			t.Fatalf("status %d should not retry", status)
 		}
 	}
+}
+
+func TestRuleCostHonorsEndpointAndCachedInput(t *testing.T) {
+	input, cached, output := uint64(1_000_000), uint64(200_000), uint64(500_000)
+	cost, ok := ruleCost(`{"endpoint":"/chat/completions","inputTokensAtLeast":500000}`, `{"inputPerMillion":2,"cachedInputPerMillion":0.5,"outputPerMillion":8,"request":0.01}`, "/chat/completions", usage.TokenUsage{Input: &input, CachedInput: &cached, Output: &output})
+	if !ok || !cost.Equal(decimalRequire("5.71")) {
+		t.Fatalf("unexpected rule cost: %v, matched=%t", cost, ok)
+	}
+	if _, ok = ruleCost(`{"endpoint":"/embeddings"}`, `{"inputPerMillion":2,"outputPerMillion":8}`, "/chat/completions", usage.TokenUsage{Input: &input, Output: &output}); ok {
+		t.Fatal("endpoint-mismatched rule should not apply")
+	}
+}
+
+func decimalRequire(value string) decimal.Decimal {
+	result, err := decimal.NewFromString(value)
+	if err != nil {
+		panic(err)
+	}
+	return result
 }

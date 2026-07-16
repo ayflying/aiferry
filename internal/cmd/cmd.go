@@ -17,6 +17,8 @@ import (
 	"github.com/yunloli/aiferry/internal/service/app"
 	"github.com/yunloli/aiferry/internal/service/auth"
 	"github.com/yunloli/aiferry/internal/service/channel"
+	"github.com/yunloli/aiferry/internal/service/channelgroup"
+	"github.com/yunloli/aiferry/internal/service/channeltype"
 	"github.com/yunloli/aiferry/internal/service/relay"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
@@ -36,15 +38,17 @@ var (
 				return err
 			}
 			var (
-				apiKeySvc  = apikey.New(appSvc)
-				authSvc    = auth.New(appSvc)
-				usageSvc   = usage.New()
-				channelSvc = channel.New(appSvc)
-				relaySvc   = relay.New(appSvc, usageSvc)
-				adminCtrl  = adminctrl.New(channelSvc, apiKeySvc, usageSvc)
-				authCtrl   = authctrl.New(authSvc)
-				relayCtrl  = relayctrl.New(apiKeySvc, relaySvc)
-				s          = g.Server()
+				apiKeySvc       = apikey.New(appSvc)
+				authSvc         = auth.New(appSvc)
+				usageSvc        = usage.New()
+				channelGroupSvc = channelgroup.New()
+				channelTypeSvc  = channeltype.New()
+				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc)
+				relaySvc        = relay.New(appSvc, usageSvc)
+				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, apiKeySvc, usageSvc)
+				authCtrl        = authctrl.New(authSvc)
+				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)
+				s               = g.Server()
 			)
 			s.SetAddr(":8080")
 			s.SetServerRoot(cfg.WebRoot)

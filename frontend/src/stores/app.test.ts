@@ -19,4 +19,13 @@ describe('app store', () => {
 
     expect(store.apiKeys).toEqual([])
   })
+
+  it('normalizes a null channel type response to an empty list', async () => {
+    vi.mocked(apiGet).mockResolvedValueOnce(null)
+    const store = useAppStore()
+
+    await store.loadChannelTypes()
+
+    expect(store.channelTypes).toEqual([])
+  })
 })

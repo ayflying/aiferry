@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,23 +27,32 @@ type Service struct {
 }
 
 type View struct {
-	Id         uint64     `json:"id"`
-	UserId     uint64     `json:"userId"`
-	Name       string     `json:"name"`
-	KeyPrefix  string     `json:"keyPrefix"`
-	Status     int        `json:"status"`
-	ExpiresAt  *time.Time `json:"expiresAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt"`
-	CreatedAt  time.Time  `json:"createdAt"`
+	Id              uint64     `json:"id"`
+	UserId          uint64     `json:"userId"`
+	Name            string     `json:"name"`
+	KeyPrefix       string     `json:"keyPrefix"`
+	Status          int        `json:"status"`
+	SpendLimit      *float64   `json:"spendLimit"`
+	SpentAmount     float64    `json:"spentAmount"`
+	AvailableAmount *float64   `json:"availableAmount"`
+	AllowedModels   []string   `json:"allowedModels"`
+	ChannelGroupIDs []uint64   `json:"channelGroupIds"`
+	ExpiresAt       *time.Time `json:"expiresAt"`
+	LastUsedAt      *time.Time `json:"lastUsedAt"`
+	CreatedAt       time.Time  `json:"createdAt"`
 }
 
 type AuthKey struct {
-	Id        uint64     `json:"id" orm:"id"`
-	UserId    uint64     `json:"userId" orm:"user_id"`
-	Name      string     `json:"name" orm:"name"`
-	KeyHash   string     `json:"keyHash" orm:"key_hash"`
-	Status    int        `json:"status" orm:"status"`
-	ExpiresAt *time.Time `json:"expiresAt" orm:"expires_at"`
+	Id              uint64     `json:"id" orm:"id"`
+	UserId          uint64     `json:"userId" orm:"user_id"`
+	Name            string     `json:"name" orm:"name"`
+	KeyHash         string     `json:"keyHash" orm:"key_hash"`
+	Status          int        `json:"status" orm:"status"`
+	SpendLimit      *float64   `json:"spendLimit" orm:"spend_limit"`
+	SpentAmount     float64    `json:"spentAmount" orm:"spent_amount"`
+	AllowedModels   []string   `json:"allowedModels"`
+	ChannelGroupIDs []uint64   `json:"channelGroupIds"`
+	ExpiresAt       *time.Time `json:"expiresAt" orm:"expires_at"`
 }
 
 type Created struct {
@@ -57,10 +67,18 @@ func New(appSvc *app.Service) *Service {
 func (s *Service) List(ctx context.Context) ([]View, error) {
 	rows := make([]View, 0)
 	err := dao.ApiKeys.Ctx(ctx).
-		Fields("id,user_id,name,key_prefix,status,expires_at,last_used_at,created_at").
+		Fields("id,user_id,name,key_prefix,status,spend_limit,spent_amount,expires_at,last_used_at,created_at").
 		OrderDesc(dao.ApiKeys.Columns().Id).
 		Scan(&rows)
-	return rows, gerror.Wrap(err, "list API keys")
+	if err != nil {
+		return nil, gerror.Wrap(err, "list API keys")
+	}
+	for index := range rows {
+		if err = s.populatePolicy(ctx, &rows[index]); err != nil {
+			return nil, err
+		}
+	}
+	return rows, nil
 }
 
 func (s *Service) Create(ctx context.Context, input adminapi.APIKeyInput) (Created, error) {
@@ -79,24 +97,32 @@ func (s *Service) Create(ctx context.Context, input adminapi.APIKeyInput) (Creat
 		KeyHash:   hash,
 		Status:    1,
 	}
+	if input.SpendLimit != nil {
+		data.SpendLimit = *input.SpendLimit
+	}
 	if input.ExpiresAt != nil {
 		data.ExpiresAt = *input.ExpiresAt
 	}
-	id, err := dao.ApiKeys.Ctx(ctx).Data(data).InsertAndGetId()
+	var id uint64
+	err = dao.ApiKeys.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		created, createErr := dao.ApiKeys.Ctx(txCtx).Data(data).InsertAndGetId()
+		if createErr != nil {
+			return gerror.Wrap(createErr, "create API key")
+		}
+		id = uint64(created)
+		return s.replacePolicy(txCtx, id, input.AllowedModels, input.ChannelGroupIDs)
+	})
 	if err != nil {
-		return Created{}, gerror.Wrap(err, "create API key")
+		return Created{}, err
+	}
+	view := View{Id: id, UserId: user.Id, Name: input.Name, KeyPrefix: prefix, Status: 1, SpendLimit: input.SpendLimit, AllowedModels: normalizeModels(input.AllowedModels), ChannelGroupIDs: uniqueIDs(input.ChannelGroupIDs), ExpiresAt: input.ExpiresAt, CreatedAt: time.Now()}
+	if input.SpendLimit != nil {
+		available := *input.SpendLimit
+		view.AvailableAmount = &available
 	}
 	return Created{
-		View: View{
-			Id:        uint64(id),
-			UserId:    user.Id,
-			Name:      input.Name,
-			KeyPrefix: prefix,
-			Status:    1,
-			ExpiresAt: input.ExpiresAt,
-			CreatedAt: time.Now(),
-		},
-		Key: plainText,
+		View: view,
+		Key:  plainText,
 	}, nil
 }
 
@@ -109,13 +135,23 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.APIKeyUp
 		return gerror.New("API key not found")
 	}
 	data := do.ApiKeys{Name: strings.TrimSpace(input.Name), Status: input.Status}
+	if input.SpendLimit == nil {
+		data.SpendLimit = gdb.Raw("NULL")
+	} else {
+		data.SpendLimit = *input.SpendLimit
+	}
 	if input.ExpiresAt == nil {
 		data.ExpiresAt = gdb.Raw("NULL")
 	} else {
 		data.ExpiresAt = *input.ExpiresAt
 	}
-	if _, err := dao.ApiKeys.Ctx(ctx).Where(dao.ApiKeys.Columns().Id, id).Data(data).Update(); err != nil {
-		return gerror.Wrap(err, "update API key")
+	if err := dao.ApiKeys.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		if _, updateErr := dao.ApiKeys.Ctx(txCtx).Where(dao.ApiKeys.Columns().Id, id).Data(data).Update(); updateErr != nil {
+			return gerror.Wrap(updateErr, "update API key")
+		}
+		return s.replacePolicy(txCtx, id, input.AllowedModels, input.ChannelGroupIDs)
+	}); err != nil {
+		return err
 	}
 	return s.app.Redis.Del(ctx, cacheKey(current.KeyHash)).Err()
 }
@@ -128,8 +164,19 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 	if current.Id == 0 {
 		return gerror.New("API key not found")
 	}
-	if _, err := dao.ApiKeys.Ctx(ctx).Where(dao.ApiKeys.Columns().Id, id).Delete(); err != nil {
-		return gerror.Wrap(err, "delete API key")
+	if err := dao.ApiKeys.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		if _, deleteErr := dao.ApiKeyModels.Ctx(txCtx).Where(dao.ApiKeyModels.Columns().ApiKeyId, id).Delete(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "delete key model policy")
+		}
+		if _, deleteErr := dao.ApiKeyChannelGroups.Ctx(txCtx).Where(dao.ApiKeyChannelGroups.Columns().ApiKeyId, id).Delete(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "delete key group policy")
+		}
+		if _, deleteErr := dao.ApiKeys.Ctx(txCtx).Where(dao.ApiKeys.Columns().Id, id).Delete(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "delete API key")
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return s.app.Redis.Del(ctx, cacheKey(current.KeyHash)).Err()
 }
@@ -143,7 +190,7 @@ func (s *Service) Authenticate(ctx context.Context, bearer string) (AuthKey, err
 	if err != nil {
 		return AuthKey{}, err
 	}
-	if key.Id == 0 || key.Status != 1 || (key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now())) {
+	if key.Id == 0 || key.Status != 1 || (key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now())) || (key.SpendLimit != nil && key.SpentAmount >= *key.SpendLimit) {
 		return AuthKey{}, gerror.New("invalid or expired API key")
 	}
 	s.touchLastUsed(key.Id)
@@ -161,12 +208,15 @@ func (s *Service) getCached(ctx context.Context, hash string) (AuthKey, error) {
 		return AuthKey{}, gerror.Wrap(err, "read API key cache")
 	}
 	if err = dao.ApiKeys.Ctx(ctx).
-		Fields("id,user_id,name,key_hash,status,expires_at").
+		Fields("id,user_id,name,key_hash,status,spend_limit,spent_amount,expires_at").
 		Where(dao.ApiKeys.Columns().KeyHash, hash).
 		Scan(&key); err != nil {
 		return AuthKey{}, gerror.Wrap(err, "find API key")
 	}
 	if key.Id != 0 {
+		if err = s.populateAuthPolicy(ctx, &key); err != nil {
+			return AuthKey{}, err
+		}
 		encoded, _ := json.Marshal(key)
 		_ = s.app.Redis.Set(ctx, cacheKey(hash), encoded, cacheTTL).Err()
 	}
@@ -183,6 +233,148 @@ func (s *Service) touchLastUsed(id uint64) {
 		Where(dao.ApiKeys.Columns().Id, id).
 		Data(do.ApiKeys{LastUsedAt: time.Now()}).
 		Update()
+}
+
+func (s *Service) CanUseModel(key AuthKey, model string) bool {
+	return len(key.AllowedModels) == 0 || contains(key.AllowedModels, model)
+}
+
+func (s *Service) CanUseChannelGroups(key AuthKey, groupIDs []uint64) bool {
+	if len(key.ChannelGroupIDs) == 0 {
+		return true
+	}
+	for _, groupID := range groupIDs {
+		if containsID(key.ChannelGroupIDs, groupID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) AddSpend(ctx context.Context, key AuthKey, amount float64) error {
+	if amount <= 0 {
+		return nil
+	}
+	result, err := dao.ApiKeys.Ctx(ctx).Where(dao.ApiKeys.Columns().Id, key.Id).Data(do.ApiKeys{SpentAmount: gdb.Raw("spent_amount + " + decimalLiteral(amount))}).Update()
+	if err != nil {
+		return gerror.Wrap(err, "add API key spend")
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return gerror.New("API key not found")
+	}
+	_ = s.app.Redis.Del(ctx, cacheKey(key.KeyHash)).Err()
+	return nil
+}
+
+func (s *Service) replacePolicy(ctx context.Context, keyID uint64, models []string, groupIDs []uint64) error {
+	if _, err := dao.ApiKeyModels.Ctx(ctx).Where(dao.ApiKeyModels.Columns().ApiKeyId, keyID).Delete(); err != nil {
+		return gerror.Wrap(err, "clear key model policy")
+	}
+	if _, err := dao.ApiKeyChannelGroups.Ctx(ctx).Where(dao.ApiKeyChannelGroups.Columns().ApiKeyId, keyID).Delete(); err != nil {
+		return gerror.Wrap(err, "clear key group policy")
+	}
+	for _, model := range normalizeModels(models) {
+		if _, err := dao.ApiKeyModels.Ctx(ctx).Data(do.ApiKeyModels{ApiKeyId: keyID, ModelName: model}).Insert(); err != nil {
+			return gerror.Wrap(err, "save key model policy")
+		}
+	}
+	for _, groupID := range uniqueIDs(groupIDs) {
+		if _, err := dao.ApiKeyChannelGroups.Ctx(ctx).Data(do.ApiKeyChannelGroups{ApiKeyId: keyID, ChannelGroupId: groupID}).Insert(); err != nil {
+			return gerror.Wrap(err, "save key group policy")
+		}
+	}
+	return nil
+}
+
+func (s *Service) populatePolicy(ctx context.Context, view *View) error {
+	if view.SpendLimit != nil {
+		remaining := *view.SpendLimit - view.SpentAmount
+		if remaining < 0 {
+			remaining = 0
+		}
+		view.AvailableAmount = &remaining
+	}
+	var err error
+	if view.AllowedModels, err = listModels(ctx, view.Id); err != nil {
+		return err
+	}
+	if view.ChannelGroupIDs, err = listGroupIDs(ctx, view.Id); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) populateAuthPolicy(ctx context.Context, key *AuthKey) error {
+	var err error
+	if key.AllowedModels, err = listModels(ctx, key.Id); err != nil {
+		return err
+	}
+	key.ChannelGroupIDs, err = listGroupIDs(ctx, key.Id)
+	return err
+}
+
+func listModels(ctx context.Context, keyID uint64) ([]string, error) {
+	var models []string
+	err := dao.ApiKeyModels.Ctx(ctx).Fields(dao.ApiKeyModels.Columns().ModelName).Where(dao.ApiKeyModels.Columns().ApiKeyId, keyID).OrderAsc(dao.ApiKeyModels.Columns().ModelName).Scan(&models)
+	return models, gerror.Wrap(err, "list key model policy")
+}
+
+func listGroupIDs(ctx context.Context, keyID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := dao.ApiKeyChannelGroups.Ctx(ctx).Fields(dao.ApiKeyChannelGroups.Columns().ChannelGroupId).Where(dao.ApiKeyChannelGroups.Columns().ApiKeyId, keyID).OrderAsc(dao.ApiKeyChannelGroups.Columns().ChannelGroupId).Scan(&ids)
+	return ids, gerror.Wrap(err, "list key group policy")
+}
+
+func normalizeModels(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func uniqueIDs(values []uint64) []uint64 {
+	seen := make(map[uint64]struct{}, len(values))
+	result := make([]uint64, 0, len(values))
+	for _, value := range values {
+		if value > 0 {
+			seen[value] = struct{}{}
+		}
+	}
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+func containsID(values []uint64, target uint64) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func decimalLiteral(value float64) string {
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.8f", value), "0"), ".")
 }
 
 func cacheKey(hash string) string {

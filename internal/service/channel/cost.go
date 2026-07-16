@@ -18,6 +18,7 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
+	"github.com/yunloli/aiferry/internal/service/channeltype"
 )
 
 type CostResult struct {
@@ -35,18 +36,25 @@ func (s *Service) QueryCost(ctx context.Context, channelID uint64, input adminap
 	if err != nil {
 		return CostResult{}, err
 	}
+	_, config, err := s.types.GetByCode(ctx, channel.Type)
+	if err != nil {
+		return CostResult{}, err
+	}
 	start, end, err := costRange(input.StartDate, input.EndDate)
 	if err != nil {
 		return CostResult{}, err
 	}
-	result := CostResult{Mode: channel.CostQueryMode, Currency: "USD", PeriodStart: &start, PeriodEnd: &end, QueriedAt: time.Now()}
-	switch channel.CostQueryMode {
-	case ModeOpenAICosts:
-		err = s.queryOpenAICosts(ctx, channel, start, end, &result)
-	case ModeSub2API:
-		err = s.querySub2API(ctx, channel, &result)
-	case ModeCustomJSON:
-		err = s.queryCustomJSON(ctx, channel, &result)
+	result := CostResult{Mode: config.Costs.Adapter, Currency: "USD", PeriodStart: &start, PeriodEnd: &end, QueriedAt: time.Now()}
+	if config.Costs.FixedCurrency != "" {
+		result.Currency = config.Costs.FixedCurrency
+	}
+	switch config.Costs.Adapter {
+	case channeltype.AdapterOpenAICosts:
+		err = s.queryOpenAICosts(ctx, channel, config.Costs, start, end, &result)
+	case channeltype.AdapterSub2API:
+		err = s.querySub2API(ctx, channel, config.Costs, &result)
+	case channeltype.AdapterCustomJSON:
+		err = s.queryCustomJSON(ctx, channel, config.Costs, &result)
 	default:
 		err = gerror.New("cost query is not configured")
 	}
@@ -59,11 +67,8 @@ func (s *Service) QueryCost(ctx context.Context, channelID uint64, input adminap
 	return result, nil
 }
 
-func (s *Service) queryOpenAICosts(ctx context.Context, channel entity.Channels, start, end time.Time, result *CostResult) error {
-	if channel.ManagementKeyCipher == "" {
-		return gerror.New("OpenAI organization costs require a management key")
-	}
-	key, err := s.app.Secrets.Decrypt(channel.ManagementKeyCipher)
+func (s *Service) queryOpenAICosts(ctx context.Context, channel entity.Channels, config channeltype.CostConfig, start, end time.Time, result *CostResult) error {
+	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
 	if err != nil {
 		return err
 	}
@@ -75,7 +80,9 @@ func (s *Service) queryOpenAICosts(ctx context.Context, channel entity.Channels,
 	if channel.ProjectId != "" {
 		values.Add("project_ids", channel.ProjectId)
 	}
-	body, err := s.getCostJSON(ctx, channel.BaseUrl+"/organization/costs?"+values.Encode(), key, "Authorization", "Bearer ")
+	parsed, _ := url.Parse(endpoint)
+	parsed.RawQuery = values.Encode()
+	body, err := s.getCostJSON(ctx, channel, parsed.String(), config)
 	if err != nil {
 		return err
 	}
@@ -107,18 +114,18 @@ func (s *Service) queryOpenAICosts(ctx context.Context, channel entity.Channels,
 	return nil
 }
 
-func (s *Service) querySub2API(ctx context.Context, channel entity.Channels, result *CostResult) error {
-	key, err := s.app.Secrets.Decrypt(channel.ApiKeyCipher)
+func (s *Service) querySub2API(ctx context.Context, channel entity.Channels, config channeltype.CostConfig, result *CostResult) error {
+	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
 	if err != nil {
 		return err
 	}
-	body, err := s.getCostJSON(ctx, channel.BaseUrl+"/usage", key, "Authorization", "Bearer ")
+	body, err := s.getCostJSON(ctx, channel, endpoint, config)
 	if err != nil {
 		return err
 	}
-	result.RemainingAmount = firstFloat(body, "remaining", "balance", "quota.remaining")
-	result.UsedAmount = firstFloat(body, "used", "usage.total.cost", "usage.total.actual_cost", "quota.used")
-	if currency := firstString(body, "unit", "currency", "quota.unit"); currency != "" {
+	result.RemainingAmount = firstFloat(body, config.RemainingPath, "remaining", "balance", "quota.remaining")
+	result.UsedAmount = firstFloat(body, config.UsedPath, "used", "usage.total.cost", "usage.total.actual_cost", "quota.used")
+	if currency := firstString(body, config.CurrencyPath, "unit", "currency", "quota.unit"); currency != "" {
 		result.Currency = strings.ToUpper(currency)
 	}
 	if result.RemainingAmount == nil && result.UsedAmount == nil {
@@ -127,36 +134,12 @@ func (s *Service) querySub2API(ctx context.Context, channel entity.Channels, res
 	return nil
 }
 
-func (s *Service) queryCustomJSON(ctx context.Context, channel entity.Channels, result *CostResult) error {
-	var config adminapi.CostQueryConfig
-	if err := json.Unmarshal([]byte(channel.CostQueryConfig), &config); err != nil {
-		return gerror.Wrap(err, "decode custom cost query config")
-	}
-	endpoint, err := resolveCostURL(channel.BaseUrl, config.URL)
+func (s *Service) queryCustomJSON(ctx context.Context, channel entity.Channels, config channeltype.CostConfig, result *CostResult) error {
+	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
 	if err != nil {
 		return err
 	}
-	var key string
-	switch config.AuthType {
-	case "channel_key":
-		key, err = s.app.Secrets.Decrypt(channel.ApiKeyCipher)
-	case "management_key":
-		if channel.ManagementKeyCipher == "" {
-			return gerror.New("custom query requires a management key")
-		}
-		key, err = s.app.Secrets.Decrypt(channel.ManagementKeyCipher)
-	case "none", "":
-	default:
-		return gerror.New("unsupported custom cost auth type")
-	}
-	if err != nil {
-		return err
-	}
-	headerName := config.HeaderName
-	if headerName == "" {
-		headerName = "Authorization"
-	}
-	body, err := s.getCostJSON(ctx, endpoint, key, headerName, "Bearer ")
+	body, err := s.getCostJSON(ctx, channel, endpoint, config)
 	if err != nil {
 		return err
 	}
@@ -177,14 +160,13 @@ func (s *Service) queryCustomJSON(ctx context.Context, channel entity.Channels, 
 	return nil
 }
 
-func (s *Service) getCostJSON(ctx context.Context, endpoint, key, headerName, prefix string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+func (s *Service) getCostJSON(ctx context.Context, channel entity.Channels, endpoint string, config channeltype.CostConfig) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, config.Method, endpoint, nil)
 	if err != nil {
 		return nil, gerror.Wrap(err, "create cost query request")
 	}
-	req.Header.Set("Accept", "application/json")
-	if key != "" {
-		req.Header.Set(headerName, prefix+key)
+	if err = s.setConfiguredHeaders(ctx, req, channel, config.AuthType, config.HeaderName, config.HeaderPrefix); err != nil {
+		return nil, err
 	}
 	resp, err := s.app.HTTP.Do(req)
 	if err != nil {
@@ -265,23 +247,26 @@ func costRange(startDate, endDate string) (time.Time, time.Time, error) {
 	return start, end, nil
 }
 
-func resolveCostURL(baseURL, configured string) (string, error) {
+func resolveEndpointURL(baseURL, configured string) (string, error) {
 	configured = strings.TrimSpace(configured)
 	if configured == "" {
-		return "", gerror.New("custom cost URL is required")
+		return "", gerror.New("configured endpoint URL is required")
 	}
 	parsed, err := url.Parse(configured)
 	if err != nil {
-		return "", gerror.Wrap(err, "parse custom cost URL")
+		return "", gerror.Wrap(err, "parse configured endpoint URL")
 	}
 	if parsed.IsAbs() {
 		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return "", gerror.New("custom cost URL must use HTTP(S)")
+			return "", gerror.New("configured endpoint URL must use HTTP(S)")
 		}
 		return parsed.String(), nil
 	}
-	base, _ := url.Parse(baseURL + "/")
-	return base.ResolveReference(parsed).String(), nil
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return "", gerror.New("channel base URL is required")
+	}
+	return baseURL + "/" + strings.TrimLeft(parsed.String(), "/"), nil
 }
 
 func firstFloat(body []byte, paths ...string) *float64 {

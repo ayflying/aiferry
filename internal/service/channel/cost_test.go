@@ -25,9 +25,13 @@ func TestJSONFloatPaths(t *testing.T) {
 	}
 }
 
-func TestResolveCostURL(t *testing.T) {
-	value, err := resolveCostURL("https://relay.example/v1", "usage")
+func TestResolveEndpointURL(t *testing.T) {
+	value, err := resolveEndpointURL("https://relay.example/v1", "usage")
 	if err != nil || value != "https://relay.example/v1/usage" {
 		t.Fatalf("unexpected URL: %q %v", value, err)
+	}
+	value, err = resolveEndpointURL("https://relay.example/v1", "/models")
+	if err != nil || value != "https://relay.example/v1/models" {
+		t.Fatalf("unexpected leading-slash URL: %q %v", value, err)
 	}
 }

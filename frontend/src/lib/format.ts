@@ -20,6 +20,13 @@ export function formatTime(value?: string | null): string {
   return dayjs(value).format('YYYY-MM-DD HH:mm:ss')
 }
 
+export function formatLatency(value?: number | null): string {
+  if (value === undefined || value === null) return '—'
+  if (value < 1000) return `${value} ms`
+  const seconds = value / 1000
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(2)} 秒`
+}
+
 export function successRate(requests: number, successes: number): string {
   if (!requests) return '—'
   return `${((successes / requests) * 100).toFixed(1)}%`

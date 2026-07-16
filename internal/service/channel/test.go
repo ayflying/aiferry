@@ -42,7 +42,7 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 	if err != nil {
 		return TestResult{}, err
 	}
-	apiKey, err := s.app.Secrets.Decrypt(channel.ApiKeyCipher)
+	_, typeConfig, err := s.types.GetByCode(ctx, channel.Type)
 	if err != nil {
 		return TestResult{}, err
 	}
@@ -53,7 +53,9 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 		return TestResult{}, gerror.Wrap(err, "create model test request")
 	}
 	req.Header.Set("Content-Type", "application/json")
-	setUpstreamHeaders(req, channel, apiKey)
+	if err = s.setConfiguredHeaders(ctx, req, channel, typeConfig.Models.AuthType, typeConfig.Models.HeaderName, typeConfig.Models.HeaderPrefix); err != nil {
+		return TestResult{}, err
+	}
 	startedAt := time.Now()
 	resp, requestErr := s.app.HTTP.Do(req)
 	latency := time.Since(startedAt).Milliseconds()
