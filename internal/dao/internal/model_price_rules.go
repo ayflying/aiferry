@@ -23,6 +23,7 @@ type ModelPriceRulesDao struct {
 type ModelPriceRulesColumns struct {
 	Id             string //
 	ChannelModelId string //
+	ModelName      string //
 	Name           string //
 	Source         string //
 	SourceRef      string //
@@ -41,6 +42,7 @@ type ModelPriceRulesColumns struct {
 var modelPriceRulesColumns = ModelPriceRulesColumns{
 	Id:             "id",
 	ChannelModelId: "channel_model_id",
+	ModelName:      "model_name",
 	Name:           "name",
 	Source:         "source",
 	SourceRef:      "source_ref",

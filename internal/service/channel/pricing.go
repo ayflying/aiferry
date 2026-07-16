@@ -11,6 +11,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/tidwall/gjson"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
@@ -23,6 +24,7 @@ import (
 type PriceRuleView struct {
 	Id             uint64          `json:"id"`
 	ChannelModelID uint64          `json:"channelModelId"`
+	ModelName      string          `json:"modelName"`
 	Name           string          `json:"name"`
 	Source         string          `json:"source"`
 	SourceRef      string          `json:"sourceRef"`
@@ -35,6 +37,17 @@ type PriceRuleView struct {
 	UpdatedAt      time.Time       `json:"updatedAt"`
 }
 
+type PriceSyncResult struct {
+	Count   int `json:"count"`
+	Sources int `json:"sources"`
+}
+
+type modelPriceValues struct {
+	Input       *float64
+	CachedInput *float64
+	Output      *float64
+}
+
 type syncedRule struct {
 	Model      string
 	Name       string
@@ -44,8 +57,12 @@ type syncedRule struct {
 }
 
 func (s *Service) ListPriceRules(ctx context.Context, modelID uint64) ([]PriceRuleView, error) {
+	modelName, err := s.publicModelName(ctx, modelID)
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]entity.ModelPriceRules, 0)
-	if err := dao.ModelPriceRules.Ctx(ctx).Where(dao.ModelPriceRules.Columns().ChannelModelId, modelID).OrderDesc(dao.ModelPriceRules.Columns().Priority).OrderDesc(dao.ModelPriceRules.Columns().Id).Scan(&rows); err != nil {
+	if err = dao.ModelPriceRules.Ctx(ctx).Where(dao.ModelPriceRules.Columns().ModelName, modelName).OrderDesc(dao.ModelPriceRules.Columns().Priority).OrderDesc(dao.ModelPriceRules.Columns().Id).Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list model price rules")
 	}
 	views := make([]PriceRuleView, 0, len(rows))
@@ -63,15 +80,13 @@ func (s *Service) CreatePriceRule(ctx context.Context, modelID uint64, input adm
 	if err := validatePriceRule(input); err != nil {
 		return 0, err
 	}
-	if exists, err := dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().Id, modelID).Count(); err != nil || exists == 0 {
-		if err != nil {
-			return 0, gerror.Wrap(err, "find model for price rule")
-		}
-		return 0, gerror.New("model not found")
+	modelName, err := s.publicModelName(ctx, modelID)
+	if err != nil {
+		return 0, err
 	}
 	conditions := normalizeJSON(input.Conditions, []byte(`{}`))
 	created, err := dao.ModelPriceRules.Ctx(ctx).Data(do.ModelPriceRules{
-		ChannelModelId: modelID, Name: strings.TrimSpace(input.Name), Source: input.Source, SourceRef: strings.TrimSpace(input.SourceRef), Priority: input.Priority,
+		ChannelModelId: modelID, ModelName: modelName, Name: strings.TrimSpace(input.Name), Source: input.Source, SourceRef: strings.TrimSpace(input.SourceRef), Priority: input.Priority,
 		Currency: strings.ToUpper(strings.TrimSpace(input.Currency)), ConditionsJson: string(conditions), RatesJson: string(input.Rates), Status: boolStatus(input.Status),
 	}).InsertAndGetId()
 	return uint64(created), gerror.Wrap(err, "create model price rule")
@@ -115,6 +130,39 @@ func (s *Service) SyncPrices(ctx context.Context, channelID uint64) (int, error)
 	if config.Pricing.Adapter == channeltype.AdapterNone {
 		return 0, gerror.New("channel type does not configure price synchronization")
 	}
+	return s.syncPricesFromChannel(ctx, channel, config)
+}
+
+func (s *Service) SyncAllPrices(ctx context.Context) (PriceSyncResult, error) {
+	var channels []entity.Channels
+	if err := dao.Channels.Ctx(ctx).
+		Where(dao.Channels.Columns().Status, 1).
+		OrderAsc(dao.Channels.Columns().Priority).
+		OrderAsc(dao.Channels.Columns().Id).
+		Scan(&channels); err != nil {
+		return PriceSyncResult{}, gerror.Wrap(err, "list price sync channels")
+	}
+
+	result := PriceSyncResult{}
+	for _, channel := range channels {
+		_, config, err := s.types.GetByCode(ctx, channel.Type)
+		if err != nil {
+			return result, err
+		}
+		if config.Pricing.Adapter == channeltype.AdapterNone {
+			continue
+		}
+		count, err := s.syncPricesFromChannel(ctx, channel, config)
+		if err != nil {
+			return result, gerror.Wrapf(err, "sync prices from channel %s", channel.Name)
+		}
+		result.Count += count
+		result.Sources++
+	}
+	return result, nil
+}
+
+func (s *Service) syncPricesFromChannel(ctx context.Context, channel entity.Channels, config channeltype.Config) (int, error) {
 	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Pricing.Path)
 	if err != nil {
 		return 0, err
@@ -150,35 +198,46 @@ func (s *Service) SyncPrices(ctx context.Context, channelID uint64) (int, error)
 	}
 
 	var models []entity.ChannelModels
-	if err = dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().ChannelId, channelID).Scan(&models); err != nil {
-		return 0, gerror.Wrap(err, "load channel models for prices")
+	if err = dao.ChannelModels.Ctx(ctx).Scan(&models); err != nil {
+		return 0, gerror.Wrap(err, "load public models for prices")
 	}
-	byName := make(map[string]entity.ChannelModels, len(models))
+	byName := make(map[string][]entity.ChannelModels, len(models)*2)
 	for _, model := range models {
-		byName[model.UpstreamName] = model
-		byName[model.PublicName] = model
+		byName[model.UpstreamName] = append(byName[model.UpstreamName], model)
+		byName[model.PublicName] = append(byName[model.PublicName], model)
+	}
+	publicRules := make(map[string][]syncedRule)
+	canonicalModelIDs := make(map[string]uint64)
+	for _, rule := range rules {
+		seen := make(map[string]struct{})
+		for _, model := range byName[rule.Model] {
+			if _, exists := seen[model.PublicName]; exists {
+				continue
+			}
+			seen[model.PublicName] = struct{}{}
+			publicRules[model.PublicName] = append(publicRules[model.PublicName], rule)
+			if canonicalModelIDs[model.PublicName] == 0 || model.Id < canonicalModelIDs[model.PublicName] {
+				canonicalModelIDs[model.PublicName] = model.Id
+			}
+		}
 	}
 	count := 0
 	err = dao.ModelPriceRules.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
-		seenModels := make(map[uint64]struct{}, len(models))
-		for _, model := range models {
-			if _, exists := seenModels[model.Id]; exists {
-				continue
-			}
-			seenModels[model.Id] = struct{}{}
-			if _, deleteErr := dao.ModelPriceRules.Ctx(txCtx).Where(do.ModelPriceRules{ChannelModelId: model.Id, Source: "sync"}).Delete(); deleteErr != nil {
+		for modelName, modelRules := range publicRules {
+			if _, deleteErr := dao.ModelPriceRules.Ctx(txCtx).Where(do.ModelPriceRules{ModelName: modelName, Source: "sync"}).Delete(); deleteErr != nil {
 				return gerror.Wrap(deleteErr, "replace synced price rules")
 			}
-		}
-		for _, rule := range rules {
-			model, ok := byName[rule.Model]
-			if !ok {
-				continue
+			for _, rule := range modelRules {
+				if _, insertErr := dao.ModelPriceRules.Ctx(txCtx).Data(do.ModelPriceRules{ChannelModelId: canonicalModelIDs[modelName], ModelName: modelName, Name: rule.Name, Source: "sync", SourceRef: endpoint, Currency: rule.Currency, ConditionsJson: string(rule.Conditions), RatesJson: string(rule.Rates), Status: 1, SyncedAt: gtime.Now()}).Insert(); insertErr != nil {
+					return gerror.Wrap(insertErr, "save synced price rule")
+				}
+				count++
+				if values, ok := modelPriceValuesFromRule(rule); ok {
+					if saveErr := s.mergePublicPrice(txCtx, modelName, values); saveErr != nil {
+						return saveErr
+					}
+				}
 			}
-			if _, insertErr := dao.ModelPriceRules.Ctx(txCtx).Data(do.ModelPriceRules{ChannelModelId: model.Id, Name: rule.Name, Source: "sync", SourceRef: endpoint, Currency: rule.Currency, ConditionsJson: string(rule.Conditions), RatesJson: string(rule.Rates), Status: 1, SyncedAt: time.Now()}).Insert(); insertErr != nil {
-				return gerror.Wrap(insertErr, "save synced price rule")
-			}
-			count++
 		}
 		return nil
 	})
@@ -240,15 +299,82 @@ func syncedRulesFromJSON(body []byte, config channeltype.PricingConfig) ([]synce
 	return result, nil
 }
 
+func (s *Service) publicModelName(ctx context.Context, modelID uint64) (string, error) {
+	var model entity.ChannelModels
+	if err := dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().Id, modelID).Scan(&model); err != nil {
+		return "", gerror.Wrap(err, "find model for price rule")
+	}
+	if model.Id == 0 {
+		return "", gerror.New("model not found")
+	}
+	return model.PublicName, nil
+}
+
+func (s *Service) replacePublicPrice(ctx context.Context, modelName string, values modelPriceValues) error {
+	return s.savePublicPrice(ctx, modelName, values, true)
+}
+
+func (s *Service) mergePublicPrice(ctx context.Context, modelName string, values modelPriceValues) error {
+	return s.savePublicPrice(ctx, modelName, values, false)
+}
+
+func (s *Service) savePublicPrice(ctx context.Context, modelName string, values modelPriceValues, replace bool) error {
+	data := do.ModelPrices{PublicName: modelName}
+	if replace || values.Input != nil {
+		data.InputPrice = nullableNumber(values.Input)
+	}
+	if replace || values.CachedInput != nil {
+		data.CachedInputPrice = nullableNumber(values.CachedInput)
+	}
+	if replace || values.Output != nil {
+		data.OutputPrice = nullableNumber(values.Output)
+	}
+	result, err := dao.ModelPrices.Ctx(ctx).Where(dao.ModelPrices.Columns().PublicName, modelName).Data(data).Update()
+	if err != nil {
+		return gerror.Wrap(err, "update public model price")
+	}
+	if affected, _ := result.RowsAffected(); affected > 0 {
+		return nil
+	}
+	if _, err = dao.ModelPrices.Ctx(ctx).Data(data).Insert(); err != nil {
+		return gerror.Wrap(err, "create public model price")
+	}
+	return nil
+}
+
+func modelPriceValuesFromRule(rule syncedRule) (modelPriceValues, bool) {
+	if conditions := strings.TrimSpace(string(rule.Conditions)); conditions != "" && conditions != "{}" {
+		return modelPriceValues{}, false
+	}
+	rates := gjson.ParseBytes(rule.Rates)
+	values := modelPriceValues{
+		Input:       jsonPriceValue(rates.Get("inputPerMillion")),
+		CachedInput: jsonPriceValue(rates.Get("cachedInputPerMillion")),
+		Output:      jsonPriceValue(rates.Get("outputPerMillion")),
+	}
+	return values, values.Input != nil || values.CachedInput != nil || values.Output != nil
+}
+
+func jsonPriceValue(value gjson.Result) *float64 {
+	if !value.Exists() {
+		return nil
+	}
+	result := value.Float()
+	return &result
+}
+
 func priceRuleView(row entity.ModelPriceRules) (PriceRuleView, error) {
 	conditions := json.RawMessage(row.ConditionsJson)
 	rates := json.RawMessage(row.RatesJson)
 	if !json.Valid(conditions) || !json.Valid(rates) {
 		return PriceRuleView{}, gerror.New("stored price rule has invalid JSON")
 	}
-	view := PriceRuleView{Id: row.Id, ChannelModelID: row.ChannelModelId, Name: row.Name, Source: row.Source, SourceRef: row.SourceRef, Priority: row.Priority, Currency: row.Currency, Conditions: conditions, Rates: rates, Status: row.Status, UpdatedAt: row.UpdatedAt}
-	if !row.SyncedAt.IsZero() {
-		value := row.SyncedAt
+	view := PriceRuleView{Id: row.Id, ChannelModelID: row.ChannelModelId, ModelName: row.ModelName, Name: row.Name, Source: row.Source, SourceRef: row.SourceRef, Priority: row.Priority, Currency: row.Currency, Conditions: conditions, Rates: rates, Status: row.Status}
+	if row.UpdatedAt != nil {
+		view.UpdatedAt = row.UpdatedAt.Time
+	}
+	if row.SyncedAt != nil {
+		value := row.SyncedAt.Time
 		view.SyncedAt = &value
 	}
 	return view, nil

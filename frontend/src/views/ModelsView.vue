@@ -87,12 +87,14 @@ async function removeRule(rule: PriceRule) {
   } catch (error) { if (error !== 'cancel') ElMessage.error((error as Error).message) }
 }
 
-async function syncPrices(channel: number) {
+async function syncPrices() {
   loading.value = true
   try {
-    const result = await apiPost<{ count: number }>(`/channels/${channel}/prices/sync`, {})
-    ElMessage.success(result.count ? `已同步 ${result.count} 条价格规则` : '未找到可匹配的上游价格')
-    if (current.value?.channelId === channel) await loadRules(current.value.id)
+    const result = await apiPost<{ count: number; sources: number }>('/prices/sync', {})
+    if (!result.sources) ElMessage.info('没有已配置的价格同步源，请在渠道类型的 pricing JSON 中配置价格接口')
+    else ElMessage.success(result.count ? `已同步 ${result.count} 条公共价格规则` : '价格源没有返回已启用模型的匹配价格')
+    if (current.value) await loadRules(current.value.id)
+    await load()
   } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
 }
 
@@ -109,7 +111,7 @@ onMounted(load)
       </div>
       <div class="spacer" />
       <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
-		<el-button :icon="RotateCw" :loading="loading" :disabled="!channelId" @click="channelId && syncPrices(channelId)">同步当前渠道价格</el-button>
+		<el-button :icon="RotateCw" :loading="loading" @click="syncPrices">同步模型价格</el-button>
     </div>
 
     <div class="table-panel">
@@ -126,7 +128,7 @@ onMounted(load)
 
     <el-drawer v-model="editOpen" title="价格设置" :size="priceDrawerSize">
       <el-form label-position="top">
-        <div class="price-target"><div><span>公开模型</span><code>{{ current?.publicName }}</code></div><div><span>渠道</span><strong>{{ current?.channelName }}</strong></div></div>
+        <div class="price-target"><div><span>公开模型</span><code>{{ current?.publicName }}</code></div><div><span>价格范围</span><strong>所有同名公开模型</strong></div></div>
         <div class="section-heading price-heading"><h2>USD / 1M Token</h2><span>留空表示未定价</span></div>
         <div class="form-grid">
           <el-form-item label="输入价格"><el-input-number v-model="form.inputPrice" :min="0" :precision="6" :controls="false" placeholder="未定价" /></el-form-item>

@@ -240,10 +240,11 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 func (s *Service) route(ctx context.Context, model string, key apikey.AuthKey) ([]Candidate, error) {
 	var candidates []Candidate
 	err := dao.ChannelModels.Ctx(ctx).As("m").Fields(`
-		m.id AS channel_model_id,m.public_name,m.upstream_name,m.input_price,m.cached_input_price,m.output_price,
+		m.id AS channel_model_id,m.public_name,m.upstream_name,p.input_price,p.cached_input_price,p.output_price,
 		c.id AS channel_id,c.name AS channel_name,c.base_url,c.api_key_cipher,
 		c.organization_id,c.project_id,c.priority,c.weight`).
 		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id AND c.status=1").
+		LeftJoin(dao.ModelPrices.Table()+" p", "p.public_name=m.public_name AND p.deleted_at IS NULL").
 		Where("m.enabled", 1).
 		Where("m.public_name", model).
 		Scan(&candidates)
@@ -333,7 +334,7 @@ func (s *Service) estimateCost(ctx context.Context, candidate Candidate, endpoin
 	}
 	err := dao.ModelPriceRules.Ctx(ctx).
 		Fields("conditions_json,rates_json").
-		Where("channel_model_id", candidate.ChannelModelID).
+		Where("model_name", candidate.PublicName).
 		Where("status", 1).
 		OrderDesc("priority").
 		OrderDesc("source = 'manual'").

@@ -66,10 +66,6 @@ type PriceRuleInput struct {
 	Status     int             `json:"status" v:"in:0,1"`
 }
 
-type PriceSyncInput struct {
-	SourceURL string `json:"sourceUrl" v:"required|url"`
-}
-
 type ModelSelectionInput struct {
 	ModelNames []string `json:"modelNames"`
 }

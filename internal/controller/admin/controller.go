@@ -44,6 +44,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.PUT("/channels/{id}/models/selection", c.selectChannelModels)
 	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
 	group.POST("/channels/{id}/prices/sync", c.syncChannelPrices)
+	group.POST("/prices/sync", c.syncAllPrices)
 	group.GET("/models", c.listModels)
 	group.PUT("/models/{id}", c.updateModel)
 	group.GET("/models/{id}/price-rules", c.listPriceRules)
@@ -189,6 +190,11 @@ func (c *Controller) queryChannelCost(r *ghttp.Request) {
 func (c *Controller) syncChannelPrices(r *ghttp.Request) {
 	count, err := c.channels.SyncPrices(r.Context(), routeID(r))
 	respond(r, map[string]any{"count": count}, err)
+}
+
+func (c *Controller) syncAllPrices(r *ghttp.Request) {
+	data, err := c.channels.SyncAllPrices(r.Context())
+	respond(r, data, err)
 }
 
 func (c *Controller) listPriceRules(r *ghttp.Request) {

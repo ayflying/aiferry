@@ -378,8 +378,11 @@ func (s *Service) SelectModels(ctx context.Context, channelID uint64, input admi
 func (s *Service) ListModels(ctx context.Context, channelID uint64) ([]ModelView, error) {
 	rows := make([]ModelView, 0)
 	model := dao.ChannelModels.Ctx(ctx).As("m").
-		Fields("m.*,c.name AS channel_name").
-		LeftJoin(dao.Channels.Table()+" c", "c.id=m.channel_id")
+		Fields(`m.id,m.channel_id,c.name AS channel_name,m.public_name,m.upstream_name,m.discovered,m.enabled,
+			p.input_price,p.cached_input_price,p.output_price,m.last_test_endpoint,m.last_test_status,
+			m.last_test_latency_ms,m.last_test_error,m.last_test_at,m.updated_at`).
+		LeftJoin(dao.Channels.Table()+" c", "c.id=m.channel_id").
+		LeftJoin(dao.ModelPrices.Table()+" p", "p.public_name=m.public_name AND p.deleted_at IS NULL")
 	if channelID > 0 {
 		model = model.Where("m.channel_id", channelID)
 	}
@@ -459,20 +462,31 @@ func firstJSONText(body []byte, paths ...string) string {
 }
 
 func (s *Service) UpdateModel(ctx context.Context, id uint64, input adminapi.ModelInput) error {
-	data := do.ChannelModels{
+	var model entity.ChannelModels
+	if err := dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().Id, id).Scan(&model); err != nil {
+		return gerror.Wrap(err, "find model")
+	}
+	if model.Id == 0 {
+		return gerror.New("model not found")
+	}
+	publicName := strings.TrimSpace(input.PublicName)
+	modelData := do.ChannelModels{
 		PublicName:   strings.TrimSpace(input.PublicName),
 		UpstreamName: strings.TrimSpace(input.UpstreamName),
 		Enabled:      boolInt(input.Enabled),
 	}
-	data.InputPrice = nullableNumber(input.InputPrice)
-	data.CachedInputPrice = nullableNumber(input.CachedInputPrice)
-	data.OutputPrice = nullableNumber(input.OutputPrice)
-	result, err := dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().Id, id).Data(data).Update()
+	err := dao.ChannelModels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		if _, updateErr := dao.ChannelModels.Ctx(txCtx).Where(dao.ChannelModels.Columns().Id, id).Data(modelData).Update(); updateErr != nil {
+			return gerror.Wrap(updateErr, "update channel model")
+		}
+		return s.replacePublicPrice(txCtx, publicName, modelPriceValues{
+			Input:       input.InputPrice,
+			CachedInput: input.CachedInputPrice,
+			Output:      input.OutputPrice,
+		})
+	})
 	if err != nil {
-		return gerror.Wrap(err, "update channel model")
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return gerror.New("model not found")
+		return err
 	}
 	return s.invalidateRoutes(ctx)
 }
