@@ -9,9 +9,10 @@ RUN apt-get update \
 # recreate the links instead of following a broken cross-stage symlink.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
+RUN rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s /usr/local/lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
 RUN go install github.com/gogf/gf/cmd/gf/v2@v2.10.0
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

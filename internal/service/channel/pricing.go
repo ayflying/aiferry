@@ -38,8 +38,16 @@ type PriceRuleView struct {
 }
 
 type PriceSyncResult struct {
-	Count   int `json:"count"`
-	Sources int `json:"sources"`
+	Count     int                      `json:"count"`
+	Sources   int                      `json:"sources"`
+	Succeeded int                      `json:"succeeded"`
+	Failures  []PriceSyncSourceFailure `json:"failures"`
+}
+
+type PriceSyncSourceFailure struct {
+	ChannelID   uint64 `json:"channelId"`
+	ChannelName string `json:"channelName"`
+	Message     string `json:"message"`
 }
 
 type modelPriceValues struct {
@@ -143,21 +151,33 @@ func (s *Service) SyncAllPrices(ctx context.Context) (PriceSyncResult, error) {
 		return PriceSyncResult{}, gerror.Wrap(err, "list price sync channels")
 	}
 
-	result := PriceSyncResult{}
+	result := PriceSyncResult{Failures: make([]PriceSyncSourceFailure, 0)}
 	for _, channel := range channels {
 		_, config, err := s.types.GetByCode(ctx, channel.Type)
 		if err != nil {
-			return result, err
+			result.Sources++
+			result.Failures = append(result.Failures, PriceSyncSourceFailure{
+				ChannelID:   channel.Id,
+				ChannelName: channel.Name,
+				Message:     err.Error(),
+			})
+			continue
 		}
 		if config.Pricing.Adapter == channeltype.AdapterNone {
 			continue
 		}
+		result.Sources++
 		count, err := s.syncPricesFromChannel(ctx, channel, config)
 		if err != nil {
-			return result, gerror.Wrapf(err, "sync prices from channel %s", channel.Name)
+			result.Failures = append(result.Failures, PriceSyncSourceFailure{
+				ChannelID:   channel.Id,
+				ChannelName: channel.Name,
+				Message:     err.Error(),
+			})
+			continue
 		}
 		result.Count += count
-		result.Sources++
+		result.Succeeded++
 	}
 	return result, nil
 }

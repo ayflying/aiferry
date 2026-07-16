@@ -90,12 +90,20 @@ async function removeRule(rule: PriceRule) {
 async function syncPrices() {
   loading.value = true
   try {
-    const result = await apiPost<{ count: number; sources: number }>('/prices/sync', {})
+    const result = await apiPost<{ count: number; sources: number; succeeded: number; failures: Array<{ channelName: string; message: string }> }>('/prices/sync', {})
     if (!result.sources) ElMessage.info('没有已配置的价格同步源，请在渠道类型的 pricing JSON 中配置价格接口')
+    else if (!result.succeeded) ElMessage.error(`价格同步失败：${formatSyncFailures(result.failures)}`)
+    else if (result.failures.length) ElMessage.warning(`已同步 ${result.count} 条公共价格规则；${formatSyncFailures(result.failures)}`)
     else ElMessage.success(result.count ? `已同步 ${result.count} 条公共价格规则` : '价格源没有返回已启用模型的匹配价格')
     if (current.value) await loadRules(current.value.id)
     await load()
   } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+}
+
+function formatSyncFailures(failures: Array<{ channelName: string; message: string }>) {
+  const visible = failures.slice(0, 2).map((item) => `${item.channelName}：${item.message}`)
+  const remaining = failures.length - visible.length
+  return `${visible.join('；')}${remaining > 0 ? `；另有 ${remaining} 个价格源失败` : ''}`
 }
 
 onMounted(load)
