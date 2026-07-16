@@ -70,7 +70,7 @@ button { color: inherit; }
 .user-copy strong { max-width: 160px; overflow: hidden; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .user-copy small { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .el-dropdown-menu__item svg { margin-right: 8px; }
-.page-content { width: 100%; max-width: 1540px; margin: 0 auto; padding: 22px 24px 40px; }
+.page-content { width: 100%; margin: 0; padding: 22px 24px 40px; }
 
 .login-page { position: relative; display: grid; min-height: 100vh; grid-template-rows: auto 1fr auto; padding: 28px 36px 22px; overflow: hidden; background: var(--canvas); }
 .login-page::before { position: absolute; inset: 0 0 auto; height: 4px; background: linear-gradient(90deg, var(--action) 0 42%, var(--healthy) 42% 72%, var(--ink) 72%); content: ''; }
