@@ -55,7 +55,7 @@ func New(appSvc *app.Service) *Service {
 }
 
 func (s *Service) List(ctx context.Context) ([]View, error) {
-	var rows []View
+	rows := make([]View, 0)
 	err := dao.ApiKeys.Ctx(ctx).
 		Fields("id,user_id,name,key_prefix,status,expires_at,last_used_at,created_at").
 		OrderDesc(dao.ApiKeys.Columns().Id).

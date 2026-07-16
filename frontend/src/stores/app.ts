@@ -8,11 +8,11 @@ export const useAppStore = defineStore('app', () => {
   const apiKeys = ref<APIKey[]>([])
 
   async function loadChannels() {
-    channels.value = await apiGet<Channel[]>('/channels')
+    channels.value = (await apiGet<Channel[] | null>('/channels')) ?? []
   }
 
   async function loadAPIKeys() {
-    apiKeys.value = await apiGet<APIKey[]>('/api-keys')
+    apiKeys.value = (await apiGet<APIKey[] | null>('/api-keys')) ?? []
   }
 
   return { channels, apiKeys, loadChannels, loadAPIKeys }

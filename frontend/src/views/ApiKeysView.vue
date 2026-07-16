@@ -10,6 +10,7 @@ import { formatTime } from '../lib/format'
 const store = useAppStore()
 const loading = ref(false)
 const saving = ref(false)
+const loadError = ref('')
 const dialogOpen = ref(false)
 const editing = ref<APIKey>()
 const created = ref<CreatedAPIKey>()
@@ -17,7 +18,15 @@ const form = reactive<{ name: string; status: number; expiresAt?: Date }>({ name
 
 async function load() {
   loading.value = true
-  try { await store.loadAPIKeys() } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+  loadError.value = ''
+  try {
+    await store.loadAPIKeys()
+  } catch (error) {
+    loadError.value = (error as Error).message
+    ElMessage.error(loadError.value)
+  } finally {
+    loading.value = false
+  }
 }
 
 function openCreate() {
@@ -78,22 +87,25 @@ onMounted(load)
     </div>
 
     <div class="table-panel">
-      <el-table v-loading="loading" :data="store.apiKeys" row-key="id">
+      <div v-if="loadError && !store.apiKeys.length" class="empty-state error-state">
+        <div><strong>访问密钥加载失败</strong><span>{{ loadError }}</span><el-button :icon="RefreshCw" @click="load">重新加载</el-button></div>
+      </div>
+      <el-table v-else-if="loading || store.apiKeys.length" v-loading="loading" :data="store.apiKeys" row-key="id">
         <el-table-column label="名称" min-width="170"><template #default="{ row }"><div class="key-name"><span class="key-icon"><KeyRound :size="15" /></span><strong>{{ row.name }}</strong></div></template></el-table-column>
         <el-table-column label="密钥前缀" min-width="140"><template #default="{ row }"><span class="mono">{{ row.keyPrefix }}••••</span></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
         <el-table-column label="过期时间" min-width="160"><template #default="{ row }">{{ row.expiresAt ? formatTime(row.expiresAt) : '永不过期' }}</template></el-table-column>
         <el-table-column label="最后使用" min-width="160"><template #default="{ row }">{{ formatTime(row.lastUsedAt) }}</template></el-table-column>
         <el-table-column label="创建时间" min-width="160"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
-        <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip content="编辑"><button class="icon-button" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip><el-tooltip content="删除"><button class="icon-button danger" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
+        <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip content="编辑"><button class="icon-button" type="button" aria-label="编辑密钥" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip><el-tooltip content="删除"><button class="icon-button danger" type="button" aria-label="删除密钥" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
       </el-table>
-      <div v-if="!loading && !store.apiKeys.length" class="empty-state"><div><strong>还没有访问密钥</strong><span>创建密钥后才能调用 /v1 接口</span></div></div>
+      <div v-if="!loadError && !loading && !store.apiKeys.length" class="empty-state"><div><strong>还没有访问密钥</strong><span>创建密钥后才能调用 /v1 接口</span><el-button type="primary" :icon="Plus" @click="openCreate">创建密钥</el-button></div></div>
     </div>
 
     <el-dialog v-model="dialogOpen" :title="editing ? '编辑访问密钥' : '创建访问密钥'" width="min(520px, 92vw)" :close-on-click-modal="!created">
       <div v-if="created" class="secret-once">
         <strong>访问密钥只显示这一次</strong>
-        <div class="secret-value"><code>{{ created.key }}</code><el-tooltip content="复制"><button class="icon-button" @click="copyKey"><Copy :size="16" /></button></el-tooltip></div>
+        <div class="secret-value"><code>{{ created.key }}</code><el-tooltip content="复制"><button class="icon-button" type="button" aria-label="复制密钥" @click="copyKey"><Copy :size="16" /></button></el-tooltip></div>
       </div>
       <el-form v-else label-position="top">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="例如 开发环境" /></el-form-item>
@@ -106,5 +118,5 @@ onMounted(load)
 </template>
 
 <style scoped>
-.key-name { display: flex; align-items: center; gap: 9px; }.key-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: #245f96; background: #e9f2ff; }
+.key-name { display: flex; align-items: center; gap: 9px; }.key-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: #245f96; background: #e9f2ff; }.empty-state span { display: block; margin-bottom: 14px; }.error-state strong { color: #c83e4d; }
 </style>
