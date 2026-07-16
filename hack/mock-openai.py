@@ -18,7 +18,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/v1/models"):
-            self.send_json(200, {"object": "list", "data": [{"id": "mock-gpt", "object": "model"}]})
+            self.send_json(200, {"object": "list", "data": [
+                {"id": "zeta-model", "object": "model"},
+                {"id": "mock-gpt", "object": "model"},
+                {"id": "alpha-model", "object": "model"},
+            ]})
             return
         if self.path.startswith("/v1/usage"):
             self.send_json(200, {"remaining": 42.5, "used": 7.5, "unit": "USD"})

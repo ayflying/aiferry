@@ -1,17 +1,40 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Coins, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from '@lucide/vue'
+import { Coins, FlaskConical, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiDelete, apiPost, apiPut } from '../api/client'
-import type { Channel, ChannelInput, CostQueryConfig } from '../api/types'
+import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import type { Channel, ChannelInput, ChannelModel, CostQueryConfig, DiscoveredModel, ModelTestResult } from '../api/types'
 import { useAppStore } from '../stores/app'
 import { formatCost, formatTime } from '../lib/format'
+import { enabledChannelModels, sortDiscoveredModels } from '../lib/models'
 
 const store = useAppStore()
 const loading = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<number>()
+const discoveryOpen = ref(false)
+const discovering = ref(false)
+const applyingSelection = ref(false)
+const discoveryChannel = ref<Channel>()
+const discoveredModels = ref<DiscoveredModel[]>([])
+const discoveryKeyword = ref('')
+const selectedModelNames = ref<string[]>([])
+const testOpen = ref(false)
+const testLoading = ref(false)
+const testChannel = ref<Channel>()
+const testModels = ref<ChannelModel[]>([])
+const testModelId = ref<number>()
+const testEndpoint = ref<ModelTestResult['endpoint']>('chat')
+const testResult = ref<ModelTestResult>()
+
+const visibleDiscoveredModels = computed(() => {
+  const keyword = discoveryKeyword.value.trim().toLowerCase()
+  if (!keyword) return discoveredModels.value
+  return discoveredModels.value.filter((item) => item.name.toLowerCase().includes(keyword))
+})
+const allVisibleSelected = computed(() => visibleDiscoveredModels.value.length > 0
+  && visibleDiscoveredModels.value.every((item) => selectedModelNames.value.includes(item.name)))
 
 const emptyConfig = (): CostQueryConfig => ({
   url: '', authType: 'none', headerName: 'Authorization', usedPath: '', remainingPath: '', currencyPath: '', fixedCurrency: 'USD',
@@ -64,12 +87,67 @@ async function save() {
 }
 
 async function discover(channel: Channel) {
-  loading.value = true
+  discoveryChannel.value = channel
+  discoveryKeyword.value = ''
+  discoveredModels.value = []
+  selectedModelNames.value = []
+  discoveryOpen.value = true
+  discovering.value = true
   try {
-    const models = await apiPost<string[]>(`/channels/${channel.id}/models/discover`)
-    ElMessage.success(`发现 ${models.length} 个模型`)
+    const models = await apiPost<DiscoveredModel[]>(`/channels/${channel.id}/models/discover`)
+    discoveredModels.value = sortDiscoveredModels(models)
+    selectedModelNames.value = discoveredModels.value.filter((item) => item.selected).map((item) => item.name)
+  } catch (error) {
+    discoveryOpen.value = false
+    ElMessage.error((error as Error).message)
+  } finally { discovering.value = false }
+}
+
+function toggleVisibleModels() {
+  const selected = new Set(selectedModelNames.value)
+  for (const model of visibleDiscoveredModels.value) {
+    if (allVisibleSelected.value) selected.delete(model.name)
+    else selected.add(model.name)
+  }
+  selectedModelNames.value = [...selected]
+}
+
+async function saveModelSelection() {
+  if (!discoveryChannel.value) return
+  applyingSelection.value = true
+  try {
+    await apiPut(`/channels/${discoveryChannel.value.id}/models/selection`, { modelNames: selectedModelNames.value })
+    ElMessage.success(`已启用 ${selectedModelNames.value.length} 个模型`)
+    discoveryOpen.value = false
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+  } catch (error) { ElMessage.error((error as Error).message) } finally { applyingSelection.value = false }
+}
+
+async function openTest(channel: Channel) {
+  testChannel.value = channel
+  testModels.value = []
+  testModelId.value = undefined
+  testEndpoint.value = 'chat'
+  testResult.value = undefined
+  testOpen.value = true
+  testLoading.value = true
+  try {
+    const models = await apiGet<ChannelModel[]>(`/channels/${channel.id}/models`)
+    testModels.value = enabledChannelModels(models)
+    testModelId.value = testModels.value[0]?.id
+  } catch (error) { ElMessage.error((error as Error).message) } finally { testLoading.value = false }
+}
+
+async function testModel() {
+  if (!testModelId.value) return
+  testLoading.value = true
+  testResult.value = undefined
+  try {
+    testResult.value = await apiPost<ModelTestResult>('/models/test', { modelId: testModelId.value, endpoint: testEndpoint.value })
+    if (testResult.value.success) ElMessage.success('模型测试通过')
+    else ElMessage.error(testResult.value.message || '模型测试失败')
+    await load()
+  } catch (error) { ElMessage.error((error as Error).message) } finally { testLoading.value = false }
 }
 
 async function queryCost(channel: Channel) {
@@ -115,17 +193,51 @@ onMounted(load)
         <el-table-column label="模型" width="110"><template #default="{ row }">{{ row.enabledModelCount }} / {{ row.discoveredModels }}</template></el-table-column>
         <el-table-column label="最近测试" min-width="140"><template #default="{ row }"><span v-if="row.lastTestStatus" class="status-dot" :class="row.lastTestStatus">{{ row.lastTestStatus === 'success' ? `${row.lastTestLatencyMs} ms` : '失败' }}</span><span v-else class="muted">未测试</span></template></el-table-column>
         <el-table-column label="上游费用" min-width="150"><template #default="{ row }"><div v-if="row.lastCostAt" class="cost-cell"><span v-if="row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="row.lastCostRemaining !== undefined">剩余 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><small>{{ formatTime(row.lastCostAt) }}</small></div><span v-else class="muted">未查询</span></template></el-table-column>
-        <el-table-column label="操作" width="190" fixed="right" align="right">
+        <el-table-column label="操作" width="230" fixed="right" align="right">
           <template #default="{ row }"><div class="table-actions">
-            <el-tooltip content="发现模型"><button class="icon-button" @click="discover(row)"><ScanSearch :size="16" /></button></el-tooltip>
-            <el-tooltip content="查询费用"><button class="icon-button" :disabled="row.costQueryMode === 'none'" @click="queryCost(row)"><Coins :size="16" /></button></el-tooltip>
-            <el-tooltip content="编辑"><button class="icon-button" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip>
-            <el-tooltip content="删除"><button class="icon-button danger" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip>
+            <el-tooltip content="发现模型"><button class="icon-button" type="button" :aria-label="`发现 ${row.name} 的模型`" @click="discover(row)"><ScanSearch :size="16" /></button></el-tooltip>
+            <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="openTest(row)"><FlaskConical :size="16" /></button></el-tooltip>
+            <el-tooltip content="查询费用"><button class="icon-button" type="button" :aria-label="`查询 ${row.name} 的费用`" :disabled="row.costQueryMode === 'none'" @click="queryCost(row)"><Coins :size="16" /></button></el-tooltip>
+            <el-tooltip content="编辑"><button class="icon-button" type="button" :aria-label="`编辑渠道 ${row.name}`" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip>
+            <el-tooltip content="删除"><button class="icon-button danger" type="button" :aria-label="`删除渠道 ${row.name}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip>
           </div></template>
         </el-table-column>
       </el-table>
       <div v-if="!loading && !store.channels.length" class="empty-state"><div><strong>还没有渠道</strong><span>添加第一个 OpenAI 兼容上游</span></div></div>
     </div>
+
+    <el-dialog v-model="discoveryOpen" :title="`选择模型 · ${discoveryChannel?.name || ''}`" width="min(640px, 94vw)">
+      <div v-loading="discovering" class="model-selection">
+        <div class="selection-toolbar">
+          <el-input v-model="discoveryKeyword" clearable placeholder="搜索模型" />
+          <el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消当前结果' : '选择当前结果' }}</el-button>
+        </div>
+        <div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div>
+        <el-checkbox-group v-if="visibleDiscoveredModels.length" v-model="selectedModelNames" class="model-check-list">
+          <el-checkbox v-for="item in visibleDiscoveredModels" :key="item.name" :value="item.name"><code>{{ item.name }}</code></el-checkbox>
+        </el-checkbox-group>
+        <div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div>
+      </div>
+      <template #footer><el-button @click="discoveryOpen = false">取消</el-button><el-button type="primary" :loading="applyingSelection" :disabled="discovering" @click="saveModelSelection">确认选择</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="testOpen" :title="`渠道测试 · ${testChannel?.name || ''}`" width="min(540px, 94vw)">
+      <div v-loading="testLoading" class="test-dialog">
+        <template v-if="testModels.length">
+          <el-form label-position="top">
+            <el-form-item label="已启用模型"><el-select v-model="testModelId" filterable><el-option v-for="model in testModels" :key="model.id" :label="model.publicName" :value="model.id"><span class="model-option"><strong>{{ model.publicName }}</strong><small>{{ model.upstreamName }}</small></span></el-option></el-select></el-form-item>
+            <el-form-item label="接口类型"><el-segmented v-model="testEndpoint" :options="[{ label: 'Chat', value: 'chat' }, { label: 'Responses', value: 'responses' }, { label: 'Embeddings', value: 'embeddings' }]" /></el-form-item>
+          </el-form>
+          <div v-if="testResult" class="test-result" :class="testResult.success ? 'success' : 'failed'">
+            <strong>{{ testResult.success ? '测试通过' : '测试失败' }}</strong>
+            <span>HTTP {{ testResult.httpStatus || '—' }} · {{ testResult.latencyMs }} ms · 输入 {{ testResult.inputTokens }} · 输出 {{ testResult.outputTokens }}</span>
+            <p>{{ testResult.message }}</p>
+          </div>
+        </template>
+        <div v-else-if="!testLoading" class="selection-empty">当前渠道没有已选择的模型</div>
+      </div>
+      <template #footer><el-button @click="testOpen = false">关闭</el-button><el-button type="primary" :loading="testLoading" :disabled="!testModelId" @click="testModel">开始测试</el-button></template>
+    </el-dialog>
 
     <el-drawer v-model="drawerOpen" :title="title" size="min(620px, 94vw)">
       <el-form label-position="top">
@@ -160,5 +272,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.channel-name { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.channel-name strong { font-size: 13px; }.channel-name span { overflow: hidden; color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.cost-cell { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.cost-cell small { color: #7b8792; }.custom-query { margin-top: 8px; padding-top: 16px; border-top: 1px solid #dce2e7; }
+.channel-name { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.channel-name strong { font-size: 13px; }.channel-name span { overflow: hidden; color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.cost-cell { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.cost-cell small { color: #7b8792; }.model-selection { min-height: 300px; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-check-list .el-checkbox { min-width: 0; height: 38px; margin: 0; padding: 0 10px; border-bottom: 1px solid #eef1f3; }.model-check-list .el-checkbox:last-child { border-bottom: 0; }.model-check-list code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.test-dialog { min-height: 180px; }.test-result { padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; }.test-result.success { border-color: #acd7cc; background: #f2faf8; }.test-result.failed { border-color: #e9abb2; background: #fff6f7; }.test-result span { display: block; margin-top: 5px; color: #66717d; font-size: 11px; }.test-result p { margin: 8px 0 0; font-size: 12px; }.model-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.model-option small { color: #7b8792; font-family: 'JetBrains Mono', monospace; font-size: 10px; }.custom-query { margin-top: 8px; padding-top: 16px; border-top: 1px solid #dce2e7; }
+@media (max-width: 600px) { .selection-toolbar { grid-template-columns: 1fr; }.model-option small { display: none; } }
 </style>

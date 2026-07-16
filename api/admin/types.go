@@ -35,6 +35,10 @@ type ModelInput struct {
 	OutputPrice      *float64 `json:"outputPrice"`
 }
 
+type ModelSelectionInput struct {
+	ModelNames []string `json:"modelNames"`
+}
+
 type ModelTestInput struct {
 	ModelID  uint64 `json:"modelId" v:"required|min:1"`
 	Endpoint string `json:"endpoint" v:"required|in:chat,responses,embeddings"`

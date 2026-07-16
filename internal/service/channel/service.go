@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -74,6 +75,11 @@ type ModelView struct {
 	LastTestError     string     `json:"lastTestError" orm:"last_test_error"`
 	LastTestAt        *time.Time `json:"lastTestAt" orm:"last_test_at"`
 	UpdatedAt         time.Time  `json:"updatedAt" orm:"updated_at"`
+}
+
+type DiscoveredModel struct {
+	Name     string `json:"name"`
+	Selected bool   `json:"selected"`
 }
 
 func New(appSvc *app.Service) *Service {
@@ -200,7 +206,7 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 	return s.invalidateRoutes(ctx)
 }
 
-func (s *Service) DiscoverModels(ctx context.Context, channelID uint64) ([]string, error) {
+func (s *Service) DiscoverModels(ctx context.Context, channelID uint64) ([]DiscoveredModel, error) {
 	channel, err := s.Get(ctx, channelID)
 	if err != nil {
 		return nil, err
@@ -230,44 +236,131 @@ func (s *Service) DiscoverModels(ctx context.Context, channelID uint64) ([]strin
 	if err = json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, gerror.Wrap(err, "decode upstream models")
 	}
-	models := make([]string, 0, len(payload.Data))
+	var existing []entity.ChannelModels
+	if err = dao.ChannelModels.Ctx(ctx).
+		Where(do.ChannelModels{ChannelId: channelID, Enabled: 1}).
+		Scan(&existing); err != nil {
+		return nil, gerror.Wrap(err, "load selected models")
+	}
+	selected := make(map[string]struct{}, len(existing))
+	for _, model := range existing {
+		selected[model.UpstreamName] = struct{}{}
+	}
+
+	names := make([]string, 0, len(payload.Data))
 	for _, item := range payload.Data {
 		name := strings.TrimSpace(item.ID)
 		if name == "" {
 			continue
 		}
-		models = append(models, name)
-		count, countErr := dao.ChannelModels.Ctx(ctx).
-			Where(do.ChannelModels{ChannelId: channelID, UpstreamName: name}).Count()
-		if countErr != nil {
-			return nil, gerror.Wrap(countErr, "check discovered model")
-		}
-		if count == 0 {
-			_, err = dao.ChannelModels.Ctx(ctx).Data(do.ChannelModels{
-				ChannelId:    channelID,
-				PublicName:   name,
-				UpstreamName: name,
-				Discovered:   1,
-				Enabled:      0,
-			}).Insert()
-			if err != nil {
-				return nil, gerror.Wrap(err, "save discovered model")
-			}
-		}
+		names = append(names, name)
+	}
+	names = normalizeModelNames(names)
+	models := make([]DiscoveredModel, 0, len(names))
+	for _, name := range names {
+		_, isSelected := selected[name]
+		models = append(models, DiscoveredModel{Name: name, Selected: isSelected})
 	}
 	return models, nil
 }
 
+func (s *Service) SelectModels(ctx context.Context, channelID uint64, input adminapi.ModelSelectionInput) ([]ModelView, error) {
+	if _, err := s.Get(ctx, channelID); err != nil {
+		return nil, err
+	}
+	names := normalizeModelNames(input.ModelNames)
+	if len(names) > 2000 {
+		return nil, gerror.New("too many models selected")
+	}
+	for _, name := range names {
+		if len(name) > 191 {
+			return nil, gerror.Newf("model name is too long: %s", name)
+		}
+	}
+	selected := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		selected[name] = struct{}{}
+	}
+
+	err := dao.ChannelModels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		var existing []entity.ChannelModels
+		if scanErr := dao.ChannelModels.Ctx(txCtx).
+			Where(dao.ChannelModels.Columns().ChannelId, channelID).
+			Scan(&existing); scanErr != nil {
+			return gerror.Wrap(scanErr, "load channel models")
+		}
+		for _, model := range existing {
+			_, enabled := selected[model.UpstreamName]
+			delete(selected, model.UpstreamName)
+			if model.Enabled == boolInt(enabled) {
+				continue
+			}
+			if _, updateErr := dao.ChannelModels.Ctx(txCtx).
+				Where(dao.ChannelModels.Columns().Id, model.Id).
+				Data(do.ChannelModels{Enabled: boolInt(enabled)}).
+				Update(); updateErr != nil {
+				return gerror.Wrap(updateErr, "update model selection")
+			}
+		}
+		for _, name := range names {
+			if _, missing := selected[name]; !missing {
+				continue
+			}
+			if _, insertErr := dao.ChannelModels.Ctx(txCtx).Data(do.ChannelModels{
+				ChannelId:    channelID,
+				PublicName:   name,
+				UpstreamName: name,
+				Discovered:   1,
+				Enabled:      1,
+			}).Insert(); insertErr != nil {
+				return gerror.Wrap(insertErr, "save selected model")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err = s.invalidateRoutes(ctx); err != nil {
+		return nil, err
+	}
+	return s.ListModels(ctx, channelID)
+}
+
 func (s *Service) ListModels(ctx context.Context, channelID uint64) ([]ModelView, error) {
-	var rows []ModelView
+	rows := make([]ModelView, 0)
 	model := dao.ChannelModels.Ctx(ctx).As("m").
 		Fields("m.*,c.name AS channel_name").
 		LeftJoin(dao.Channels.Table()+" c", "c.id=m.channel_id")
 	if channelID > 0 {
 		model = model.Where("m.channel_id", channelID)
 	}
-	err := model.OrderDesc("m.enabled").OrderAsc("m.public_name").Scan(&rows)
+	err := model.OrderAsc("m.public_name").OrderAsc("m.upstream_name").Scan(&rows)
 	return rows, gerror.Wrap(err, "list channel models")
+}
+
+func normalizeModelNames(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		name := strings.TrimSpace(value)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		left, right := strings.ToLower(result[i]), strings.ToLower(result[j])
+		if left == right {
+			return result[i] < result[j]
+		}
+		return left < right
+	})
+	return result
 }
 
 func (s *Service) UpdateModel(ctx context.Context, id uint64, input adminapi.ModelInput) error {

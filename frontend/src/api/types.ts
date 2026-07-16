@@ -88,6 +88,22 @@ export interface ChannelModel {
   updatedAt: string
 }
 
+export interface DiscoveredModel {
+  name: string
+  selected: boolean
+}
+
+export interface ModelTestResult {
+  success: boolean
+  endpoint: 'chat' | 'responses' | 'embeddings'
+  model: string
+  latencyMs: number
+  httpStatus: number
+  inputTokens: number
+  outputTokens: number
+  message: string
+}
+
 export interface APIKey {
   id: number
   userId: number

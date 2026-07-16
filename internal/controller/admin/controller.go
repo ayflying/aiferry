@@ -29,6 +29,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.DELETE("/channels/{id}", c.deleteChannel)
 	group.POST("/channels/{id}/models/discover", c.discoverModels)
 	group.GET("/channels/{id}/models", c.listChannelModels)
+	group.PUT("/channels/{id}/models/selection", c.selectChannelModels)
 	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
 	group.GET("/models", c.listModels)
 	group.PUT("/models/{id}", c.updateModel)
@@ -76,6 +77,15 @@ func (c *Controller) discoverModels(r *ghttp.Request) {
 
 func (c *Controller) listChannelModels(r *ghttp.Request) {
 	data, err := c.channels.ListModels(r.Context(), routeID(r))
+	respond(r, data, err)
+}
+
+func (c *Controller) selectChannelModels(r *ghttp.Request) {
+	var input adminapi.ModelSelectionInput
+	if !parse(r, &input) {
+		return
+	}
+	data, err := c.channels.SelectModels(r.Context(), routeID(r), input)
 	respond(r, data, err)
 }
 
