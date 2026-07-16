@@ -1,0 +1,44 @@
+services:
+  toolbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file:
+      - .env
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_ADDR: ${REDIS_ADDR}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      AIFERRY_MASTER_KEY: ${AIFERRY_MASTER_KEY}
+      WEB_ROOT: /workspace/frontend/dist
+    volumes:
+      - .:/workspace
+      - go-mod-cache:/go/pkg/mod
+      - npm-cache:/root/.npm
+    working_dir: /workspace
+
+  mock-openai:
+    image: python:3.13-alpine
+    profiles: ["acceptance"]
+    environment:
+      FAIL_REQUESTS: "0"
+    volumes:
+      - ./hack/mock-openai.py:/app/mock-openai.py:ro
+    command: ["python", "/app/mock-openai.py"]
+
+  mock-openai-fail:
+    image: python:3.13-alpine
+    profiles: ["acceptance"]
+    environment:
+      FAIL_REQUESTS: "1"
+    volumes:
+      - ./hack/mock-openai.py:/app/mock-openai.py:ro
+    command: ["python", "/app/mock-openai.py"]
+
+volumes:
+  go-mod-cache:
+  npm-cache:

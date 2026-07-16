@@ -1,0 +1,14 @@
+
+# CLI tool, only in development environment.
+# https://goframe.org/docs/cli
+gfcli:
+  gen:
+    dao:
+      - link: "mysql:${MYSQL_USER:aiferry}:${MYSQL_PASSWORD:aiferry}@tcp(${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306})/${MYSQL_DATABASE:aiferry}?charset=utf8mb4&parseTime=true&loc=Local"
+        descriptionTag: true
+        removePrefix: ""
+
+  docker:
+    build: "-a amd64 -s linux -p temp -ew"
+    tagPrefixes:
+      - aiferry

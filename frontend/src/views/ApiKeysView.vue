@@ -1,0 +1,110 @@
+<script setup lang="ts">
+import { onMounted, reactive, ref } from 'vue'
+import { Copy, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from '@lucide/vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { apiDelete, apiPost, apiPut } from '../api/client'
+import type { APIKey, CreatedAPIKey } from '../api/types'
+import { useAppStore } from '../stores/app'
+import { formatTime } from '../lib/format'
+
+const store = useAppStore()
+const loading = ref(false)
+const saving = ref(false)
+const dialogOpen = ref(false)
+const editing = ref<APIKey>()
+const created = ref<CreatedAPIKey>()
+const form = reactive<{ name: string; status: number; expiresAt?: Date }>({ name: '', status: 1, expiresAt: undefined })
+
+async function load() {
+  loading.value = true
+  try { await store.loadAPIKeys() } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+}
+
+function openCreate() {
+  editing.value = undefined
+  created.value = undefined
+  Object.assign(form, { name: '', status: 1, expiresAt: undefined })
+  dialogOpen.value = true
+}
+
+function openEdit(item: APIKey) {
+  editing.value = item
+  created.value = undefined
+  Object.assign(form, { name: item.name, status: item.status, expiresAt: item.expiresAt ? new Date(item.expiresAt) : undefined })
+  dialogOpen.value = true
+}
+
+async function save() {
+  if (!form.name.trim()) { ElMessage.warning('请填写密钥名称'); return }
+  saving.value = true
+  try {
+    if (editing.value) {
+      await apiPut(`/api-keys/${editing.value.id}`, { ...form, expiresAt: form.expiresAt?.toISOString() })
+      ElMessage.success('访问密钥已更新')
+      dialogOpen.value = false
+    } else {
+      created.value = await apiPost<CreatedAPIKey>('/api-keys', { name: form.name, expiresAt: form.expiresAt?.toISOString() })
+      ElMessage.success('访问密钥已创建')
+    }
+    await load()
+  } catch (error) { ElMessage.error((error as Error).message) } finally { saving.value = false }
+}
+
+async function copyKey() {
+  if (!created.value) return
+  await navigator.clipboard.writeText(created.value.key)
+  ElMessage.success('密钥已复制')
+}
+
+async function remove(item: APIKey) {
+  try {
+    await ElMessageBox.confirm(`删除访问密钥“${item.name}”？`, '删除密钥', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await apiDelete(`/api-keys/${item.id}`)
+    ElMessage.success('访问密钥已删除')
+    await load()
+  } catch (error) { if (error !== 'cancel') ElMessage.error((error as Error).message) }
+}
+
+onMounted(load)
+</script>
+
+<template>
+  <div class="page-stack">
+    <div class="page-toolbar">
+      <div class="muted">中转 API 使用独立密钥鉴权和归因</div>
+      <div class="spacer" />
+      <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
+      <el-button type="primary" :icon="Plus" @click="openCreate">创建密钥</el-button>
+    </div>
+
+    <div class="table-panel">
+      <el-table v-loading="loading" :data="store.apiKeys" row-key="id">
+        <el-table-column label="名称" min-width="170"><template #default="{ row }"><div class="key-name"><span class="key-icon"><KeyRound :size="15" /></span><strong>{{ row.name }}</strong></div></template></el-table-column>
+        <el-table-column label="密钥前缀" min-width="140"><template #default="{ row }"><span class="mono">{{ row.keyPrefix }}••••</span></template></el-table-column>
+        <el-table-column label="状态" width="100"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
+        <el-table-column label="过期时间" min-width="160"><template #default="{ row }">{{ row.expiresAt ? formatTime(row.expiresAt) : '永不过期' }}</template></el-table-column>
+        <el-table-column label="最后使用" min-width="160"><template #default="{ row }">{{ formatTime(row.lastUsedAt) }}</template></el-table-column>
+        <el-table-column label="创建时间" min-width="160"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
+        <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip content="编辑"><button class="icon-button" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip><el-tooltip content="删除"><button class="icon-button danger" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
+      </el-table>
+      <div v-if="!loading && !store.apiKeys.length" class="empty-state"><div><strong>还没有访问密钥</strong><span>创建密钥后才能调用 /v1 接口</span></div></div>
+    </div>
+
+    <el-dialog v-model="dialogOpen" :title="editing ? '编辑访问密钥' : '创建访问密钥'" width="min(520px, 92vw)" :close-on-click-modal="!created">
+      <div v-if="created" class="secret-once">
+        <strong>访问密钥只显示这一次</strong>
+        <div class="secret-value"><code>{{ created.key }}</code><el-tooltip content="复制"><button class="icon-button" @click="copyKey"><Copy :size="16" /></button></el-tooltip></div>
+      </div>
+      <el-form v-else label-position="top">
+        <el-form-item label="名称"><el-input v-model="form.name" placeholder="例如 开发环境" /></el-form-item>
+        <el-form-item v-if="editing" label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item>
+        <el-form-item label="过期时间"><el-date-picker v-model="form.expiresAt" type="datetime" clearable placeholder="永不过期" style="width: 100%" /></el-form-item>
+      </el-form>
+      <template #footer><el-button v-if="created" type="primary" @click="dialogOpen = false">完成</el-button><template v-else><el-button @click="dialogOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ editing ? '保存密钥' : '创建密钥' }}</el-button></template></template>
+    </el-dialog>
+  </div>
+</template>
+
+<style scoped>
+.key-name { display: flex; align-items: center; gap: 9px; }.key-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: #245f96; background: #e9f2ff; }
+</style>
