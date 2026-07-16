@@ -82,3 +82,7 @@ docker compose --profile local up -d --build
 - Playwright 桌面与移动验收：在 Playwright 容器中执行 `npm run test:e2e`
 
 项目参考 [QuantumNous/new-api](https://github.com/QuantumNous/new-api) 和 [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) 的协议与产品边界，不复制其 AGPL-3.0 实现代码。
+
+## 开源协议
+
+AiFerry 使用 [MIT License](LICENSE) 开源。
