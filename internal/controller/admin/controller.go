@@ -188,8 +188,11 @@ func (c *Controller) queryChannelCost(r *ghttp.Request) {
 }
 
 func (c *Controller) syncChannelPrices(r *ghttp.Request) {
-	count, err := c.channels.SyncPrices(r.Context(), routeID(r))
-	respond(r, map[string]any{"count": count}, err)
+	// Keep the legacy channel URL compatible with clients that have not reloaded
+	// their bundled frontend yet. Prices are shared by public model, so every
+	// synchronization must use all configured price sources.
+	data, err := c.channels.SyncAllPrices(r.Context())
+	respond(r, data, err)
 }
 
 func (c *Controller) syncAllPrices(r *ghttp.Request) {

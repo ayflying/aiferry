@@ -126,21 +126,6 @@ func (s *Service) DeletePriceRule(ctx context.Context, id uint64) error {
 	return nil
 }
 
-func (s *Service) SyncPrices(ctx context.Context, channelID uint64) (int, error) {
-	channel, err := s.Get(ctx, channelID)
-	if err != nil {
-		return 0, err
-	}
-	_, config, err := s.types.GetByCode(ctx, channel.Type)
-	if err != nil {
-		return 0, err
-	}
-	if config.Pricing.Adapter == channeltype.AdapterNone {
-		return 0, gerror.New("channel type does not configure price synchronization")
-	}
-	return s.syncPricesFromChannel(ctx, channel, config)
-}
-
 func (s *Service) SyncAllPrices(ctx context.Context) (PriceSyncResult, error) {
 	var channels []entity.Channels
 	if err := dao.Channels.Ctx(ctx).
