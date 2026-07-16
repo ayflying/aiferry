@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -62,6 +63,10 @@ type oauthState struct {
 
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
+}
+
+type tokenErrorResponse struct {
+	Error string `json:"error"`
 }
 
 type accountEnvelope struct {
@@ -134,18 +139,18 @@ func (s *Service) CompleteLogin(ctx context.Context, state, stateCookie, code, c
 	}
 	accessToken, err := s.exchangeCode(ctx, code, callbackURL)
 	if err != nil {
-		return SessionUser{}, "", "", err
+		return SessionUser{}, "", "", gerror.Wrap(err, "exchange Casdoor authorization code")
 	}
 	account, err := s.getAccount(ctx, accessToken)
 	if err != nil {
-		return SessionUser{}, "", "", err
+		return SessionUser{}, "", "", gerror.Wrap(err, "fetch Casdoor account")
 	}
 	if accountDisabled(account) || !accountAllowed(account, s.app.Config.CasdoorAllowedGroup) {
 		return SessionUser{}, "", "", ErrAccessDenied
 	}
 	user, err := s.syncUser(ctx, account)
 	if err != nil {
-		return SessionUser{}, "", "", err
+		return SessionUser{}, "", "", gerror.Wrap(err, "synchronize Casdoor account")
 	}
 	sessionToken, err := randomToken(32)
 	if err != nil {
@@ -156,7 +161,7 @@ func (s *Service) CompleteLogin(ctx context.Context, state, stateCookie, code, c
 		return SessionUser{}, "", "", gerror.Wrap(err, "encode login session")
 	}
 	if err = s.app.Redis.Set(ctx, sessionKey(sessionToken), encoded, s.sessionTTL()).Err(); err != nil {
-		return SessionUser{}, "", "", gerror.Wrap(err, "save login session")
+		return SessionUser{}, "", "", gerror.Wrap(err, "save Casdoor login session")
 	}
 	return user, sessionToken, metadata.ReturnTo, nil
 }
@@ -262,6 +267,10 @@ func (s *Service) exchangeCode(ctx context.Context, code, callbackURL string) (s
 		return "", gerror.Wrap(err, "read Casdoor token response")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		var failure tokenErrorResponse
+		if json.Unmarshal(body, &failure) == nil && strings.TrimSpace(failure.Error) != "" {
+			return "", gerror.Newf("Casdoor token exchange failed: %s", strings.TrimSpace(failure.Error))
+		}
 		return "", gerror.Newf("Casdoor token exchange failed with HTTP %d", response.StatusCode)
 	}
 	var token tokenResponse
@@ -331,7 +340,7 @@ func (s *Service) syncUser(ctx context.Context, account casdoorAccount) (Session
 	if err = dao.Users.Ctx(ctx).
 		Where(columns.IdentityProvider, "casdoor").
 		Where(columns.IdentitySubject, uid).
-		Scan(&current); err != nil {
+		Scan(&current); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return SessionUser{}, gerror.Wrap(err, "find Casdoor user")
 	}
 	if current.Id == 0 {

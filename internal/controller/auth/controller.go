@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"github.com/yunloli/aiferry/internal/service/auth"
@@ -45,6 +46,7 @@ func (c *Controller) Callback(r *ghttp.Request) {
 	)
 	clearCookie(r, auth.StateCookieName())
 	if err != nil {
+		g.Log().Errorf(r.Context(), "Casdoor callback failed: %v", err)
 		switch {
 		case errors.Is(err, auth.ErrInvalidState):
 			redirectLoginError(r, "invalid_state")
