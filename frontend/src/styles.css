@@ -95,8 +95,6 @@ button { color: inherit; }
 .login-command:hover:not(:disabled) { background: #0868dc; }
 .login-command:focus-visible { outline: 3px solid #b8d8ff; outline-offset: 2px; }
 .login-command:disabled { cursor: not-allowed; opacity: .58; }
-.login-policy { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--line); font-size: 11px; }
-.login-policy span { color: var(--muted); }.login-policy strong { text-align: right; }
 .login-foot { align-self: end; text-align: center; }
 @keyframes ferry-route { from { transform: translateX(0); } to { transform: translateX(138%); } }
 

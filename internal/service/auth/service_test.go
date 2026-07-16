@@ -1,6 +1,11 @@
 package auth
 
-import "testing"
+import (
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gogf/gf/v2/net/ghttp"
+)
 
 func TestAccountAllowed(t *testing.T) {
 	tests := []struct {
@@ -50,5 +55,28 @@ func TestSanitizeReturnTo(t *testing.T) {
 		if got := sanitizeReturnTo(value); got != "/" {
 			t.Fatalf("sanitizeReturnTo(%q) = %q", value, got)
 		}
+	}
+}
+
+func TestCallbackURLPreservesHostPort(t *testing.T) {
+	request := httptest.NewRequest("GET", "http://192.168.50.217:8080/api/auth/login", nil)
+	callbackURL, err := CallbackURL(&ghttp.Request{Request: request})
+	if err != nil {
+		t.Fatalf("CallbackURL() error = %v", err)
+	}
+	if callbackURL != "http://192.168.50.217:8080/auth/casdoor/callback" {
+		t.Fatalf("CallbackURL() = %q", callbackURL)
+	}
+}
+
+func TestCallbackURLUsesForwardedProtocol(t *testing.T) {
+	request := httptest.NewRequest("GET", "http://aiferry.example.com/api/auth/login", nil)
+	request.Header.Set("X-Forwarded-Proto", "https")
+	callbackURL, err := CallbackURL(&ghttp.Request{Request: request})
+	if err != nil {
+		t.Fatalf("CallbackURL() error = %v", err)
+	}
+	if callbackURL != "https://aiferry.example.com/auth/casdoor/callback" {
+		t.Fatalf("CallbackURL() = %q", callbackURL)
 	}
 }

@@ -8,6 +8,8 @@ test('protects the console and starts a valid Casdoor login', async ({ context, 
   await expect(page).toHaveTitle('登录 - AiFerry')
   await expect(page.getByRole('heading', { name: '登录 AiFerry' })).toBeVisible()
   await expect(page.getByRole('button', { name: '使用 Casdoor 登录' })).toBeEnabled()
+  await expect(page.getByText('允许身份')).toHaveCount(0)
+  await expect(page.getByText('管理员 / AI用户组')).toHaveCount(0)
 
   const layout = await page.evaluate(() => {
     const masthead = document.querySelector('.login-masthead')?.getBoundingClientRect()

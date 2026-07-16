@@ -220,7 +220,7 @@ func CallbackURL(r *ghttp.Request) (string, error) {
 	if scheme != "http" && scheme != "https" {
 		return "", gerror.New("invalid request scheme")
 	}
-	host := strings.TrimSpace(r.GetHost())
+	host := strings.TrimSpace(r.Host)
 	if host == "" || strings.ContainsAny(host, "/\\\r\n") {
 		return "", gerror.New("invalid request host")
 	}

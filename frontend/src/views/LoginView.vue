@@ -63,10 +63,6 @@ onMounted(load)
         <LogIn :size="19" />
         <span>{{ starting ? '正在前往 Casdoor' : loading ? '正在读取登录配置' : '使用 Casdoor 登录' }}</span>
       </button>
-      <div class="login-policy">
-        <span>允许身份</span>
-        <strong>管理员 / AI用户组</strong>
-      </div>
     </section>
 
     <div class="login-foot mono-label">AIFERRY · OPENAI GATEWAY</div>
