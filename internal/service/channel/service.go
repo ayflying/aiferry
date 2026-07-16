@@ -278,7 +278,8 @@ func (s *Service) DiscoverModels(ctx context.Context, channelID uint64) ([]Disco
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, gerror.Newf("upstream model query returned HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		return nil, upstreamModelQueryError(resp.StatusCode, body)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
@@ -426,6 +427,35 @@ func modelNamesFromJSON(body []byte, listPath, idPath string) ([]string, error) 
 		}
 	}
 	return normalizeModelNames(names), nil
+}
+
+func upstreamModelQueryError(status int, body []byte) error {
+	if status != http.StatusTooManyRequests {
+		return gerror.Newf("upstream model query returned HTTP %d", status)
+	}
+
+	var (
+		code    = strings.ToUpper(strings.TrimSpace(firstJSONText(body, "code", "error.code")))
+		message = strings.ToUpper(strings.TrimSpace(firstJSONText(body, "message", "error.message")))
+	)
+	if strings.Contains(code, "DAILY_LIMIT_EXCEEDED") ||
+		(strings.Contains(code, "USAGE_LIMIT_EXCEEDED") &&
+			(strings.Contains(message, "DAILY_LIMIT_EXCEEDED") || strings.Contains(message, "DAILY USAGE LIMIT"))) {
+		return gerror.New("上游每日用量额度已用尽，请在上游补充额度或等待每日额度重置")
+	}
+	return gerror.New("上游请求受限（HTTP 429），请稍后重试或检查上游额度")
+}
+
+func firstJSONText(body []byte, paths ...string) string {
+	if !gjson.ValidBytes(body) {
+		return ""
+	}
+	for _, path := range paths {
+		if value := strings.TrimSpace(gjson.GetBytes(body, path).String()); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *Service) UpdateModel(ctx context.Context, id uint64, input adminapi.ModelInput) error {

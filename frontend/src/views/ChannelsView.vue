@@ -124,6 +124,7 @@ async function discover(channel: Channel) {
 
 function describeDiscoveryError(error: unknown) {
   const message = error instanceof Error ? error.message : '网络请求失败'
+  if (message.startsWith('上游每日用量额度已用尽')) return message
   if (message.includes('HTTP 429')) {
     return '上游返回 HTTP 429，当前请求受到限流或该密钥的可用配额不足。请稍后重试，或在上游确认配额和请求限制。'
   }
