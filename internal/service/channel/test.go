@@ -50,7 +50,7 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 	if err != nil {
 		return TestResult{}, err
 	}
-	endpoints := testEndpoints(input.Endpoint)
+	endpoints := testEndpoints(input.Endpoint, model.UpstreamName)
 	var result TestResult
 	for index, endpoint := range endpoints {
 		current, path, tokens, requestErr := s.testModelEndpoint(ctx, channel, typeConfig, model, endpoint, input.Stream)
@@ -131,11 +131,21 @@ func (s *Service) recordTestUsage(ctx context.Context, channel entity.Channels, 
 	}
 }
 
-func testEndpoints(endpoint string) []string {
-	if endpoint == "auto" {
+func testEndpoints(endpoint, model string) []string {
+	if endpoint != "auto" {
+		return []string{endpoint}
+	}
+	modelName := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.Contains(modelName, "image"):
+		return []string{"images"}
+	case strings.Contains(modelName, "embedding"):
+		return []string{"embeddings"}
+	case strings.HasPrefix(modelName, "gpt-5"):
+		return []string{"responses", "chat"}
+	default:
 		return []string{"chat", "responses", "embeddings"}
 	}
-	return []string{endpoint}
 }
 
 func canTryAlternativeEndpoint(result TestResult) bool {
@@ -167,6 +177,13 @@ func testPayload(endpoint, model string, stream bool) (string, any, bool) {
 		return "/responses", payload, stream
 	case "embeddings":
 		return "/embeddings", map[string]any{"model": model, "input": "AiFerry model check"}, false
+	case "images":
+		return "/images/generations", map[string]any{
+			"model":  model,
+			"prompt": "A small white ferry sailing on calm blue water.",
+			"n":      1,
+			"size":   "1024x1024",
+		}, false
 	default:
 		payload := map[string]any{
 			"model":                 model,

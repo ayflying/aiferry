@@ -6,12 +6,21 @@ import (
 	"testing"
 )
 
-func TestTestEndpointsUsesAlternativesForAutoMode(t *testing.T) {
-	endpoints := testEndpoints("auto")
+func TestTestEndpointsUsesModelCapabilitiesForAutoMode(t *testing.T) {
+	endpoints := testEndpoints("auto", "gpt-4.1-mini")
 	if len(endpoints) != 3 || endpoints[0] != "chat" || endpoints[1] != "responses" || endpoints[2] != "embeddings" {
 		t.Fatalf("unexpected auto endpoints: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("responses"); len(endpoints) != 1 || endpoints[0] != "responses" {
+	if endpoints = testEndpoints("auto", "gpt-5.6-luna"); len(endpoints) != 2 || endpoints[0] != "responses" || endpoints[1] != "chat" {
+		t.Fatalf("new GPT models should test Responses first: %#v", endpoints)
+	}
+	if endpoints = testEndpoints("auto", "gpt-image-2"); len(endpoints) != 1 || endpoints[0] != "images" {
+		t.Fatalf("image models should use the image endpoint: %#v", endpoints)
+	}
+	if endpoints = testEndpoints("auto", "text-embedding-3-large"); len(endpoints) != 1 || endpoints[0] != "embeddings" {
+		t.Fatalf("embedding models should use the embeddings endpoint: %#v", endpoints)
+	}
+	if endpoints = testEndpoints("responses", "gpt-5.6-luna"); len(endpoints) != 1 || endpoints[0] != "responses" {
 		t.Fatalf("explicit endpoint should not expand: %#v", endpoints)
 	}
 }
@@ -42,6 +51,24 @@ func TestTestPayloadKeepsEmbeddingsNonStreaming(t *testing.T) {
 	path, _, streamed := testPayload("embeddings", "text-embedding-3-small", true)
 	if path != "/embeddings" || streamed {
 		t.Fatalf("embeddings should remain non-streaming: path=%q streamed=%t", path, streamed)
+	}
+}
+
+func TestTestPayloadUsesImageGenerationEndpoint(t *testing.T) {
+	path, payload, streamed := testPayload("images", "gpt-image-2", true)
+	if path != "/images/generations" || streamed {
+		t.Fatalf("image testing should use the non-streaming image endpoint: path=%q streamed=%t", path, streamed)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err = json.Unmarshal(body, &value); err != nil {
+		t.Fatal(err)
+	}
+	if value["model"] != "gpt-image-2" || value["prompt"] == "" || value["size"] != "1024x1024" {
+		t.Fatalf("unexpected image test payload: %#v", value)
 	}
 }
 

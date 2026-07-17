@@ -36,6 +36,7 @@ const endpointOptions = [
   { label: 'Chat Completions', value: 'chat' },
   { label: 'Responses', value: 'responses' },
   { label: 'Embeddings', value: 'embeddings' },
+  { label: '图像生成', value: 'images' },
 ]
 const enabledModels = computed(() => enabledChannelModels(models.value))
 const filteredModels = computed(() => {
