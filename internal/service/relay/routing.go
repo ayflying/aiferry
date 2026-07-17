@@ -135,6 +135,7 @@ func (s *Service) markSuccess(ctx context.Context, channelID uint64) {
 func (s *Service) maybeAutoDisable(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, candidate Candidate, result attemptResult) {
 	_, _ = s.resilience.DisableIfNeededWithSettings(ctx, settings, system.AutoDisableInput{
 		ChannelID: candidate.ChannelID,
+		Source:    system.AutoDisableSourceRelayRequest,
 		Status:    result.status,
 		Latency:   result.latency,
 		Message:   result.errorMessage,

@@ -132,6 +132,7 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 		AutoDisabledAt:         gdb.Raw("NULL"),
 		AutoDisabledReason:     gdb.Raw("NULL"),
 		AutoDisabledStatusCode: gdb.Raw("NULL"),
+		AutoDisabledSource:     gdb.Raw("NULL"),
 		Priority:               input.Priority,
 		Weight:                 normalizeWeight(input.Weight),
 		CostQueryMode:          typeConfig.Costs.Adapter,

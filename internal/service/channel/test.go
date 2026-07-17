@@ -79,7 +79,13 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput, 
 		_ = s.app.Redis.Del(ctx, failureKey(channel.Id), cooldownKey(channel.Id)).Err()
 		_, _ = s.resilience.RecoverIfAllowed(ctx, channel.Id)
 	} else {
-		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Status: result.HTTPStatus, Latency: time.Duration(result.LatencyMs) * time.Millisecond, Message: result.Message})
+		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{
+			ChannelID: channel.Id,
+			Source:    system.AutoDisableSourceModelTest,
+			Status:    result.HTTPStatus,
+			Latency:   time.Duration(result.LatencyMs) * time.Millisecond,
+			Message:   result.Message,
+		})
 	}
 	s.saveTestResult(ctx, channel.Id, model.Id, result.Endpoint, result)
 	if billingErr != nil {

@@ -33,6 +33,7 @@ type ChannelsColumns struct {
 	AutoDisabledAt         string //
 	AutoDisabledReason     string //
 	AutoDisabledStatusCode string //
+	AutoDisabledSource     string //
 	Priority               string //
 	Weight                 string //
 	CostQueryMode          string //
@@ -64,6 +65,7 @@ var channelsColumns = ChannelsColumns{
 	AutoDisabledAt:         "auto_disabled_at",
 	AutoDisabledReason:     "auto_disabled_reason",
 	AutoDisabledStatusCode: "auto_disabled_status_code",
+	AutoDisabledSource:     "auto_disabled_source",
 	Priority:               "priority",
 	Weight:                 "weight",
 	CostQueryMode:          "cost_query_mode",

@@ -6,6 +6,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
@@ -49,7 +50,11 @@ func (s *Service) runHealthChecks(ctx context.Context, mode string) {
 	if mode == "all" {
 		model = model.Where("c.status=1 OR (c.status=0 AND c.auto_disabled_at IS NOT NULL)")
 	} else {
-		model = model.Where("c.status=0 AND c.auto_disabled_at IS NOT NULL")
+		model = model.Where(
+			"c.status=? AND c.auto_disabled_at IS NOT NULL AND c.auto_disabled_source=?",
+			0,
+			system.AutoDisableSourceRelayRequest,
+		)
 	}
 	if err := model.Scan(&rows); err != nil {
 		return

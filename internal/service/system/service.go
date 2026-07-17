@@ -30,13 +30,6 @@ type Service struct {
 	app *app.Service
 }
 
-type AutoDisableInput struct {
-	ChannelID uint64
-	Status    int
-	Latency   time.Duration
-	Message   string
-}
-
 type statusCodeRange struct {
 	start int
 	end   int
@@ -147,6 +140,7 @@ func (s *Service) DisableIfNeededWithSettings(ctx context.Context, settings admi
 		AutoDisabledAt:         gtime.Now(),
 		AutoDisabledReason:     autoDisableReason(input),
 		AutoDisabledStatusCode: nil,
+		AutoDisabledSource:     autoDisableSource(input.Source),
 	}
 	if input.Status > 0 {
 		data.AutoDisabledStatusCode = input.Status
@@ -187,6 +181,7 @@ func (s *Service) RecoverIfAllowed(ctx context.Context, channelID uint64) (bool,
 		AutoDisabledAt:         gdb.Raw("NULL"),
 		AutoDisabledReason:     gdb.Raw("NULL"),
 		AutoDisabledStatusCode: gdb.Raw("NULL"),
+		AutoDisabledSource:     gdb.Raw("NULL"),
 	}).Update()
 	if err != nil {
 		return false, gerror.Wrap(err, "automatically recover channel")
@@ -304,36 +299,6 @@ func normalizeStatusCodeRules(value string) (string, []statusCodeRange, error) {
 		}
 	}
 	return strings.Join(parts, ","), rules, nil
-}
-
-func matchesAutoDisable(settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) bool {
-	if input.Status > 0 && MatchesStatusCodeRules(settings.DisableStatusCodes, input.Status) {
-		return true
-	}
-	if input.Latency >= time.Duration(settings.DisableLatencySeconds)*time.Second {
-		return true
-	}
-	message := strings.ToLower(input.Message)
-	for _, keyword := range settings.FailureKeywords {
-		if strings.Contains(message, strings.ToLower(keyword)) {
-			return true
-		}
-	}
-	return false
-}
-
-func autoDisableReason(input AutoDisableInput) string {
-	parts := make([]string, 0, 3)
-	if input.Status > 0 {
-		parts = append(parts, fmt.Sprintf("HTTP %d", input.Status))
-	}
-	if input.Latency > 0 {
-		parts = append(parts, fmt.Sprintf("%s", input.Latency.Round(time.Millisecond)))
-	}
-	if message := strings.TrimSpace(input.Message); message != "" {
-		parts = append(parts, message)
-	}
-	return truncate(strings.Join(parts, " · "), 1024)
 }
 
 func normalizeKeywords(values []string) []string {

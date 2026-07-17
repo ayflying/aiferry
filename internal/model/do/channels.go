@@ -23,6 +23,7 @@ type Channels struct {
 	AutoDisabledAt         any //
 	AutoDisabledReason     any //
 	AutoDisabledStatusCode any //
+	AutoDisabledSource     any //
 	Priority               any //
 	Weight                 any //
 	CostQueryMode          any //

@@ -30,3 +30,15 @@ func TestMatchesAutoDisable(t *testing.T) {
 		t.Fatal("unconfigured error should not disable a channel")
 	}
 }
+
+func TestAutoDisableSource(t *testing.T) {
+	if source := autoDisableSource(AutoDisableSourceRelayRequest); source != AutoDisableSourceRelayRequest {
+		t.Fatalf("unexpected relay source: %q", source)
+	}
+	if source := autoDisableSource(AutoDisableSourceModelTest); source != AutoDisableSourceModelTest {
+		t.Fatalf("unexpected model test source: %q", source)
+	}
+	if source := autoDisableSource("manual"); source != autoDisableSourceUnknown {
+		t.Fatalf("unexpected unknown source: %q", source)
+	}
+}

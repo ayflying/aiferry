@@ -22,6 +22,7 @@ type Channels struct {
 	AutoDisabledAt         time.Time `json:"autoDisabledAt"         orm:"auto_disabled_at"          description:""` //
 	AutoDisabledReason     string    `json:"autoDisabledReason"     orm:"auto_disabled_reason"      description:""` //
 	AutoDisabledStatusCode uint      `json:"autoDisabledStatusCode" orm:"auto_disabled_status_code" description:""` //
+	AutoDisabledSource     string    `json:"autoDisabledSource"     orm:"auto_disabled_source"      description:""` //
 	Priority               int       `json:"priority"               orm:"priority"                  description:""` //
 	Weight                 uint      `json:"weight"                 orm:"weight"                    description:""` //
 	CostQueryMode          string    `json:"costQueryMode"          orm:"cost_query_mode"           description:""` //
