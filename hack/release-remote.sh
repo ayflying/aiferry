@@ -25,20 +25,6 @@ if [ ! -f "$HOME/.docker/config.json" ] || \
   exit 3
 fi
 
-upsert_env() {
-  key="$1"
-  value="$2"
-  env_file="$3"
-  temp_file="$(mktemp "${env_file}.XXXXXX")"
-  awk -v key="$key" -v value="$value" '
-    BEGIN { found = 0 }
-    index($0, key "=") == 1 { print key "=" value; found = 1; next }
-    { print }
-    END { if (!found) print key "=" value }
-  ' "$env_file" > "$temp_file"
-  mv "$temp_file" "$env_file"
-}
-
 echo "Building $image:$version on the remote build server"
 docker build \
   --build-arg "VERSION=$version" \
@@ -53,8 +39,6 @@ docker push "$image:latest"
 
 install -d "$deploy_dir"
 cp docker-compose.yml "$deploy_dir/docker-compose.yml"
-upsert_env AIFERRY_IMAGE "$image" "$deploy_dir/.env"
-upsert_env AIFERRY_VERSION "$version" "$deploy_dir/.env"
 
 echo "Pulling the published image through Docker Compose"
 docker compose --project-name "$compose_project" -f "$deploy_dir/docker-compose.yml" config --quiet

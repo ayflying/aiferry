@@ -41,19 +41,11 @@ if ($current -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
 $next = '{0}.{1}.{2}' -f $Matches[1], $Matches[2], ([int]$Matches[3] + 1)
 Write-Utf8File (Join-Path $root 'VERSION') "$next`n"
 
-$examplePath = Join-Path $root '.env.example'
-$example = Get-Content -Raw $examplePath
-$updatedExample = [regex]::Replace($example, '(?m)^AIFERRY_VERSION=.*$', "AIFERRY_VERSION=$next")
-if ($updatedExample -eq $example) {
-  throw '.env.example 缺少 AIFERRY_VERSION。'
-}
-Write-Utf8File $examplePath $updatedExample
-
-Invoke-External git @('add', 'VERSION', '.env.example')
+Invoke-External git @('add', 'VERSION')
 Invoke-External git @(
   'commit',
   '-m', "发布：AiFerry $next",
-  '-m', "递增根目录 VERSION 至 $next，并同步镜像运行环境的示例版本。",
+  '-m', "递增根目录 VERSION 至 $next，发布镜像由 Compose 固定拉取 latest 标签。",
   '-m', '该发布将在远程构建服务器构建并推送同版本标签及 latest 到 GitHub Container Registry。'
 )
 Invoke-External git @('push', 'origin', 'main')

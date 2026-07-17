@@ -38,7 +38,7 @@ services:
       retries: 20
 
   aiferry:
-    image: "${AIFERRY_IMAGE:-ghcr.io/ayflying/aiferry}:${AIFERRY_VERSION:?AIFERRY_VERSION must be set in .env}"
+    image: ghcr.io/ayflying/aiferry:latest
     env_file:
       - .env
     environment:
