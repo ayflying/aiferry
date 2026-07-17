@@ -79,7 +79,7 @@ func (s *Service) Get(ctx context.Context) (adminapi.SystemResilienceSettingsInp
 	}
 
 	var row entity.SystemSettings
-	if err := dao.SystemSettings.Ctx(ctx).Where(do.SystemSettings{SettingKey: resilienceSettingsKey}).Scan(&row); err != nil {
+	if err := dao.SystemSettings.Ctx(ctx).Where(do.SystemSettings{SettingKey: resilienceSettingsKey}).Scan(&row); err != nil && !isNoRowsError(err) {
 		return adminapi.SystemResilienceSettingsInput{}, gerror.Wrap(err, "load channel resilience settings")
 	}
 	if row.SettingKey == "" {

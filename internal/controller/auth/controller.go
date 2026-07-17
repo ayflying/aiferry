@@ -165,14 +165,14 @@ func redirectLoginError(r *ghttp.Request, code string) {
 }
 
 func respondUnauthorized(r *ghttp.Request) {
-	r.Response.WriteStatus(http.StatusUnauthorized)
+	r.Response.Status = http.StatusUnauthorized
 	r.Response.WriteJson(map[string]any{"code": http.StatusUnauthorized, "message": "登录状态已失效", "data": nil})
 	r.Exit()
 }
 
 func respond(r *ghttp.Request, data any, err error) {
 	if err != nil {
-		r.Response.WriteStatus(http.StatusBadRequest)
+		r.Response.Status = http.StatusBadRequest
 		r.Response.WriteJson(map[string]any{"code": http.StatusBadRequest, "message": "认证请求失败", "data": nil})
 		r.Exit()
 		return

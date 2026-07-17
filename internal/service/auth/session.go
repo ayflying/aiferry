@@ -131,13 +131,13 @@ func (s *Service) sessionTTL() time.Duration {
 }
 
 func writeUnauthorized(r *ghttp.Request) {
-	r.Response.WriteStatus(http.StatusUnauthorized)
+	r.Response.Status = http.StatusUnauthorized
 	r.Response.WriteJson(map[string]any{"code": http.StatusUnauthorized, "message": "登录状态已失效", "data": nil})
 	r.Exit()
 }
 
 func writeForbidden(r *ghttp.Request) {
-	r.Response.WriteStatus(http.StatusForbidden)
+	r.Response.Status = http.StatusForbidden
 	r.Response.WriteJson(map[string]any{"code": http.StatusForbidden, "message": "需要管理员权限", "data": nil})
 	r.Exit()
 }

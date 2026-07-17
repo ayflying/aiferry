@@ -112,7 +112,7 @@ func (s *Service) MailDeliverySettings(ctx context.Context) (MailDeliverySetting
 
 func (s *Service) loadStoredMailSettings(ctx context.Context) (storedMailSettings, error) {
 	var row entity.SystemSettings
-	if err := dao.SystemSettings.Ctx(ctx).Where(do.SystemSettings{SettingKey: mailSettingsKey}).Scan(&row); err != nil {
+	if err := dao.SystemSettings.Ctx(ctx).Where(do.SystemSettings{SettingKey: mailSettingsKey}).Scan(&row); err != nil && !isNoRowsError(err) {
 		return storedMailSettings{}, gerror.Wrap(err, "load mail settings")
 	}
 	if row.SettingKey == "" {

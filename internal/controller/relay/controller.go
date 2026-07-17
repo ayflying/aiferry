@@ -82,7 +82,7 @@ func (c *Controller) authenticate(r *ghttp.Request) (apikey.AuthKey, bool) {
 
 func writeError(r *ghttp.Request, status int, kind, message string) {
 	r.Response.Header().Set("Content-Type", "application/json")
-	r.Response.WriteStatus(status)
+	r.Response.Status = status
 	r.Response.WriteJson(map[string]any{"error": map[string]any{"type": kind, "message": message}})
 	r.Exit()
 }

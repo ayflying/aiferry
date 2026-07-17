@@ -332,7 +332,7 @@ func (c *Controller) listUsage(r *ghttp.Request) {
 
 func parse(r *ghttp.Request, target any) bool {
 	if err := r.Parse(target); err != nil {
-		r.Response.WriteStatus(http.StatusBadRequest)
+		r.Response.Status = http.StatusBadRequest
 		r.Response.WriteJson(map[string]any{"code": 400, "message": err.Error(), "data": nil})
 		r.Exit()
 		return false
@@ -342,7 +342,7 @@ func parse(r *ghttp.Request, target any) bool {
 
 func respond(r *ghttp.Request, data any, err error) {
 	if err != nil {
-		r.Response.WriteStatus(http.StatusBadRequest)
+		r.Response.Status = http.StatusBadRequest
 		r.Response.WriteJson(map[string]any{"code": 400, "message": err.Error(), "data": nil})
 		r.Exit()
 		return
