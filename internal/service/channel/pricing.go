@@ -53,7 +53,12 @@ type PriceSyncSourceFailure struct {
 type modelPriceValues struct {
 	Input       *float64
 	CachedInput *float64
+	CacheWrite  *float64
 	Output      *float64
+	ImageInput  *float64
+	AudioInput  *float64
+	AudioOutput *float64
+	Request     *float64
 }
 
 type syncedRule struct {
@@ -63,6 +68,14 @@ type syncedRule struct {
 	Conditions json.RawMessage
 	Rates      json.RawMessage
 }
+
+const newAPIRatioUSDPerMillion = 2.0
+
+const (
+	BillingModeToken   = "token"
+	BillingModeRequest = "request"
+	BillingModeRules   = "rules"
+)
 
 func (s *Service) ListPriceRules(ctx context.Context, modelID uint64) ([]PriceRuleView, error) {
 	modelName, err := s.publicModelName(ctx, modelID)
@@ -275,6 +288,9 @@ func (s *Service) syncPricesFromChannel(ctx context.Context, channel entity.Chan
 }
 
 func syncedRulesFromJSON(body []byte, config channeltype.PricingConfig) ([]syncedRule, error) {
+	if config.Adapter == channeltype.AdapterNewAPIRatio {
+		return syncedRulesFromNewAPIRatio(body)
+	}
 	items := gjson.ParseBytes(body)
 	if config.ListPath != "" {
 		items = gjson.GetBytes(body, config.ListPath)
@@ -312,8 +328,23 @@ func syncedRulesFromJSON(body []byte, config channeltype.PricingConfig) ([]synce
 			if config.CachedInputPricePath != "" {
 				flat["cachedInputPerMillion"] = item.Get(config.CachedInputPricePath).Float()
 			}
+			if config.CacheWritePricePath != "" {
+				flat["cacheWritePerMillion"] = item.Get(config.CacheWritePricePath).Float()
+			}
 			if config.OutputPricePath != "" {
 				flat["outputPerMillion"] = item.Get(config.OutputPricePath).Float()
+			}
+			if config.ImageInputPricePath != "" {
+				flat["imageInputPerMillion"] = item.Get(config.ImageInputPricePath).Float()
+			}
+			if config.AudioInputPricePath != "" {
+				flat["audioInputPerMillion"] = item.Get(config.AudioInputPricePath).Float()
+			}
+			if config.AudioOutputPricePath != "" {
+				flat["audioOutputPerMillion"] = item.Get(config.AudioOutputPricePath).Float()
+			}
+			if config.RequestPricePath != "" {
+				flat["request"] = item.Get(config.RequestPricePath).Float()
 			}
 			if len(flat) > 0 {
 				encoded, _ := json.Marshal(flat)
@@ -329,6 +360,76 @@ func syncedRulesFromJSON(body []byte, config channeltype.PricingConfig) ([]synce
 	return result, nil
 }
 
+func syncedRulesFromNewAPIRatio(body []byte) ([]syncedRule, error) {
+	data := gjson.GetBytes(body, "data")
+	if !data.IsObject() {
+		return nil, gerror.New("NewAPI ratio source did not return a data object")
+	}
+	modelRatios := newAPIRatioValues(data.Get("model_ratio"))
+	if len(modelRatios) == 0 {
+		return nil, gerror.New("NewAPI ratio source did not return model_ratio")
+	}
+	modelPrices := newAPIRatioValues(data.Get("model_price"))
+	cacheRatios := newAPIRatioValues(data.Get("cache_ratio"))
+	completionRatios := newAPIRatioValues(data.Get("completion_ratio"))
+	rules := make([]syncedRule, 0, len(modelRatios)+len(modelPrices))
+	for model, ratio := range modelRatios {
+		if _, usesRequestPrice := modelPrices[model]; usesRequestPrice {
+			continue
+		}
+		input := ratio * newAPIRatioUSDPerMillion
+		rates := map[string]float64{
+			"inputPerMillion":  input,
+			"outputPerMillion": input * completionRatio(completionRatios, model),
+		}
+		if cacheRatio, exists := cacheRatios[model]; exists {
+			rates["cachedInputPerMillion"] = input * cacheRatio
+		}
+		encoded, _ := json.Marshal(rates)
+		rules = append(rules, syncedRule{
+			Model:      model,
+			Name:       "BaseLLM 官方模型价格",
+			Currency:   "USD",
+			Conditions: json.RawMessage(`{}`),
+			Rates:      encoded,
+		})
+	}
+	for model, price := range modelPrices {
+		encoded, _ := json.Marshal(map[string]float64{"request": price})
+		rules = append(rules, syncedRule{
+			Model:      model,
+			Name:       "BaseLLM 官方按次价格",
+			Currency:   "USD",
+			Conditions: json.RawMessage(`{}`),
+			Rates:      encoded,
+		})
+	}
+	sort.Slice(rules, func(i, j int) bool { return rules[i].Model < rules[j].Model })
+	return rules, nil
+}
+
+func newAPIRatioValues(value gjson.Result) map[string]float64 {
+	values := make(map[string]float64)
+	if !value.IsObject() {
+		return values
+	}
+	value.ForEach(func(key, item gjson.Result) bool {
+		amount := item.Float()
+		if model := strings.TrimSpace(key.String()); model != "" && item.Type == gjson.Number && amount >= 0 {
+			values[model] = amount
+		}
+		return true
+	})
+	return values
+}
+
+func completionRatio(values map[string]float64, model string) float64 {
+	if value, exists := values[model]; exists {
+		return value
+	}
+	return 1
+}
+
 func (s *Service) publicModelName(ctx context.Context, modelID uint64) (string, error) {
 	var model entity.ChannelModels
 	if err := dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().Id, modelID).Scan(&model); err != nil {
@@ -341,23 +442,41 @@ func (s *Service) publicModelName(ctx context.Context, modelID uint64) (string, 
 }
 
 func (s *Service) replacePublicPrice(ctx context.Context, modelName string, values modelPriceValues) error {
-	return s.savePublicPrice(ctx, modelName, values, true)
+	return s.savePublicPrice(ctx, modelName, values, true, false, BillingModeToken)
 }
 
 func (s *Service) mergePublicPrice(ctx context.Context, modelName string, values modelPriceValues) error {
-	return s.savePublicPrice(ctx, modelName, values, false)
+	return s.savePublicPrice(ctx, modelName, values, false, false, "")
 }
 
-func (s *Service) savePublicPrice(ctx context.Context, modelName string, values modelPriceValues, replace bool) error {
+func (s *Service) savePublicPrice(ctx context.Context, modelName string, values modelPriceValues, replaceToken, replaceRequest bool, billingMode string) error {
 	data := do.ModelPrices{PublicName: modelName}
-	if replace || values.Input != nil {
+	if billingMode != "" {
+		data.BillingMode = billingMode
+	}
+	if replaceToken || values.Input != nil {
 		data.InputPrice = nullableNumber(values.Input)
 	}
-	if replace || values.CachedInput != nil {
+	if replaceToken || values.CachedInput != nil {
 		data.CachedInputPrice = nullableNumber(values.CachedInput)
 	}
-	if replace || values.Output != nil {
+	if replaceToken || values.CacheWrite != nil {
+		data.CacheWritePrice = nullableNumber(values.CacheWrite)
+	}
+	if replaceToken || values.Output != nil {
 		data.OutputPrice = nullableNumber(values.Output)
+	}
+	if replaceToken || values.ImageInput != nil {
+		data.ImageInputPrice = nullableNumber(values.ImageInput)
+	}
+	if replaceToken || values.AudioInput != nil {
+		data.AudioInputPrice = nullableNumber(values.AudioInput)
+	}
+	if replaceToken || values.AudioOutput != nil {
+		data.AudioOutputPrice = nullableNumber(values.AudioOutput)
+	}
+	if replaceRequest || values.Request != nil {
+		data.RequestPrice = nullableNumber(values.Request)
 	}
 	result, err := dao.ModelPrices.Ctx(ctx).Where(dao.ModelPrices.Columns().PublicName, modelName).Data(data).Update()
 	if err != nil {
@@ -372,6 +491,42 @@ func (s *Service) savePublicPrice(ctx context.Context, modelName string, values 
 	return nil
 }
 
+func (s *Service) updatePublicModelPrice(ctx context.Context, modelName string, input adminapi.ModelPriceInput) error {
+	mode, err := normalizeBillingMode(input.BillingMode)
+	if err != nil {
+		return err
+	}
+	values := modelPriceValues{
+		Input:       input.InputPrice,
+		CachedInput: input.CachedInputPrice,
+		CacheWrite:  input.CacheWritePrice,
+		Output:      input.OutputPrice,
+		ImageInput:  input.ImageInputPrice,
+		AudioInput:  input.AudioInputPrice,
+		AudioOutput: input.AudioOutputPrice,
+		Request:     input.RequestPrice,
+	}
+	switch mode {
+	case BillingModeToken:
+		return s.savePublicPrice(ctx, modelName, values, true, false, mode)
+	case BillingModeRequest:
+		return s.savePublicPrice(ctx, modelName, values, false, true, mode)
+	default:
+		return s.savePublicPrice(ctx, modelName, values, false, false, mode)
+	}
+}
+
+func normalizeBillingMode(value string) (string, error) {
+	switch value = strings.TrimSpace(value); value {
+	case "", BillingModeToken:
+		return BillingModeToken, nil
+	case BillingModeRequest, BillingModeRules:
+		return value, nil
+	default:
+		return "", gerror.New("unsupported model billing mode")
+	}
+}
+
 func modelPriceValuesFromRule(rule syncedRule) (modelPriceValues, bool) {
 	if conditions := strings.TrimSpace(string(rule.Conditions)); conditions != "" && conditions != "{}" {
 		return modelPriceValues{}, false
@@ -380,9 +535,14 @@ func modelPriceValuesFromRule(rule syncedRule) (modelPriceValues, bool) {
 	values := modelPriceValues{
 		Input:       jsonPriceValue(rates.Get("inputPerMillion")),
 		CachedInput: jsonPriceValue(rates.Get("cachedInputPerMillion")),
+		CacheWrite:  jsonPriceValue(rates.Get("cacheWritePerMillion")),
 		Output:      jsonPriceValue(rates.Get("outputPerMillion")),
+		ImageInput:  jsonPriceValue(rates.Get("imageInputPerMillion")),
+		AudioInput:  jsonPriceValue(rates.Get("audioInputPerMillion")),
+		AudioOutput: jsonPriceValue(rates.Get("audioOutputPerMillion")),
+		Request:     jsonPriceValue(rates.Get("request")),
 	}
-	return values, values.Input != nil || values.CachedInput != nil || values.Output != nil
+	return values, values.Input != nil || values.CachedInput != nil || values.CacheWrite != nil || values.Output != nil || values.ImageInput != nil || values.AudioInput != nil || values.AudioOutput != nil || values.Request != nil
 }
 
 func jsonPriceValue(value gjson.Result) *float64 {

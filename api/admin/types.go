@@ -50,15 +50,27 @@ type ModelInput struct {
 	PublicName       string   `json:"publicName" v:"required|length:1,191"`
 	UpstreamName     string   `json:"upstreamName" v:"required|length:1,191"`
 	Enabled          bool     `json:"enabled"`
+	BillingMode      string   `json:"billingMode"`
 	InputPrice       *float64 `json:"inputPrice"`
 	CachedInputPrice *float64 `json:"cachedInputPrice"`
+	CacheWritePrice  *float64 `json:"cacheWritePrice"`
 	OutputPrice      *float64 `json:"outputPrice"`
+	ImageInputPrice  *float64 `json:"imageInputPrice"`
+	AudioInputPrice  *float64 `json:"audioInputPrice"`
+	AudioOutputPrice *float64 `json:"audioOutputPrice"`
+	RequestPrice     *float64 `json:"requestPrice"`
 }
 
 type ModelPriceInput struct {
+	BillingMode      string   `json:"billingMode"`
 	InputPrice       *float64 `json:"inputPrice"`
 	CachedInputPrice *float64 `json:"cachedInputPrice"`
+	CacheWritePrice  *float64 `json:"cacheWritePrice"`
 	OutputPrice      *float64 `json:"outputPrice"`
+	ImageInputPrice  *float64 `json:"imageInputPrice"`
+	AudioInputPrice  *float64 `json:"audioInputPrice"`
+	AudioOutputPrice *float64 `json:"audioOutputPrice"`
+	RequestPrice     *float64 `json:"requestPrice"`
 }
 
 type PriceRuleInput struct {

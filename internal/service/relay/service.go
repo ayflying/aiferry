@@ -50,7 +50,13 @@ type Candidate struct {
 	UpstreamName     string   `orm:"upstream_name"`
 	InputPrice       *float64 `orm:"input_price"`
 	CachedInputPrice *float64 `orm:"cached_input_price"`
+	CacheWritePrice  *float64 `orm:"cache_write_price"`
 	OutputPrice      *float64 `orm:"output_price"`
+	ImageInputPrice  *float64 `orm:"image_input_price"`
+	AudioInputPrice  *float64 `orm:"audio_input_price"`
+	AudioOutputPrice *float64 `orm:"audio_output_price"`
+	RequestPrice     *float64 `orm:"request_price"`
+	BillingMode      string   `orm:"billing_mode"`
 	GroupIDs         []uint64
 }
 
@@ -254,7 +260,7 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 func (s *Service) route(ctx context.Context, model string, key apikey.AuthKey) ([]Candidate, error) {
 	var candidates []Candidate
 	err := dao.ChannelModels.Ctx(ctx).As("m").Fields(`
-		m.id AS channel_model_id,m.public_name,m.upstream_name,p.input_price,p.cached_input_price,p.output_price,
+		m.id AS channel_model_id,m.public_name,m.upstream_name,p.input_price,p.cached_input_price,p.cache_write_price,p.output_price,p.image_input_price,p.audio_input_price,p.audio_output_price,p.request_price,COALESCE(p.billing_mode,'token') AS billing_mode,
 		c.id AS channel_id,c.name AS channel_name,c.base_url,c.api_key_cipher,
 		c.organization_id,c.project_id,c.priority,c.weight`).
 		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id AND c.status=1").
@@ -342,13 +348,32 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 }
 
 func (s *Service) estimateCost(ctx context.Context, candidate Candidate, endpoint string, tokens usage.TokenUsage) *decimal.Decimal {
+	switch candidate.BillingMode {
+	case "rules":
+		return s.estimateRuleCost(ctx, candidate.PublicName, endpoint, tokens)
+	case "request":
+		return usage.EstimateCost(tokens, usage.PriceRates{Request: candidate.RequestPrice})
+	default:
+		return usage.EstimateCost(tokens, usage.PriceRates{
+			Input:       candidate.InputPrice,
+			CachedInput: candidate.CachedInputPrice,
+			CacheWrite:  candidate.CacheWritePrice,
+			Output:      candidate.OutputPrice,
+			ImageInput:  candidate.ImageInputPrice,
+			AudioInput:  candidate.AudioInputPrice,
+			AudioOutput: candidate.AudioOutputPrice,
+		})
+	}
+}
+
+func (s *Service) estimateRuleCost(ctx context.Context, modelName, endpoint string, tokens usage.TokenUsage) *decimal.Decimal {
 	var rules []struct {
 		ConditionsJSON string `orm:"conditions_json"`
 		RatesJSON      string `orm:"rates_json"`
 	}
 	err := dao.ModelPriceRules.Ctx(ctx).
 		Fields("conditions_json,rates_json").
-		Where("model_name", candidate.PublicName).
+		Where("model_name", modelName).
 		Where("status", 1).
 		OrderDesc("priority").
 		OrderDesc("source = 'manual'").
@@ -361,7 +386,7 @@ func (s *Service) estimateCost(ctx context.Context, candidate Candidate, endpoin
 			}
 		}
 	}
-	return usage.EstimateCost(tokens, candidate.InputPrice, candidate.CachedInputPrice, candidate.OutputPrice)
+	return nil
 }
 
 func ruleCost(conditionsJSON, ratesJSON, endpoint string, tokens usage.TokenUsage) (*decimal.Decimal, bool) {
@@ -397,33 +422,25 @@ func ruleCost(conditionsJSON, ratesJSON, endpoint string, tokens usage.TokenUsag
 		return nil, false
 	}
 	rates := gjson.Parse(ratesJSON)
-	inputRate := rates.Get("inputPerMillion")
-	outputRate := rates.Get("outputPerMillion")
-	if !inputRate.Exists() || !outputRate.Exists() {
-		return nil, false
+	cost := usage.EstimateCost(tokens, usage.PriceRates{
+		Input:       rateValue(rates.Get("inputPerMillion")),
+		CachedInput: rateValue(rates.Get("cachedInputPerMillion")),
+		CacheWrite:  rateValue(rates.Get("cacheWritePerMillion")),
+		Output:      rateValue(rates.Get("outputPerMillion")),
+		ImageInput:  rateValue(rates.Get("imageInputPerMillion")),
+		AudioInput:  rateValue(rates.Get("audioInputPerMillion")),
+		AudioOutput: rateValue(rates.Get("audioOutputPerMillion")),
+		Request:     rateValue(rates.Get("request")),
+	})
+	return cost, cost != nil
+}
+
+func rateValue(value gjson.Result) *float64 {
+	if !value.Exists() || value.Type != gjson.Number {
+		return nil
 	}
-	cachedRate := rates.Get("cachedInputPerMillion")
-	cached := uint64(0)
-	if tokens.CachedInput != nil {
-		cached = min(*tokens.CachedInput, input)
-	}
-	normalInput := input - cached
-	denominator := decimal.NewFromInt(1_000_000)
-	cost := decimal.NewFromInt(int64(normalInput)).Mul(decimal.NewFromFloat(inputRate.Float())).Div(denominator)
-	if cached > 0 {
-		rate := inputRate.Float()
-		if cachedRate.Exists() {
-			rate = cachedRate.Float()
-		}
-		cost = cost.Add(decimal.NewFromInt(int64(cached)).Mul(decimal.NewFromFloat(rate)).Div(denominator))
-	}
-	if tokens.Output != nil {
-		cost = cost.Add(decimal.NewFromInt(int64(output)).Mul(decimal.NewFromFloat(outputRate.Float())).Div(denominator))
-	}
-	if requestRate := rates.Get("request"); requestRate.Exists() {
-		cost = cost.Add(decimal.NewFromFloat(requestRate.Float()))
-	}
-	return &cost, true
+	result := value.Float()
+	return &result
 }
 
 func (s *Service) channelGroupIDs(ctx context.Context, channelID uint64) ([]uint64, error) {
@@ -496,13 +513,17 @@ func (s *Service) writeBufferedResponse(writer http.ResponseWriter, status int, 
 func parseJSONUsage(body []byte) usage.TokenUsage {
 	input := optionalUint(body, "usage.input_tokens", "usage.prompt_tokens", "response.usage.input_tokens")
 	cached := optionalUint(body, "usage.input_tokens_details.cached_tokens", "usage.prompt_tokens_details.cached_tokens", "response.usage.input_tokens_details.cached_tokens")
+	cacheWrite := optionalUint(body, "usage.cache_creation_input_tokens", "usage.cache_creation_tokens", "usage.input_tokens_details.cache_creation_tokens", "usage.prompt_tokens_details.cache_creation_tokens")
+	imageInput := optionalUint(body, "usage.image_tokens", "usage.input_tokens_details.image_tokens", "usage.prompt_tokens_details.image_tokens")
+	audioInput := optionalUint(body, "usage.audio_tokens", "usage.input_tokens_details.audio_tokens", "usage.prompt_tokens_details.audio_tokens")
 	output := optionalUint(body, "usage.output_tokens", "usage.completion_tokens", "response.usage.output_tokens")
+	audioOutput := optionalUint(body, "usage.output_audio_tokens", "usage.output_tokens_details.audio_tokens", "usage.completion_tokens_details.audio_tokens")
 	total := optionalUint(body, "usage.total_tokens", "response.usage.total_tokens")
 	if total == nil && input != nil && output != nil {
 		value := *input + *output
 		total = &value
 	}
-	return usage.TokenUsage{Input: input, CachedInput: cached, Output: output, Total: total}
+	return usage.TokenUsage{Input: input, CachedInput: cached, CacheWrite: cacheWrite, ImageInput: imageInput, AudioInput: audioInput, Output: output, AudioOutput: audioOutput, Total: total}
 }
 
 func parseSSEUsage(line []byte, target *usage.TokenUsage) {
@@ -515,7 +536,7 @@ func parseSSEUsage(line []byte, target *usage.TokenUsage) {
 		return
 	}
 	parsed := parseJSONUsage([]byte(payload))
-	if parsed.Input != nil {
+	if parsed.Input != nil || parsed.CachedInput != nil || parsed.CacheWrite != nil || parsed.ImageInput != nil || parsed.AudioInput != nil || parsed.Output != nil || parsed.AudioOutput != nil {
 		*target = parsed
 	}
 }

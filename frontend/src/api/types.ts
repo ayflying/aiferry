@@ -66,10 +66,16 @@ export interface ChannelTypePricingConfig {
   ratesPath: string
   inputPricePath: string
   cachedInputPricePath: string
+  cacheWritePricePath: string
   outputPricePath: string
+  imageInputPricePath: string
+  audioInputPricePath: string
+  audioOutputPricePath: string
+  requestPricePath: string
 }
 
 export interface ChannelTypeConfig {
+  priceSyncOnly?: boolean
   models: ChannelTypeModelConfig
   costs: ChannelTypeCostConfig
   pricing: ChannelTypePricingConfig
@@ -146,6 +152,8 @@ export interface ChannelInput {
   groupIds: number[]
 }
 
+export type ModelBillingMode = 'token' | 'request' | 'rules'
+
 export interface ChannelModel {
   id: number
   channelId: number
@@ -156,7 +164,13 @@ export interface ChannelModel {
   enabled: number
   inputPrice?: number
   cachedInputPrice?: number
+  cacheWritePrice?: number
   outputPrice?: number
+  imageInputPrice?: number
+  audioInputPrice?: number
+  audioOutputPrice?: number
+  requestPrice?: number
+  billingMode: ModelBillingMode
   lastTestEndpoint: string
   lastTestStatus: string
   lastTestLatencyMs: number
@@ -170,7 +184,13 @@ export interface PublicModel {
   publicName: string
   inputPrice?: number
   cachedInputPrice?: number
+  cacheWritePrice?: number
   outputPrice?: number
+  imageInputPrice?: number
+  audioInputPrice?: number
+  audioOutputPrice?: number
+  requestPrice?: number
+  billingMode: ModelBillingMode
 }
 
 export interface DiscoveredModel {

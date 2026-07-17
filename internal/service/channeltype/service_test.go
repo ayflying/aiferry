@@ -47,3 +47,17 @@ func TestParseConfigAcceptsJSONPriceSynchronization(t *testing.T) {
 		t.Fatalf("unexpected pricing config: %+v", config.Pricing)
 	}
 }
+
+func TestParseConfigAcceptsPriceSyncOnlyNewAPIRatioSource(t *testing.T) {
+	config, err := ParseConfig([]byte(`{
+    "priceSyncOnly":true,
+    "costs":{"adapter":"none"},
+    "pricing":{"adapter":"newapi_ratio","path":"/llm-metadata/api/newapi/ratio_config-v1-base.json","authType":"none"}
+  }`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.PriceSyncOnly || config.Pricing.Adapter != AdapterNewAPIRatio {
+		t.Fatalf("unexpected config: %+v", config)
+	}
+}

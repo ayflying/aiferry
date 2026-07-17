@@ -16,8 +16,23 @@ type Service struct{}
 type TokenUsage struct {
 	Input       *uint64 `json:"input"`
 	CachedInput *uint64 `json:"cachedInput"`
+	CacheWrite  *uint64 `json:"cacheWrite"`
+	ImageInput  *uint64 `json:"imageInput"`
+	AudioInput  *uint64 `json:"audioInput"`
 	Output      *uint64 `json:"output"`
+	AudioOutput *uint64 `json:"audioOutput"`
 	Total       *uint64 `json:"total"`
+}
+
+type PriceRates struct {
+	Input       *float64
+	CachedInput *float64
+	CacheWrite  *float64
+	Output      *float64
+	ImageInput  *float64
+	AudioInput  *float64
+	AudioOutput *float64
+	Request     *float64
 }
 
 type RecordInput struct {
@@ -206,28 +221,86 @@ func (s *Service) List(ctx context.Context, page, pageSize int, modelName string
 	return LogPage{Items: items, Total: total, Page: page, PageSize: pageSize}, gerror.Wrap(err, "list usage logs")
 }
 
-func EstimateCost(tokens TokenUsage, inputPrice, cachedPrice, outputPrice *float64) *decimal.Decimal {
-	if tokens.Input == nil || tokens.Output == nil || inputPrice == nil || outputPrice == nil {
+func EstimateCost(tokens TokenUsage, rates PriceRates) *decimal.Decimal {
+	cost := decimal.Zero
+	priced := false
+	inputRemaining := remainingTokens(tokens.Input)
+	outputRemaining := remainingTokens(tokens.Output)
+	denominator := decimal.NewFromInt(1_000_000)
+
+	chargeInputComponent := func(tokens *uint64, preferred, fallback *float64) {
+		amount := tokenCount(tokens)
+		if inputRemaining != nil && amount > *inputRemaining {
+			amount = *inputRemaining
+		}
+		if inputRemaining != nil {
+			*inputRemaining -= amount
+		}
+		rate := preferred
+		if rate == nil {
+			rate = fallback
+		}
+		if rate == nil || amount == 0 {
+			return
+		}
+		cost = cost.Add(decimal.NewFromInt(int64(amount)).Mul(decimal.NewFromFloat(*rate)).Div(denominator))
+		priced = true
+	}
+	chargeOutputComponent := func(tokens *uint64, preferred, fallback *float64) {
+		amount := tokenCount(tokens)
+		if outputRemaining != nil && amount > *outputRemaining {
+			amount = *outputRemaining
+		}
+		if outputRemaining != nil {
+			*outputRemaining -= amount
+		}
+		rate := preferred
+		if rate == nil {
+			rate = fallback
+		}
+		if rate == nil || amount == 0 {
+			return
+		}
+		cost = cost.Add(decimal.NewFromInt(int64(amount)).Mul(decimal.NewFromFloat(*rate)).Div(denominator))
+		priced = true
+	}
+
+	chargeInputComponent(tokens.CachedInput, rates.CachedInput, rates.Input)
+	chargeInputComponent(tokens.CacheWrite, rates.CacheWrite, rates.Input)
+	chargeInputComponent(tokens.ImageInput, rates.ImageInput, rates.Input)
+	chargeInputComponent(tokens.AudioInput, rates.AudioInput, rates.Input)
+	if inputRemaining != nil && rates.Input != nil && *inputRemaining > 0 {
+		cost = cost.Add(decimal.NewFromInt(int64(*inputRemaining)).Mul(decimal.NewFromFloat(*rates.Input)).Div(denominator))
+		priced = true
+	}
+	chargeOutputComponent(tokens.AudioOutput, rates.AudioOutput, rates.Output)
+	if outputRemaining != nil && rates.Output != nil && *outputRemaining > 0 {
+		cost = cost.Add(decimal.NewFromInt(int64(*outputRemaining)).Mul(decimal.NewFromFloat(*rates.Output)).Div(denominator))
+		priced = true
+	}
+	if rates.Request != nil {
+		cost = cost.Add(decimal.NewFromFloat(*rates.Request))
+		priced = true
+	}
+	if !priced {
 		return nil
 	}
-	inputTokens := *tokens.Input
-	cachedTokens := uint64(0)
-	if tokens.CachedInput != nil {
-		cachedTokens = *tokens.CachedInput
-		if cachedTokens > inputTokens {
-			cachedTokens = inputTokens
-		}
-	}
-	normalInput := inputTokens - cachedTokens
-	cachedUnitPrice := inputPrice
-	if cachedPrice != nil {
-		cachedUnitPrice = cachedPrice
-	}
-	denominator := decimal.NewFromInt(1_000_000)
-	cost := decimal.NewFromInt(int64(normalInput)).Mul(decimal.NewFromFloat(*inputPrice)).Div(denominator)
-	cost = cost.Add(decimal.NewFromInt(int64(cachedTokens)).Mul(decimal.NewFromFloat(*cachedUnitPrice)).Div(denominator))
-	cost = cost.Add(decimal.NewFromInt(int64(*tokens.Output)).Mul(decimal.NewFromFloat(*outputPrice)).Div(denominator))
 	return &cost
+}
+
+func tokenCount(value *uint64) uint64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func remainingTokens(value *uint64) *uint64 {
+	if value == nil {
+		return nil
+	}
+	result := *value
+	return &result
 }
 
 func boolInt(value bool) int {

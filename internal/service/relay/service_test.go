@@ -16,6 +16,10 @@ func TestParseJSONUsageVariants(t *testing.T) {
 	if tokens.Total == nil || *tokens.Total != 20 {
 		t.Fatalf("total should be derived: %+v", tokens)
 	}
+	tokens = parseJSONUsage([]byte(`{"usage":{"input_tokens":20,"cache_creation_input_tokens":4,"input_tokens_details":{"image_tokens":3,"audio_tokens":2},"output_tokens":7,"output_tokens_details":{"audio_tokens":5}}}`))
+	if tokens.CacheWrite == nil || *tokens.CacheWrite != 4 || tokens.ImageInput == nil || *tokens.ImageInput != 3 || tokens.AudioInput == nil || *tokens.AudioInput != 2 || tokens.AudioOutput == nil || *tokens.AudioOutput != 5 {
+		t.Fatalf("special usage details were not parsed: %+v", tokens)
+	}
 }
 
 func TestParseSSEUsage(t *testing.T) {
@@ -58,6 +62,13 @@ func TestRuleCostHonorsEndpointAndCachedInput(t *testing.T) {
 	}
 	if _, ok = ruleCost(`{"endpoint":"/embeddings"}`, `{"inputPerMillion":2,"outputPerMillion":8}`, "/chat/completions", usage.TokenUsage{Input: &input, Output: &output}); ok {
 		t.Fatal("endpoint-mismatched rule should not apply")
+	}
+}
+
+func TestRuleCostSupportsRequestOnlyPricing(t *testing.T) {
+	cost, ok := ruleCost(`{}`, `{"request":0.01}`, "/images/generations", usage.TokenUsage{})
+	if !ok || !cost.Equal(decimalRequire("0.01")) {
+		t.Fatalf("unexpected request-only cost: %v, matched=%t", cost, ok)
 	}
 }
 

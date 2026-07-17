@@ -22,9 +22,15 @@ type ModelPricesDao struct {
 // ModelPricesColumns defines and stores column names for the table model_prices.
 type ModelPricesColumns struct {
 	PublicName       string //
+	BillingMode      string //
 	InputPrice       string //
 	CachedInputPrice string //
+	CacheWritePrice  string //
 	OutputPrice      string //
+	ImageInputPrice  string //
+	AudioInputPrice  string //
+	AudioOutputPrice string //
+	RequestPrice     string //
 	CreatedAt        string //
 	UpdatedAt        string //
 	DeletedAt        string //
@@ -33,9 +39,15 @@ type ModelPricesColumns struct {
 // modelPricesColumns holds the columns for the table model_prices.
 var modelPricesColumns = ModelPricesColumns{
 	PublicName:       "public_name",
+	BillingMode:      "billing_mode",
 	InputPrice:       "input_price",
 	CachedInputPrice: "cached_input_price",
+	CacheWritePrice:  "cache_write_price",
 	OutputPrice:      "output_price",
+	ImageInputPrice:  "image_input_price",
+	AudioInputPrice:  "audio_input_price",
+	AudioOutputPrice: "audio_output_price",
+	RequestPrice:     "request_price",
 	CreatedAt:        "created_at",
 	UpdatedAt:        "updated_at",
 	DeletedAt:        "deleted_at",

@@ -80,7 +80,13 @@ type ModelView struct {
 	Enabled           int        `json:"enabled" orm:"enabled"`
 	InputPrice        *float64   `json:"inputPrice" orm:"input_price"`
 	CachedInputPrice  *float64   `json:"cachedInputPrice" orm:"cached_input_price"`
+	CacheWritePrice   *float64   `json:"cacheWritePrice" orm:"cache_write_price"`
 	OutputPrice       *float64   `json:"outputPrice" orm:"output_price"`
+	ImageInputPrice   *float64   `json:"imageInputPrice" orm:"image_input_price"`
+	AudioInputPrice   *float64   `json:"audioInputPrice" orm:"audio_input_price"`
+	AudioOutputPrice  *float64   `json:"audioOutputPrice" orm:"audio_output_price"`
+	RequestPrice      *float64   `json:"requestPrice" orm:"request_price"`
+	BillingMode       string     `json:"billingMode" orm:"billing_mode"`
 	LastTestEndpoint  string     `json:"lastTestEndpoint" orm:"last_test_endpoint"`
 	LastTestStatus    string     `json:"lastTestStatus" orm:"last_test_status"`
 	LastTestLatencyMs uint       `json:"lastTestLatencyMs" orm:"last_test_latency_ms"`
@@ -94,7 +100,13 @@ type PublicModelView struct {
 	PublicName       string   `json:"publicName" orm:"public_name"`
 	InputPrice       *float64 `json:"inputPrice" orm:"input_price"`
 	CachedInputPrice *float64 `json:"cachedInputPrice" orm:"cached_input_price"`
+	CacheWritePrice  *float64 `json:"cacheWritePrice" orm:"cache_write_price"`
 	OutputPrice      *float64 `json:"outputPrice" orm:"output_price"`
+	ImageInputPrice  *float64 `json:"imageInputPrice" orm:"image_input_price"`
+	AudioInputPrice  *float64 `json:"audioInputPrice" orm:"audio_input_price"`
+	AudioOutputPrice *float64 `json:"audioOutputPrice" orm:"audio_output_price"`
+	RequestPrice     *float64 `json:"requestPrice" orm:"request_price"`
+	BillingMode      string   `json:"billingMode" orm:"billing_mode"`
 }
 
 type DiscoveredModel struct {
@@ -396,7 +408,8 @@ func (s *Service) ListModels(ctx context.Context, channelID uint64) ([]ModelView
 	rows := make([]ModelView, 0)
 	model := dao.ChannelModels.Ctx(ctx).As("m").
 		Fields(`m.id,m.channel_id,c.name AS channel_name,m.public_name,m.upstream_name,m.discovered,m.enabled,
-			p.input_price,p.cached_input_price,p.output_price,m.last_test_endpoint,m.last_test_status,
+			p.input_price,p.cached_input_price,p.cache_write_price,p.output_price,p.image_input_price,p.audio_input_price,p.audio_output_price,p.request_price,
+			COALESCE(p.billing_mode,'token') AS billing_mode,m.last_test_endpoint,m.last_test_status,
 			m.last_test_latency_ms,m.last_test_error,m.last_test_at,m.updated_at`).
 		LeftJoin(dao.Channels.Table()+" c", "c.id=m.channel_id").
 		LeftJoin(dao.ModelPrices.Table()+" p", "p.public_name=m.public_name AND p.deleted_at IS NULL")
@@ -410,9 +423,9 @@ func (s *Service) ListModels(ctx context.Context, channelID uint64) ([]ModelView
 func (s *Service) ListPublicModels(ctx context.Context) ([]PublicModelView, error) {
 	rows := make([]PublicModelView, 0)
 	err := dao.ChannelModels.Ctx(ctx).As("m").
-		Fields(`MIN(m.id) AS id,m.public_name,p.input_price,p.cached_input_price,p.output_price`).
+		Fields(`MIN(m.id) AS id,m.public_name,p.input_price,p.cached_input_price,p.cache_write_price,p.output_price,p.image_input_price,p.audio_input_price,p.audio_output_price,p.request_price,COALESCE(p.billing_mode,'token') AS billing_mode`).
 		LeftJoin(dao.ModelPrices.Table()+" p", "p.public_name=m.public_name AND p.deleted_at IS NULL").
-		Group("m.public_name,p.input_price,p.cached_input_price,p.output_price").
+		Group("m.public_name,p.input_price,p.cached_input_price,p.cache_write_price,p.output_price,p.image_input_price,p.audio_input_price,p.audio_output_price,p.request_price,p.billing_mode").
 		OrderAsc("m.public_name").
 		Scan(&rows)
 	return rows, gerror.Wrap(err, "list public models")
@@ -510,7 +523,12 @@ func (s *Service) UpdateModel(ctx context.Context, id uint64, input adminapi.Mod
 		return s.replacePublicPrice(txCtx, publicName, modelPriceValues{
 			Input:       input.InputPrice,
 			CachedInput: input.CachedInputPrice,
+			CacheWrite:  input.CacheWritePrice,
 			Output:      input.OutputPrice,
+			ImageInput:  input.ImageInputPrice,
+			AudioInput:  input.AudioInputPrice,
+			AudioOutput: input.AudioOutputPrice,
+			Request:     input.RequestPrice,
 		})
 	})
 	if err != nil {
@@ -524,11 +542,7 @@ func (s *Service) UpdatePublicModelPrice(ctx context.Context, id uint64, input a
 	if err != nil {
 		return err
 	}
-	return s.replacePublicPrice(ctx, modelName, modelPriceValues{
-		Input:       input.InputPrice,
-		CachedInput: input.CachedInputPrice,
-		Output:      input.OutputPrice,
-	})
+	return s.updatePublicModelPrice(ctx, modelName, input)
 }
 
 func (s *Service) toView(row entity.Channels) View {

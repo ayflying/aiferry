@@ -21,6 +21,7 @@ const (
 	AdapterOpenAICosts = "openai_costs"
 	AdapterSub2API     = "sub2api_usage"
 	AdapterCustomJSON  = "custom_json"
+	AdapterNewAPIRatio = "newapi_ratio"
 
 	AuthNone          = "none"
 	AuthChannelKey    = "channel_key"
@@ -67,13 +68,19 @@ type PricingConfig struct {
 	RatesPath            string `json:"ratesPath"`
 	InputPricePath       string `json:"inputPricePath"`
 	CachedInputPricePath string `json:"cachedInputPricePath"`
+	CacheWritePricePath  string `json:"cacheWritePricePath"`
 	OutputPricePath      string `json:"outputPricePath"`
+	ImageInputPricePath  string `json:"imageInputPricePath"`
+	AudioInputPricePath  string `json:"audioInputPricePath"`
+	AudioOutputPricePath string `json:"audioOutputPricePath"`
+	RequestPricePath     string `json:"requestPricePath"`
 }
 
 type Config struct {
-	Models  ModelConfig   `json:"models"`
-	Costs   CostConfig    `json:"costs"`
-	Pricing PricingConfig `json:"pricing"`
+	PriceSyncOnly bool          `json:"priceSyncOnly"`
+	Models        ModelConfig   `json:"models"`
+	Costs         CostConfig    `json:"costs"`
+	Pricing       PricingConfig `json:"pricing"`
 }
 
 type View struct {
@@ -218,14 +225,16 @@ func ParseConfig(raw []byte) (Config, error) {
 	config.Models.IDPath = strings.TrimSpace(config.Models.IDPath)
 	config.Models.AuthType = normalizeAuth(config.Models.AuthType)
 	config.Models.HeaderName = normalizeHeader(config.Models.HeaderName, config.Models.AuthType)
-	if config.Models.Path == "" || config.Models.IDPath == "" {
-		return Config{}, gerror.New("models.path and models.idPath are required")
-	}
-	if config.Models.Method != httpMethodGet {
-		return Config{}, gerror.New("only GET model discovery is supported")
-	}
-	if !validAuth(config.Models.AuthType) {
-		return Config{}, gerror.New("unsupported models.authType")
+	if !config.PriceSyncOnly {
+		if config.Models.Path == "" || config.Models.IDPath == "" {
+			return Config{}, gerror.New("models.path and models.idPath are required")
+		}
+		if config.Models.Method != httpMethodGet {
+			return Config{}, gerror.New("only GET model discovery is supported")
+		}
+		if !validAuth(config.Models.AuthType) {
+			return Config{}, gerror.New("unsupported models.authType")
+		}
 	}
 
 	config.Costs.Adapter = strings.TrimSpace(config.Costs.Adapter)
@@ -266,11 +275,8 @@ func ParseConfig(raw []byte) (Config, error) {
 	config.Pricing.ListPath = strings.TrimSpace(config.Pricing.ListPath)
 	config.Pricing.ModelPath = strings.TrimSpace(config.Pricing.ModelPath)
 	if config.Pricing.Adapter != AdapterNone {
-		if config.Pricing.Adapter != "json" {
-			return Config{}, gerror.New("unsupported pricing.adapter")
-		}
-		if config.Pricing.Path == "" || config.Pricing.ModelPath == "" {
-			return Config{}, gerror.New("pricing.path and pricing.modelPath are required")
+		if config.Pricing.Path == "" {
+			return Config{}, gerror.New("pricing.path is required")
 		}
 		if config.Pricing.Method != httpMethodGet {
 			return Config{}, gerror.New("only GET price synchronization is supported")
@@ -278,9 +284,21 @@ func ParseConfig(raw []byte) (Config, error) {
 		if !validAuth(config.Pricing.AuthType) {
 			return Config{}, gerror.New("unsupported pricing.authType")
 		}
-		if config.Pricing.RatesPath == "" && config.Pricing.InputPricePath == "" && config.Pricing.OutputPricePath == "" {
-			return Config{}, gerror.New("pricing requires ratesPath or inputPricePath/outputPricePath")
+		switch config.Pricing.Adapter {
+		case "json":
+			if config.Pricing.ModelPath == "" {
+				return Config{}, gerror.New("pricing.modelPath is required for json pricing")
+			}
+			if config.Pricing.RatesPath == "" && config.Pricing.InputPricePath == "" && config.Pricing.CachedInputPricePath == "" && config.Pricing.CacheWritePricePath == "" && config.Pricing.OutputPricePath == "" && config.Pricing.ImageInputPricePath == "" && config.Pricing.AudioInputPricePath == "" && config.Pricing.AudioOutputPricePath == "" && config.Pricing.RequestPricePath == "" {
+				return Config{}, gerror.New("pricing requires ratesPath or a configured price path")
+			}
+		case AdapterNewAPIRatio:
+		default:
+			return Config{}, gerror.New("unsupported pricing.adapter")
 		}
+	}
+	if config.PriceSyncOnly && config.Pricing.Adapter == AdapterNone {
+		return Config{}, gerror.New("price sync only channel types require pricing configuration")
 	}
 	return config, nil
 }
