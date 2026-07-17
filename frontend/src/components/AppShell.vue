@@ -28,14 +28,15 @@ const mobileOpen = ref(false)
 
 const adminItems = [
   { path: '/', label: '仪表盘', icon: Gauge },
-  { path: '/channels', label: '渠道', icon: Cable },
-  { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
   { path: '/api-keys', label: '访问密钥', icon: KeyRound },
   { path: '/usage', label: '用量', icon: Activity },
+  { path: '/channels', label: '渠道', icon: Cable },
+  { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
+  { path: '/users', label: '用户管理', icon: UsersRound },
   { path: '/settings', label: '系统设置', icon: Settings },
 ]
 const items = computed(() => auth.user?.role === 'admin'
-  ? [...adminItems, { path: '/users', label: '用户管理', icon: UsersRound }]
+  ? adminItems
   : [{ path: '/profile', label: '个人中心', icon: UserRound }])
 
 const pageTitle = computed(() => String(route.meta.title || 'AiFerry'))
