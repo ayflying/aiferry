@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [string]$BuildHost = 'root@192.168.50.217',
   [string]$DeployDir = '/root/aiferry-dev',
@@ -74,3 +74,4 @@ finally {
   if (Test-Path $archive) { Remove-Item -Force $archive }
   & ssh $BuildHost "rm -rf '$stage'" 2>$null
 }
+
