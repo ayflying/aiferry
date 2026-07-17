@@ -16,6 +16,7 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	"github.com/yunloli/aiferry/internal/service/app"
+	"github.com/yunloli/aiferry/internal/service/channel"
 	mailservice "github.com/yunloli/aiferry/internal/service/mail"
 	"github.com/yunloli/aiferry/internal/service/pricingcache"
 	"github.com/yunloli/aiferry/internal/service/system"
@@ -32,6 +33,7 @@ type Service struct {
 	users      *user.Service
 	prices     *pricingcache.Service
 	mail       *mailservice.Service
+	channels   *channel.Service
 }
 
 type Candidate struct {
@@ -71,8 +73,8 @@ type attemptResult struct {
 	headers      http.Header
 }
 
-func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service) *Service {
-	return &Service{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc}
+func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service) *Service {
+	return &Service{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc}
 }
 
 func (s *Service) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {

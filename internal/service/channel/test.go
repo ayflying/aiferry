@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/tidwall/gjson"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
@@ -134,8 +135,13 @@ func (s *Service) recordTestUsage(ctx context.Context, userID uint64, channel en
 			chargeErr = gerror.New("上游响应未返回可计费的用量信息")
 		} else if err := s.users.Debit(ctx, userID, *cost); err != nil {
 			chargeErr = err
-		} else if s.mail != nil {
-			s.mail.NotifyLowBalance(ctx, userID)
+		} else {
+			if err = s.ApplyUsageCost(ctx, channel.Id, *cost); err != nil {
+				g.Log().Warningf(ctx, "apply channel %d test usage cost: %v", channel.Id, err)
+			}
+			if s.mail != nil {
+				s.mail.NotifyLowBalance(ctx, userID)
+			}
 		}
 		if chargeErr != nil {
 			recordStatus = http.StatusPaymentRequired

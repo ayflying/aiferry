@@ -30,3 +30,10 @@ func TestValidRecipient(t *testing.T) {
 		t.Fatal("expected display-name address to be rejected")
 	}
 }
+
+func TestChannelBalanceReminderKey(t *testing.T) {
+	key := channelBalanceReminderKey(42, 5)
+	if key != "aiferry:mail:channel-low-balance:42:5" {
+		t.Fatalf("unexpected channel balance reminder key: %q", key)
+	}
+}

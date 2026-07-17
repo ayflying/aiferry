@@ -117,6 +117,36 @@ func (s *Service) List(ctx context.Context) ([]ManagedUser, error) {
 	return result, nil
 }
 
+func (s *Service) AdminEmails(ctx context.Context) ([]string, error) {
+	rows := make([]struct {
+		Email string `orm:"email"`
+	}, 0)
+	columns := dao.Users.Columns()
+	if err := dao.Users.Ctx(ctx).
+		Fields(columns.Email).
+		WhereIn(columns.Role, s.app.Config.AdminRoles).
+		Where(columns.Status, 1).
+		WhereNotNull(columns.Email).
+		OrderAsc(columns.Id).
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "list administrator emails")
+	}
+	emails := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		email := strings.ToLower(strings.TrimSpace(row.Email))
+		if email == "" {
+			continue
+		}
+		if _, exists := seen[email]; exists {
+			continue
+		}
+		seen[email] = struct{}{}
+		emails = append(emails, email)
+	}
+	return emails, nil
+}
+
 func (s *Service) UpdateBalance(ctx context.Context, id uint64, balance float64) (Profile, error) {
 	if math.IsNaN(balance) || math.IsInf(balance, 0) || balance < 0 {
 		return Profile{}, gerror.New("余额必须是非负金额")

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/shopspring/decimal"
 
 	"github.com/yunloli/aiferry/internal/service/apikey"
@@ -23,6 +24,11 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 			chargeErr = err
 		} else {
 			_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
+			if s.channels != nil {
+				if err := s.channels.ApplyUsageCost(ctx, candidate.ChannelID, *cost); err != nil {
+					g.Log().Warningf(ctx, "apply channel %d usage cost: %v", candidate.ChannelID, err)
+				}
+			}
 			if s.mail != nil {
 				s.mail.NotifyLowBalance(ctx, key.UserId)
 			}

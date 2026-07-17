@@ -54,7 +54,7 @@ var (
 				mailSvc         = mail.New(appSvc, systemSvc, userSvc)
 				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc, priceCache, userSvc, mailSvc)
 				priceSourceSvc  = pricesource.New(channelSvc)
-				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc)
+				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc, channelSvc)
 				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc, authSvc, mailSvc)
 				authCtrl        = authctrl.New(authSvc, userSvc)
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)
@@ -64,6 +64,7 @@ var (
 				return err
 			}
 			channelSvc.StartHealthChecks(ctx)
+			channelSvc.StartCostSync(ctx)
 			s.SetAddr(":8080")
 			s.SetServerRoot(cfg.WebRoot)
 			s.SetFileServerEnabled(true)
