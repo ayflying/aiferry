@@ -1,4 +1,5 @@
 import { ElMessageBox } from 'element-plus'
+import 'element-plus/es/components/message-box/style/css'
 
 const fallbackMessage = '操作失败，请稍后重试'
 
