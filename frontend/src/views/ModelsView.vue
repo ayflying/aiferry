@@ -7,6 +7,7 @@ import type { ModelBillingMode, PriceRule, PublicModel } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { compareModelNames } from '../lib/models'
+import TableActionButton from '../components/TableActionButton.vue'
 
 const store = useAppStore()
 const models = ref<PublicModel[]>([])
@@ -142,7 +143,7 @@ onMounted(load)
       <el-table v-loading="loading" :data="filtered" row-key="publicName">
         <el-table-column prop="publicName" label="公开模型" min-width="250"><template #default="{ row }"><span class="mono model-name">{{ row.publicName }}</span></template></el-table-column>
         <el-table-column label="计费方式" min-width="260"><template #default="{ row }"><div class="price-line"><template v-if="row.billingMode === 'request'"><span>按次 {{ row.requestPrice ?? '—' }}</span></template><template v-else-if="row.billingMode === 'rules'"><span>高级计费规则</span></template><template v-else><span>入 {{ row.inputPrice ?? '—' }}</span><span>缓存读 {{ row.cachedInputPrice ?? '—' }}</span><span>补全 {{ row.outputPrice ?? '—' }}</span></template></div></template></el-table-column>
-        <el-table-column label="操作" width="86" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip content="设置公共价格"><button class="icon-button" type="button" :aria-label="`设置 ${row.publicName} 的公共价格`" @click="openEdit(row)"><Coins :size="16" /></button></el-tooltip></div></template></el-table-column>
+        <el-table-column label="操作" width="86" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="Coins" :label="`设置 ${row.publicName} 的公共价格`" @click="openEdit(row)" /></div></template></el-table-column>
       </el-table>
       <div v-if="!loading && !filtered.length" class="empty-state"><div><strong>没有匹配模型</strong><span>先在渠道页发现并选择模型</span></div></div>
     </div>
@@ -161,7 +162,7 @@ onMounted(load)
           </el-tab-pane>
           <el-tab-pane label="高级计费规则" name="rules">
             <div class="section-heading price-heading"><h2>高级计费规则</h2><span>仅在此页签启用时参与计费</span></div>
-            <div class="rules-list"><div v-for="rule in rules" :key="rule.id" class="rule-row"><div><strong>{{ rule.name }}</strong><span>{{ rule.source === 'sync' ? '上游同步' : '人工规则' }} · P{{ rule.priority }} · {{ rule.currency }}</span></div><code>{{ JSON.stringify(rule.rates) }}</code><el-tooltip content="删除规则"><button class="icon-button danger" type="button" @click="removeRule(rule)"><Trash2 :size="15" /></button></el-tooltip></div><div v-if="!rules.length" class="muted">没有高级规则。</div></div>
+            <div class="rules-list"><div v-for="rule in rules" :key="rule.id" class="rule-row"><div><strong>{{ rule.name }}</strong><span>{{ rule.source === 'sync' ? '上游同步' : '人工规则' }} · P{{ rule.priority }} · {{ rule.currency }}</span></div><code>{{ JSON.stringify(rule.rates) }}</code><TableActionButton :icon="Trash2" label="删除规则" danger :size="15" @click="removeRule(rule)" /></div><div v-if="!rules.length" class="muted">没有高级规则。</div></div>
             <div class="rule-editor"><el-input v-model="ruleForm.name" placeholder="规则名称，例如 Chat 长上下文" /><div class="form-grid"><el-input-number v-model="ruleForm.priority" :min="-999" :max="999" controls-position="right" /><el-input v-model="ruleForm.currency" maxlength="12" /></div><el-input v-model="ruleForm.conditionsText" type="textarea" :rows="4" spellcheck="false" /><el-input v-model="ruleForm.ratesText" type="textarea" :rows="8" spellcheck="false" /><el-button :loading="ruleSaving" @click="addRule">添加人工规则</el-button></div>
           </el-tab-pane>
         </el-tabs>

@@ -3,7 +3,6 @@ package channel
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -161,29 +160,21 @@ func (s *Service) queryCustomJSON(ctx context.Context, channel entity.Channels, 
 }
 
 func (s *Service) getCostJSON(ctx context.Context, channel entity.Channels, endpoint string, config channeltype.CostConfig) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, config.Method, endpoint, nil)
-	if err != nil {
-		return nil, gerror.Wrap(err, "create cost query request")
-	}
-	if err = s.setConfiguredHeaders(ctx, req, channel, config.AuthType, config.HeaderName, config.HeaderPrefix); err != nil {
-		return nil, err
-	}
-	resp, err := s.app.HTTP.Do(req)
-	if err != nil {
-		return nil, gerror.Wrap(err, "query upstream cost")
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, gerror.Wrap(err, "read upstream cost response")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, gerror.Newf("upstream cost query returned HTTP %d: %s", resp.StatusCode, upstreamError(body, resp.Status))
-	}
-	if !gjson.ValidBytes(body) {
-		return nil, gerror.New("upstream cost query returned invalid JSON")
-	}
-	return body, nil
+	return s.fetchUpstreamJSON(ctx, channel, upstreamJSONRequest{
+		Method:       config.Method,
+		Endpoint:     endpoint,
+		AuthType:     config.AuthType,
+		HeaderName:   config.HeaderName,
+		HeaderPrefix: config.HeaderPrefix,
+		BodyLimit:    4 << 20,
+		RequestError: "create cost query request",
+		FetchError:   "query upstream cost",
+		ReadError:    "read upstream cost response",
+		InvalidError: "upstream cost query returned invalid JSON",
+		StatusError: func(status int, body []byte) error {
+			return gerror.Newf("upstream cost query returned HTTP %d: %s", status, upstreamError(body, http.StatusText(status)))
+		},
+	})
 }
 
 func (s *Service) saveCostResult(ctx context.Context, channelID uint64, result CostResult) error {
