@@ -11,6 +11,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channel"
 	"github.com/yunloli/aiferry/internal/service/channelgroup"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
+	"github.com/yunloli/aiferry/internal/service/pricesource"
 	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
@@ -19,13 +20,14 @@ type Controller struct {
 	channels *channel.Service
 	types    *channeltype.Service
 	groups   *channelgroup.Service
+	prices   *pricesource.Service
 	apiKeys  *apikey.Service
 	settings *system.Service
 	usage    *usage.Service
 }
 
-func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service) *Controller {
-	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc}
+func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service) *Controller {
+	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc}
 }
 
 func (c *Controller) Register(group *ghttp.RouterGroup) {
@@ -45,8 +47,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.GET("/channels/{id}/models", c.listChannelModels)
 	group.PUT("/channels/{id}/models/selection", c.selectChannelModels)
 	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
-	group.POST("/channels/{id}/prices/sync", c.syncChannelPrices)
-	group.POST("/prices/sync", c.syncAllPrices)
+	c.registerPriceRoutes(group)
 	group.GET("/models", c.listModels)
 	group.GET("/public-models", c.listPublicModels)
 	group.PUT("/models/{id}", c.updateModel)
@@ -194,31 +195,6 @@ func (c *Controller) queryChannelCost(r *ghttp.Request) {
 		return
 	}
 	data, err := c.channels.QueryCost(r.Context(), routeID(r), input)
-	respond(r, data, err)
-}
-
-func (c *Controller) syncChannelPrices(r *ghttp.Request) {
-	// Keep the legacy channel URL compatible with clients that have not reloaded
-	// their bundled frontend yet. Prices are shared by public model, so every
-	// synchronization must use all configured price sources.
-	data, err := c.channels.SyncAllPrices(r.Context())
-	respond(r, data, err)
-}
-
-func (c *Controller) syncAllPrices(r *ghttp.Request) {
-	var input adminapi.PriceSyncInput
-	if len(r.GetBody()) > 0 && !parse(r, &input) {
-		return
-	}
-	var (
-		data channel.PriceSyncResult
-		err  error
-	)
-	if input.ChannelID > 0 {
-		data, err = c.channels.SyncPriceSource(r.Context(), input.ChannelID)
-	} else {
-		data, err = c.channels.SyncAllPrices(r.Context())
-	}
 	respond(r, data, err)
 }
 

@@ -1,7 +1,6 @@
 package channeltype
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"regexp"
@@ -77,10 +76,9 @@ type PricingConfig struct {
 }
 
 type Config struct {
-	PriceSyncOnly bool          `json:"priceSyncOnly"`
-	Models        ModelConfig   `json:"models"`
-	Costs         CostConfig    `json:"costs"`
-	Pricing       PricingConfig `json:"pricing"`
+	Models  ModelConfig   `json:"models"`
+	Costs   CostConfig    `json:"costs"`
+	Pricing PricingConfig `json:"pricing"`
 }
 
 type View struct {
@@ -210,129 +208,6 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 		return gerror.Wrap(err, "delete channel type")
 	}
 	return nil
-}
-
-func ParseConfig(raw []byte) (Config, error) {
-	var config Config
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
-		return Config{}, gerror.Wrap(err, "invalid channel type JSON")
-	}
-	config.Models.Method = normalizeMethod(config.Models.Method)
-	config.Models.Path = strings.TrimSpace(config.Models.Path)
-	config.Models.ListPath = strings.TrimSpace(config.Models.ListPath)
-	config.Models.IDPath = strings.TrimSpace(config.Models.IDPath)
-	config.Models.AuthType = normalizeAuth(config.Models.AuthType)
-	config.Models.HeaderName = normalizeHeader(config.Models.HeaderName, config.Models.AuthType)
-	if !config.PriceSyncOnly {
-		if config.Models.Path == "" || config.Models.IDPath == "" {
-			return Config{}, gerror.New("models.path and models.idPath are required")
-		}
-		if config.Models.Method != httpMethodGet {
-			return Config{}, gerror.New("only GET model discovery is supported")
-		}
-		if !validAuth(config.Models.AuthType) {
-			return Config{}, gerror.New("unsupported models.authType")
-		}
-	}
-
-	config.Costs.Adapter = strings.TrimSpace(config.Costs.Adapter)
-	if config.Costs.Adapter == "" {
-		config.Costs.Adapter = AdapterNone
-	}
-	config.Costs.Method = normalizeMethod(config.Costs.Method)
-	config.Costs.Path = strings.TrimSpace(config.Costs.Path)
-	config.Costs.AuthType = normalizeAuth(config.Costs.AuthType)
-	config.Costs.HeaderName = normalizeHeader(config.Costs.HeaderName, config.Costs.AuthType)
-	config.Costs.FixedCurrency = strings.ToUpper(strings.TrimSpace(config.Costs.FixedCurrency))
-	if !validAdapter(config.Costs.Adapter) {
-		return Config{}, gerror.New("unsupported costs.adapter")
-	}
-	if config.Costs.Adapter != AdapterNone {
-		if config.Costs.Path == "" {
-			return Config{}, gerror.New("costs.path is required when cost querying is enabled")
-		}
-		if config.Costs.Method != httpMethodGet {
-			return Config{}, gerror.New("only GET cost queries are supported")
-		}
-		if !validAuth(config.Costs.AuthType) {
-			return Config{}, gerror.New("unsupported costs.authType")
-		}
-	}
-	if config.Costs.Adapter == AdapterCustomJSON && config.Costs.UsedPath == "" && config.Costs.RemainingPath == "" {
-		return Config{}, gerror.New("custom_json costs require usedPath or remainingPath")
-	}
-
-	config.Pricing.Adapter = strings.TrimSpace(config.Pricing.Adapter)
-	if config.Pricing.Adapter == "" {
-		config.Pricing.Adapter = AdapterNone
-	}
-	config.Pricing.Method = normalizeMethod(config.Pricing.Method)
-	config.Pricing.Path = strings.TrimSpace(config.Pricing.Path)
-	config.Pricing.AuthType = normalizeAuth(config.Pricing.AuthType)
-	config.Pricing.HeaderName = normalizeHeader(config.Pricing.HeaderName, config.Pricing.AuthType)
-	config.Pricing.ListPath = strings.TrimSpace(config.Pricing.ListPath)
-	config.Pricing.ModelPath = strings.TrimSpace(config.Pricing.ModelPath)
-	if config.Pricing.Adapter != AdapterNone {
-		if config.Pricing.Path == "" {
-			return Config{}, gerror.New("pricing.path is required")
-		}
-		if config.Pricing.Method != httpMethodGet {
-			return Config{}, gerror.New("only GET price synchronization is supported")
-		}
-		if !validAuth(config.Pricing.AuthType) {
-			return Config{}, gerror.New("unsupported pricing.authType")
-		}
-		switch config.Pricing.Adapter {
-		case "json":
-			if config.Pricing.ModelPath == "" {
-				return Config{}, gerror.New("pricing.modelPath is required for json pricing")
-			}
-			if config.Pricing.RatesPath == "" && config.Pricing.InputPricePath == "" && config.Pricing.CachedInputPricePath == "" && config.Pricing.CacheWritePricePath == "" && config.Pricing.OutputPricePath == "" && config.Pricing.ImageInputPricePath == "" && config.Pricing.AudioInputPricePath == "" && config.Pricing.AudioOutputPricePath == "" && config.Pricing.RequestPricePath == "" {
-				return Config{}, gerror.New("pricing requires ratesPath or a configured price path")
-			}
-		case AdapterNewAPIRatio:
-		default:
-			return Config{}, gerror.New("unsupported pricing.adapter")
-		}
-	}
-	if config.PriceSyncOnly && config.Pricing.Adapter == AdapterNone {
-		return Config{}, gerror.New("price sync only channel types require pricing configuration")
-	}
-	return config, nil
-}
-
-const httpMethodGet = "GET"
-
-func normalizeMethod(value string) string {
-	if value = strings.ToUpper(strings.TrimSpace(value)); value == "" {
-		return httpMethodGet
-	}
-	return value
-}
-
-func normalizeAuth(value string) string {
-	if value = strings.TrimSpace(value); value == "" {
-		return AuthNone
-	}
-	return value
-}
-
-func normalizeHeader(value, authType string) string {
-	value = strings.TrimSpace(value)
-	if value == "" && authType != AuthNone {
-		return "Authorization"
-	}
-	return value
-}
-
-func validAuth(value string) bool {
-	return value == AuthNone || value == AuthChannelKey || value == AuthManagementKey
-}
-
-func validAdapter(value string) bool {
-	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterCustomJSON
 }
 
 func normalizeStatus(value int) int {

@@ -39,6 +39,9 @@ type PriceSyncResult struct {
 }
 
 type PriceSyncSourceFailure struct {
+	SourceKind  string `json:"sourceKind"`
+	SourceID    uint64 `json:"sourceId"`
+	SourceName  string `json:"sourceName"`
 	ChannelID   uint64 `json:"channelId"`
 	ChannelName string `json:"channelName"`
 	Message     string `json:"message"`

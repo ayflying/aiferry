@@ -48,16 +48,27 @@ func TestParseConfigAcceptsJSONPriceSynchronization(t *testing.T) {
 	}
 }
 
-func TestParseConfigAcceptsPriceSyncOnlyNewAPIRatioSource(t *testing.T) {
-	config, err := ParseConfig([]byte(`{
-    "priceSyncOnly":true,
-    "costs":{"adapter":"none"},
-    "pricing":{"adapter":"newapi_ratio","path":"/llm-metadata/api/newapi/ratio_config-v1-base.json","authType":"none"}
-  }`))
+func TestParsePricingConfigAcceptsNewAPIRatioSource(t *testing.T) {
+	config, err := ParsePricingConfig(PricingConfig{
+		Adapter:  AdapterNewAPIRatio,
+		Path:     "/llm-metadata/api/newapi/ratio_config-v1-base.json",
+		AuthType: AuthNone,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.PriceSyncOnly || config.Pricing.Adapter != AdapterNewAPIRatio {
+	if config.Adapter != AdapterNewAPIRatio || config.Method != "GET" {
 		t.Fatalf("unexpected config: %+v", config)
+	}
+}
+
+func TestParseConfigRejectsNewAPIRatioChannelType(t *testing.T) {
+	_, err := ParseConfig([]byte(`{
+    "models":{"path":"/models","idPath":"id"},
+    "costs":{"adapter":"none"},
+    "pricing":{"adapter":"newapi_ratio","path":"/ratio","authType":"none"}
+  }`))
+	if err == nil {
+		t.Fatal("expected price source adapter rejection")
 	}
 }

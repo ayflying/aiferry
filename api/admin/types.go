@@ -116,7 +116,15 @@ type CostQueryInput struct {
 }
 
 type PriceSyncInput struct {
-	ChannelID uint64 `json:"channelId"`
+	ChannelID     uint64 `json:"channelId"`
+	PriceSourceID uint64 `json:"priceSourceId"`
+}
+
+type PriceSourceInput struct {
+	Name   string          `json:"name" v:"required|length:1,96"`
+	Code   string          `json:"code" v:"required|length:2,64"`
+	Status int             `json:"status" v:"in:0,1"`
+	Config json.RawMessage `json:"config" v:"required"`
 }
 
 type SystemResilienceSettingsInput struct {

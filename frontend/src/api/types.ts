@@ -75,10 +75,28 @@ export interface ChannelTypePricingConfig {
 }
 
 export interface ChannelTypeConfig {
-  priceSyncOnly?: boolean
   models: ChannelTypeModelConfig
   costs: ChannelTypeCostConfig
   pricing: ChannelTypePricingConfig
+}
+
+export interface PriceSourceConfig {
+  baseUrl: string
+  pricing: Omit<ChannelTypePricingConfig, 'adapter' | 'authType'> & {
+    adapter: 'newapi_ratio' | 'json'
+    authType: 'none'
+  }
+}
+
+export interface PriceSource {
+  id: number
+  name: string
+  code: string
+  config: PriceSourceConfig
+  status: number
+  builtIn: number
+  createdAt: string
+  updatedAt: string
 }
 
 export interface ChannelType {

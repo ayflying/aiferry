@@ -1,21 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Coins, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
+import { Braces, Coins, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { ModelBillingMode, PriceRule, PublicModel } from '../api/types'
+import type { ModelBillingMode, PriceRule, PriceSource, PublicModel } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { compareModelNames } from '../lib/models'
 import TableActionButton from '../components/TableActionButton.vue'
+import PriceSourceManager from '../components/PriceSourceManager.vue'
 
 const store = useAppStore()
 const models = ref<PublicModel[]>([])
+const sources = ref<PriceSource[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const keyword = ref('')
-const priceSourceChannelId = ref<number>()
+const priceSyncTarget = ref('')
 const editOpen = ref(false)
+const sourceOpen = ref(false)
 const current = ref<PublicModel>()
 const rules = ref<PriceRule[]>([])
 const ruleSaving = ref(false)
@@ -37,7 +40,8 @@ const filtered = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return models.value.filter((item) => !query || item.publicName.toLowerCase().includes(query)).sort((left, right) => compareModelNames(left.publicName, right.publicName))
 })
-const priceSources = computed(() => {
+const enabledSources = computed(() => sources.value.filter((item) => item.status === 1))
+const channelPriceSources = computed(() => {
   const typesWithPricing = new Set(store.channelTypes.filter((type) => type.config.pricing.adapter !== 'none').map((type) => type.code))
   return store.channels.filter((channel) => channel.status === 1 && typesWithPricing.has(channel.type))
 })
@@ -45,12 +49,21 @@ const priceSources = computed(() => {
 async function load() {
   loading.value = true
   try {
-    const [items] = await Promise.all([apiGet<PublicModel[]>('/public-models'), store.loadChannels(), store.loadChannelTypes()])
+    const [items, priceSources] = await Promise.all([apiGet<PublicModel[]>('/public-models'), apiGet<PriceSource[]>('/price-sources'), store.loadChannels(), store.loadChannelTypes()])
     models.value = items
-    if (!priceSourceChannelId.value || !priceSources.value.some((item) => item.id === priceSourceChannelId.value)) {
-      priceSourceChannelId.value = priceSources.value.find((item) => item.type === 'newapi_ratio_metadata')?.id ?? priceSources.value[0]?.id
-    }
+    sources.value = priceSources
+    if (!syncTargetExists(priceSyncTarget.value)) priceSyncTarget.value = defaultSyncTarget()
   } catch (error) { showError(error, '加载模型失败') } finally { loading.value = false }
+}
+
+function defaultSyncTarget() {
+  return enabledSources.value[0] ? `source:${enabledSources.value[0].id}` : channelPriceSources.value[0] ? `channel:${channelPriceSources.value[0].id}` : ''
+}
+
+function syncTargetExists(target: string) {
+  const [kind, rawID] = target.split(':')
+  const id = Number(rawID)
+  return kind === 'source' ? enabledSources.value.some((item) => item.id === id) : kind === 'channel' && channelPriceSources.value.some((item) => item.id === id)
 }
 
 function openEdit(model: PublicModel) {
@@ -108,20 +121,22 @@ async function removeRule(rule: PriceRule) {
 }
 
 async function syncPrices() {
-  if (!priceSourceChannelId.value) { showError('请选择用于同步价格的渠道', '无法同步价格'); return }
+  if (!priceSyncTarget.value) { showError('请选择价格同步来源', '无法同步价格'); return }
+  const [kind, rawID] = priceSyncTarget.value.split(':')
   loading.value = true
   try {
-    const result = await apiPost<{ count: number; sources: number; succeeded: number; failures: Array<{ channelName: string; message: string }> }>('/prices/sync', { channelId: priceSourceChannelId.value })
+    const payload = kind === 'source' ? { priceSourceId: Number(rawID) } : { channelId: Number(rawID) }
+    const result = await apiPost<{ count: number; sources: number; succeeded: number; failures: Array<{ sourceName?: string; channelName?: string; message: string }> }>('/prices/sync', payload)
     if (!result.succeeded) showError(formatSyncFailures(result.failures), '价格同步失败')
-    else if (result.failures.length) showError(`已同步 ${result.count} 条公共价格规则，但以下渠道未完成：${formatSyncFailures(result.failures)}`, '价格同步未完全完成')
-    else ElMessage.success(result.count ? `已同步 ${result.count} 条公共价格规则` : '所选渠道没有返回已匹配的公开模型价格')
+    else if (result.failures.length) showError(`已同步 ${result.count} 条公共价格规则，但以下来源未完成：${formatSyncFailures(result.failures)}`, '价格同步未完全完成')
+    else ElMessage.success(result.count ? `已同步 ${result.count} 条公共价格规则` : '所选来源没有返回已匹配的公开模型价格')
     if (current.value) await loadRules(current.value.id)
     await load()
   } catch (error) { showError(error, '价格同步失败') } finally { loading.value = false }
 }
 
-function formatSyncFailures(failures: Array<{ channelName: string; message: string }>) {
-  const visible = failures.slice(0, 2).map((item) => `${item.channelName}：${item.message}`)
+function formatSyncFailures(failures: Array<{ sourceName?: string; channelName?: string; message: string }>) {
+  const visible = failures.slice(0, 2).map((item) => `${item.sourceName || item.channelName || '价格源'}：${item.message}`)
   const remaining = failures.length - visible.length
   return `${visible.join('；')}${remaining > 0 ? `；另有 ${remaining} 个价格源失败` : ''}`
 }
@@ -134,9 +149,13 @@ onMounted(load)
     <div class="page-toolbar">
       <div class="toolbar-group"><el-input v-model="keyword" clearable placeholder="搜索公开模型" style="width: 240px" /></div>
       <div class="spacer" />
-      <el-select v-model="priceSourceChannelId" clearable filterable no-data-text="没有启用渠道" placeholder="选择价格同步渠道" style="width: 210px"><el-option v-for="item in priceSources" :key="item.id" :label="item.name" :value="item.id" /></el-select>
+      <el-select v-model="priceSyncTarget" clearable filterable no-data-text="没有可用价格源" placeholder="选择价格同步来源" style="width: 230px">
+        <el-option-group v-if="enabledSources.length" label="公共价格源"><el-option v-for="item in enabledSources" :key="`source:${item.id}`" :label="item.name" :value="`source:${item.id}`" /></el-option-group>
+        <el-option-group v-if="channelPriceSources.length" label="渠道"><el-option v-for="item in channelPriceSources" :key="`channel:${item.id}`" :label="item.name" :value="`channel:${item.id}`" /></el-option-group>
+      </el-select>
+      <el-button :icon="Braces" @click="sourceOpen = true">价格源</el-button>
       <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
-      <el-button :icon="RotateCw" :loading="loading" :disabled="!priceSourceChannelId" @click="syncPrices">同步模型价格</el-button>
+      <el-button :icon="RotateCw" :loading="loading" :disabled="!priceSyncTarget" @click="syncPrices">同步模型价格</el-button>
     </div>
 
     <div class="table-panel">
@@ -169,6 +188,7 @@ onMounted(load)
       </el-form>
       <template #footer><el-button @click="editOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存价格</el-button></template>
     </el-drawer>
+    <PriceSourceManager v-model="sourceOpen" :sources="sources" :loading="loading" @changed="load" />
   </div>
 </template>
 

@@ -33,6 +33,19 @@ func (s *Service) fetchUpstreamJSON(ctx context.Context, channel entity.Channels
 	if err = s.setConfiguredHeaders(ctx, req, channel, input.AuthType, input.HeaderName, input.HeaderPrefix); err != nil {
 		return nil, err
 	}
+	return s.fetchJSON(req, input)
+}
+
+func (s *Service) fetchPublicJSON(ctx context.Context, input upstreamJSONRequest) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, input.Method, input.Endpoint, nil)
+	if err != nil {
+		return nil, gerror.Wrap(err, input.RequestError)
+	}
+	req.Header.Set("Accept", "application/json")
+	return s.fetchJSON(req, input)
+}
+
+func (s *Service) fetchJSON(req *http.Request, input upstreamJSONRequest) ([]byte, error) {
 	resp, err := s.app.HTTP.Do(req)
 	if err != nil {
 		return nil, gerror.Wrap(err, input.FetchError)

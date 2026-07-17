@@ -43,7 +43,6 @@ const drawerSize = window.innerWidth <= 600 ? '94%' : '620px'
 const typeDrawerSize = window.innerWidth <= 600 ? '94%' : '680px'
 const activeTypes = computed(() => store.channelTypes.filter((item) => item.status === 1 || item.code === form.type))
 const selectedChannelType = computed(() => store.channelTypes.find((item) => item.code === form.type))
-const isPriceSyncOnly = (channel: Channel) => store.channelTypes.find((item) => item.code === channel.type)?.config.priceSyncOnly === true
 const usesManagementKey = computed(() => {
   const config = selectedChannelType.value?.config
   if (!config) return false
@@ -75,7 +74,7 @@ async function load() {
 
 function openCreate() {
   editingId.value = undefined
-  Object.assign(form, emptyForm(), { type: store.channelTypes.find((item) => item.status === 1 && !item.config.priceSyncOnly)?.code || '' })
+  Object.assign(form, emptyForm(), { type: store.channelTypes.find((item) => item.status === 1)?.code || '' })
   drawerOpen.value = true
 }
 
@@ -297,12 +296,12 @@ onMounted(load)
             <el-table-column label="类型" min-width="120"><template #default="{ row }"><div class="type-cell"><strong>{{ row.typeName }}</strong><code>{{ row.type }}</code></div></template></el-table-column>
             <el-table-column label="状态" width="112"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="row.autoDisabledReason || '渠道被自动禁用'" placement="top"><span class="status-dot warning">自动禁用</span></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '手动停用' }}</span></template></el-table-column>
             <el-table-column label="路由" width="108"><template #default="{ row }"><span class="mono">P{{ row.priority }} / W{{ row.weight }}</span></template></el-table-column>
-            <el-table-column label="模型" width="100"><template #default="{ row }"><span v-if="isPriceSyncOnly(row)" class="muted">仅价格同步</span><template v-else>{{ row.enabledModelCount }} / {{ row.discoveredModels }}</template></template></el-table-column>
+            <el-table-column label="模型" width="100"><template #default="{ row }">{{ row.enabledModelCount }} / {{ row.discoveredModels }}</template></el-table-column>
             <el-table-column label="最近测试" min-width="130"><template #default="{ row }"><span v-if="row.lastTestStatus" class="status-dot" :class="row.lastTestStatus">{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : '失败' }}</span><span v-else class="muted">未测试</span></template></el-table-column>
             <el-table-column label="上游费用" min-width="145"><template #default="{ row }"><div v-if="row.lastCostAt" class="cost-cell"><span v-if="row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="row.lastCostRemaining !== undefined">剩余 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><small>{{ formatTime(row.lastCostAt) }}</small></div><span v-else class="muted">未查询</span></template></el-table-column>
             <el-table-column label="操作" width="230" fixed="right" align="right"><template #default="{ row }"><div class="table-actions">
-              <template v-if="!isPriceSyncOnly(row)"><el-tooltip content="发现模型"><button class="icon-button" type="button" :aria-label="`发现 ${row.name} 的模型`" @click="discover(row)"><ScanSearch :size="16" /></button></el-tooltip>
-              <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="openTest(row)"><FlaskConical :size="16" /></button></el-tooltip></template>
+              <el-tooltip content="发现模型"><button class="icon-button" type="button" :aria-label="`发现 ${row.name} 的模型`" @click="discover(row)"><ScanSearch :size="16" /></button></el-tooltip>
+              <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="openTest(row)"><FlaskConical :size="16" /></button></el-tooltip>
               <el-tooltip content="查询费用"><button class="icon-button" type="button" :aria-label="`查询 ${row.name} 的费用`" :disabled="row.costQueryMode === 'none'" @click="queryCost(row)"><Coins :size="16" /></button></el-tooltip>
               <el-tooltip content="编辑"><button class="icon-button" type="button" :aria-label="`编辑渠道 ${row.name}`" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip>
               <el-tooltip content="删除"><button class="icon-button danger" type="button" :aria-label="`删除渠道 ${row.name}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip>
