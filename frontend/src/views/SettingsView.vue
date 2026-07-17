@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Activity, Database, Gauge, HardDrive, RefreshCw, Route, ShieldCheck } from '@lucide/vue'
+import { Activity, Database, Gauge, HardDrive, Mail, RefreshCw, Route, Send, ShieldCheck } from '@lucide/vue'
 import { ElMessage } from 'element-plus'
-import { apiGet, apiPut } from '../api/client'
-import type { SystemResilienceSettings } from '../api/types'
+import { apiGet, apiPost, apiPut } from '../api/client'
+import type { MailSettings, SystemResilienceSettings } from '../api/types'
 import { showError } from '../lib/error'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
-type SettingsTab = 'overview' | 'resilience'
+type SettingsTab = 'overview' | 'resilience' | 'mail'
 
 const loading = ref(false)
 const saving = ref(false)
+const mailSaving = ref(false)
+const testSending = ref(false)
 const activeTab = ref<SettingsTab>('overview')
 const info = ref<SystemInfo>()
 const form = reactive({
@@ -25,10 +27,25 @@ const form = reactive({
   disableStatusCodes: '401,429',
   failureKeywordsText: '',
 })
+const mailForm = reactive({
+  enabled: false,
+  host: '',
+  port: 587,
+  username: '',
+  password: '',
+  passwordConfigured: false,
+  from: '',
+  security: 'starttls' as MailSettings['security'],
+  threshold: 5,
+  subjectTemplate: '',
+  bodyTemplate: '',
+})
+const testRecipient = ref('')
 
 const sectionMeta = computed(() => ({
   overview: { title: '运行概览', description: '实例与依赖状态' },
   resilience: { title: '路由可靠性', description: '故障转移、健康检查与自动禁用' },
+  mail: { title: '邮件提醒', description: '余额提醒与 SMTP 投递配置' },
 }[activeTab.value]))
 
 function applySettings(settings: SystemResilienceSettings) {
@@ -39,16 +56,25 @@ function applySettings(settings: SystemResilienceSettings) {
   })
 }
 
+function applyMailSettings(settings: MailSettings) {
+  Object.assign(mailForm, { ...settings, password: '' })
+}
+
 async function load() {
   loading.value = true
   try {
-    const [system, settings] = await Promise.all([apiGet<SystemInfo>('/system'), apiGet<SystemResilienceSettings>('/system/settings')])
+    const [system, settings, mail] = await Promise.all([
+      apiGet<SystemInfo>('/system'),
+      apiGet<SystemResilienceSettings>('/system/settings'),
+      apiGet<MailSettings>('/system/mail'),
+    ])
     info.value = system
     applySettings(settings)
+    applyMailSettings(mail)
   } catch (error) { showError(error, '加载系统设置失败') } finally { loading.value = false }
 }
 
-async function save() {
+async function saveReliability() {
   saving.value = true
   try {
     const settings = await apiPut<SystemResilienceSettings>('/system/settings', {
@@ -68,6 +94,40 @@ async function save() {
   } catch (error) { showError(error, '保存系统设置失败') } finally { saving.value = false }
 }
 
+async function saveMail() {
+  mailSaving.value = true
+  try {
+    const password = mailForm.password.trim()
+    const settings = await apiPut<MailSettings>('/system/mail', {
+      enabled: mailForm.enabled,
+      host: mailForm.host,
+      port: mailForm.port,
+      username: mailForm.username,
+      password: password || undefined,
+      from: mailForm.from,
+      security: mailForm.security,
+      threshold: mailForm.threshold,
+      subjectTemplate: mailForm.subjectTemplate,
+      bodyTemplate: mailForm.bodyTemplate,
+    })
+    applyMailSettings(settings)
+    ElMessage.success('邮件设置已保存')
+  } catch (error) { showError(error, '保存邮件设置失败') } finally { mailSaving.value = false }
+}
+
+async function sendTestMail() {
+  testSending.value = true
+  try {
+    await apiPost<Record<string, never>>('/system/mail/test', { recipient: testRecipient.value })
+    ElMessage.success('测试邮件已发送')
+  } catch (error) { showError(error, '发送测试邮件失败') } finally { testSending.value = false }
+}
+
+function saveActive() {
+  if (activeTab.value === 'resilience') return saveReliability()
+  if (activeTab.value === 'mail') return saveMail()
+}
+
 onMounted(load)
 </script>
 
@@ -76,13 +136,14 @@ onMounted(load)
     <el-tabs v-model="activeTab" class="settings-tabs">
       <el-tab-pane name="overview"><template #label><span class="tab-label"><Activity :size="15" />概览</span></template></el-tab-pane>
       <el-tab-pane name="resilience"><template #label><span class="tab-label"><Route :size="15" />路由可靠性</span></template></el-tab-pane>
+      <el-tab-pane name="mail"><template #label><span class="tab-label"><Mail :size="15" />邮件提醒</span></template></el-tab-pane>
     </el-tabs>
 
     <div class="page-toolbar settings-toolbar">
       <div><h1>{{ sectionMeta.title }}</h1><span class="muted">{{ sectionMeta.description }}</span></div>
       <div class="spacer" />
       <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
-      <el-button v-if="activeTab !== 'overview'" type="primary" :loading="saving" @click="save">保存更改</el-button>
+      <el-button v-if="activeTab !== 'overview'" type="primary" :loading="saving || mailSaving" @click="saveActive">保存更改</el-button>
     </div>
 
     <template v-if="activeTab === 'overview'">
@@ -92,15 +153,22 @@ onMounted(load)
       <section class="settings-grid"><div><span>产品</span><strong>{{ info?.name || '—' }}</strong></div><div><span>管理模式</span><strong>{{ info?.adminMode || '—' }}</strong></div><div><span>中转 API</span><strong>{{ info?.apiVersion || '—' }}</strong></div><div><span>支持范围</span><strong>OpenAI 文本核心</strong></div></section>
     </template>
 
-    <template v-else>
+    <template v-else-if="activeTab === 'resilience'">
       <section class="settings-section"><div class="section-heading"><div><h2>故障转移</h2><span>单次请求会按路由顺序切换不同渠道</span></div><Gauge :size="19" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="最大尝试渠道数"><el-input-number v-model="form.maxFailoverAttempts" :min="1" :max="10" controls-position="right" /></el-form-item><el-form-item label="可故障转移状态码"><el-input v-model="form.retryStatusCodes" placeholder="401,429,500-599" /></el-form-item></div><p class="field-hint">状态码支持逗号分隔和包含范围，例如 401,429,500-599。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>后台渠道探测</h2><span>使用已启用模型执行最小请求，不保存提示词或响应正文。</span></div><el-switch v-model="form.healthCheckEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="检查范围"><el-segmented v-model="form.healthCheckMode" :disabled="!form.healthCheckEnabled" :options="[{ label: '仅恢复自动禁用渠道', value: 'passive' }, { label: '检查全部可管理渠道', value: 'all' }]" /></el-form-item><el-form-item label="检查间隔（分钟）"><el-input-number v-model="form.healthCheckIntervalMinutes" :disabled="!form.healthCheckEnabled" :min="1" :max="1440" controls-position="right" /></el-form-item></div></el-form></section>
       <section class="settings-section compact"><div class="setting-switch"><div><strong>成功后自动恢复</strong><span>只恢复有自动禁用标记的渠道，手动停用保持不变。</span></div><el-switch v-model="form.recoveryEnabled" /></div></section>
       <section class="settings-section"><div class="section-heading"><div><h2>上游异常自动下线</h2><span>命中任一规则后渠道停止参与路由，并保存触发原因。</span></div><el-switch v-model="form.autoDisableEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="慢响应阈值（秒）"><el-input-number v-model="form.disableLatencySeconds" :disabled="!form.autoDisableEnabled" :min="1" :max="3600" controls-position="right" /></el-form-item><el-form-item label="自动禁用状态码"><el-input v-model="form.disableStatusCodes" :disabled="!form.autoDisableEnabled" placeholder="401,429" /></el-form-item></div><el-form-item label="失败关键词"><el-input v-model="form.failureKeywordsText" :disabled="!form.autoDisableEnabled" type="textarea" :rows="10" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">关键词不区分大小写；状态码支持逗号分隔和包含范围。</p></el-form></section>
     </template>
+
+    <template v-else>
+      <section class="settings-section"><div class="section-heading"><div><h2>余额提醒</h2><span>用户余额低于阈值时，每 24 小时最多发送一次提醒。</span></div><el-switch v-model="mailForm.enabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="提醒阈值（美元）"><el-input-number v-model="mailForm.threshold" :min="0" :max="1000000" :precision="6" controls-position="right" /></el-form-item><el-form-item label="加密方式"><el-select v-model="mailForm.security"><el-option label="STARTTLS" value="starttls" /><el-option label="TLS" value="tls" /><el-option label="不加密" value="none" /></el-select></el-form-item></div></el-form></section>
+      <section class="settings-section"><div class="section-heading"><div><h2>SMTP 服务</h2><span>密码只会加密保存，读取时不会返回原始内容。</span></div><Mail :size="19" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="SMTP 主机"><el-input v-model="mailForm.host" placeholder="smtp.example.com" /></el-form-item><el-form-item label="端口"><el-input-number v-model="mailForm.port" :min="1" :max="65535" controls-position="right" /></el-form-item></div><div class="form-grid"><el-form-item label="用户名"><el-input v-model="mailForm.username" autocomplete="username" /></el-form-item><el-form-item :label="mailForm.passwordConfigured ? '密码（留空不修改）' : '密码'"><el-input v-model="mailForm.password" type="password" show-password autocomplete="new-password" /></el-form-item></div><el-form-item label="发件人邮箱"><el-input v-model="mailForm.from" placeholder="noreply@example.com" /></el-form-item></el-form></section>
+      <section class="settings-section"><div class="section-heading"><div><h2>提醒模板</h2><span>可使用 {nickname}、{balance} 和 {threshold} 作为变量。</span></div></div><el-form label-position="top" class="settings-form"><el-form-item label="邮件主题"><el-input v-model="mailForm.subjectTemplate" /></el-form-item><el-form-item label="邮件正文"><el-input v-model="mailForm.bodyTemplate" type="textarea" :rows="8" spellcheck="false" /></el-form-item></el-form></section>
+      <section class="settings-section compact"><div class="setting-switch"><div><strong>发送测试邮件</strong><span>使用当前已保存的 SMTP 配置投递。</span></div><div class="mail-test-actions"><el-input v-model="testRecipient" type="email" placeholder="recipient@example.com" /><el-button type="primary" :icon="Send" :loading="testSending" :disabled="!mailForm.enabled" @click="sendTestMail">发送</el-button></div></div></section>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.settings-page { width: 100%; }.settings-tabs :deep(.el-tabs__header) { margin: 0; }.settings-tabs :deep(.el-tabs__nav-wrap::after) { background: #dce2e7; }.tab-label { display: inline-flex; align-items: center; gap: 7px; }.settings-toolbar { display: flex; min-height: 54px; align-items: center; gap: 10px; padding: 16px 0 18px; border-bottom: 1px solid #dce2e7; }.settings-toolbar h1 { margin: 0 0 4px; color: #15202b; font-size: 16px; font-weight: 650; }.spacer { flex: 1; }.settings-band { display: grid; min-height: 78px; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.auth-band { color: #126a59; }.auth-band div, .settings-title, .settings-value { display: flex; flex-direction: column; gap: 3px; }.auth-band span, .settings-title span, .settings-value small, .field-hint, .setting-switch span, .section-heading span { color: #66717d; font-size: 11px; }.settings-value { align-items: flex-end; }.settings-value span { font-family: 'JetBrains Mono', monospace; font-size: 13px; text-transform: uppercase; }.settings-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #dce2e7; }.settings-grid div { display: flex; min-height: 72px; flex-direction: column; justify-content: center; gap: 6px; border-right: 1px solid #dce2e7; }.settings-grid div:last-child { border: 0; }.settings-grid span { color: #66717d; font-size: 11px; }.settings-grid strong { font-size: 13px; }.settings-section { padding: 20px 0; border-bottom: 1px solid #dce2e7; }.settings-section.compact { padding: 18px 0; }.section-heading, .setting-switch { display: flex; align-items: center; justify-content: space-between; gap: 18px; }.section-heading h2 { margin: 0 0 4px; color: #15202b; font-size: 14px; }.settings-form { margin-top: 18px; }.settings-form :deep(.el-form-item) { margin-bottom: 10px; }.settings-form :deep(.el-input-number) { width: 100%; }.setting-switch div { display: flex; flex-direction: column; gap: 4px; }.field-hint { margin: 2px 0 0; line-height: 1.55; }.settings-form :deep(textarea) { font-family: 'JetBrains Mono', monospace; font-size: 12px; }@media (max-width: 720px) { .settings-toolbar { align-items: flex-start; flex-wrap: wrap; }.settings-toolbar .spacer { display: none; }.settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.settings-grid div:nth-child(2) { border-right: 0; }.settings-grid div:nth-child(-n+2) { border-bottom: 1px solid #dce2e7; }.section-heading { align-items: flex-start; }.settings-form :deep(.el-segmented) { max-width: 100%; height: auto; flex-wrap: wrap; } }@media (max-width: 480px) { .settings-grid { grid-template-columns: 1fr; }.settings-grid div { border-right: 0; border-bottom: 1px solid #dce2e7; }.settings-grid div:last-child { border-bottom: 0; } }
+.settings-page { width: 100%; }.settings-tabs :deep(.el-tabs__header) { margin: 0; }.settings-tabs :deep(.el-tabs__nav-wrap::after) { background: #dce2e7; }.tab-label { display: inline-flex; align-items: center; gap: 7px; }.settings-toolbar { display: flex; min-height: 54px; align-items: center; gap: 10px; padding: 16px 0 18px; border-bottom: 1px solid #dce2e7; }.settings-toolbar h1 { margin: 0 0 4px; color: #15202b; font-size: 16px; font-weight: 650; }.spacer { flex: 1; }.settings-band { display: grid; min-height: 78px; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.auth-band { color: #126a59; }.auth-band div, .settings-title, .settings-value { display: flex; flex-direction: column; gap: 3px; }.auth-band span, .settings-title span, .settings-value small, .field-hint, .setting-switch span, .section-heading span { color: #66717d; font-size: 11px; }.settings-value { align-items: flex-end; }.settings-value span { font-family: 'JetBrains Mono', monospace; font-size: 13px; text-transform: uppercase; }.settings-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #dce2e7; }.settings-grid div { display: flex; min-height: 72px; flex-direction: column; justify-content: center; gap: 6px; border-right: 1px solid #dce2e7; }.settings-grid div:last-child { border: 0; }.settings-grid span { color: #66717d; font-size: 11px; }.settings-grid strong { font-size: 13px; }.settings-section { padding: 20px 0; border-bottom: 1px solid #dce2e7; }.settings-section.compact { padding: 18px 0; }.section-heading, .setting-switch { display: flex; align-items: center; justify-content: space-between; gap: 18px; }.section-heading h2 { margin: 0 0 4px; color: #15202b; font-size: 14px; }.settings-form { margin-top: 18px; }.settings-form :deep(.el-form-item) { margin-bottom: 10px; }.settings-form :deep(.el-input-number) { width: 100%; }.setting-switch div { display: flex; flex-direction: column; gap: 4px; }.field-hint { margin: 2px 0 0; line-height: 1.55; }.settings-form :deep(textarea) { font-family: 'JetBrains Mono', monospace; font-size: 12px; }.mail-test-actions { display: flex; width: min(440px, 100%); flex-direction: row !important; gap: 8px !important; }.mail-test-actions .el-input { min-width: 0; }@media (max-width: 720px) { .settings-toolbar { align-items: flex-start; flex-wrap: wrap; }.settings-toolbar .spacer { display: none; }.settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.settings-grid div:nth-child(2) { border-right: 0; }.settings-grid div:nth-child(-n+2) { border-bottom: 1px solid #dce2e7; }.section-heading { align-items: flex-start; }.settings-form :deep(.el-segmented) { max-width: 100%; height: auto; flex-wrap: wrap; }.setting-switch { align-items: flex-start; flex-direction: column; }.mail-test-actions { width: 100%; } }@media (max-width: 480px) { .settings-grid { grid-template-columns: 1fr; }.settings-grid div { border-right: 0; border-bottom: 1px solid #dce2e7; }.settings-grid div:last-child { border-bottom: 0; } }
 </style>

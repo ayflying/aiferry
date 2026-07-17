@@ -183,6 +183,19 @@ export interface SystemResilienceSettings {
   failureKeywords: string[]
 }
 
+export interface MailSettings {
+  enabled: boolean
+  host: string
+  port: number
+  username: string
+  passwordConfigured: boolean
+  from: string
+  security: 'none' | 'starttls' | 'tls'
+  threshold: number
+  subjectTemplate: string
+  bodyTemplate: string
+}
+
 export interface ChannelInput {
   name: string
   type: string

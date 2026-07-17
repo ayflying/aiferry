@@ -140,3 +140,20 @@ type SystemResilienceSettingsInput struct {
 	DisableStatusCodes         string   `json:"disableStatusCodes"`
 	FailureKeywords            []string `json:"failureKeywords"`
 }
+
+type MailSettingsInput struct {
+	Enabled         bool    `json:"enabled"`
+	Host            string  `json:"host"`
+	Port            int     `json:"port"`
+	Username        string  `json:"username"`
+	Password        *string `json:"password"`
+	From            string  `json:"from"`
+	Security        string  `json:"security"`
+	Threshold       float64 `json:"threshold"`
+	SubjectTemplate string  `json:"subjectTemplate"`
+	BodyTemplate    string  `json:"bodyTemplate"`
+}
+
+type MailTestInput struct {
+	Recipient string `json:"recipient" v:"required|email"`
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channel"
 	"github.com/yunloli/aiferry/internal/service/channelgroup"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
+	mailservice "github.com/yunloli/aiferry/internal/service/mail"
 	"github.com/yunloli/aiferry/internal/service/pricesource"
 	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
@@ -28,10 +29,11 @@ type Controller struct {
 	usage    *usage.Service
 	users    *user.Service
 	auth     *auth.Service
+	mail     *mailservice.Service
 }
 
-func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service, userSvc *user.Service, authSvc *auth.Service) *Controller {
-	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc, users: userSvc, auth: authSvc}
+func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service, userSvc *user.Service, authSvc *auth.Service, mailSvc *mailservice.Service) *Controller {
+	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc, users: userSvc, auth: authSvc, mail: mailSvc}
 }
 
 func (c *Controller) Register(group *ghttp.RouterGroup) {
@@ -76,12 +78,8 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.DELETE("/price-rules/{id}", c.deletePriceRule)
 	group.POST("/models/test", c.testModel)
 	group.GET("/dashboard", c.dashboard)
-	group.GET("/users", c.listUsers)
-	group.PUT("/users/{id}/balance", c.updateUserBalance)
-	group.DELETE("/users/{id}", c.deleteUser)
-	group.GET("/system", c.systemInfo)
-	group.GET("/system/settings", c.getSystemSettings)
-	group.PUT("/system/settings", c.updateSystemSettings)
+	c.registerUserRoutes(group)
+	c.registerSystemRoutes(group)
 }
 
 func (c *Controller) listChannelGroups(r *ghttp.Request) {
@@ -207,7 +205,12 @@ func (c *Controller) testModel(r *ghttp.Request) {
 	if !parse(r, &input) {
 		return
 	}
-	data, err := c.channels.TestModel(r.Context(), input)
+	current, ok := auth.CurrentUser(r.Context())
+	if !ok {
+		respond(r, nil, auth.ErrUnauthorized)
+		return
+	}
+	data, err := c.channels.TestModel(r.Context(), input, current.Id)
 	respond(r, data, err)
 }
 
@@ -303,53 +306,6 @@ func (c *Controller) listUsage(r *ghttp.Request) {
 			data.Items[index].ChannelName = ""
 		}
 	}
-	respond(r, data, err)
-}
-
-func (c *Controller) listUsers(r *ghttp.Request) {
-	data, err := c.users.List(r.Context())
-	respond(r, data, err)
-}
-
-func (c *Controller) updateUserBalance(r *ghttp.Request) {
-	var input adminapi.UserBalanceInput
-	if !parse(r, &input) {
-		return
-	}
-	data, err := c.users.UpdateBalance(r.Context(), routeID(r), input.Balance)
-	respond(r, data, err)
-}
-
-func (c *Controller) deleteUser(r *ghttp.Request) {
-	operator, ok := auth.CurrentUser(r.Context())
-	if !ok {
-		respond(r, nil, auth.ErrUnauthorized)
-		return
-	}
-	respond(r, map[string]any{}, c.users.Delete(r.Context(), routeID(r), operator.Id))
-}
-
-func (c *Controller) systemInfo(r *ghttp.Request) {
-	respond(r, map[string]any{
-		"name":       "AiFerry",
-		"adminMode":  "casdoor",
-		"database":   "mysql",
-		"cache":      "redis",
-		"apiVersion": "v1",
-	}, nil)
-}
-
-func (c *Controller) getSystemSettings(r *ghttp.Request) {
-	data, err := c.settings.Get(r.Context())
-	respond(r, data, err)
-}
-
-func (c *Controller) updateSystemSettings(r *ghttp.Request) {
-	var input adminapi.SystemResilienceSettingsInput
-	if !parse(r, &input) {
-		return
-	}
-	data, err := c.settings.Update(r.Context(), input)
 	respond(r, data, err)
 }
 

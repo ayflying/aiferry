@@ -34,13 +34,21 @@ type TestResult struct {
 	Message      string `json:"message"`
 }
 
-func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) (TestResult, error) {
+func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput, userID uint64) (TestResult, error) {
 	var model entity.ChannelModels
 	if err := dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().Id, input.ModelID).Scan(&model); err != nil {
 		return TestResult{}, gerror.Wrap(err, "find model")
 	}
 	if model.Id == 0 {
 		return TestResult{}, gerror.New("model not found")
+	}
+	if userID != usage.SystemUserID {
+		if !s.prices.IsPriced(model.PublicName) {
+			return TestResult{}, gerror.New("当前模型未配置可用价格，无法测试计费")
+		}
+		if err := s.users.CheckBalance(ctx, userID); err != nil {
+			return TestResult{}, err
+		}
 	}
 	channel, err := s.Get(ctx, model.ChannelId)
 	if err != nil {
@@ -51,14 +59,17 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 		return TestResult{}, err
 	}
 	endpoints := testEndpoints(input.Endpoint, model.UpstreamName)
-	var result TestResult
+	var (
+		result     TestResult
+		billingErr error
+	)
 	for index, endpoint := range endpoints {
 		current, path, tokens, requestErr := s.testModelEndpoint(ctx, channel, typeConfig, model, endpoint, input.Stream)
 		if requestErr != nil {
 			return TestResult{}, requestErr
 		}
 		result = current
-		s.recordTestUsage(ctx, channel, model, path, &result, tokens)
+		billingErr = s.recordTestUsage(ctx, userID, channel, model, path, &result, tokens)
 		if result.Success || index == len(endpoints)-1 || !canTryAlternativeEndpoint(result) {
 			break
 		}
@@ -70,6 +81,9 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Status: result.HTTPStatus, Latency: time.Duration(result.LatencyMs) * time.Millisecond, Message: result.Message})
 	}
 	s.saveTestResult(ctx, channel.Id, model.Id, result.Endpoint, result)
+	if billingErr != nil {
+		return result, billingErr
+	}
 	return result, nil
 }
 
@@ -107,28 +121,46 @@ func (s *Service) testModelEndpoint(ctx context.Context, channel entity.Channels
 	return result, path, tokens, nil
 }
 
-func (s *Service) recordTestUsage(ctx context.Context, channel entity.Channels, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage) {
+func (s *Service) recordTestUsage(ctx context.Context, userID uint64, channel entity.Channels, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage) error {
 	if s.usage == nil {
-		return
+		return nil
+	}
+	cost := s.prices.Estimate(model.PublicName, path, tokens)
+	recordStatus := result.HTTPStatus
+	recordMessage := result.Message
+	var chargeErr error
+	if result.Success && userID != usage.SystemUserID {
+		if cost == nil {
+			chargeErr = gerror.New("上游响应未返回可计费的用量信息")
+		} else if err := s.users.Debit(ctx, userID, *cost); err != nil {
+			chargeErr = err
+		} else if s.mail != nil {
+			s.mail.NotifyLowBalance(ctx, userID)
+		}
+		if chargeErr != nil {
+			recordStatus = http.StatusPaymentRequired
+			recordMessage = chargeErr.Error()
+		}
 	}
 	err := s.usage.Record(ctx, usage.RecordInput{
 		RequestID:      usage.NewRequestID("aftest"),
-		UserID:         usage.SystemUserID,
+		UserID:         userID,
 		ChannelID:      channel.Id,
 		Endpoint:       "test:" + path,
 		RequestedModel: model.PublicName,
 		UpstreamModel:  model.UpstreamName,
-		HTTPStatus:     result.HTTPStatus,
+		HTTPStatus:     recordStatus,
 		Stream:         result.Stream,
 		Tokens:         tokens,
-		EstimatedCost:  usage.EstimatePublicModelCost(ctx, model.PublicName, path, tokens),
+		EstimatedCost:  cost,
 		DurationMs:     result.LatencyMs,
 		Attempts:       1,
-		ErrorMessage:   result.Message,
+		ErrorMessage:   recordMessage,
 	})
 	if err != nil {
 		result.Message = truncate(result.Message+"；用量记录失败："+err.Error(), 1024)
 	}
+	return chargeErr
 }
 
 func testEndpoints(endpoint, model string) []string {
@@ -259,61 +291,4 @@ func failureKey(channelID uint64) string {
 
 func cooldownKey(channelID uint64) string {
 	return fmt.Sprintf("aiferry:channel:%d:cooldown", channelID)
-}
-
-func (s *Service) StartHealthChecks(ctx context.Context) {
-	go func() {
-		var lastCheck time.Time
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case now := <-ticker.C:
-				settings, err := s.resilience.Get(ctx)
-				if err != nil || !settings.HealthCheckEnabled || !settings.RecoveryEnabled {
-					continue
-				}
-				interval := time.Duration(settings.HealthCheckIntervalMinutes) * time.Minute
-				if !lastCheck.IsZero() && now.Sub(lastCheck) < interval {
-					continue
-				}
-				lastCheck = now
-				s.runHealthChecks(ctx, settings.HealthCheckMode)
-			}
-		}
-	}()
-}
-
-func (s *Service) runHealthChecks(ctx context.Context, mode string) {
-	type healthCheckModel struct {
-		ChannelID uint64 `orm:"channel_id"`
-		ModelID   uint64 `orm:"model_id"`
-	}
-	rows := make([]healthCheckModel, 0)
-	model := dao.ChannelModels.Ctx(ctx).As("m").
-		Fields("m.channel_id,m.id AS model_id").
-		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id").
-		Where("m.enabled", 1).
-		OrderAsc("m.channel_id").
-		OrderAsc("m.id")
-	if mode == "all" {
-		model = model.Where("c.status=1 OR (c.status=0 AND c.auto_disabled_at IS NOT NULL)")
-	} else {
-		model = model.Where("c.status=0 AND c.auto_disabled_at IS NOT NULL")
-	}
-	if err := model.Scan(&rows); err != nil {
-		return
-	}
-	seen := make(map[uint64]struct{}, len(rows))
-	for _, row := range rows {
-		if _, exists := seen[row.ChannelID]; exists {
-			continue
-		}
-		seen[row.ChannelID] = struct{}{}
-		testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		_, _ = s.TestModel(testCtx, adminapi.ModelTestInput{ModelID: row.ModelID, Endpoint: "chat"})
-		cancel()
-	}
 }

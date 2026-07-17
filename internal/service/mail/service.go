@@ -1,0 +1,148 @@
+package mail
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"mime"
+	"net"
+	stdmail "net/mail"
+	"net/smtp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+
+	"github.com/yunloli/aiferry/internal/service/app"
+	"github.com/yunloli/aiferry/internal/service/system"
+	"github.com/yunloli/aiferry/internal/service/user"
+)
+
+const lowBalanceReminderTTL = 24 * time.Hour
+
+type Service struct {
+	app      *app.Service
+	settings *system.Service
+	users    *user.Service
+}
+
+func New(appSvc *app.Service, systemSvc *system.Service, userSvc *user.Service) *Service {
+	return &Service{app: appSvc, settings: systemSvc, users: userSvc}
+}
+
+func (s *Service) NotifyLowBalance(ctx context.Context, userID uint64) {
+	go s.notifyLowBalance(context.WithoutCancel(ctx), userID)
+}
+
+func (s *Service) SendTest(ctx context.Context, recipient string) error {
+	recipient = strings.TrimSpace(recipient)
+	if !validRecipient(recipient) {
+		return gerror.New("测试收件人邮箱格式无效")
+	}
+	settings, err := s.settings.MailDeliverySettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return gerror.New("请先启用邮件提醒")
+	}
+	return send(settings, recipient, "AiFerry 邮件配置测试", "这是一封 AiFerry 发送的邮件配置测试。")
+}
+
+func (s *Service) notifyLowBalance(ctx context.Context, userID uint64) {
+	profile, err := s.users.Profile(ctx, userID)
+	if err != nil || strings.TrimSpace(profile.Email) == "" {
+		return
+	}
+	settings, err := s.settings.MailDeliverySettings(ctx)
+	if err != nil || !settings.Enabled || profile.Balance >= settings.Threshold {
+		return
+	}
+	key := reminderKey(profile.Id, settings.Threshold)
+	created, err := s.app.Redis.SetNX(ctx, key, "1", lowBalanceReminderTTL).Result()
+	if err != nil || !created {
+		return
+	}
+	subject, body := renderTemplates(settings, profile)
+	if err = send(settings, profile.Email, subject, body); err != nil {
+		_ = s.app.Redis.Del(ctx, key).Err()
+	}
+}
+
+func send(settings system.MailDeliverySettings, recipient, subject, body string) error {
+	address := net.JoinHostPort(settings.Host, strconv.Itoa(settings.Port))
+	message := []byte("From: " + settings.From + "\r\n" +
+		"To: " + recipient + "\r\n" +
+		"Subject: " + encodeHeader(subject) + "\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body)
+	if settings.Security == "tls" {
+		connection, err := tls.Dial("tcp", address, &tls.Config{ServerName: settings.Host, MinVersion: tls.VersionTLS12})
+		if err != nil {
+			return gerror.Wrap(err, "connect SMTP over TLS")
+		}
+		defer connection.Close()
+		client, err := smtp.NewClient(connection, settings.Host)
+		if err != nil {
+			return gerror.Wrap(err, "create SMTP client")
+		}
+		defer client.Quit()
+		return deliver(client, settings, recipient, message)
+	}
+	client, err := smtp.Dial(address)
+	if err != nil {
+		return gerror.Wrap(err, "connect SMTP")
+	}
+	defer client.Quit()
+	if settings.Security == "starttls" {
+		if err = client.StartTLS(&tls.Config{ServerName: settings.Host, MinVersion: tls.VersionTLS12}); err != nil {
+			return gerror.Wrap(err, "start SMTP TLS")
+		}
+	}
+	return deliver(client, settings, recipient, message)
+}
+
+func deliver(client *smtp.Client, settings system.MailDeliverySettings, recipient string, message []byte) error {
+	if settings.Username != "" {
+		if err := client.Auth(smtp.PlainAuth("", settings.Username, settings.Password, settings.Host)); err != nil {
+			return gerror.Wrap(err, "authenticate SMTP")
+		}
+	}
+	if err := client.Mail(settings.From); err != nil {
+		return gerror.Wrap(err, "set SMTP sender")
+	}
+	if err := client.Rcpt(recipient); err != nil {
+		return gerror.Wrap(err, "set SMTP recipient")
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return gerror.Wrap(err, "open SMTP message")
+	}
+	if _, err = writer.Write(message); err != nil {
+		_ = writer.Close()
+		return gerror.Wrap(err, "write SMTP message")
+	}
+	return gerror.Wrap(writer.Close(), "send SMTP message")
+}
+
+func renderTemplates(settings system.MailDeliverySettings, profile user.Profile) (string, string) {
+	replacer := strings.NewReplacer(
+		"{nickname}", profile.Nickname,
+		"{balance}", fmt.Sprintf("%.6f", profile.Balance),
+		"{threshold}", fmt.Sprintf("%.6f", settings.Threshold),
+	)
+	return replacer.Replace(settings.SubjectTemplate), replacer.Replace(settings.BodyTemplate)
+}
+
+func reminderKey(userID uint64, threshold float64) string {
+	return fmt.Sprintf("aiferry:mail:low-balance:%d:%.8f", userID, threshold)
+}
+
+func validRecipient(value string) bool {
+	address, err := stdmail.ParseAddress(value)
+	return err == nil && address.Address == value
+}
+
+func encodeHeader(value string) string {
+	return mime.QEncoding.Encode("UTF-8", value)
+}

@@ -23,6 +23,9 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 			chargeErr = err
 		} else {
 			_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
+			if s.mail != nil {
+				s.mail.NotifyLowBalance(ctx, key.UserId)
+			}
 		}
 		if chargeErr != nil {
 			recordStatus = 402
