@@ -14,8 +14,8 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channeltype"
 	"github.com/yunloli/aiferry/internal/service/pricesource"
 	"github.com/yunloli/aiferry/internal/service/system"
-	"github.com/yunloli/aiferry/internal/service/user"
 	"github.com/yunloli/aiferry/internal/service/usage"
+	"github.com/yunloli/aiferry/internal/service/user"
 )
 
 type Controller struct {

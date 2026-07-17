@@ -104,7 +104,7 @@ func (s *Service) List(ctx context.Context) ([]ManagedUser, error) {
 		if err != nil {
 			return nil, gerror.Wrap(err, "count user API keys")
 		}
-		result = append(result, ManagedUser{Profile: profileFromEntity(row), APIKeyCount: keyCount, Usage: summary})
+		result = append(result, ManagedUser{Profile: profileFromEntity(row), APIKeyCount: int64(keyCount), Usage: summary})
 	}
 	return result, nil
 }

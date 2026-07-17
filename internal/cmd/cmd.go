@@ -22,8 +22,8 @@ import (
 	"github.com/yunloli/aiferry/internal/service/pricesource"
 	"github.com/yunloli/aiferry/internal/service/relay"
 	"github.com/yunloli/aiferry/internal/service/system"
-	"github.com/yunloli/aiferry/internal/service/user"
 	"github.com/yunloli/aiferry/internal/service/usage"
+	"github.com/yunloli/aiferry/internal/service/user"
 )
 
 var (
