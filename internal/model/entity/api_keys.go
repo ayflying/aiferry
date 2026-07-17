@@ -15,6 +15,7 @@ type ApiKeys struct {
 	Name        string    `json:"name"        orm:"name"         description:""` //
 	KeyPrefix   string    `json:"keyPrefix"   orm:"key_prefix"   description:""` //
 	KeyHash     string    `json:"keyHash"     orm:"key_hash"     description:""` //
+	KeyCipher   string    `json:"keyCipher"   orm:"key_cipher"   description:""` //
 	Status      int       `json:"status"      orm:"status"       description:""` //
 	SpendLimit  float64   `json:"spendLimit"  orm:"spend_limit"  description:""` //
 	SpentAmount float64   `json:"spentAmount" orm:"spent_amount" description:""` //

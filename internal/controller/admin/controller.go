@@ -42,6 +42,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.GET("/models/{id}/price-rules", c.listPriceRules)
 	group.GET("/api-keys", c.listAPIKeys)
 	group.POST("/api-keys", c.createAPIKey)
+	group.GET("/api-keys/{id}/secret", c.revealAPIKey)
 	group.PUT("/api-keys/{id}", c.updateAPIKey)
 	group.DELETE("/api-keys/{id}", c.deleteAPIKey)
 	group.GET("/usage", c.listUsage)
@@ -261,6 +262,12 @@ func (c *Controller) createAPIKey(r *ghttp.Request) {
 	}
 	data, err := c.apiKeys.Create(r.Context(), input)
 	respond(r, data, err)
+}
+
+func (c *Controller) revealAPIKey(r *ghttp.Request) {
+	r.Response.Header().Set("Cache-Control", "no-store")
+	key, err := c.apiKeys.Reveal(r.Context(), routeID(r))
+	respond(r, map[string]string{"key": key}, err)
 }
 
 func (c *Controller) updateAPIKey(r *ghttp.Request) {

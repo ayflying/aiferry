@@ -288,6 +288,7 @@ export interface APIKey {
   userId: number
   name: string
   keyPrefix: string
+  secretAvailable: boolean
   status: number
   spendLimit?: number
   spentAmount: number

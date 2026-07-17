@@ -26,6 +26,7 @@ type ApiKeysColumns struct {
 	Name        string //
 	KeyPrefix   string //
 	KeyHash     string //
+	KeyCipher   string //
 	Status      string //
 	SpendLimit  string //
 	SpentAmount string //
@@ -43,6 +44,7 @@ var apiKeysColumns = ApiKeysColumns{
 	Name:        "name",
 	KeyPrefix:   "key_prefix",
 	KeyHash:     "key_hash",
+	KeyCipher:   "key_cipher",
 	Status:      "status",
 	SpendLimit:  "spend_limit",
 	SpentAmount: "spent_amount",

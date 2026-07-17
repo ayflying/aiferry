@@ -16,6 +16,7 @@ type ApiKeys struct {
 	Name        any //
 	KeyPrefix   any //
 	KeyHash     any //
+	KeyCipher   any //
 	Status      any //
 	SpendLimit  any //
 	SpentAmount any //
