@@ -7,6 +7,7 @@ import type { APIKey, CreatedAPIKey, PublicModel } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
+import { copyText } from '../lib/clipboard'
 import { formatTime } from '../lib/format'
 import TableActionButton from '../components/TableActionButton.vue'
 
@@ -74,8 +75,10 @@ async function save() {
 
 async function copyCreatedKey() {
   if (!created.value) return
-  await navigator.clipboard.writeText(created.value.key)
-  ElMessage.success('密钥已复制')
+  try {
+    await copyText(created.value.key)
+    ElMessage.success('密钥已复制')
+  } catch (error) { showError(error, '复制密钥失败') }
 }
 
 function secretLabel(item: APIKey) {
@@ -94,7 +97,7 @@ async function copyListKey(item: APIKey) {
   if (!item.secretAvailable) return
   secretLoading[item.id] = true
   try {
-    await navigator.clipboard.writeText(await getSecret(item))
+    await copyText(await getSecret(item))
     ElMessage.success('完整密钥已复制')
   } catch (error) { showError(error, '复制完整密钥失败') } finally { secretLoading[item.id] = false }
 }
@@ -138,7 +141,7 @@ onMounted(load)
       </div>
       <el-table v-else-if="loading || store.apiKeys.length" v-loading="loading" :data="store.apiKeys" row-key="id">
         <el-table-column label="名称" min-width="170"><template #default="{ row }"><div class="key-name"><span class="key-icon"><KeyRound :size="15" /></span><strong>{{ row.name }}</strong></div></template></el-table-column>
-        <el-table-column label="密钥" min-width="280"><template #default="{ row }"><div class="key-cell"><span class="mono">{{ secretLabel(row) }}</span><span class="table-actions"><TableActionButton :icon="Copy" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : '复制完整密钥')" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="copyListKey(row)" /><TableActionButton :icon="revealedSecrets[row.id] ? EyeOff : Eye" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : (revealedSecrets[row.id] ? '隐藏完整密钥' : '显示完整密钥'))" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="toggleSecret(row)" /></span></div></template></el-table-column>
+        <el-table-column label="密钥" min-width="280"><template #default="{ row }"><div class="key-cell" :class="{ revealed: Boolean(revealedSecrets[row.id]) }"><span class="mono key-value">{{ secretLabel(row) }}</span><span class="table-actions"><TableActionButton :icon="Copy" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : '复制完整密钥')" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="copyListKey(row)" /><TableActionButton :icon="revealedSecrets[row.id] ? Eye : EyeOff" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : (revealedSecrets[row.id] ? '隐藏完整密钥' : '显示完整密钥'))" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="toggleSecret(row)" /></span></div></template></el-table-column>
         <el-table-column label="额度" min-width="150"><template #default="{ row }"><span v-if="row.spendLimit === undefined" class="muted">不限额</span><div v-else class="amount-cell"><strong>{{ row.availableAmount?.toFixed(6) }}</strong><small>可用 / 已用 {{ row.spentAmount.toFixed(6) }}</small></div></template></el-table-column>
         <el-table-column label="权限" min-width="150"><template #default="{ row }"><span class="muted">模型 {{ row.allowedModels?.length || '全部' }} · 分组 {{ row.channelGroupIds?.length || '全部' }}</span></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
@@ -168,5 +171,5 @@ onMounted(load)
 </template>
 
 <style scoped>
-.key-name { display: flex; align-items: center; gap: 9px; }.key-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: #245f96; background: #e9f2ff; }.key-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }.key-cell .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.amount-cell { display: flex; flex-direction: column; gap: 2px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }.amount-cell small { color: #7b8792; }.empty-state span { display: block; margin-bottom: 14px; }.error-state strong { color: #c83e4d; }
+.key-name { display: flex; align-items: center; gap: 9px; }.key-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; color: #245f96; background: #e9f2ff; }.key-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }.key-cell .key-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.key-cell.revealed { align-items: flex-start; }.key-cell.revealed .key-value { overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; word-break: break-all; }.key-cell .table-actions { flex: 0 0 auto; }.amount-cell { display: flex; flex-direction: column; gap: 2px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }.amount-cell small { color: #7b8792; }.empty-state span { display: block; margin-bottom: 14px; }.error-state strong { color: #c83e4d; }
 </style>
