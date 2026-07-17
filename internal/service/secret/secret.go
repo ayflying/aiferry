@@ -8,8 +8,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"io"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+)
+
+const (
+	APIKeyPrefix       = "sk-"
+	legacyAPIKeyPrefix = "af_"
 )
 
 type Service struct {
@@ -58,10 +64,14 @@ func GenerateAPIKey() (plainText, prefix, hash string, err error) {
 	if _, err = io.ReadFull(rand.Reader, random); err != nil {
 		return "", "", "", gerror.Wrap(err, "generate API key")
 	}
-	plainText = "af_" + base64.RawURLEncoding.EncodeToString(random)
+	plainText = APIKeyPrefix + base64.RawURLEncoding.EncodeToString(random)
 	prefix = plainText[:12]
 	hash = HashAPIKey(plainText)
 	return plainText, prefix, hash, nil
+}
+
+func HasAPIKeyPrefix(value string) bool {
+	return strings.HasPrefix(value, APIKeyPrefix) || strings.HasPrefix(value, legacyAPIKeyPrefix)
 }
 
 func HashAPIKey(value string) string {

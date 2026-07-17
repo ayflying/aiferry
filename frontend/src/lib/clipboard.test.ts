@@ -16,9 +16,9 @@ describe('copyText', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
 
-    await copyText('af_test')
+    await copyText('sk_test')
 
-    expect(writeText).toHaveBeenCalledWith('af_test')
+    expect(writeText).toHaveBeenCalledWith('sk_test')
   })
 
   it('falls back to the legacy copy command after Clipboard API failure', async () => {
@@ -26,7 +26,7 @@ describe('copyText', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } })
     Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
 
-    await copyText('af_test')
+    await copyText('sk_test')
 
     expect(execCommand).toHaveBeenCalledWith('copy')
     expect(document.querySelector('textarea')).toBeNull()

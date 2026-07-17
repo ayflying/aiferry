@@ -32,10 +32,19 @@ func TestGenerateAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(plainText, "af_") || prefix != plainText[:12] {
+	if !strings.HasPrefix(plainText, APIKeyPrefix) || prefix != plainText[:12] {
 		t.Fatalf("invalid key shape: %q %q", plainText, prefix)
 	}
 	if hash != HashAPIKey(plainText) || len(hash) != 64 {
 		t.Fatal("invalid API key hash")
+	}
+}
+
+func TestHasAPIKeyPrefix(t *testing.T) {
+	if !HasAPIKeyPrefix("sk-current") || !HasAPIKeyPrefix("af_legacy") {
+		t.Fatal("current and legacy API key prefixes should be accepted")
+	}
+	if HasAPIKeyPrefix("pk-invalid") {
+		t.Fatal("unexpected API key prefix accepted")
 	}
 }

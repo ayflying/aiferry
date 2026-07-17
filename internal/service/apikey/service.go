@@ -229,7 +229,7 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 }
 
 func (s *Service) Authenticate(ctx context.Context, bearer string) (AuthKey, error) {
-	if !strings.HasPrefix(bearer, "af_") {
+	if !secret.HasAPIKeyPrefix(bearer) {
 		return AuthKey{}, gerror.New("invalid API key")
 	}
 	hash := secret.HashAPIKey(bearer)

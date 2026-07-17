@@ -22,7 +22,7 @@ test('creates, displays once, edits and deletes an API key', async ({ context, p
   await page.getByRole('button', { name: '创建密钥' }).last().click()
 
   await expect(page.getByText('访问密钥只显示这一次')).toBeVisible()
-  await expect(page.locator('.secret-value code')).toHaveText(/^af_/)
+  await expect(page.locator('.secret-value code')).toHaveText(/^sk-/)
   await page.getByRole('button', { name: '完成' }).click()
   await expect(page.getByText(keyName)).toBeVisible()
 
