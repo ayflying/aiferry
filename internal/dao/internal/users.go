@@ -23,8 +23,10 @@ type UsersDao struct {
 type UsersColumns struct {
 	Id               string //
 	Name             string //
+	Email            string //
 	Role             string //
 	Status           string //
+	Balance          string //
 	IdentityProvider string //
 	IdentitySubject  string //
 	AvatarUrl        string //
@@ -39,8 +41,10 @@ type UsersColumns struct {
 var usersColumns = UsersColumns{
 	Id:               "id",
 	Name:             "name",
+	Email:            "email",
 	Role:             "role",
 	Status:           "status",
+	Balance:          "balance",
 	IdentityProvider: "identity_provider",
 	IdentitySubject:  "identity_subject",
 	AvatarUrl:        "avatar_url",

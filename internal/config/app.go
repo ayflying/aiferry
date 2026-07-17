@@ -28,7 +28,6 @@ type App struct {
 	CasdoorEndpoint        string
 	CasdoorClientID        string
 	CasdoorClientSecret    string
-	CasdoorAllowedGroup    string
 	SessionTTL             int
 }
 
@@ -62,7 +61,6 @@ func Load() (App, error) {
 		CasdoorEndpoint:        strings.TrimRight(env("CASDOOR_ENDPOINT", ""), "/"),
 		CasdoorClientID:        strings.TrimSpace(os.Getenv("CASDOOR_CLIENT_ID")),
 		CasdoorClientSecret:    os.Getenv("CASDOOR_CLIENT_SECRET"),
-		CasdoorAllowedGroup:    env("CASDOOR_ALLOWED_GROUP", "AI用户组"),
 		SessionTTL:             envInt("SESSION_TTL_HOURS", 12),
 	}
 	if strings.TrimSpace(app.MySQLPassword) == "" {

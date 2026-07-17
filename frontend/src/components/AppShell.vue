@@ -14,6 +14,7 @@ import {
   Settings,
   ShipWheel,
   UserRound,
+  UsersRound,
 } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import { showError } from '../lib/error'
@@ -25,7 +26,7 @@ const collapsed = ref(localStorage.getItem('aiferry-sidebar') === 'collapsed')
 const mobile = ref(false)
 const mobileOpen = ref(false)
 
-const items = [
+const adminItems = [
   { path: '/', label: '仪表盘', icon: Gauge },
   { path: '/channels', label: '渠道', icon: Cable },
   { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
@@ -33,6 +34,9 @@ const items = [
   { path: '/usage', label: '用量', icon: Activity },
   { path: '/settings', label: '系统设置', icon: Settings },
 ]
+const items = computed(() => auth.user?.role === 'admin'
+  ? [...adminItems, { path: '/users', label: '用户管理', icon: UsersRound }]
+  : [{ path: '/profile', label: '个人中心', icon: UserRound }])
 
 const pageTitle = computed(() => String(route.meta.title || 'AiFerry'))
 
@@ -52,6 +56,10 @@ function updateViewport() {
 }
 
 async function handleUserCommand(command: string) {
+  if (command === 'profile') {
+    await router.push('/profile')
+    return
+  }
   if (command !== 'logout') return
   try {
     await auth.logout()
@@ -124,10 +132,11 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
             <el-avatar :size="30" :src="auth.user?.avatarUrl || undefined">
               <UserRound :size="16" />
             </el-avatar>
-            <span class="user-copy"><strong>{{ auth.user?.name || '用户' }}</strong><small>{{ auth.user?.role === 'admin' ? '管理员' : 'AI用户组' }}</small></span>
+            <span class="user-copy"><strong>{{ auth.user?.name || '用户' }}</strong><small>{{ auth.user?.role === 'admin' ? '管理员' : '用户' }}</small></span>
           </button>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="profile"><UserRound :size="16" />个人中心</el-dropdown-item>
               <el-dropdown-item command="logout"><LogOut :size="16" />退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>

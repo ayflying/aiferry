@@ -7,24 +7,15 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 )
 
-func TestAccountAllowed(t *testing.T) {
-	tests := []struct {
-		name    string
-		account casdoorAccount
-		allowed bool
-	}{
-		{name: "administrator", account: casdoorAccount{IsAdmin: true}, allowed: true},
-		{name: "global administrator", account: casdoorAccount{IsGlobalAdmin: true}, allowed: true},
-		{name: "group with organization", account: casdoorAccount{Groups: []string{"built-in/AI用户组"}}, allowed: true},
-		{name: "plain group", account: casdoorAccount{Groups: []string{"AI用户组"}}, allowed: true},
-		{name: "different group", account: casdoorAccount{Groups: []string{"built-in/研发组"}}, allowed: false},
+func TestAccountRole(t *testing.T) {
+	if role := accountRole(casdoorAccount{IsAdmin: true}); role != "admin" {
+		t.Fatalf("accountRole() = %q, want admin", role)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := accountAllowed(test.account, "AI用户组"); got != test.allowed {
-				t.Fatalf("accountAllowed() = %v, want %v", got, test.allowed)
-			}
-		})
+	if role := accountRole(casdoorAccount{IsGlobalAdmin: true}); role != "admin" {
+		t.Fatalf("accountRole() = %q, want admin", role)
+	}
+	if role := accountRole(casdoorAccount{Groups: []string{"built-in/任意用户组"}}); role != "user" {
+		t.Fatalf("accountRole() = %q, want user", role)
 	}
 }
 

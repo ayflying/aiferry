@@ -19,11 +19,8 @@ func (s *Service) syncUser(ctx context.Context, account casdoorAccount) (Session
 	var (
 		uid    = accountUID(account)
 		groups = append([]string(nil), account.Groups...)
-		role   = "ai_user"
+		role   = accountRole(account)
 	)
-	if account.IsAdmin || account.IsGlobalAdmin {
-		role = "admin"
-	}
 	groupsJSON, err := json.Marshal(groups)
 	if err != nil {
 		return SessionUser{}, gerror.Wrap(err, "encode Casdoor groups")
@@ -39,6 +36,7 @@ func (s *Service) syncUser(ctx context.Context, account casdoorAccount) (Session
 	if current.Id == 0 {
 		if _, err = dao.Users.Ctx(ctx).Data(do.Users{
 			Name:             accountName(account),
+			Email:            strings.TrimSpace(account.Email),
 			Role:             role,
 			Status:           1,
 			IdentityProvider: "casdoor",
@@ -61,7 +59,6 @@ func (s *Service) syncUser(ctx context.Context, account casdoorAccount) (Session
 	}
 	name := accountName(account)
 	if _, err = dao.Users.Ctx(ctx).Where(columns.Id, current.Id).Data(do.Users{
-		Name:        name,
 		Role:        role,
 		AvatarUrl:   account.Avatar,
 		GroupsJson:  string(groupsJSON),
@@ -96,6 +93,13 @@ func accountName(account casdoorAccount) string {
 	return accountUID(account)
 }
 
+func accountRole(account casdoorAccount) string {
+	if account.IsAdmin || account.IsGlobalAdmin {
+		return "admin"
+	}
+	return "user"
+}
+
 func accountDisabled(account casdoorAccount) bool {
 	if account.IsForbidden || account.IsDeleted || account.Disabled || strings.TrimSpace(account.DeletedTime) != "" {
 		return true
@@ -105,21 +109,4 @@ func accountDisabled(account casdoorAccount) bool {
 	}
 	status := strings.ToLower(strings.TrimSpace(account.Status))
 	return status == "disabled" || status == "deleted" || status == "inactive" || status == "forbidden"
-}
-
-func accountAllowed(account casdoorAccount, allowedGroup string) bool {
-	if account.IsAdmin || account.IsGlobalAdmin {
-		return true
-	}
-	allowedGroup = strings.TrimSpace(allowedGroup)
-	for _, group := range account.Groups {
-		name := strings.TrimSpace(group)
-		if index := strings.Index(name, "/"); index >= 0 {
-			name = name[index+1:]
-		}
-		if name == allowedGroup {
-			return true
-		}
-	}
-	return false
 }

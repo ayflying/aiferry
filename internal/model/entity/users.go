@@ -12,8 +12,10 @@ import (
 type Users struct {
 	Id               uint64    `json:"id"               orm:"id"                description:""` //
 	Name             string    `json:"name"             orm:"name"              description:""` //
+	Email            string    `json:"email"            orm:"email"             description:""` //
 	Role             string    `json:"role"             orm:"role"              description:""` //
 	Status           int       `json:"status"           orm:"status"            description:""` //
+	Balance          float64   `json:"balance"          orm:"balance"           description:""` //
 	IdentityProvider string    `json:"identityProvider" orm:"identity_provider" description:""` //
 	IdentitySubject  string    `json:"identitySubject"  orm:"identity_subject"  description:""` //
 	AvatarUrl        string    `json:"avatarUrl"        orm:"avatar_url"        description:""` //

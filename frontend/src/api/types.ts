@@ -18,6 +18,32 @@ export interface AuthUser {
 	groups: string[]
 }
 
+export interface AccountUsageSummary {
+  days: number
+  requests: number
+  successes: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  estimatedCost: number
+}
+
+export interface AccountProfile {
+  id: number
+  nickname: string
+  email: string
+  role: string
+  balance: number
+  avatarUrl: string
+  createdAt: string
+  lastLoginAt?: string
+}
+
+export interface ManagedUser extends AccountProfile {
+  apiKeyCount: number
+  usage: AccountUsageSummary
+}
+
 export interface CostQueryConfig {
   url: string
   authType: 'none' | 'channel_key' | 'management_key'

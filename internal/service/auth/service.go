@@ -70,6 +70,7 @@ type casdoorAccount struct {
 	Name          string   `json:"name"`
 	DisplayName   string   `json:"displayName"`
 	Avatar        string   `json:"avatar"`
+	Email         string   `json:"email"`
 	Groups        []string `json:"groups"`
 	IsAdmin       bool     `json:"isAdmin"`
 	IsGlobalAdmin bool     `json:"isGlobalAdmin"`
@@ -134,7 +135,7 @@ func (s *Service) CompleteLogin(ctx context.Context, state, stateCookie, code, c
 	if err != nil {
 		return SessionUser{}, "", "", gerror.Wrap(err, "fetch Casdoor account")
 	}
-	if accountDisabled(account) || !accountAllowed(account, s.app.Config.CasdoorAllowedGroup) {
+	if accountDisabled(account) {
 		return SessionUser{}, "", "", ErrAccessDenied
 	}
 	user, err := s.syncUser(ctx, account)

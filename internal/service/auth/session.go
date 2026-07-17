@@ -11,6 +11,9 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 func (s *Service) Authenticate(ctx context.Context, token string) (SessionUser, error) {
@@ -29,6 +32,14 @@ func (s *Service) Authenticate(ctx context.Context, token string) (SessionUser, 
 		_ = s.app.Redis.Del(ctx, sessionKey(token)).Err()
 		return SessionUser{}, ErrUnauthorized
 	}
+	var current entity.Users
+	if err = dao.Users.Ctx(ctx).Where(dao.Users.Columns().Id, user.Id).Scan(&current); err != nil || current.Id == 0 || current.Status != 1 {
+		_ = s.app.Redis.Del(ctx, sessionKey(token)).Err()
+		return SessionUser{}, ErrUnauthorized
+	}
+	user.Name = current.Name
+	user.Role = current.Role
+	user.AvatarURL = current.AvatarUrl
 	_ = s.app.Redis.Expire(ctx, sessionKey(token), s.sessionTTL()).Err()
 	return user, nil
 }
@@ -40,10 +51,24 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	return gerror.Wrap(s.app.Redis.Del(ctx, sessionKey(token)).Err(), "delete login session")
 }
 
+func (s *Service) RequireUser(r *ghttp.Request) {
+	user, err := s.Authenticate(r.Context(), r.Cookie.Get(sessionCookieName).String())
+	if err != nil {
+		writeUnauthorized(r)
+		return
+	}
+	r.SetCtx(context.WithValue(r.Context(), userContextKey, user))
+	r.Middleware.Next()
+}
+
 func (s *Service) RequireAdmin(r *ghttp.Request) {
 	user, err := s.Authenticate(r.Context(), r.Cookie.Get(sessionCookieName).String())
 	if err != nil {
 		writeUnauthorized(r)
+		return
+	}
+	if user.Role != "admin" {
+		writeForbidden(r)
 		return
 	}
 	r.SetCtx(context.WithValue(r.Context(), userContextKey, user))
@@ -91,5 +116,11 @@ func (s *Service) sessionTTL() time.Duration {
 func writeUnauthorized(r *ghttp.Request) {
 	r.Response.WriteStatus(http.StatusUnauthorized)
 	r.Response.WriteJson(map[string]any{"code": http.StatusUnauthorized, "message": "登录状态已失效", "data": nil})
+	r.Exit()
+}
+
+func writeForbidden(r *ghttp.Request) {
+	r.Response.WriteStatus(http.StatusForbidden)
+	r.Response.WriteJson(map[string]any{"code": http.StatusForbidden, "message": "需要管理员权限", "data": nil})
 	r.Exit()
 }

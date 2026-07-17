@@ -22,6 +22,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/pricesource"
 	"github.com/yunloli/aiferry/internal/service/relay"
 	"github.com/yunloli/aiferry/internal/service/system"
+	"github.com/yunloli/aiferry/internal/service/user"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
@@ -43,14 +44,15 @@ var (
 				apiKeySvc       = apikey.New(appSvc)
 				authSvc         = auth.New(appSvc)
 				usageSvc        = usage.New()
+				userSvc         = user.New(appSvc, usageSvc)
 				channelGroupSvc = channelgroup.New()
 				channelTypeSvc  = channeltype.New()
 				systemSvc       = system.New(appSvc)
 				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc)
 				priceSourceSvc  = pricesource.New(channelSvc)
 				relaySvc        = relay.New(appSvc, usageSvc, systemSvc)
-				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc)
-				authCtrl        = authctrl.New(authSvc)
+				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc)
+				authCtrl        = authctrl.New(authSvc, userSvc)
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)
 				s               = g.Server()
 			)

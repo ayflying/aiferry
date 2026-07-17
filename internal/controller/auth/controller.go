@@ -9,15 +9,18 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 
+	authapi "github.com/yunloli/aiferry/api/auth"
 	"github.com/yunloli/aiferry/internal/service/auth"
+	"github.com/yunloli/aiferry/internal/service/user"
 )
 
 type Controller struct {
-	auth *auth.Service
+	auth  *auth.Service
+	users *user.Service
 }
 
-func New(authSvc *auth.Service) *Controller {
-	return &Controller{auth: authSvc}
+func New(authSvc *auth.Service, userSvc *user.Service) *Controller {
+	return &Controller{auth: authSvc, users: userSvc}
 }
 
 func (c *Controller) RegisterPublic(group *ghttp.RouterGroup) {
@@ -26,8 +29,11 @@ func (c *Controller) RegisterPublic(group *ghttp.RouterGroup) {
 }
 
 func (c *Controller) RegisterProtected(group *ghttp.RouterGroup) {
-	group.Middleware(c.auth.RequireAdmin)
+	group.Middleware(c.auth.RequireUser)
 	group.GET("/me", c.me)
+	group.GET("/profile", c.profile)
+	group.PUT("/profile", c.updateProfile)
+	group.GET("/usage", c.personalUsage)
 	group.POST("/logout", c.logout)
 }
 
@@ -87,6 +93,41 @@ func (c *Controller) me(r *ghttp.Request) {
 		return
 	}
 	respond(r, user.View(), nil)
+}
+
+func (c *Controller) profile(r *ghttp.Request) {
+	user, ok := auth.CurrentUser(r.Context())
+	if !ok {
+		respondUnauthorized(r)
+		return
+	}
+	data, err := c.users.Profile(r.Context(), user.Id)
+	respond(r, data, err)
+}
+
+func (c *Controller) updateProfile(r *ghttp.Request) {
+	user, ok := auth.CurrentUser(r.Context())
+	if !ok {
+		respondUnauthorized(r)
+		return
+	}
+	var input authapi.ProfileUpdateInput
+	if err := r.Parse(&input); err != nil {
+		respond(r, nil, err)
+		return
+	}
+	data, err := c.users.UpdateProfile(r.Context(), user.Id, input.Nickname, input.Email)
+	respond(r, data, err)
+}
+
+func (c *Controller) personalUsage(r *ghttp.Request) {
+	user, ok := auth.CurrentUser(r.Context())
+	if !ok {
+		respondUnauthorized(r)
+		return
+	}
+	data, err := c.users.Usage(r.Context(), user.Id, r.GetQuery("days", 30).Int())
+	respond(r, data, err)
 }
 
 func (c *Controller) logout(r *ghttp.Request) {

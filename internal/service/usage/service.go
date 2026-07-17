@@ -86,6 +86,16 @@ type Dashboard struct {
 	ByChannel []Breakdown  `json:"byChannel"`
 }
 
+type UserSummary struct {
+	Days          int     `json:"days"`
+	Requests      int64   `json:"requests" orm:"requests"`
+	Successes     int64   `json:"successes" orm:"successes"`
+	InputTokens   uint64  `json:"inputTokens" orm:"input_tokens"`
+	OutputTokens  uint64  `json:"outputTokens" orm:"output_tokens"`
+	TotalTokens   uint64  `json:"totalTokens" orm:"total_tokens"`
+	EstimatedCost float64 `json:"estimatedCost" orm:"estimated_cost"`
+}
+
 type LogView struct {
 	Id                uint64    `json:"id" orm:"id"`
 	RequestId         string    `json:"requestId" orm:"request_id"`
@@ -195,6 +205,26 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 		return result, gerror.Wrap(err, "load channel breakdown")
 	}
 	return result, nil
+}
+
+func (s *Service) UserSummary(ctx context.Context, userID uint64, days int) (UserSummary, error) {
+	if days <= 0 || days > 90 {
+		days = 30
+	}
+	result := UserSummary{Days: days}
+	start := time.Now().AddDate(0, 0, -days+1).Truncate(24 * time.Hour)
+	err := dao.UsageLogs.Ctx(ctx).
+		Where(dao.UsageLogs.Columns().UserId, userID).
+		WhereGTE(dao.UsageLogs.Columns().CreatedAt, start).
+		Fields(`
+			COUNT(*) AS requests,
+			COALESCE(SUM(CASE WHEN http_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0) AS successes,
+			COALESCE(SUM(input_tokens),0) AS input_tokens,
+			COALESCE(SUM(output_tokens),0) AS output_tokens,
+			COALESCE(SUM(total_tokens),0) AS total_tokens,
+			COALESCE(SUM(estimated_cost),0) AS estimated_cost`).
+		Scan(&result)
+	return result, gerror.Wrap(err, "load user usage summary")
 }
 
 func (s *Service) List(ctx context.Context, page, pageSize int, modelName string, channelID, apiKeyID uint64) (LogPage, error) {
