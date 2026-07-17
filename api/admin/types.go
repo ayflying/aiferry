@@ -55,6 +55,12 @@ type ModelInput struct {
 	OutputPrice      *float64 `json:"outputPrice"`
 }
 
+type ModelPriceInput struct {
+	InputPrice       *float64 `json:"inputPrice"`
+	CachedInputPrice *float64 `json:"cachedInputPrice"`
+	OutputPrice      *float64 `json:"outputPrice"`
+}
+
 type PriceRuleInput struct {
 	Name       string          `json:"name" v:"required|length:1,96"`
 	Source     string          `json:"source" v:"required|in:manual,sync"`
@@ -95,6 +101,10 @@ type APIKeyUpdate struct {
 type CostQueryInput struct {
 	StartDate string `json:"startDate"`
 	EndDate   string `json:"endDate"`
+}
+
+type PriceSyncInput struct {
+	ChannelID uint64 `json:"channelId"`
 }
 
 type SystemResilienceSettingsInput struct {

@@ -48,6 +48,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/channels/{id}/prices/sync", c.syncChannelPrices)
 	group.POST("/prices/sync", c.syncAllPrices)
 	group.GET("/models", c.listModels)
+	group.GET("/public-models", c.listPublicModels)
 	group.PUT("/models/{id}", c.updateModel)
 	group.GET("/models/{id}/price-rules", c.listPriceRules)
 	group.POST("/models/{id}/price-rules", c.createPriceRule)
@@ -165,12 +166,17 @@ func (c *Controller) listModels(r *ghttp.Request) {
 	respond(r, data, err)
 }
 
+func (c *Controller) listPublicModels(r *ghttp.Request) {
+	data, err := c.channels.ListPublicModels(r.Context())
+	respond(r, data, err)
+}
+
 func (c *Controller) updateModel(r *ghttp.Request) {
-	var input adminapi.ModelInput
+	var input adminapi.ModelPriceInput
 	if !parse(r, &input) {
 		return
 	}
-	respond(r, map[string]any{}, c.channels.UpdateModel(r.Context(), routeID(r), input))
+	respond(r, map[string]any{}, c.channels.UpdatePublicModelPrice(r.Context(), routeID(r), input))
 }
 
 func (c *Controller) testModel(r *ghttp.Request) {
@@ -200,7 +206,19 @@ func (c *Controller) syncChannelPrices(r *ghttp.Request) {
 }
 
 func (c *Controller) syncAllPrices(r *ghttp.Request) {
-	data, err := c.channels.SyncAllPrices(r.Context())
+	var input adminapi.PriceSyncInput
+	if len(r.GetBody()) > 0 && !parse(r, &input) {
+		return
+	}
+	var (
+		data channel.PriceSyncResult
+		err  error
+	)
+	if input.ChannelID > 0 {
+		data, err = c.channels.SyncPriceSource(r.Context(), input.ChannelID)
+	} else {
+		data, err = c.channels.SyncAllPrices(r.Context())
+	}
 	respond(r, data, err)
 }
 

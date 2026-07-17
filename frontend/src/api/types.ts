@@ -165,6 +165,14 @@ export interface ChannelModel {
   updatedAt: string
 }
 
+export interface PublicModel {
+  id: number
+  publicName: string
+  inputPrice?: number
+  cachedInputPrice?: number
+  outputPrice?: number
+}
+
 export interface DiscoveredModel {
   name: string
   selected: boolean

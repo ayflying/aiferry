@@ -89,6 +89,14 @@ type ModelView struct {
 	UpdatedAt         time.Time  `json:"updatedAt" orm:"updated_at"`
 }
 
+type PublicModelView struct {
+	Id               uint64   `json:"id" orm:"id"`
+	PublicName       string   `json:"publicName" orm:"public_name"`
+	InputPrice       *float64 `json:"inputPrice" orm:"input_price"`
+	CachedInputPrice *float64 `json:"cachedInputPrice" orm:"cached_input_price"`
+	OutputPrice      *float64 `json:"outputPrice" orm:"output_price"`
+}
+
 type DiscoveredModel struct {
 	Name     string `json:"name"`
 	Selected bool   `json:"selected"`
@@ -399,6 +407,17 @@ func (s *Service) ListModels(ctx context.Context, channelID uint64) ([]ModelView
 	return rows, gerror.Wrap(err, "list channel models")
 }
 
+func (s *Service) ListPublicModels(ctx context.Context) ([]PublicModelView, error) {
+	rows := make([]PublicModelView, 0)
+	err := dao.ChannelModels.Ctx(ctx).As("m").
+		Fields(`MIN(m.id) AS id,m.public_name,p.input_price,p.cached_input_price,p.output_price`).
+		LeftJoin(dao.ModelPrices.Table()+" p", "p.public_name=m.public_name AND p.deleted_at IS NULL").
+		Group("m.public_name,p.input_price,p.cached_input_price,p.output_price").
+		OrderAsc("m.public_name").
+		Scan(&rows)
+	return rows, gerror.Wrap(err, "list public models")
+}
+
 func normalizeModelNames(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	result := make([]string, 0, len(values))
@@ -498,6 +517,18 @@ func (s *Service) UpdateModel(ctx context.Context, id uint64, input adminapi.Mod
 		return err
 	}
 	return s.invalidateRoutes(ctx)
+}
+
+func (s *Service) UpdatePublicModelPrice(ctx context.Context, id uint64, input adminapi.ModelPriceInput) error {
+	modelName, err := s.publicModelName(ctx, id)
+	if err != nil {
+		return err
+	}
+	return s.replacePublicPrice(ctx, modelName, modelPriceValues{
+		Input:       input.InputPrice,
+		CachedInput: input.CachedInputPrice,
+		Output:      input.OutputPrice,
+	})
 }
 
 func (s *Service) toView(row entity.Channels) View {

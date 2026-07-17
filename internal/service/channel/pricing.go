@@ -167,6 +167,31 @@ func (s *Service) SyncAllPrices(ctx context.Context) (PriceSyncResult, error) {
 	return result, nil
 }
 
+func (s *Service) SyncPriceSource(ctx context.Context, channelID uint64) (PriceSyncResult, error) {
+	channel, err := s.Get(ctx, channelID)
+	if err != nil {
+		return PriceSyncResult{}, err
+	}
+	result := PriceSyncResult{Sources: 1, Failures: make([]PriceSyncSourceFailure, 0)}
+	_, config, err := s.types.GetByCode(ctx, channel.Type)
+	if err != nil {
+		result.Failures = append(result.Failures, PriceSyncSourceFailure{ChannelID: channel.Id, ChannelName: channel.Name, Message: err.Error()})
+		return result, nil
+	}
+	if config.Pricing.Adapter == channeltype.AdapterNone {
+		result.Failures = append(result.Failures, PriceSyncSourceFailure{ChannelID: channel.Id, ChannelName: channel.Name, Message: "渠道类型没有配置价格同步接口"})
+		return result, nil
+	}
+	count, err := s.syncPricesFromChannel(ctx, channel, config)
+	if err != nil {
+		result.Failures = append(result.Failures, PriceSyncSourceFailure{ChannelID: channel.Id, ChannelName: channel.Name, Message: err.Error()})
+		return result, nil
+	}
+	result.Count = count
+	result.Succeeded = 1
+	return result, nil
+}
+
 func (s *Service) syncPricesFromChannel(ctx context.Context, channel entity.Channels, config channeltype.Config) (int, error) {
 	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Pricing.Path)
 	if err != nil {

@@ -36,9 +36,11 @@ test('selects discovered models, tests the channel, and keeps pricing focused', 
 
   await page.goto('/models')
   await expect(page.getByRole('columnheader', { name: '最近测试' })).toHaveCount(0)
-  await page.getByRole('button', { name: '设置 mock-gpt 的价格' }).click()
-  const pricingDrawer = page.locator('.el-drawer').filter({ hasText: '价格设置' })
-  await expect(page.getByRole('heading', { name: '价格设置' })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '渠道' })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: '上游模型' })).toHaveCount(0)
+  await page.getByRole('button', { name: '设置 mock-gpt 的公共价格' }).click()
+  const pricingDrawer = page.locator('.el-drawer').filter({ hasText: '公共价格设置' })
+  await expect(page.getByRole('heading', { name: '公共价格设置' })).toBeVisible()
   const viewport = page.viewportSize()
   await expect.poll(async () => {
     const box = await pricingDrawer.boundingBox()
