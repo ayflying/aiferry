@@ -72,7 +72,7 @@ docker compose up -d --build aiferry
 docker compose --profile local up -d --build
 ```
 
-健康检查：`GET /healthz`。管理端默认监听 `http://localhost:8080`。
+健康检查：`GET /healthz`。管理端默认监听 `http://localhost:38517`。
 
 ## 测试
 
