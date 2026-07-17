@@ -55,10 +55,10 @@ watch(() => props.channel?.id, () => {
 })
 watch([keyword, pageSize], () => { page.value = 1 })
 
-async function loadModels() {
+async function loadModels(preserveResults = false) {
   if (!props.channel) return
   loading.value = true
-  latestResults.value = {}
+  if (!preserveResults) latestResults.value = {}
   page.value = 1
   try {
     models.value = enabledChannelModels(await apiGet<ChannelModel[]>(`/channels/${props.channel.id}/models`))
@@ -82,7 +82,10 @@ function latencyOf(model: ChannelModel) {
 }
 
 function messageOf(model: ChannelModel) {
-  return latestResults.value[model.id]?.message || model.lastTestError || ''
+  const result = latestResults.value[model.id]
+  const message = result?.message || model.lastTestError || ''
+  if (!result?.httpStatus) return message
+  return `HTTP ${result.httpStatus} · ${message}`
 }
 
 function endpointOf(model: ChannelModel) {
@@ -95,7 +98,7 @@ function changePageSize(value: number | string) {
 }
 
 async function runTest(model: ChannelModel, quiet = false) {
-  if (running.value) return
+  if (running.value && !quiet) return
   try {
     const result = await apiPost<ModelTestResult>('/models/test', {
       modelId: model.id,
@@ -112,7 +115,8 @@ async function runTest(model: ChannelModel, quiet = false) {
     } : item)
     if (!quiet) {
       if (result.success) ElMessage.success(`${model.publicName} 测试通过`)
-      else showError(result.message || '上游未通过测试', `${model.publicName} 测试失败`)
+      else showError(testFailureMessage(result), `${model.publicName} 测试失败`)
+      emit('changed')
     }
   } catch (error) {
     const failedEndpoint = endpoint.value === 'auto' ? 'chat' : endpoint.value
@@ -144,12 +148,17 @@ async function testAll() {
   running.value = true
   try {
     for (const model of enabledModels.value) await runTest(model, true)
-    await loadModels()
+    await loadModels(true)
     emit('changed')
     ElMessage.success(`已完成 ${enabledModels.value.length} 个模型的测试`)
   } finally {
     running.value = false
   }
+}
+
+function testFailureMessage(result: ModelTestResult) {
+  const status = result.httpStatus ? `HTTP ${result.httpStatus}` : '未收到 HTTP 响应'
+  return `${status} · ${result.endpoint} · ${result.message || '上游未通过测试'}`
 }
 
 async function deleteFailedModels() {
