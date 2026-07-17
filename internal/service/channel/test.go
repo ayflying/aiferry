@@ -18,6 +18,7 @@ import (
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/service/system"
+	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
 type TestResult struct {
@@ -63,6 +64,7 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 	result := TestResult{Endpoint: input.Endpoint, Model: model.PublicName, LatencyMs: latency}
 	if requestErr != nil {
 		result.Message = requestErr.Error()
+		s.recordTestUsage(ctx, channel, model, path, &result, usage.TokenUsage{})
 		s.saveTestResult(ctx, channel.Id, model.Id, input.Endpoint, result)
 		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Latency: time.Duration(latency) * time.Millisecond, Message: result.Message})
 		return result, nil
@@ -71,8 +73,9 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	result.HTTPStatus = resp.StatusCode
 	result.Success = resp.StatusCode >= 200 && resp.StatusCode < 300
-	result.InputTokens = firstInt(responseBody, "usage.input_tokens", "usage.prompt_tokens")
-	result.OutputTokens = firstInt(responseBody, "usage.output_tokens", "usage.completion_tokens")
+	tokens := usage.ParseJSONUsage(responseBody)
+	result.InputTokens = int64(testTokenValue(tokens.Input))
+	result.OutputTokens = int64(testTokenValue(tokens.Output))
 	if result.Success {
 		result.Message = "模型响应正常"
 		_ = s.app.Redis.Del(ctx, failureKey(channel.Id), cooldownKey(channel.Id)).Err()
@@ -81,8 +84,32 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 		result.Message = upstreamError(responseBody, resp.Status)
 		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Status: result.HTTPStatus, Latency: time.Duration(latency) * time.Millisecond, Message: result.Message})
 	}
+	s.recordTestUsage(ctx, channel, model, path, &result, tokens)
 	s.saveTestResult(ctx, channel.Id, model.Id, input.Endpoint, result)
 	return result, nil
+}
+
+func (s *Service) recordTestUsage(ctx context.Context, channel entity.Channels, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage) {
+	if s.usage == nil {
+		return
+	}
+	err := s.usage.Record(ctx, usage.RecordInput{
+		RequestID:      usage.NewRequestID("aftest"),
+		UserID:         usage.SystemUserID,
+		ChannelID:      channel.Id,
+		Endpoint:       "test:" + path,
+		RequestedModel: model.PublicName,
+		UpstreamModel:  model.UpstreamName,
+		HTTPStatus:     result.HTTPStatus,
+		Tokens:         tokens,
+		EstimatedCost:  usage.EstimatePublicModelCost(ctx, model.PublicName, path, tokens),
+		DurationMs:     result.LatencyMs,
+		Attempts:       1,
+		ErrorMessage:   result.Message,
+	})
+	if err != nil {
+		result.Message = truncate(result.Message+"；用量记录失败："+err.Error(), 1024)
+	}
 }
 
 func testPayload(endpoint, model string) (string, any) {
@@ -126,14 +153,11 @@ func (s *Service) saveTestResult(ctx context.Context, channelID, modelID uint64,
 	}).Update()
 }
 
-func firstInt(body []byte, paths ...string) int64 {
-	for _, path := range paths {
-		value := gjson.GetBytes(body, path)
-		if value.Exists() {
-			return value.Int()
-		}
+func testTokenValue(value *uint64) uint64 {
+	if value == nil {
+		return 0
 	}
-	return 0
+	return *value
 }
 
 func upstreamError(body []byte, fallback string) string {

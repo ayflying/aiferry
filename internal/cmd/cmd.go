@@ -46,7 +46,7 @@ var (
 				channelGroupSvc = channelgroup.New()
 				channelTypeSvc  = channeltype.New()
 				systemSvc       = system.New(appSvc)
-				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc)
+				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc)
 				priceSourceSvc  = pricesource.New(channelSvc)
 				relaySvc        = relay.New(appSvc, usageSvc, systemSvc)
 				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc)

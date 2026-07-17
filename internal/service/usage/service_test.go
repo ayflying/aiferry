@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -16,6 +17,13 @@ func TestEstimateCostWithCachedTokens(t *testing.T) {
 	cost := EstimateCost(TokenUsage{Input: &input, CachedInput: &cached, Output: &output}, PriceRates{Input: &inputPrice, CachedInput: &cachedPrice, Output: &outputPrice})
 	if cost == nil || !cost.Equal(decimal.NewFromFloat(5.625)) {
 		t.Fatalf("unexpected cost: %v", cost)
+	}
+}
+
+func TestNewRequestIDUsesPrefixAndUniqueRandomValue(t *testing.T) {
+	first, second := NewRequestID("aftest"), NewRequestID("aftest")
+	if !strings.HasPrefix(first, "aftest_") || first == second {
+		t.Fatalf("unexpected request IDs: %q, %q", first, second)
 	}
 }
 

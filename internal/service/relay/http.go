@@ -1,13 +1,13 @@
 package relay
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/tidwall/gjson"
+
+	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
 func (s *Service) writeBufferedResponse(writer http.ResponseWriter, status int, body []byte, headers http.Header) {
@@ -57,7 +57,5 @@ func upstreamError(body []byte, fallback string) string {
 }
 
 func newRequestID() string {
-	random := make([]byte, 12)
-	_, _ = rand.Read(random)
-	return "afreq_" + hex.EncodeToString(random)
+	return usage.NewRequestID("afreq")
 }

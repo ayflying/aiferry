@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
 import type { UsagePage } from '../api/types'
@@ -11,6 +11,7 @@ const store = useAppStore()
 const loading = ref(false)
 const page = ref<UsagePage>({ items: [], total: 0, page: 1, pageSize: 20 })
 const filters = reactive({ model: '', channelId: undefined as number | undefined, apiKeyId: undefined as number | undefined, page: 1, pageSize: 20 })
+const usageItems = computed(() => page.value.items ?? [])
 
 async function load() {
   loading.value = true
@@ -44,7 +45,7 @@ onMounted(load)
     </div>
 
     <div class="table-panel">
-      <el-table v-loading="loading" :data="page.items" row-key="id">
+      <el-table v-loading="loading" :data="usageItems" row-key="id">
         <el-table-column label="时间" min-width="156"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
         <el-table-column label="请求" min-width="168"><template #default="{ row }"><div class="request-cell"><span class="mono">{{ row.requestId }}</span><small>{{ row.endpoint }}<template v-if="row.isStream"> · stream</template></small></div></template></el-table-column>
         <el-table-column label="模型" min-width="160"><template #default="{ row }"><div class="request-cell"><strong>{{ row.requestedModel }}</strong><small v-if="row.upstreamModel && row.upstreamModel !== row.requestedModel">→ {{ row.upstreamModel }}</small></div></template></el-table-column>
@@ -55,7 +56,7 @@ onMounted(load)
         <el-table-column label="性能" min-width="126"><template #default="{ row }"><div class="token-cell"><strong>{{ row.durationMs }} ms</strong><small>首包 {{ row.firstTokenMs ?? '—' }} · {{ row.attempts }} 次</small></div></template></el-table-column>
         <el-table-column label="错误" min-width="180" show-overflow-tooltip><template #default="{ row }"><span :class="row.errorMessage ? 'danger-text' : 'muted'">{{ row.errorMessage || '—' }}</span></template></el-table-column>
       </el-table>
-      <div v-if="!loading && !page.items.length" class="empty-state"><div><strong>暂无用量记录</strong><span>成功调用中转接口后会显示在这里</span></div></div>
+      <div v-if="!loading && !usageItems.length" class="empty-state"><div><strong>暂无用量记录</strong><span>成功调用中转接口后会显示在这里</span></div></div>
       <div class="pagination-row"><el-pagination :current-page="filters.page" :page-size="filters.pageSize" :page-sizes="[20, 50, 100]" :total="page.total" layout="total, sizes, prev, pager, next" @current-change="changePage" @size-change="changePageSize" /></div>
     </div>
   </div>

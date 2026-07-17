@@ -16,6 +16,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channelgroup"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
 	"github.com/yunloli/aiferry/internal/service/system"
+	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
 const (
@@ -30,6 +31,7 @@ type Service struct {
 	types      *channeltype.Service
 	groups     *channelgroup.Service
 	resilience *system.Service
+	usage      *usage.Service
 }
 
 type View struct {
@@ -108,8 +110,8 @@ type DiscoveredModel struct {
 	Selected bool   `json:"selected"`
 }
 
-func New(appSvc *app.Service, typeSvc *channeltype.Service, groupSvc *channelgroup.Service, resilienceSvc *system.Service) *Service {
-	return &Service{app: appSvc, types: typeSvc, groups: groupSvc, resilience: resilienceSvc}
+func New(appSvc *app.Service, typeSvc *channeltype.Service, groupSvc *channelgroup.Service, resilienceSvc *system.Service, usageSvc *usage.Service) *Service {
+	return &Service{app: appSvc, types: typeSvc, groups: groupSvc, resilience: resilienceSvc, usage: usageSvc}
 }
 
 func normalizeBaseURL(value string) (string, error) {

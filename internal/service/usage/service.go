@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/shopspring/decimal"
 
@@ -133,6 +134,9 @@ func (s *Service) Record(ctx context.Context, input RecordInput) error {
 		Attempts:       input.Attempts,
 		ErrorMessage:   truncate(input.ErrorMessage, 1024),
 	}
+	if input.APIKeyID == 0 {
+		data.ApiKeyId = gdb.Raw("NULL")
+	}
 	if input.Tokens.Input != nil {
 		data.InputTokens = *input.Tokens.Input
 	}
@@ -168,7 +172,7 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 		COALESCE(SUM(input_tokens),0) AS input_tokens,
 		COALESCE(SUM(output_tokens),0) AS output_tokens,
 		COALESCE(SUM(total_tokens),0) AS total_tokens,
-		SUM(estimated_cost) AS estimated_cost,
+		COALESCE(SUM(estimated_cost),0) AS estimated_cost,
 		COALESCE(AVG(duration_ms),0) AS average_latency`).Scan(&result.Summary); err != nil {
 		return result, gerror.Wrap(err, "load dashboard summary")
 	}
@@ -177,15 +181,15 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 		COUNT(*) AS requests,
 		COALESCE(SUM(input_tokens),0) AS input_tokens,
 		COALESCE(SUM(output_tokens),0) AS output_tokens,
-		SUM(estimated_cost) AS estimated_cost`).
+		COALESCE(SUM(estimated_cost),0) AS estimated_cost`).
 		Group("bucket").OrderAsc("bucket").Scan(&result.Trend); err != nil {
 		return result, gerror.Wrap(err, "load usage trend")
 	}
-	if err := base.Clone().Fields(`requested_model AS name,COUNT(*) AS requests,COALESCE(SUM(total_tokens),0) AS total_tokens,SUM(estimated_cost) AS estimated_cost`).
+	if err := base.Clone().Fields(`requested_model AS name,COUNT(*) AS requests,COALESCE(SUM(total_tokens),0) AS total_tokens,COALESCE(SUM(estimated_cost),0) AS estimated_cost`).
 		Group(dao.UsageLogs.Columns().RequestedModel).OrderDesc("requests").Limit(8).Scan(&result.ByModel); err != nil {
 		return result, gerror.Wrap(err, "load model breakdown")
 	}
-	if err := base.Clone().As("u").Fields(`COALESCE(c.name,'不可用渠道') AS name,COUNT(*) AS requests,COALESCE(SUM(u.total_tokens),0) AS total_tokens,SUM(u.estimated_cost) AS estimated_cost`).
+	if err := base.Clone().As("u").Fields(`COALESCE(c.name,'不可用渠道') AS name,COUNT(*) AS requests,COALESCE(SUM(u.total_tokens),0) AS total_tokens,COALESCE(SUM(u.estimated_cost),0) AS estimated_cost`).
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").Group("u.channel_id,c.name").OrderDesc("requests").Limit(8).Scan(&result.ByChannel); err != nil {
 		return result, gerror.Wrap(err, "load channel breakdown")
 	}
@@ -213,8 +217,8 @@ func (s *Service) List(ctx context.Context, page, pageSize int, modelName string
 	if err != nil {
 		return LogPage{}, gerror.Wrap(err, "count usage logs")
 	}
-	var items []LogView
-	err = query.Fields("u.*,k.name AS api_key_name,c.name AS channel_name").
+	items := make([]LogView, 0)
+	err = query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,c.name AS channel_name").
 		LeftJoin(dao.ApiKeys.Table()+" k", "k.id=u.api_key_id").
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").
 		OrderDesc("u.id").Page(page, pageSize).Scan(&items)
