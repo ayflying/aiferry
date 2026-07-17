@@ -156,8 +156,10 @@ func (s *Service) CompleteLogin(ctx context.Context, state, stateCookie, code, c
 	return user, sessionToken, metadata.ReturnTo, nil
 }
 
-func (u SessionUser) View() authapi.UserView {
-	return authapi.UserView{Id: u.Id, Name: u.Name, Role: u.Role, AvatarURL: u.AvatarURL, Groups: u.Groups}
+func (s *Service) View(user SessionUser) authapi.UserView {
+	return authapi.UserView{
+		Id: user.Id, Name: user.Name, Role: user.Role, IsAdmin: s.IsAdmin(user), AvatarURL: user.AvatarURL, Groups: user.Groups,
+	}
 }
 
 func (u SessionUser) String() string {

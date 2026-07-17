@@ -35,9 +35,14 @@ const adminItems = [
   { path: '/users', label: '用户管理', icon: UsersRound },
   { path: '/settings', label: '系统设置', icon: Settings },
 ]
-const items = computed(() => auth.user?.role === 'admin'
+const items = computed(() => auth.user?.isAdmin
   ? adminItems
-  : [{ path: '/profile', label: '个人中心', icon: UserRound }])
+  : [
+      { path: '/profile', label: '个人中心', icon: UserRound },
+      { path: '/api-keys', label: '访问密钥', icon: KeyRound },
+      { path: '/usage', label: '用量', icon: Activity },
+      { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
+    ])
 
 const pageTitle = computed(() => String(route.meta.title || 'AiFerry'))
 
@@ -133,7 +138,7 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
             <el-avatar :size="30" :src="auth.user?.avatarUrl || undefined">
               <UserRound :size="16" />
             </el-avatar>
-            <span class="user-copy"><strong>{{ auth.user?.name || '用户' }}</strong><small>{{ auth.user?.role === 'admin' ? '管理员' : '用户' }}</small></span>
+            <span class="user-copy"><strong>{{ auth.user?.name || '用户' }}</strong><small>{{ auth.user?.isAdmin ? '管理员' : '用户' }}</small></span>
           </button>
           <template #dropdown>
             <el-dropdown-menu>

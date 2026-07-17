@@ -67,12 +67,29 @@ func (s *Service) RequireAdmin(r *ghttp.Request) {
 		writeUnauthorized(r)
 		return
 	}
-	if user.Role != "admin" {
+	if !s.IsAdmin(user) {
 		writeForbidden(r)
 		return
 	}
 	r.SetCtx(context.WithValue(r.Context(), userContextKey, user))
 	r.Middleware.Next()
+}
+
+func (s *Service) RequireCurrentAdmin(r *ghttp.Request) {
+	user, ok := CurrentUser(r.Context())
+	if !ok {
+		writeUnauthorized(r)
+		return
+	}
+	if !s.IsAdmin(user) {
+		writeForbidden(r)
+		return
+	}
+	r.Middleware.Next()
+}
+
+func (s *Service) IsAdmin(user SessionUser) bool {
+	return s.app.Config.IsAdminRole(user.Role)
 }
 
 func CurrentUser(ctx context.Context) (SessionUser, bool) {

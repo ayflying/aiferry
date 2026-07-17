@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/mail"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/shopspring/decimal"
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
@@ -21,6 +23,12 @@ import (
 type Service struct {
 	app   *app.Service
 	usage *usage.Service
+}
+
+var ErrInsufficientBalance = gerror.New("账户余额不足，请先充值后再使用模型")
+
+func IsInsufficientBalance(err error) bool {
+	return errors.Is(err, ErrInsufficientBalance)
 }
 
 type Profile struct {
@@ -120,6 +128,43 @@ func (s *Service) UpdateBalance(ctx context.Context, id uint64, balance float64)
 		return Profile{}, gerror.Wrap(err, "update user balance")
 	}
 	return s.Profile(ctx, id)
+}
+
+func (s *Service) CheckBalance(ctx context.Context, id uint64) error {
+	count, err := dao.Users.Ctx(ctx).
+		Where(dao.Users.Columns().Id, id).
+		WhereGT(dao.Users.Columns().Balance, 0).
+		Count()
+	if err != nil {
+		return gerror.Wrap(err, "check user balance")
+	}
+	if count == 0 {
+		return ErrInsufficientBalance
+	}
+	return nil
+}
+
+func (s *Service) Debit(ctx context.Context, id uint64, amount decimal.Decimal) error {
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return nil
+	}
+	amount = amount.Round(8)
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return nil
+	}
+	literal := amount.StringFixed(8)
+	result, err := dao.Users.Ctx(ctx).
+		Where(dao.Users.Columns().Id, id).
+		WhereGTE(dao.Users.Columns().Balance, literal).
+		Data(do.Users{Balance: gdb.Raw("balance - " + literal)}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "debit user balance")
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrInsufficientBalance
+	}
+	return nil
 }
 
 func (s *Service) Delete(ctx context.Context, id, operatorID uint64) error {

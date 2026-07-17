@@ -29,6 +29,7 @@ type App struct {
 	CasdoorClientID        string
 	CasdoorClientSecret    string
 	SessionTTL             int
+	AdminRoles             []string
 }
 
 func Load() (App, error) {
@@ -62,6 +63,7 @@ func Load() (App, error) {
 		CasdoorClientID:        strings.TrimSpace(os.Getenv("CASDOOR_CLIENT_ID")),
 		CasdoorClientSecret:    os.Getenv("CASDOOR_CLIENT_SECRET"),
 		SessionTTL:             envInt("SESSION_TTL_HOURS", 12),
+		AdminRoles:             envList("AIFERRY_ADMIN_ROLES", []string{"admin"}),
 	}
 	if strings.TrimSpace(app.MySQLPassword) == "" {
 		return App{}, gerror.New("MYSQL_PASSWORD is required")
@@ -70,6 +72,17 @@ func Load() (App, error) {
 		return App{}, gerror.New("CASDOOR_ENDPOINT, CASDOOR_CLIENT_ID and CASDOOR_CLIENT_SECRET are required")
 	}
 	return app, nil
+}
+
+// IsAdminRole centralizes the role-to-permission mapping used by all console APIs.
+func (c App) IsAdminRole(role string) bool {
+	role = strings.TrimSpace(role)
+	for _, configured := range c.AdminRoles {
+		if role == configured {
+			return true
+		}
+	}
+	return false
 }
 
 func (c App) MySQLDSN() string {
@@ -93,4 +106,28 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func envList(key string, fallback []string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return append([]string(nil), fallback...)
+	}
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		result = append(result, item)
+	}
+	if len(result) == 0 {
+		return append([]string(nil), fallback...)
+	}
+	return result
 }

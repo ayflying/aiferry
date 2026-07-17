@@ -10,6 +10,7 @@ type UserView struct {
 	Id        uint64   `json:"id"`
 	Name      string   `json:"name"`
 	Role      string   `json:"role"`
+	IsAdmin   bool     `json:"isAdmin"`
 	AvatarURL string   `json:"avatarUrl"`
 	Groups    []string `json:"groups"`
 }

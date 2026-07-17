@@ -99,6 +99,8 @@ type UserSummary struct {
 type LogView struct {
 	Id                uint64    `json:"id" orm:"id"`
 	RequestId         string    `json:"requestId" orm:"request_id"`
+	UserId            uint64    `json:"userId" orm:"user_id"`
+	UserName          string    `json:"userName" orm:"user_name"`
 	APIKeyName        string    `json:"apiKeyName" orm:"api_key_name"`
 	ChannelName       string    `json:"channelName" orm:"channel_name"`
 	Endpoint          string    `json:"endpoint" orm:"endpoint"`
@@ -227,7 +229,7 @@ func (s *Service) UserSummary(ctx context.Context, userID uint64, days int) (Use
 	return result, gerror.Wrap(err, "load user usage summary")
 }
 
-func (s *Service) List(ctx context.Context, page, pageSize int, modelName string, channelID, apiKeyID uint64) (LogPage, error) {
+func (s *Service) List(ctx context.Context, page, pageSize int, modelName string, channelID, apiKeyID, userID uint64) (LogPage, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -244,14 +246,18 @@ func (s *Service) List(ctx context.Context, page, pageSize int, modelName string
 	if apiKeyID > 0 {
 		query = query.Where("u.api_key_id", apiKeyID)
 	}
+	if userID > 0 {
+		query = query.Where("u.user_id", userID)
+	}
 	total, err := query.Clone().Count()
 	if err != nil {
 		return LogPage{}, gerror.Wrap(err, "count usage logs")
 	}
 	items := make([]LogView, 0)
-	err = query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,c.name AS channel_name").
+	err = query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,c.name AS channel_name,COALESCE(usr.name,'已删除用户') AS user_name").
 		LeftJoin(dao.ApiKeys.Table()+" k", "k.id=u.api_key_id").
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").
+		LeftJoin(dao.Users.Table()+" usr", "usr.id=u.user_id").
 		OrderDesc("u.id").Page(page, pageSize).Scan(&items)
 	return LogPage{Items: items, Total: total, Page: page, PageSize: pageSize}, gerror.Wrap(err, "list usage logs")
 }

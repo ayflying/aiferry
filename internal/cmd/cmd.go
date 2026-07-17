@@ -20,6 +20,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channelgroup"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
 	"github.com/yunloli/aiferry/internal/service/pricesource"
+	"github.com/yunloli/aiferry/internal/service/pricingcache"
 	"github.com/yunloli/aiferry/internal/service/relay"
 	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
@@ -45,17 +46,21 @@ var (
 				authSvc         = auth.New(appSvc)
 				usageSvc        = usage.New()
 				userSvc         = user.New(appSvc, usageSvc)
+				priceCache      = pricingcache.New()
 				channelGroupSvc = channelgroup.New()
 				channelTypeSvc  = channeltype.New()
 				systemSvc       = system.New(appSvc)
-				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc)
+				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc, priceCache)
 				priceSourceSvc  = pricesource.New(channelSvc)
-				relaySvc        = relay.New(appSvc, usageSvc, systemSvc)
-				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc)
+				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache)
+				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc, authSvc)
 				authCtrl        = authctrl.New(authSvc, userSvc)
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)
 				s               = g.Server()
 			)
+			if err = priceCache.Load(ctx); err != nil {
+				return err
+			}
 			channelSvc.StartHealthChecks(ctx)
 			s.SetAddr(":8080")
 			s.SetServerRoot(cfg.WebRoot)
@@ -73,7 +78,7 @@ var (
 			})
 			s.BindHandler("GET:/auth/casdoor/callback", authCtrl.Callback)
 			s.Group("/api/admin", func(group *ghttp.RouterGroup) {
-				group.Middleware(authSvc.RequireAdmin)
+				group.Middleware(authSvc.RequireUser)
 				adminCtrl.Register(group)
 			})
 			s.Group("/v1", func(group *ghttp.RouterGroup) {

@@ -2,16 +2,20 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
-import type { UsageLog, UsagePage } from '../api/types'
+import type { ManagedUser, UsageLog, UsagePage } from '../api/types'
 import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
+import { useAuthStore } from '../stores/auth'
 import { formatCost, formatNumber, formatTime } from '../lib/format'
 
 const store = useAppStore()
+const auth = useAuthStore()
 const loading = ref(false)
 const page = ref<UsagePage>({ items: [], total: 0, page: 1, pageSize: 20 })
-const filters = reactive({ model: '', channelId: undefined as number | undefined, apiKeyId: undefined as number | undefined, page: 1, pageSize: 20 })
+const filters = reactive({ model: '', userId: undefined as number | undefined, channelId: undefined as number | undefined, apiKeyId: undefined as number | undefined, page: 1, pageSize: 20 })
+const users = ref<ManagedUser[]>([])
+const isAdmin = computed(() => auth.user?.isAdmin === true)
 const usageItems = computed(() => page.value.items ?? [])
 const selectedUsage = ref<UsageLog>()
 const detailOpen = ref(false)
@@ -19,12 +23,14 @@ const detailOpen = ref(false)
 async function load() {
   loading.value = true
   try {
-    const [data] = await Promise.all([
-      apiGet<UsagePage>('/usage', filters),
-      store.channels.length ? Promise.resolve() : store.loadChannels(),
-      store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys(),
-    ])
-    page.value = data
+    const dataPromise = apiGet<UsagePage>('/usage', filters)
+    const support = [store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys()]
+    if (isAdmin.value) {
+      support.push(store.channels.length ? Promise.resolve() : store.loadChannels())
+      support.push(apiGet<ManagedUser[]>('/users').then((items) => { users.value = items }))
+    }
+    await Promise.all([dataPromise, ...support])
+    page.value = await dataPromise
   } catch (error) { showError(error, '加载用量记录失败') } finally { loading.value = false }
 }
 
@@ -41,7 +47,8 @@ onMounted(load)
     <div class="page-toolbar">
       <div class="toolbar-group">
         <el-input v-model="filters.model" clearable placeholder="模型名称" style="width: 200px" @keyup.enter="search" />
-        <el-select v-model="filters.channelId" clearable placeholder="全部渠道" style="width: 160px"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select>
+        <el-select v-if="isAdmin" v-model="filters.userId" clearable filterable placeholder="全部用户" style="width: 160px"><el-option v-for="item in users" :key="item.id" :label="item.nickname" :value="item.id" /></el-select>
+        <el-select v-if="isAdmin" v-model="filters.channelId" clearable placeholder="全部渠道" style="width: 160px"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select>
         <el-select v-model="filters.apiKeyId" clearable placeholder="全部密钥" style="width: 160px"><el-option v-for="item in store.apiKeys" :key="item.id" :label="item.name" :value="item.id" /></el-select>
         <el-button type="primary" :icon="Search" @click="search">查询</el-button>
       </div>
@@ -54,7 +61,8 @@ onMounted(load)
         <el-table-column label="时间" min-width="156"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
         <el-table-column label="请求" min-width="168"><template #default="{ row }"><div class="request-cell"><span class="mono">{{ row.requestId }}</span><small>{{ row.endpoint }}<template v-if="row.isStream"> · stream</template></small></div></template></el-table-column>
         <el-table-column label="模型" min-width="160"><template #default="{ row }"><div class="request-cell"><strong>{{ row.requestedModel }}</strong><small v-if="row.upstreamModel && row.upstreamModel !== row.requestedModel">→ {{ row.upstreamModel }}</small></div></template></el-table-column>
-        <el-table-column label="渠道 / 密钥" min-width="150"><template #default="{ row }"><div class="request-cell"><span>{{ row.channelName || '—' }}</span><small>{{ row.apiKeyName || '—' }}</small></div></template></el-table-column>
+        <el-table-column v-if="isAdmin" label="用户" min-width="130"><template #default="{ row }">{{ row.userName || `#${row.userId}` }}</template></el-table-column>
+        <el-table-column :label="isAdmin ? '渠道 / 密钥' : '访问密钥'" min-width="150"><template #default="{ row }"><div class="request-cell"><span v-if="isAdmin">{{ row.channelName || '—' }}</span><span v-else>{{ row.apiKeyName || '—' }}</span><small v-if="isAdmin">{{ row.apiKeyName || '—' }}</small></div></template></el-table-column>
         <el-table-column label="状态" width="86"><template #default="{ row }"><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag></template></el-table-column>
         <el-table-column label="Token" min-width="150"><template #default="{ row }"><div class="token-cell"><strong>{{ formatNumber(row.totalTokens) }}</strong><small>入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</small></div></template></el-table-column>
         <el-table-column label="估算成本" min-width="125"><template #default="{ row }"><el-button text class="cost-detail-trigger" @click="openUsageDetail(row)"><span :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</span></el-button></template></el-table-column>

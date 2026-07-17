@@ -16,8 +16,10 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	"github.com/yunloli/aiferry/internal/service/app"
+	"github.com/yunloli/aiferry/internal/service/pricingcache"
 	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
+	"github.com/yunloli/aiferry/internal/service/user"
 )
 
 const maxRequestBody = 16 << 20
@@ -26,30 +28,23 @@ type Service struct {
 	app        *app.Service
 	usage      *usage.Service
 	resilience *system.Service
+	users      *user.Service
+	prices     *pricingcache.Service
 }
 
 type Candidate struct {
-	ChannelModelID   uint64   `orm:"channel_model_id"`
-	ChannelID        uint64   `orm:"channel_id"`
-	ChannelName      string   `orm:"channel_name"`
-	BaseURL          string   `orm:"base_url"`
-	APIKeyCipher     string   `orm:"api_key_cipher"`
-	OrganizationID   string   `orm:"organization_id"`
-	ProjectID        string   `orm:"project_id"`
-	Priority         int      `orm:"priority"`
-	Weight           uint     `orm:"weight"`
-	PublicName       string   `orm:"public_name"`
-	UpstreamName     string   `orm:"upstream_name"`
-	InputPrice       *float64 `orm:"input_price"`
-	CachedInputPrice *float64 `orm:"cached_input_price"`
-	CacheWritePrice  *float64 `orm:"cache_write_price"`
-	OutputPrice      *float64 `orm:"output_price"`
-	ImageInputPrice  *float64 `orm:"image_input_price"`
-	AudioInputPrice  *float64 `orm:"audio_input_price"`
-	AudioOutputPrice *float64 `orm:"audio_output_price"`
-	RequestPrice     *float64 `orm:"request_price"`
-	BillingMode      string   `orm:"billing_mode"`
-	GroupIDs         []uint64
+	ChannelModelID uint64 `orm:"channel_model_id"`
+	ChannelID      uint64 `orm:"channel_id"`
+	ChannelName    string `orm:"channel_name"`
+	BaseURL        string `orm:"base_url"`
+	APIKeyCipher   string `orm:"api_key_cipher"`
+	OrganizationID string `orm:"organization_id"`
+	ProjectID      string `orm:"project_id"`
+	Priority       int    `orm:"priority"`
+	Weight         uint   `orm:"weight"`
+	PublicName     string `orm:"public_name"`
+	UpstreamName   string `orm:"upstream_name"`
+	GroupIDs       []uint64
 }
 
 type Model struct {
@@ -71,10 +66,11 @@ type attemptResult struct {
 	firstTokenMs *int64
 	errorMessage string
 	latency      time.Duration
+	headers      http.Header
 }
 
-func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service) *Service {
-	return &Service{app: appSvc, usage: usageSvc, resilience: resilienceSvc}
+func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service) *Service {
+	return &Service{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache}
 }
 
 func (s *Service) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
@@ -93,6 +89,9 @@ func (s *Service) Models(ctx context.Context, key apikey.AuthKey) (ModelList, er
 	models := make([]Model, 0, len(rows))
 	for _, row := range rows {
 		if len(key.AllowedModels) > 0 && !containsString(key.AllowedModels, row.PublicName) {
+			continue
+		}
+		if !s.prices.IsPriced(row.PublicName) {
 			continue
 		}
 		candidates, routeErr := s.route(ctx, row.PublicName, key)
@@ -131,6 +130,12 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	if len(candidates) == 0 {
 		return gerror.New("no available channel for model " + requestedModel)
 	}
+	if !s.prices.IsPriced(requestedModel) {
+		return gerror.New("当前模型未配置可用价格，无法计费")
+	}
+	if err = s.users.CheckBalance(ctx, key.UserId); err != nil {
+		return err
+	}
 	requestID := newRequestID()
 	startedAt := time.Now()
 	settings, settingsErr := s.resilience.Get(ctx)
@@ -142,7 +147,11 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	for index := 0; index < maxAttempts; index++ {
 		candidate := candidates[index]
 		attemptStartedAt := time.Now()
-		result, handled, attemptErr := s.attempt(ctx, writer, incomingHeaders, endpoint, body, candidate, isStream, startedAt, settings.RetryStatusCodes)
+		attemptWriter := writer
+		if !isStream {
+			attemptWriter = nil
+		}
+		result, handled, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, candidate, isStream, startedAt, settings.RetryStatusCodes)
 		result.latency = time.Since(attemptStartedAt)
 		last = result
 		if attemptErr != nil {
@@ -160,15 +169,23 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 			if result.status >= 200 && result.status < 300 {
 				s.markSuccess(ctx, candidate.ChannelID)
 			}
-			s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, index+1, startedAt, result)
+			if recordErr := s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, index+1, startedAt, result); recordErr != nil {
+				if !isStream {
+					s.writeBufferedResponse(writer, http.StatusPaymentRequired, openAIError("insufficient_balance", recordErr.Error()), http.Header{"Content-Type": []string{"application/json"}})
+				}
+				return nil
+			}
+			if !isStream {
+				s.writeBufferedResponse(writer, result.status, result.body, result.headers)
+			}
 			return nil
 		}
 		if retryableStatusForRules(result.status, settings.RetryStatusCodes) && index+1 < maxAttempts {
 			s.markFailure(ctx, candidate.ChannelID)
 			continue
 		}
-		s.writeBufferedResponse(writer, result.status, result.body, http.Header{"Content-Type": []string{"application/json"}})
-		s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, index+1, startedAt, result)
+		s.writeBufferedResponse(writer, result.status, result.body, result.headers)
+		_ = s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, index+1, startedAt, result)
 		return nil
 	}
 	if last.status == 0 {
@@ -208,7 +225,7 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	if !stream || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
-		result := attemptResult{status: resp.StatusCode, body: responseBody, tokens: parseJSONUsage(responseBody)}
+		result := attemptResult{status: resp.StatusCode, body: responseBody, tokens: parseJSONUsage(responseBody), headers: resp.Header.Clone()}
 		if readErr != nil {
 			return result, false, gerror.Wrap(readErr, "read upstream response")
 		}
@@ -216,7 +233,9 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 			result.errorMessage = upstreamError(responseBody, resp.Status)
 			return result, false, nil
 		}
-		s.writeBufferedResponse(writer, resp.StatusCode, responseBody, resp.Header)
+		if writer != nil {
+			s.writeBufferedResponse(writer, resp.StatusCode, responseBody, resp.Header)
+		}
 		return result, true, nil
 	}
 	defer resp.Body.Close()

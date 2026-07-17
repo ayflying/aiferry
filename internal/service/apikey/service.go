@@ -65,11 +65,18 @@ func New(appSvc *app.Service) *Service {
 }
 
 func (s *Service) List(ctx context.Context) ([]View, error) {
+	current, ok := auth.CurrentUser(ctx)
+	if !ok {
+		return nil, gerror.New("authenticated user is required")
+	}
 	rows := make([]View, 0)
-	err := dao.ApiKeys.Ctx(ctx).
+	query := dao.ApiKeys.Ctx(ctx).
 		Fields("id,user_id,name,key_prefix,status,spend_limit,spent_amount,expires_at,last_used_at,created_at").
-		OrderDesc(dao.ApiKeys.Columns().Id).
-		Scan(&rows)
+		OrderDesc(dao.ApiKeys.Columns().Id)
+	if !s.app.Config.IsAdminRole(current.Role) {
+		query = query.Where(dao.ApiKeys.Columns().UserId, current.Id)
+	}
+	err := query.Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "list API keys")
 	}
@@ -134,6 +141,9 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.APIKeyUp
 	if current.Id == 0 {
 		return gerror.New("API key not found")
 	}
+	if err := s.ensureAccess(ctx, current.UserId); err != nil {
+		return err
+	}
 	data := do.ApiKeys{Name: strings.TrimSpace(input.Name), Status: input.Status}
 	if input.SpendLimit == nil {
 		data.SpendLimit = gdb.Raw("NULL")
@@ -163,6 +173,9 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 	}
 	if current.Id == 0 {
 		return gerror.New("API key not found")
+	}
+	if err := s.ensureAccess(ctx, current.UserId); err != nil {
+		return err
 	}
 	if err := dao.ApiKeys.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
 		if _, deleteErr := dao.ApiKeyModels.Ctx(txCtx).Where(dao.ApiKeyModels.Columns().ApiKeyId, id).Delete(); deleteErr != nil {
@@ -263,6 +276,17 @@ func (s *Service) AddSpend(ctx context.Context, key AuthKey, amount float64) err
 		return gerror.New("API key not found")
 	}
 	_ = s.app.Redis.Del(ctx, cacheKey(key.KeyHash)).Err()
+	return nil
+}
+
+func (s *Service) ensureAccess(ctx context.Context, ownerID uint64) error {
+	current, ok := auth.CurrentUser(ctx)
+	if !ok {
+		return gerror.New("authenticated user is required")
+	}
+	if current.Id != ownerID && !s.app.Config.IsAdminRole(current.Role) {
+		return gerror.New("无权操作其他用户的访问密钥")
+	}
 	return nil
 }
 

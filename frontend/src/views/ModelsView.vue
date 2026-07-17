@@ -6,11 +6,13 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { ModelBillingMode, PriceRule, PriceSource, PublicModel } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
+import { useAuthStore } from '../stores/auth'
 import { compareModelNames } from '../lib/models'
 import TableActionButton from '../components/TableActionButton.vue'
 import PriceSourceManager from '../components/PriceSourceManager.vue'
 
 const store = useAppStore()
+const auth = useAuthStore()
 const models = ref<PublicModel[]>([])
 const sources = ref<PriceSource[]>([])
 const loading = ref(false)
@@ -35,6 +37,7 @@ const form = reactive({
   audioOutputPrice: undefined as number | undefined,
   requestPrice: undefined as number | undefined,
 })
+const isAdmin = computed(() => auth.user?.isAdmin === true)
 
 const filtered = computed(() => {
   const query = keyword.value.trim().toLowerCase()
@@ -49,9 +52,19 @@ const channelPriceSources = computed(() => {
 async function load() {
   loading.value = true
   try {
-    const [items, priceSources] = await Promise.all([apiGet<PublicModel[]>('/public-models'), apiGet<PriceSource[]>('/price-sources'), store.loadChannels(), store.loadChannelTypes()])
-    models.value = items
-    sources.value = priceSources
+    if (isAdmin.value) {
+      const [items, priceSources] = await Promise.all([
+        apiGet<PublicModel[]>('/public-models'),
+        apiGet<PriceSource[]>('/price-sources'),
+        store.loadChannels(),
+        store.loadChannelTypes(),
+      ])
+      models.value = items
+      sources.value = priceSources
+    } else {
+      models.value = await apiGet<PublicModel[]>('/public-models')
+      sources.value = []
+    }
     if (!syncTargetExists(priceSyncTarget.value)) priceSyncTarget.value = defaultSyncTarget()
   } catch (error) { showError(error, '加载模型失败') } finally { loading.value = false }
 }
@@ -149,6 +162,7 @@ onMounted(load)
     <div class="page-toolbar">
       <div class="toolbar-group"><el-input v-model="keyword" clearable placeholder="搜索公开模型" style="width: 240px" /></div>
       <div class="spacer" />
+      <template v-if="isAdmin">
       <el-select v-model="priceSyncTarget" clearable filterable no-data-text="没有可用价格源" placeholder="选择价格同步来源" style="width: 230px">
         <el-option-group v-if="enabledSources.length" label="公共价格源"><el-option v-for="item in enabledSources" :key="`source:${item.id}`" :label="item.name" :value="`source:${item.id}`" /></el-option-group>
         <el-option-group v-if="channelPriceSources.length" label="渠道"><el-option v-for="item in channelPriceSources" :key="`channel:${item.id}`" :label="item.name" :value="`channel:${item.id}`" /></el-option-group>
@@ -156,18 +170,20 @@ onMounted(load)
       <el-button :icon="Braces" @click="sourceOpen = true">价格源</el-button>
       <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
       <el-button :icon="RotateCw" :loading="loading" :disabled="!priceSyncTarget" @click="syncPrices">同步模型价格</el-button>
+      </template>
+      <el-button v-else :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
     </div>
 
     <div class="table-panel">
       <el-table v-loading="loading" :data="filtered" row-key="publicName">
         <el-table-column prop="publicName" label="公开模型" min-width="250"><template #default="{ row }"><span class="mono model-name">{{ row.publicName }}</span></template></el-table-column>
         <el-table-column label="计费方式" min-width="260"><template #default="{ row }"><div class="price-line"><template v-if="row.billingMode === 'request'"><span>按次 {{ row.requestPrice ?? '—' }}</span></template><template v-else-if="row.billingMode === 'rules'"><span>高级计费规则</span></template><template v-else><span>入 {{ row.inputPrice ?? '—' }}</span><span>缓存读 {{ row.cachedInputPrice ?? '—' }}</span><span>补全 {{ row.outputPrice ?? '—' }}</span></template></div></template></el-table-column>
-        <el-table-column label="操作" width="86" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="Coins" :label="`设置 ${row.publicName} 的公共价格`" @click="openEdit(row)" /></div></template></el-table-column>
+        <el-table-column v-if="isAdmin" label="操作" width="86" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="Coins" :label="`设置 ${row.publicName} 的公共价格`" @click="openEdit(row)" /></div></template></el-table-column>
       </el-table>
       <div v-if="!loading && !filtered.length" class="empty-state"><div><strong>没有匹配模型</strong><span>先在渠道页发现并选择模型</span></div></div>
     </div>
 
-    <el-drawer v-model="editOpen" title="公共价格设置" :size="priceDrawerSize">
+    <el-drawer v-if="isAdmin" v-model="editOpen" title="公共价格设置" :size="priceDrawerSize">
       <el-form label-position="top">
         <div class="price-target"><div><span>公开模型</span><code>{{ current?.publicName }}</code></div><div><span>适用范围</span><strong>所有同名模型</strong></div></div>
         <el-tabs v-model="form.billingMode" class="pricing-tabs">
@@ -188,7 +204,7 @@ onMounted(load)
       </el-form>
       <template #footer><el-button @click="editOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存价格</el-button></template>
     </el-drawer>
-    <PriceSourceManager v-model="sourceOpen" :sources="sources" :loading="loading" @changed="load" />
+    <PriceSourceManager v-if="isAdmin" v-model="sourceOpen" :sources="sources" :loading="loading" @changed="load" />
   </div>
 </template>
 

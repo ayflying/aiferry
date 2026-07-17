@@ -92,7 +92,7 @@ func (c *Controller) me(r *ghttp.Request) {
 		respondUnauthorized(r)
 		return
 	}
-	respond(r, user.View(), nil)
+	respond(r, c.auth.View(user), nil)
 }
 
 func (c *Controller) profile(r *ghttp.Request) {

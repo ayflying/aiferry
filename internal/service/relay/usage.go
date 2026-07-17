@@ -4,14 +4,31 @@ import (
 	"context"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/shopspring/decimal"
 
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
-func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) {
-	cost := s.estimateCost(ctx, candidate, endpoint, result.tokens)
+func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) error {
+	cost := s.prices.Estimate(candidate.PublicName, endpoint, result.tokens)
+	recordStatus := result.status
+	recordError := result.errorMessage
+	var chargeErr error
+	if result.status >= 200 && result.status < 300 {
+		if cost == nil {
+			chargeErr = gerror.New("上游响应未返回可计费的用量信息")
+		} else if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
+			chargeErr = err
+		} else {
+			_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
+		}
+		if chargeErr != nil {
+			recordStatus = 402
+			recordError = chargeErr.Error()
+		}
+	}
 	_ = s.usage.Record(ctx, usage.RecordInput{
 		RequestID:      requestID,
 		UserID:         key.UserId,
@@ -20,37 +37,16 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		Endpoint:       endpoint,
 		RequestedModel: requestedModel,
 		UpstreamModel:  candidate.UpstreamName,
-		HTTPStatus:     result.status,
+		HTTPStatus:     recordStatus,
 		Stream:         stream,
 		Tokens:         result.tokens,
 		EstimatedCost:  cost,
 		DurationMs:     time.Since(startedAt).Milliseconds(),
 		FirstTokenMs:   result.firstTokenMs,
 		Attempts:       attempts,
-		ErrorMessage:   result.errorMessage,
+		ErrorMessage:   recordError,
 	})
-	if cost != nil && result.status >= 200 && result.status < 300 {
-		_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
-	}
-}
-
-func (s *Service) estimateCost(ctx context.Context, candidate Candidate, endpoint string, tokens usage.TokenUsage) *decimal.Decimal {
-	switch candidate.BillingMode {
-	case "rules":
-		return usage.EstimateRuleCost(ctx, candidate.PublicName, endpoint, tokens)
-	case "request":
-		return usage.EstimateCost(tokens, usage.PriceRates{Request: candidate.RequestPrice})
-	default:
-		return usage.EstimateCost(tokens, usage.PriceRates{
-			Input:       candidate.InputPrice,
-			CachedInput: candidate.CachedInputPrice,
-			CacheWrite:  candidate.CacheWritePrice,
-			Output:      candidate.OutputPrice,
-			ImageInput:  candidate.ImageInputPrice,
-			AudioInput:  candidate.AudioInputPrice,
-			AudioOutput: candidate.AudioOutputPrice,
-		})
-	}
+	return chargeErr
 }
 
 func parseJSONUsage(body []byte) usage.TokenUsage {

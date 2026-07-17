@@ -9,6 +9,7 @@ import (
 
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	relaysvc "github.com/yunloli/aiferry/internal/service/relay"
+	"github.com/yunloli/aiferry/internal/service/user"
 )
 
 type Controller struct {
@@ -54,6 +55,10 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 			return
 		}
 		if err = c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, endpoint, body, key); err != nil {
+			if user.IsInsufficientBalance(err) {
+				writeError(r, http.StatusPaymentRequired, "insufficient_balance", err.Error())
+				return
+			}
 			writeError(r, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
 		}

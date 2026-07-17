@@ -73,7 +73,13 @@ func (s *Service) saveSyncedPriceRules(ctx context.Context, endpoint string, rul
 		}
 		return nil
 	})
-	return count, err
+	if err != nil {
+		return 0, err
+	}
+	if err = s.prices.Load(ctx); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func syncedRulesFromJSON(body []byte, config channeltype.PricingConfig) ([]syncedRule, error) {

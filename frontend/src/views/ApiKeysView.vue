@@ -3,29 +3,35 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Copy, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { APIKey, ChannelModel, CreatedAPIKey } from '../api/types'
+import type { APIKey, CreatedAPIKey, PublicModel } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
+import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../lib/format'
 import TableActionButton from '../components/TableActionButton.vue'
 
 const store = useAppStore()
+const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
 const dialogOpen = ref(false)
 const editing = ref<APIKey>()
 const created = ref<CreatedAPIKey>()
-const models = ref<ChannelModel[]>([])
+const models = ref<string[]>([])
 const form = reactive<{ name: string; status: number; expiresAt?: Date; spendLimit?: number; allowedModels: string[]; channelGroupIds: number[] }>({ name: '', status: 1, expiresAt: undefined, spendLimit: undefined, allowedModels: [], channelGroupIds: [] })
-const selectableModels = computed(() => [...new Set(models.value.filter((item) => item.enabled === 1).map((item) => item.publicName))].sort())
+const isAdmin = computed(() => auth.user?.isAdmin === true)
+const selectableModels = computed(() => [...new Set(models.value)].sort())
 
 async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    await Promise.all([store.loadAPIKeys(), store.loadChannelGroups(), store.loadChannels()])
-    models.value = await apiGet<ChannelModel[]>('/models').catch(() => [])
+    const modelPromise = apiGet<PublicModel[]>('/public-models')
+    const support = [store.loadAPIKeys()]
+    if (isAdmin.value) support.push(store.loadChannelGroups())
+    await Promise.all([modelPromise, ...support])
+    models.value = (await modelPromise).map((item) => item.publicName)
   } catch (error) {
     loadError.value = (error as Error).message
     showError(loadError.value, '加载访问密钥失败')
@@ -119,7 +125,7 @@ onMounted(load)
         <el-form-item v-if="editing" label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item>
         <div class="form-grid"><el-form-item label="过期时间"><el-date-picker v-model="form.expiresAt" type="datetime" clearable placeholder="永不过期" style="width: 100%" /></el-form-item><el-form-item label="总可用费用"><el-input-number v-model="form.spendLimit" :min="0" :precision="6" :controls="false" placeholder="不限额" style="width: 100%" /></el-form-item></div>
         <el-form-item label="可用大模型"><el-select v-model="form.allowedModels" multiple filterable clearable collapse-tags collapse-tags-tooltip placeholder="不选择表示可用全部已启用模型"><el-option v-for="model in selectableModels" :key="model" :label="model" :value="model" /></el-select></el-form-item>
-        <el-form-item label="可用渠道分组"><el-select v-model="form.channelGroupIds" multiple filterable clearable collapse-tags collapse-tags-tooltip placeholder="不选择表示可用全部渠道分组"><el-option v-for="group in store.channelGroups.filter(item => item.status === 1)" :key="group.id" :label="`${group.name} (${group.code})`" :value="group.id" /></el-select></el-form-item>
+        <el-form-item v-if="isAdmin" label="可用渠道分组"><el-select v-model="form.channelGroupIds" multiple filterable clearable collapse-tags collapse-tags-tooltip placeholder="不选择表示可用全部渠道分组"><el-option v-for="group in store.channelGroups.filter(item => item.status === 1)" :key="group.id" :label="`${group.name} (${group.code})`" :value="group.id" /></el-select></el-form-item>
       </el-form>
       <template #footer><el-button v-if="created" type="primary" @click="dialogOpen = false">完成</el-button><template v-else><el-button @click="dialogOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ editing ? '保存密钥' : '创建密钥' }}</el-button></template></template>
     </el-dialog>

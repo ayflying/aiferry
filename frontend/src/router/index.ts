@@ -8,9 +8,9 @@ const router = createRouter({
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', public: true } },
     { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '仪表盘', admin: true } },
     { path: '/channels', name: 'channels', component: () => import('../views/ChannelsView.vue'), meta: { title: '渠道', admin: true } },
-    { path: '/models', name: 'models', component: () => import('../views/ModelsView.vue'), meta: { title: '模型与价格', admin: true } },
-    { path: '/api-keys', name: 'api-keys', component: () => import('../views/ApiKeysView.vue'), meta: { title: '访问密钥', admin: true } },
-    { path: '/usage', name: 'usage', component: () => import('../views/UsageView.vue'), meta: { title: '用量', admin: true } },
+    { path: '/models', name: 'models', component: () => import('../views/ModelsView.vue'), meta: { title: '模型与价格' } },
+    { path: '/api-keys', name: 'api-keys', component: () => import('../views/ApiKeysView.vue'), meta: { title: '访问密钥' } },
+    { path: '/usage', name: 'usage', component: () => import('../views/UsageView.vue'), meta: { title: '用量' } },
     { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: '系统设置', admin: true } },
     { path: '/users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: '用户管理', admin: true } },
     { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: '个人中心' } },
@@ -29,7 +29,7 @@ router.beforeEach(async (to) => {
   }
   try {
     if (await auth.ensureUser()) {
-      if (to.meta.admin && auth.user?.role !== 'admin') return { name: 'profile' }
+      if (to.meta.admin && !auth.user?.isAdmin) return { name: 'profile' }
       return true
     }
   } catch {

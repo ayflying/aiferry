@@ -209,7 +209,10 @@ func (s *Service) UpdateModel(ctx context.Context, id uint64, input adminapi.Mod
 	if err != nil {
 		return err
 	}
-	return s.invalidateRoutes(ctx)
+	if err = s.invalidateRoutes(ctx); err != nil {
+		return err
+	}
+	return s.prices.Load(ctx)
 }
 
 func (s *Service) UpdatePublicModelPrice(ctx context.Context, id uint64, input adminapi.ModelPriceInput) error {
@@ -217,7 +220,10 @@ func (s *Service) UpdatePublicModelPrice(ctx context.Context, id uint64, input a
 	if err != nil {
 		return err
 	}
-	return s.updatePublicModelPrice(ctx, modelName, input)
+	if err = s.updatePublicModelPrice(ctx, modelName, input); err != nil {
+		return err
+	}
+	return s.prices.Load(ctx)
 }
 
 func normalizeModelNames(values []string) []string {

@@ -27,13 +27,30 @@ type Controller struct {
 	settings *system.Service
 	usage    *usage.Service
 	users    *user.Service
+	auth     *auth.Service
 }
 
-func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service, userSvc *user.Service) *Controller {
-	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc, users: userSvc}
+func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service, userSvc *user.Service, authSvc *auth.Service) *Controller {
+	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc, users: userSvc, auth: authSvc}
 }
 
 func (c *Controller) Register(group *ghttp.RouterGroup) {
+	// Logged-in users can view public pricing and manage only their own keys and usage.
+	group.GET("/public-models", c.listPublicModels)
+	group.GET("/models/{id}/price-rules", c.listPriceRules)
+	group.GET("/api-keys", c.listAPIKeys)
+	group.POST("/api-keys", c.createAPIKey)
+	group.PUT("/api-keys/{id}", c.updateAPIKey)
+	group.DELETE("/api-keys/{id}", c.deleteAPIKey)
+	group.GET("/usage", c.listUsage)
+
+	group.Group("", func(admin *ghttp.RouterGroup) {
+		admin.Middleware(c.auth.RequireCurrentAdmin)
+		c.registerAdmin(admin)
+	})
+}
+
+func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.GET("/channels", c.listChannels)
 	group.POST("/channels", c.createChannel)
 	group.PUT("/channels/{id}", c.updateChannel)
@@ -53,19 +70,12 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
 	c.registerPriceRoutes(group)
 	group.GET("/models", c.listModels)
-	group.GET("/public-models", c.listPublicModels)
 	group.PUT("/models/{id}", c.updateModel)
-	group.GET("/models/{id}/price-rules", c.listPriceRules)
 	group.POST("/models/{id}/price-rules", c.createPriceRule)
 	group.PUT("/price-rules/{id}", c.updatePriceRule)
 	group.DELETE("/price-rules/{id}", c.deletePriceRule)
 	group.POST("/models/test", c.testModel)
-	group.GET("/api-keys", c.listAPIKeys)
-	group.POST("/api-keys", c.createAPIKey)
-	group.PUT("/api-keys/{id}", c.updateAPIKey)
-	group.DELETE("/api-keys/{id}", c.deleteAPIKey)
 	group.GET("/dashboard", c.dashboard)
-	group.GET("/usage", c.listUsage)
 	group.GET("/users", c.listUsers)
 	group.PUT("/users/{id}/balance", c.updateUserBalance)
 	group.DELETE("/users/{id}", c.deleteUser)
@@ -269,6 +279,16 @@ func (c *Controller) dashboard(r *ghttp.Request) {
 }
 
 func (c *Controller) listUsage(r *ghttp.Request) {
+	current, ok := auth.CurrentUser(r.Context())
+	if !ok {
+		respond(r, nil, auth.ErrUnauthorized)
+		return
+	}
+	userID := r.GetQuery("userId").Uint64()
+	isAdmin := c.auth.IsAdmin(current)
+	if !isAdmin {
+		userID = current.Id
+	}
 	data, err := c.usage.List(
 		r.Context(),
 		r.GetQuery("page", 1).Int(),
@@ -276,7 +296,13 @@ func (c *Controller) listUsage(r *ghttp.Request) {
 		r.GetQuery("model").String(),
 		r.GetQuery("channelId").Uint64(),
 		r.GetQuery("apiKeyId").Uint64(),
+		userID,
 	)
+	if !isAdmin {
+		for index := range data.Items {
+			data.Items[index].ChannelName = ""
+		}
+	}
 	respond(r, data, err)
 }
 

@@ -12,9 +12,10 @@ export interface AuthConfig {
 
 export interface AuthUser {
 	id: number
-	name: string
-	role: string
-	avatarUrl: string
+  name: string
+  role: string
+  isAdmin: boolean
+  avatarUrl: string
 	groups: string[]
 }
 
@@ -335,6 +336,8 @@ export interface Dashboard {
 export interface UsageLog {
   id: number
   requestId: string
+  userId: number
+  userName: string
   apiKeyName: string
   channelName: string
   endpoint: string

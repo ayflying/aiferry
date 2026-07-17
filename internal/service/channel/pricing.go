@@ -107,7 +107,13 @@ func (s *Service) CreatePriceRule(ctx context.Context, modelID uint64, input adm
 		ChannelModelId: modelID, ModelName: modelName, Name: strings.TrimSpace(input.Name), Source: input.Source, SourceRef: strings.TrimSpace(input.SourceRef), Priority: input.Priority,
 		Currency: strings.ToUpper(strings.TrimSpace(input.Currency)), ConditionsJson: string(conditions), RatesJson: string(input.Rates), Status: boolStatus(input.Status),
 	}).InsertAndGetId()
-	return uint64(created), gerror.Wrap(err, "create model price rule")
+	if err != nil {
+		return 0, gerror.Wrap(err, "create model price rule")
+	}
+	if err = s.prices.Load(ctx); err != nil {
+		return 0, err
+	}
+	return uint64(created), nil
 }
 
 func (s *Service) UpdatePriceRule(ctx context.Context, id uint64, input adminapi.PriceRuleInput) error {
@@ -122,7 +128,7 @@ func (s *Service) UpdatePriceRule(ctx context.Context, id uint64, input adminapi
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return gerror.New("price rule not found")
 	}
-	return nil
+	return s.prices.Load(ctx)
 }
 
 func (s *Service) DeletePriceRule(ctx context.Context, id uint64) error {
@@ -133,7 +139,7 @@ func (s *Service) DeletePriceRule(ctx context.Context, id uint64) error {
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return gerror.New("price rule not found")
 	}
-	return nil
+	return s.prices.Load(ctx)
 }
 
 func (s *Service) publicModelName(ctx context.Context, modelID uint64) (string, error) {
