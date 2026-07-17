@@ -44,7 +44,7 @@ function openCreate() {
 function openEdit(item: APIKey) {
   editing.value = item
   created.value = undefined
-  Object.assign(form, { name: item.name, status: item.status, expiresAt: item.expiresAt ? new Date(item.expiresAt) : undefined, spendLimit: item.spendLimit, allowedModels: [...item.allowedModels], channelGroupIds: [...item.channelGroupIds] })
+  Object.assign(form, { name: item.name, status: item.status, expiresAt: item.expiresAt ? new Date(item.expiresAt) : undefined, spendLimit: item.spendLimit, allowedModels: [...(item.allowedModels ?? [])], channelGroupIds: [...(item.channelGroupIds ?? [])] })
   dialogOpen.value = true
 }
 
@@ -99,7 +99,7 @@ onMounted(load)
         <el-table-column label="名称" min-width="170"><template #default="{ row }"><div class="key-name"><span class="key-icon"><KeyRound :size="15" /></span><strong>{{ row.name }}</strong></div></template></el-table-column>
         <el-table-column label="密钥前缀" min-width="140"><template #default="{ row }"><span class="mono">{{ row.keyPrefix }}••••</span></template></el-table-column>
         <el-table-column label="额度" min-width="150"><template #default="{ row }"><span v-if="row.spendLimit === undefined" class="muted">不限额</span><div v-else class="amount-cell"><strong>{{ row.availableAmount?.toFixed(6) }}</strong><small>可用 / 已用 {{ row.spentAmount.toFixed(6) }}</small></div></template></el-table-column>
-        <el-table-column label="权限" min-width="150"><template #default="{ row }"><span class="muted">模型 {{ row.allowedModels.length || '全部' }} · 分组 {{ row.channelGroupIds.length || '全部' }}</span></template></el-table-column>
+        <el-table-column label="权限" min-width="150"><template #default="{ row }"><span class="muted">模型 {{ row.allowedModels?.length || '全部' }} · 分组 {{ row.channelGroupIds?.length || '全部' }}</span></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
         <el-table-column label="过期时间" min-width="160"><template #default="{ row }">{{ row.expiresAt ? formatTime(row.expiresAt) : '永不过期' }}</template></el-table-column>
         <el-table-column label="最后使用" min-width="160"><template #default="{ row }">{{ formatTime(row.lastUsedAt) }}</template></el-table-column>

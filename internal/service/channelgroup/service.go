@@ -109,7 +109,7 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 }
 
 func (s *Service) ChannelIDs(ctx context.Context, channelID uint64) ([]uint64, error) {
-	var ids []uint64
+	ids := make([]uint64, 0)
 	err := dao.ChannelGroupMembers.Ctx(ctx).Fields(dao.ChannelGroupMembers.Columns().ChannelGroupId).Where(dao.ChannelGroupMembers.Columns().ChannelId, channelID).Scan(&ids)
 	return ids, gerror.Wrap(err, "list channel group memberships")
 }

@@ -314,13 +314,13 @@ func (s *Service) populateAuthPolicy(ctx context.Context, key *AuthKey) error {
 }
 
 func listModels(ctx context.Context, keyID uint64) ([]string, error) {
-	var models []string
+	models := make([]string, 0)
 	err := dao.ApiKeyModels.Ctx(ctx).Fields(dao.ApiKeyModels.Columns().ModelName).Where(dao.ApiKeyModels.Columns().ApiKeyId, keyID).OrderAsc(dao.ApiKeyModels.Columns().ModelName).Scan(&models)
 	return models, gerror.Wrap(err, "list key model policy")
 }
 
 func listGroupIDs(ctx context.Context, keyID uint64) ([]uint64, error) {
-	var ids []uint64
+	ids := make([]uint64, 0)
 	err := dao.ApiKeyChannelGroups.Ctx(ctx).Fields(dao.ApiKeyChannelGroups.Columns().ChannelGroupId).Where(dao.ApiKeyChannelGroups.Columns().ApiKeyId, keyID).OrderAsc(dao.ApiKeyChannelGroups.Columns().ChannelGroupId).Scan(&ids)
 	return ids, gerror.Wrap(err, "list key group policy")
 }
