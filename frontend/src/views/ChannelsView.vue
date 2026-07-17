@@ -3,11 +3,12 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Braces, Coins, FlaskConical, Network, Pencil, Plus, RefreshCw, ScanSearch, Tags, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { Channel, ChannelGroup, ChannelInput, ChannelModel, ChannelType, ChannelTypeConfig, DiscoveredModel, ModelTestResult } from '../api/types'
+import type { Channel, ChannelGroup, ChannelInput, ChannelType, ChannelTypeConfig, DiscoveredModel } from '../api/types'
+import ChannelModelTestDialog from '../components/ChannelModelTestDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { formatCost, formatLatency, formatTime } from '../lib/format'
-import { enabledChannelModels, sortDiscoveredModels } from '../lib/models'
+import { sortDiscoveredModels } from '../lib/models'
 
 const store = useAppStore()
 const activeTab = ref('channels')
@@ -24,12 +25,7 @@ const discoveryKeyword = ref('')
 const selectedModelNames = ref<string[]>([])
 const discoveryError = ref('')
 const testOpen = ref(false)
-const testLoading = ref(false)
 const testChannel = ref<Channel>()
-const testModels = ref<ChannelModel[]>([])
-const testModelId = ref<number>()
-const testEndpoint = ref<ModelTestResult['endpoint']>('chat')
-const testResult = ref<ModelTestResult>()
 const typeDrawerOpen = ref(false)
 const typeSaving = ref(false)
 const editingType = ref<ChannelType>()
@@ -154,29 +150,7 @@ async function saveModelSelection() {
 
 async function openTest(channel: Channel) {
   testChannel.value = channel
-  testModels.value = []
-  testModelId.value = undefined
-  testEndpoint.value = 'chat'
-  testResult.value = undefined
   testOpen.value = true
-  testLoading.value = true
-  try {
-    const models = await apiGet<ChannelModel[]>(`/channels/${channel.id}/models`)
-    testModels.value = enabledChannelModels(models)
-    testModelId.value = testModels.value[0]?.id
-  } catch (error) { showError(error, '加载测试模型失败') } finally { testLoading.value = false }
-}
-
-async function testModel() {
-  if (!testModelId.value) return
-  testLoading.value = true
-  testResult.value = undefined
-  try {
-    testResult.value = await apiPost<ModelTestResult>('/models/test', { modelId: testModelId.value, endpoint: testEndpoint.value })
-    if (testResult.value.success) ElMessage.success('模型测试通过')
-    else showError(testResult.value.message || '模型测试失败', '模型测试失败')
-    await load()
-  } catch (error) { showError(error, '模型测试失败') } finally { testLoading.value = false }
 }
 
 async function queryCost(channel: Channel) {
@@ -350,7 +324,7 @@ onMounted(load)
 
     <el-dialog v-model="discoveryOpen" :title="`选择模型 · ${discoveryChannel?.name || ''}`" width="min(640px, 94vw)"><div v-loading="discovering" class="model-selection"><template v-if="discoveryError"><div class="discovery-error" role="alert"><strong>模型发现失败</strong><span>{{ discoveryError }}</span><el-button :icon="RefreshCw" @click="discoveryChannel && discover(discoveryChannel)">重新尝试</el-button></div></template><template v-else><div class="selection-toolbar"><el-input v-model="discoveryKeyword" clearable placeholder="搜索模型" /><el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消当前结果' : '选择当前结果' }}</el-button></div><div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div><el-checkbox-group v-if="visibleDiscoveredModels.length" v-model="selectedModelNames" class="model-check-list"><el-checkbox v-for="item in visibleDiscoveredModels" :key="item.name" :value="item.name"><code>{{ item.name }}</code></el-checkbox></el-checkbox-group><div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div></template></div><template #footer><el-button @click="discoveryOpen = false">取消</el-button><el-button type="primary" :loading="applyingSelection" :disabled="discovering || Boolean(discoveryError)" @click="saveModelSelection">确认选择</el-button></template></el-dialog>
 
-    <el-dialog v-model="testOpen" :title="`渠道测试 · ${testChannel?.name || ''}`" width="min(540px, 94vw)"><div v-loading="testLoading" class="test-dialog"><template v-if="testModels.length"><el-form label-position="top"><el-form-item label="已启用模型"><el-select v-model="testModelId" filterable><el-option v-for="model in testModels" :key="model.id" :label="model.publicName" :value="model.id"><span class="model-option"><strong>{{ model.publicName }}</strong><small>{{ model.upstreamName }}</small></span></el-option></el-select></el-form-item><el-form-item label="接口类型"><el-segmented v-model="testEndpoint" :options="[{ label: 'Chat', value: 'chat' }, { label: 'Responses', value: 'responses' }, { label: 'Embeddings', value: 'embeddings' }]" /></el-form-item></el-form><div v-if="testResult" class="test-result" :class="testResult.success ? 'success' : 'failed'"><strong>{{ testResult.success ? '测试通过' : '测试失败' }}</strong><span>HTTP {{ testResult.httpStatus || '—' }} · {{ testResult.latencyMs }} ms · 输入 {{ testResult.inputTokens }} · 输出 {{ testResult.outputTokens }}</span><p>{{ testResult.message }}</p></div></template><div v-else-if="!testLoading" class="selection-empty">当前渠道没有已选择的模型</div></div><template #footer><el-button @click="testOpen = false">关闭</el-button><el-button type="primary" :loading="testLoading" :disabled="!testModelId" @click="testModel">开始测试</el-button></template></el-dialog>
+    <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="load" />
 
     <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" placeholder="https://api.openai.com/v1" /></el-form-item><el-form-item label="推理密钥"><el-input v-model="form.apiKey" type="password" show-password :placeholder="editingId ? '留空则保持不变' : 'sk-... 或上游密钥'" autocomplete="new-password" /></el-form-item><el-form-item v-if="usesManagementKey" label="上游管理密钥（可选）"><el-input v-model="form.managementKey" type="password" show-password :placeholder="editingId ? '留空则清除；不修改请勿聚焦' : '用于渠道类型声明的管理接口'" autocomplete="new-password" /></el-form-item><el-form-item label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="优先级"><el-input-number v-model="form.priority" :min="-999" :max="999" controls-position="right" /></el-form-item><el-form-item label="权重"><el-input-number v-model="form.weight" :min="1" :max="1000" controls-position="right" /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
 

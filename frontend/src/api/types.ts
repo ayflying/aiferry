@@ -219,6 +219,7 @@ export interface DiscoveredModel {
 export interface ModelTestResult {
   success: boolean
   endpoint: 'chat' | 'responses' | 'embeddings'
+  stream: boolean
   model: string
   latencyMs: number
   httpStatus: number

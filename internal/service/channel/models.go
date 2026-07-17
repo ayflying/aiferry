@@ -147,6 +147,25 @@ func (s *Service) ListModels(ctx context.Context, channelID uint64) ([]ModelView
 	return rows, gerror.Wrap(err, "list channel models")
 }
 
+func (s *Service) DeleteFailedModels(ctx context.Context, channelID uint64) (int, error) {
+	if _, err := s.Get(ctx, channelID); err != nil {
+		return 0, err
+	}
+	result, err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{
+		ChannelId:      channelID,
+		Enabled:        1,
+		LastTestStatus: "failed",
+	}).Delete()
+	if err != nil {
+		return 0, gerror.Wrap(err, "delete failed channel models")
+	}
+	if err = s.invalidateRoutes(ctx); err != nil {
+		return 0, err
+	}
+	deleted, _ := result.RowsAffected()
+	return int(deleted), nil
+}
+
 func (s *Service) ListPublicModels(ctx context.Context) ([]PublicModelView, error) {
 	rows := make([]PublicModelView, 0)
 	err := dao.ChannelModels.Ctx(ctx).As("m").

@@ -17,6 +17,7 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
+	"github.com/yunloli/aiferry/internal/service/channeltype"
 	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
@@ -24,6 +25,7 @@ import (
 type TestResult struct {
 	Success      bool   `json:"success"`
 	Endpoint     string `json:"endpoint"`
+	Stream       bool   `json:"stream"`
 	Model        string `json:"model"`
 	LatencyMs    int64  `json:"latencyMs"`
 	HTTPStatus   int    `json:"httpStatus"`
@@ -48,45 +50,61 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 	if err != nil {
 		return TestResult{}, err
 	}
-	path, payload := testPayload(input.Endpoint, model.UpstreamName)
+	endpoints := testEndpoints(input.Endpoint)
+	var result TestResult
+	for index, endpoint := range endpoints {
+		current, path, tokens, requestErr := s.testModelEndpoint(ctx, channel, typeConfig, model, endpoint, input.Stream)
+		if requestErr != nil {
+			return TestResult{}, requestErr
+		}
+		result = current
+		s.recordTestUsage(ctx, channel, model, path, &result, tokens)
+		if result.Success || index == len(endpoints)-1 || !canTryAlternativeEndpoint(result) {
+			break
+		}
+	}
+	if result.Success {
+		_ = s.app.Redis.Del(ctx, failureKey(channel.Id), cooldownKey(channel.Id)).Err()
+		_, _ = s.resilience.RecoverIfAllowed(ctx, channel.Id)
+	} else {
+		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Status: result.HTTPStatus, Latency: time.Duration(result.LatencyMs) * time.Millisecond, Message: result.Message})
+	}
+	s.saveTestResult(ctx, channel.Id, model.Id, result.Endpoint, result)
+	return result, nil
+}
+
+func (s *Service) testModelEndpoint(ctx context.Context, channel entity.Channels, typeConfig channeltype.Config, model entity.ChannelModels, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
+	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream)
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, channel.BaseUrl+path, bytes.NewReader(body))
 	if err != nil {
-		return TestResult{}, gerror.Wrap(err, "create model test request")
+		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if err = s.setConfiguredHeaders(ctx, req, channel, typeConfig.Models.AuthType, typeConfig.Models.HeaderName, typeConfig.Models.HeaderPrefix); err != nil {
-		return TestResult{}, err
+		return TestResult{}, path, usage.TokenUsage{}, err
 	}
 	startedAt := time.Now()
 	resp, requestErr := s.app.HTTP.Do(req)
 	latency := time.Since(startedAt).Milliseconds()
-	result := TestResult{Endpoint: input.Endpoint, Model: model.PublicName, LatencyMs: latency}
+	result := TestResult{Endpoint: endpoint, Stream: streamed, Model: model.PublicName, LatencyMs: latency}
 	if requestErr != nil {
 		result.Message = requestErr.Error()
-		s.recordTestUsage(ctx, channel, model, path, &result, usage.TokenUsage{})
-		s.saveTestResult(ctx, channel.Id, model.Id, input.Endpoint, result)
-		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Latency: time.Duration(latency) * time.Millisecond, Message: result.Message})
-		return result, nil
+		return result, path, usage.TokenUsage{}, nil
 	}
 	defer resp.Body.Close()
 	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	result.HTTPStatus = resp.StatusCode
 	result.Success = resp.StatusCode >= 200 && resp.StatusCode < 300
-	tokens := usage.ParseJSONUsage(responseBody)
+	tokens := parseTestUsage(responseBody, streamed)
 	result.InputTokens = int64(testTokenValue(tokens.Input))
 	result.OutputTokens = int64(testTokenValue(tokens.Output))
 	if result.Success {
 		result.Message = "模型响应正常"
-		_ = s.app.Redis.Del(ctx, failureKey(channel.Id), cooldownKey(channel.Id)).Err()
-		_, _ = s.resilience.RecoverIfAllowed(ctx, channel.Id)
 	} else {
 		result.Message = upstreamError(responseBody, resp.Status)
-		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Status: result.HTTPStatus, Latency: time.Duration(latency) * time.Millisecond, Message: result.Message})
 	}
-	s.recordTestUsage(ctx, channel, model, path, &result, tokens)
-	s.saveTestResult(ctx, channel.Id, model.Id, input.Endpoint, result)
-	return result, nil
+	return result, path, tokens, nil
 }
 
 func (s *Service) recordTestUsage(ctx context.Context, channel entity.Channels, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage) {
@@ -101,6 +119,7 @@ func (s *Service) recordTestUsage(ctx context.Context, channel entity.Channels, 
 		RequestedModel: model.PublicName,
 		UpstreamModel:  model.UpstreamName,
 		HTTPStatus:     result.HTTPStatus,
+		Stream:         result.Stream,
 		Tokens:         tokens,
 		EstimatedCost:  usage.EstimatePublicModelCost(ctx, model.PublicName, path, tokens),
 		DurationMs:     result.LatencyMs,
@@ -112,24 +131,65 @@ func (s *Service) recordTestUsage(ctx context.Context, channel entity.Channels, 
 	}
 }
 
-func testPayload(endpoint, model string) (string, any) {
+func testEndpoints(endpoint string) []string {
+	if endpoint == "auto" {
+		return []string{"chat", "responses", "embeddings"}
+	}
+	return []string{endpoint}
+}
+
+func canTryAlternativeEndpoint(result TestResult) bool {
+	switch result.HTTPStatus {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return true
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		message := strings.ToLower(result.Message)
+		for _, marker := range []string{"endpoint", "not support", "unsupported", "not compatible", "only supports", "chat completion", "responses api", "embedding model"} {
+			if strings.Contains(message, marker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func testPayload(endpoint, model string, stream bool) (string, any, bool) {
 	switch endpoint {
 	case "responses":
-		return "/responses", map[string]any{
+		payload := map[string]any{
 			"model":             model,
 			"input":             "Reply with exactly OK.",
 			"max_output_tokens": 16,
 		}
+		if stream {
+			payload["stream"] = true
+		}
+		return "/responses", payload, stream
 	case "embeddings":
-		return "/embeddings", map[string]any{"model": model, "input": "AiFerry model check"}
+		return "/embeddings", map[string]any{"model": model, "input": "AiFerry model check"}, false
 	default:
-		return "/chat/completions", map[string]any{
+		payload := map[string]any{
 			"model":                 model,
 			"messages":              []map[string]string{{"role": "user", "content": "Reply with exactly OK."}},
 			"max_completion_tokens": 16,
-			"stream":                false,
+			"stream":                stream,
 		}
+		if stream {
+			payload["stream_options"] = map[string]bool{"include_usage": true}
+		}
+		return "/chat/completions", payload, stream
 	}
+}
+
+func parseTestUsage(body []byte, stream bool) usage.TokenUsage {
+	tokens := usage.ParseJSONUsage(body)
+	if !stream {
+		return tokens
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		usage.ParseSSEUsage([]byte(line), &tokens)
+	}
+	return tokens
 }
 
 func (s *Service) saveTestResult(ctx context.Context, channelID, modelID uint64, endpoint string, result TestResult) {

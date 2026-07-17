@@ -90,7 +90,8 @@ type ModelSelectionInput struct {
 
 type ModelTestInput struct {
 	ModelID  uint64 `json:"modelId" v:"required|min:1"`
-	Endpoint string `json:"endpoint" v:"required|in:chat,responses,embeddings"`
+	Endpoint string `json:"endpoint" v:"required|in:auto,chat,responses,embeddings"`
+	Stream   bool   `json:"stream"`
 }
 
 type APIKeyInput struct {
