@@ -21,6 +21,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/app"
 	"github.com/yunloli/aiferry/internal/service/channelgroup"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
+	"github.com/yunloli/aiferry/internal/service/system"
 )
 
 const (
@@ -31,37 +32,42 @@ const (
 )
 
 type Service struct {
-	app    *app.Service
-	types  *channeltype.Service
-	groups *channelgroup.Service
+	app        *app.Service
+	types      *channeltype.Service
+	groups     *channelgroup.Service
+	resilience *system.Service
 }
 
 type View struct {
-	Id                uint64     `json:"id"`
-	Name              string     `json:"name"`
-	Type              string     `json:"type"`
-	TypeName          string     `json:"typeName"`
-	BaseURL           string     `json:"baseUrl"`
-	HasAPIKey         bool       `json:"hasApiKey"`
-	HasManagementKey  bool       `json:"hasManagementKey"`
-	OrganizationID    string     `json:"organizationId"`
-	ProjectID         string     `json:"projectId"`
-	Status            int        `json:"status"`
-	Priority          int        `json:"priority"`
-	Weight            uint       `json:"weight"`
-	CostQueryMode     string     `json:"costQueryMode"`
-	EnabledModelCount int        `json:"enabledModelCount"`
-	DiscoveredModels  int        `json:"discoveredModels"`
-	LastTestStatus    string     `json:"lastTestStatus"`
-	LastTestLatencyMs uint       `json:"lastTestLatencyMs"`
-	LastTestError     string     `json:"lastTestError"`
-	LastTestAt        *time.Time `json:"lastTestAt"`
-	LastCostUsed      *float64   `json:"lastCostUsed"`
-	LastCostRemaining *float64   `json:"lastCostRemaining"`
-	LastCostCurrency  string     `json:"lastCostCurrency"`
-	LastCostAt        *time.Time `json:"lastCostAt"`
-	GroupIDs          []uint64   `json:"groupIds"`
-	CreatedAt         time.Time  `json:"createdAt"`
+	Id                     uint64     `json:"id"`
+	Name                   string     `json:"name"`
+	Type                   string     `json:"type"`
+	TypeName               string     `json:"typeName"`
+	BaseURL                string     `json:"baseUrl"`
+	HasAPIKey              bool       `json:"hasApiKey"`
+	HasManagementKey       bool       `json:"hasManagementKey"`
+	OrganizationID         string     `json:"organizationId"`
+	ProjectID              string     `json:"projectId"`
+	Status                 int        `json:"status"`
+	AutoDisabled           bool       `json:"autoDisabled"`
+	AutoDisabledAt         *time.Time `json:"autoDisabledAt"`
+	AutoDisabledReason     string     `json:"autoDisabledReason"`
+	AutoDisabledStatusCode *uint      `json:"autoDisabledStatusCode"`
+	Priority               int        `json:"priority"`
+	Weight                 uint       `json:"weight"`
+	CostQueryMode          string     `json:"costQueryMode"`
+	EnabledModelCount      int        `json:"enabledModelCount"`
+	DiscoveredModels       int        `json:"discoveredModels"`
+	LastTestStatus         string     `json:"lastTestStatus"`
+	LastTestLatencyMs      uint       `json:"lastTestLatencyMs"`
+	LastTestError          string     `json:"lastTestError"`
+	LastTestAt             *time.Time `json:"lastTestAt"`
+	LastCostUsed           *float64   `json:"lastCostUsed"`
+	LastCostRemaining      *float64   `json:"lastCostRemaining"`
+	LastCostCurrency       string     `json:"lastCostCurrency"`
+	LastCostAt             *time.Time `json:"lastCostAt"`
+	GroupIDs               []uint64   `json:"groupIds"`
+	CreatedAt              time.Time  `json:"createdAt"`
 }
 
 type ModelView struct {
@@ -88,8 +94,8 @@ type DiscoveredModel struct {
 	Selected bool   `json:"selected"`
 }
 
-func New(appSvc *app.Service, typeSvc *channeltype.Service, groupSvc *channelgroup.Service) *Service {
-	return &Service{app: appSvc, types: typeSvc, groups: groupSvc}
+func New(appSvc *app.Service, typeSvc *channeltype.Service, groupSvc *channelgroup.Service, resilienceSvc *system.Service) *Service {
+	return &Service{app: appSvc, types: typeSvc, groups: groupSvc, resilience: resilienceSvc}
 }
 
 func (s *Service) List(ctx context.Context) ([]View, error) {
@@ -201,16 +207,19 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 		return err
 	}
 	data := do.Channels{
-		Name:            strings.TrimSpace(input.Name),
-		Type:            typeRow.Code,
-		BaseUrl:         baseURL,
-		OrganizationId:  strings.TrimSpace(input.OrganizationID),
-		ProjectId:       strings.TrimSpace(input.ProjectID),
-		Status:          boolStatus(input.Status),
-		Priority:        input.Priority,
-		Weight:          normalizeWeight(input.Weight),
-		CostQueryMode:   typeConfig.Costs.Adapter,
-		CostQueryConfig: "{}",
+		Name:                   strings.TrimSpace(input.Name),
+		Type:                   typeRow.Code,
+		BaseUrl:                baseURL,
+		OrganizationId:         strings.TrimSpace(input.OrganizationID),
+		ProjectId:              strings.TrimSpace(input.ProjectID),
+		Status:                 boolStatus(input.Status),
+		AutoDisabledAt:         gdb.Raw("NULL"),
+		AutoDisabledReason:     gdb.Raw("NULL"),
+		AutoDisabledStatusCode: gdb.Raw("NULL"),
+		Priority:               input.Priority,
+		Weight:                 normalizeWeight(input.Weight),
+		CostQueryMode:          typeConfig.Costs.Adapter,
+		CostQueryConfig:        "{}",
 	}
 	if input.APIKey != nil && strings.TrimSpace(*input.APIKey) != "" {
 		data.ApiKeyCipher, err = s.app.Secrets.Encrypt(strings.TrimSpace(*input.APIKey))
@@ -510,6 +519,16 @@ func (s *Service) toView(row entity.Channels) View {
 		LastTestError:     row.LastTestError,
 		LastCostCurrency:  row.LastCostCurrency,
 		CreatedAt:         row.CreatedAt,
+	}
+	if !row.AutoDisabledAt.IsZero() {
+		value := row.AutoDisabledAt
+		view.AutoDisabled = true
+		view.AutoDisabledAt = &value
+		view.AutoDisabledReason = row.AutoDisabledReason
+		if row.AutoDisabledStatusCode > 0 {
+			statusCode := row.AutoDisabledStatusCode
+			view.AutoDisabledStatusCode = &statusCode
+		}
 	}
 	if !row.LastTestAt.IsZero() {
 		view.LastTestAt = &row.LastTestAt

@@ -375,11 +375,11 @@ func priceRuleView(row entity.ModelPriceRules) (PriceRuleView, error) {
 		return PriceRuleView{}, gerror.New("stored price rule has invalid JSON")
 	}
 	view := PriceRuleView{Id: row.Id, ChannelModelID: row.ChannelModelId, ModelName: row.ModelName, Name: row.Name, Source: row.Source, SourceRef: row.SourceRef, Priority: row.Priority, Currency: row.Currency, Conditions: conditions, Rates: rates, Status: row.Status}
-	if row.UpdatedAt != nil {
-		view.UpdatedAt = row.UpdatedAt.Time
+	if !row.UpdatedAt.IsZero() {
+		view.UpdatedAt = row.UpdatedAt
 	}
-	if row.SyncedAt != nil {
-		value := row.SyncedAt.Time
+	if !row.SyncedAt.IsZero() {
+		value := row.SyncedAt
 		view.SyncedAt = &value
 	}
 	return view, nil

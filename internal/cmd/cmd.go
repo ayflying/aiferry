@@ -20,6 +20,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channelgroup"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
 	"github.com/yunloli/aiferry/internal/service/relay"
+	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
@@ -43,13 +44,15 @@ var (
 				usageSvc        = usage.New()
 				channelGroupSvc = channelgroup.New()
 				channelTypeSvc  = channeltype.New()
-				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc)
-				relaySvc        = relay.New(appSvc, usageSvc)
-				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, apiKeySvc, usageSvc)
+				systemSvc       = system.New(appSvc)
+				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc)
+				relaySvc        = relay.New(appSvc, usageSvc, systemSvc)
+				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, apiKeySvc, systemSvc, usageSvc)
 				authCtrl        = authctrl.New(authSvc)
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)
 				s               = g.Server()
 			)
+			channelSvc.StartHealthChecks(ctx)
 			s.SetAddr(":8080")
 			s.SetServerRoot(cfg.WebRoot)
 			s.SetFileServerEnabled(true)

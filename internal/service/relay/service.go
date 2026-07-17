@@ -20,17 +20,20 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
+	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	"github.com/yunloli/aiferry/internal/service/app"
+	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
 const maxRequestBody = 16 << 20
 
 type Service struct {
-	app   *app.Service
-	usage *usage.Service
+	app        *app.Service
+	usage      *usage.Service
+	resilience *system.Service
 }
 
 type Candidate struct {
@@ -69,10 +72,11 @@ type attemptResult struct {
 	tokens       usage.TokenUsage
 	firstTokenMs *int64
 	errorMessage string
+	latency      time.Duration
 }
 
-func New(appSvc *app.Service, usageSvc *usage.Service) *Service {
-	return &Service{app: appSvc, usage: usageSvc}
+func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service) *Service {
+	return &Service{app: appSvc, usage: usageSvc, resilience: resilienceSvc}
 }
 
 func (s *Service) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
@@ -131,18 +135,28 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	}
 	requestID := newRequestID()
 	startedAt := time.Now()
-	maxAttempts := min(len(candidates), s.app.Config.MaxFailoverAttempts)
+	settings, settingsErr := s.resilience.Get(ctx)
+	if settingsErr != nil {
+		settings = system.DefaultResilienceSettings()
+	}
+	maxAttempts := min(len(candidates), settings.MaxFailoverAttempts)
 	var last attemptResult
 	for index := 0; index < maxAttempts; index++ {
 		candidate := candidates[index]
-		result, handled, attemptErr := s.attempt(ctx, writer, incomingHeaders, endpoint, body, candidate, isStream, startedAt)
+		attemptStartedAt := time.Now()
+		result, handled, attemptErr := s.attempt(ctx, writer, incomingHeaders, endpoint, body, candidate, isStream, startedAt, settings.RetryStatusCodes)
+		result.latency = time.Since(attemptStartedAt)
 		last = result
 		if attemptErr != nil {
 			last.errorMessage = attemptErr.Error()
+			s.maybeAutoDisable(ctx, settings, candidate, last)
 			s.markFailure(ctx, candidate.ChannelID)
 			if index+1 < maxAttempts {
 				continue
 			}
+			break
+		} else {
+			s.maybeAutoDisable(ctx, settings, candidate, result)
 		}
 		if handled {
 			if result.status >= 200 && result.status < 300 {
@@ -151,7 +165,7 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 			s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, index+1, startedAt, result)
 			return nil
 		}
-		if retryableStatus(result.status) && index+1 < maxAttempts {
+		if retryableStatusForRules(result.status, settings.RetryStatusCodes) && index+1 < maxAttempts {
 			s.markFailure(ctx, candidate.ChannelID)
 			continue
 		}
@@ -167,7 +181,7 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	return nil
 }
 
-func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time) (attemptResult, bool, error) {
+func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, retryStatusCodes string) (attemptResult, bool, error) {
 	body, err := sjson.SetBytes(originalBody, "model", candidate.UpstreamName)
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "map upstream model")
@@ -200,7 +214,7 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 		if readErr != nil {
 			return result, false, gerror.Wrap(readErr, "read upstream response")
 		}
-		if retryableStatus(resp.StatusCode) {
+		if retryableStatusForRules(resp.StatusCode, retryStatusCodes) {
 			result.errorMessage = upstreamError(responseBody, resp.Status)
 			return result, false, nil
 		}
@@ -464,6 +478,15 @@ func (s *Service) markSuccess(ctx context.Context, channelID uint64) {
 	_ = s.app.Redis.Del(ctx, failureKey(channelID), cooldownKey(channelID)).Err()
 }
 
+func (s *Service) maybeAutoDisable(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, candidate Candidate, result attemptResult) {
+	_, _ = s.resilience.DisableIfNeededWithSettings(ctx, settings, system.AutoDisableInput{
+		ChannelID: candidate.ChannelID,
+		Status:    result.status,
+		Latency:   result.latency,
+		Message:   result.errorMessage,
+	})
+}
+
 func (s *Service) writeBufferedResponse(writer http.ResponseWriter, status int, body []byte, headers http.Header) {
 	copyResponseHeaders(writer.Header(), headers)
 	writer.WriteHeader(status)
@@ -509,7 +532,11 @@ func optionalUint(body []byte, paths ...string) *uint64 {
 }
 
 func retryableStatus(status int) bool {
-	return status == 401 || status == 403 || status == 404 || status == 408 || status == 429 || status >= 500
+	return retryableStatusForRules(status, system.DefaultResilienceSettings().RetryStatusCodes)
+}
+
+func retryableStatusForRules(status int, rules string) bool {
+	return system.MatchesStatusCodeRules(rules, status)
 }
 
 func copyRequestHeaders(target, source http.Header) {

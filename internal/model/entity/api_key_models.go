@@ -10,7 +10,7 @@ import (
 
 // ApiKeyModels is the golang structure for table api_key_models.
 type ApiKeyModels struct {
-	ApiKeyId  uint64    `json:"apiKeyId"  orm:"api_key_id" ` //
-	ModelName string    `json:"modelName" orm:"model_name" ` //
-	CreatedAt time.Time `json:"createdAt" orm:"created_at" ` //
+	ApiKeyId  uint64    `json:"apiKeyId"  orm:"api_key_id" description:""` //
+	ModelName string    `json:"modelName" orm:"model_name" description:""` //
+	CreatedAt time.Time `json:"createdAt" orm:"created_at" description:""` //
 }

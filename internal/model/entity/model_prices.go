@@ -5,16 +5,16 @@
 package entity
 
 import (
-	"github.com/gogf/gf/v2/os/gtime"
+	"time"
 )
 
 // ModelPrices is the golang structure for table model_prices.
 type ModelPrices struct {
-	PublicName       string      `json:"publicName"       orm:"public_name"        ` //
-	InputPrice       float64     `json:"inputPrice"       orm:"input_price"        ` //
-	CachedInputPrice float64     `json:"cachedInputPrice" orm:"cached_input_price" ` //
-	OutputPrice      float64     `json:"outputPrice"      orm:"output_price"       ` //
-	CreatedAt        *gtime.Time `json:"createdAt"        orm:"created_at"         ` //
-	UpdatedAt        *gtime.Time `json:"updatedAt"        orm:"updated_at"         ` //
-	DeletedAt        *gtime.Time `json:"deletedAt"        orm:"deleted_at"         ` //
+	PublicName       string    `json:"publicName"       orm:"public_name"        description:""` //
+	InputPrice       float64   `json:"inputPrice"       orm:"input_price"        description:""` //
+	CachedInputPrice float64   `json:"cachedInputPrice" orm:"cached_input_price" description:""` //
+	OutputPrice      float64   `json:"outputPrice"      orm:"output_price"       description:""` //
+	CreatedAt        time.Time `json:"createdAt"        orm:"created_at"         description:""` //
+	UpdatedAt        time.Time `json:"updatedAt"        orm:"updated_at"         description:""` //
+	DeletedAt        time.Time `json:"deletedAt"        orm:"deleted_at"         description:""` //
 }

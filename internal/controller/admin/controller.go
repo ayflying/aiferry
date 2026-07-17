@@ -11,6 +11,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channel"
 	"github.com/yunloli/aiferry/internal/service/channelgroup"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
+	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
@@ -19,11 +20,12 @@ type Controller struct {
 	types    *channeltype.Service
 	groups   *channelgroup.Service
 	apiKeys  *apikey.Service
+	settings *system.Service
 	usage    *usage.Service
 }
 
-func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, apiKeySvc *apikey.Service, usageSvc *usage.Service) *Controller {
-	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, apiKeys: apiKeySvc, usage: usageSvc}
+func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service) *Controller {
+	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc}
 }
 
 func (c *Controller) Register(group *ghttp.RouterGroup) {
@@ -59,6 +61,8 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.GET("/dashboard", c.dashboard)
 	group.GET("/usage", c.listUsage)
 	group.GET("/system", c.systemInfo)
+	group.GET("/system/settings", c.getSystemSettings)
+	group.PUT("/system/settings", c.updateSystemSettings)
 }
 
 func (c *Controller) listChannelGroups(r *ghttp.Request) {
@@ -278,6 +282,20 @@ func (c *Controller) systemInfo(r *ghttp.Request) {
 		"cache":      "redis",
 		"apiVersion": "v1",
 	}, nil)
+}
+
+func (c *Controller) getSystemSettings(r *ghttp.Request) {
+	data, err := c.settings.Get(r.Context())
+	respond(r, data, err)
+}
+
+func (c *Controller) updateSystemSettings(r *ghttp.Request) {
+	var input adminapi.SystemResilienceSettingsInput
+	if !parse(r, &input) {
+		return
+	}
+	data, err := c.settings.Update(r.Context(), input)
+	respond(r, data, err)
 }
 
 func parse(r *ghttp.Request, target any) bool {

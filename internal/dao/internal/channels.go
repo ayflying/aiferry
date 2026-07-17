@@ -21,58 +21,64 @@ type ChannelsDao struct {
 
 // ChannelsColumns defines and stores column names for the table channels.
 type ChannelsColumns struct {
-	Id                  string //
-	Name                string //
-	Type                string //
-	BaseUrl             string //
-	ApiKeyCipher        string //
-	ManagementKeyCipher string //
-	OrganizationId      string //
-	ProjectId           string //
-	Status              string //
-	Priority            string //
-	Weight              string //
-	CostQueryMode       string //
-	CostQueryConfig     string //
-	LastTestStatus      string //
-	LastTestLatencyMs   string //
-	LastTestError       string //
-	LastTestAt          string //
-	LastCostUsed        string //
-	LastCostRemaining   string //
-	LastCostCurrency    string //
-	LastCostAt          string //
-	CreatedAt           string //
-	UpdatedAt           string //
-	DeletedAt           string //
+	Id                     string //
+	Name                   string //
+	Type                   string //
+	BaseUrl                string //
+	ApiKeyCipher           string //
+	ManagementKeyCipher    string //
+	OrganizationId         string //
+	ProjectId              string //
+	Status                 string //
+	AutoDisabledAt         string //
+	AutoDisabledReason     string //
+	AutoDisabledStatusCode string //
+	Priority               string //
+	Weight                 string //
+	CostQueryMode          string //
+	CostQueryConfig        string //
+	LastTestStatus         string //
+	LastTestLatencyMs      string //
+	LastTestError          string //
+	LastTestAt             string //
+	LastCostUsed           string //
+	LastCostRemaining      string //
+	LastCostCurrency       string //
+	LastCostAt             string //
+	CreatedAt              string //
+	UpdatedAt              string //
+	DeletedAt              string //
 }
 
 // channelsColumns holds the columns for the table channels.
 var channelsColumns = ChannelsColumns{
-	Id:                  "id",
-	Name:                "name",
-	Type:                "type",
-	BaseUrl:             "base_url",
-	ApiKeyCipher:        "api_key_cipher",
-	ManagementKeyCipher: "management_key_cipher",
-	OrganizationId:      "organization_id",
-	ProjectId:           "project_id",
-	Status:              "status",
-	Priority:            "priority",
-	Weight:              "weight",
-	CostQueryMode:       "cost_query_mode",
-	CostQueryConfig:     "cost_query_config",
-	LastTestStatus:      "last_test_status",
-	LastTestLatencyMs:   "last_test_latency_ms",
-	LastTestError:       "last_test_error",
-	LastTestAt:          "last_test_at",
-	LastCostUsed:        "last_cost_used",
-	LastCostRemaining:   "last_cost_remaining",
-	LastCostCurrency:    "last_cost_currency",
-	LastCostAt:          "last_cost_at",
-	CreatedAt:           "created_at",
-	UpdatedAt:           "updated_at",
-	DeletedAt:           "deleted_at",
+	Id:                     "id",
+	Name:                   "name",
+	Type:                   "type",
+	BaseUrl:                "base_url",
+	ApiKeyCipher:           "api_key_cipher",
+	ManagementKeyCipher:    "management_key_cipher",
+	OrganizationId:         "organization_id",
+	ProjectId:              "project_id",
+	Status:                 "status",
+	AutoDisabledAt:         "auto_disabled_at",
+	AutoDisabledReason:     "auto_disabled_reason",
+	AutoDisabledStatusCode: "auto_disabled_status_code",
+	Priority:               "priority",
+	Weight:                 "weight",
+	CostQueryMode:          "cost_query_mode",
+	CostQueryConfig:        "cost_query_config",
+	LastTestStatus:         "last_test_status",
+	LastTestLatencyMs:      "last_test_latency_ms",
+	LastTestError:          "last_test_error",
+	LastTestAt:             "last_test_at",
+	LastCostUsed:           "last_cost_used",
+	LastCostRemaining:      "last_cost_remaining",
+	LastCostCurrency:       "last_cost_currency",
+	LastCostAt:             "last_cost_at",
+	CreatedAt:              "created_at",
+	UpdatedAt:              "updated_at",
+	DeletedAt:              "deleted_at",
 }
 
 // NewChannelsDao creates and returns a new DAO object for table data access.

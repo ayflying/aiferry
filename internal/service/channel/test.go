@@ -17,6 +17,7 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
+	"github.com/yunloli/aiferry/internal/service/system"
 )
 
 type TestResult struct {
@@ -63,6 +64,7 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 	if requestErr != nil {
 		result.Message = requestErr.Error()
 		s.saveTestResult(ctx, channel.Id, model.Id, input.Endpoint, result)
+		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Latency: time.Duration(latency) * time.Millisecond, Message: result.Message})
 		return result, nil
 	}
 	defer resp.Body.Close()
@@ -74,8 +76,10 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput) 
 	if result.Success {
 		result.Message = "模型响应正常"
 		_ = s.app.Redis.Del(ctx, failureKey(channel.Id), cooldownKey(channel.Id)).Err()
+		_, _ = s.resilience.RecoverIfAllowed(ctx, channel.Id)
 	} else {
 		result.Message = upstreamError(responseBody, resp.Status)
+		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{ChannelID: channel.Id, Status: result.HTTPStatus, Latency: time.Duration(latency) * time.Millisecond, Message: result.Message})
 	}
 	s.saveTestResult(ctx, channel.Id, model.Id, input.Endpoint, result)
 	return result, nil
@@ -154,4 +158,61 @@ func failureKey(channelID uint64) string {
 
 func cooldownKey(channelID uint64) string {
 	return fmt.Sprintf("aiferry:channel:%d:cooldown", channelID)
+}
+
+func (s *Service) StartHealthChecks(ctx context.Context) {
+	go func() {
+		var lastCheck time.Time
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				settings, err := s.resilience.Get(ctx)
+				if err != nil || !settings.HealthCheckEnabled || !settings.RecoveryEnabled {
+					continue
+				}
+				interval := time.Duration(settings.HealthCheckIntervalMinutes) * time.Minute
+				if !lastCheck.IsZero() && now.Sub(lastCheck) < interval {
+					continue
+				}
+				lastCheck = now
+				s.runHealthChecks(ctx, settings.HealthCheckMode)
+			}
+		}
+	}()
+}
+
+func (s *Service) runHealthChecks(ctx context.Context, mode string) {
+	type healthCheckModel struct {
+		ChannelID uint64 `orm:"channel_id"`
+		ModelID   uint64 `orm:"model_id"`
+	}
+	rows := make([]healthCheckModel, 0)
+	model := dao.ChannelModels.Ctx(ctx).As("m").
+		Fields("m.channel_id,m.id AS model_id").
+		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id").
+		Where("m.enabled", 1).
+		OrderAsc("m.channel_id").
+		OrderAsc("m.id")
+	if mode == "all" {
+		model = model.Where("c.status=1 OR (c.status=0 AND c.auto_disabled_at IS NOT NULL)")
+	} else {
+		model = model.Where("c.status=0 AND c.auto_disabled_at IS NOT NULL")
+	}
+	if err := model.Scan(&rows); err != nil {
+		return
+	}
+	seen := make(map[uint64]struct{}, len(rows))
+	for _, row := range rows {
+		if _, exists := seen[row.ChannelID]; exists {
+			continue
+		}
+		seen[row.ChannelID] = struct{}{}
+		testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		_, _ = s.TestModel(testCtx, adminapi.ModelTestInput{ModelID: row.ModelID, Endpoint: "chat"})
+		cancel()
+	}
 }

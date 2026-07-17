@@ -97,6 +97,10 @@ export interface Channel {
   organizationId: string
   projectId: string
   status: number
+  autoDisabled: boolean
+  autoDisabledAt?: string
+  autoDisabledReason: string
+  autoDisabledStatusCode?: number
   priority: number
   weight: number
   costQueryMode: string
@@ -113,6 +117,19 @@ export interface Channel {
   lastCostAt?: string
   groupIds: number[]
   createdAt: string
+}
+
+export interface SystemResilienceSettings {
+  maxFailoverAttempts: number
+  retryStatusCodes: string
+  healthCheckEnabled: boolean
+  healthCheckMode: 'passive' | 'all'
+  healthCheckIntervalMinutes: number
+  recoveryEnabled: boolean
+  autoDisableEnabled: boolean
+  disableLatencySeconds: number
+  disableStatusCodes: string
+  failureKeywords: string[]
 }
 
 export interface ChannelInput {
