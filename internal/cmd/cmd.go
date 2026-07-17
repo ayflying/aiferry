@@ -38,6 +38,13 @@ var (
 			if err != nil {
 				return err
 			}
+			builtins, err := config.LoadBuiltins(filepath.Join(filepath.Dir(cfg.MigrationsDir), "builtins.json"))
+			if err != nil {
+				return err
+			}
+			if err = channeltype.ValidateBuiltins(builtins); err != nil {
+				return err
+			}
 			appSvc, err := app.New(ctx, cfg)
 			if err != nil {
 				return err
@@ -49,7 +56,7 @@ var (
 				userSvc         = user.New(appSvc, usageSvc)
 				priceCache      = pricingcache.New()
 				channelGroupSvc = channelgroup.New()
-				channelTypeSvc  = channeltype.New()
+				channelTypeSvc  = channeltype.New(builtins)
 				systemSvc       = system.New(appSvc)
 				mailSvc         = mail.New(appSvc, systemSvc, userSvc)
 				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc, priceCache, userSvc, mailSvc)

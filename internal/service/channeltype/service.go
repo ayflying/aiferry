@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
+	"github.com/yunloli/aiferry/internal/config"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -103,10 +104,21 @@ type View struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-type Service struct{}
+type Service struct {
+	builtins *config.BuiltinRegistry
+}
 
-func New() *Service {
-	return &Service{}
+func New(builtins *config.BuiltinRegistry) *Service {
+	return &Service{builtins: builtins}
+}
+
+func ValidateBuiltins(builtins *config.BuiltinRegistry) error {
+	for _, item := range builtins.ChannelTypes {
+		if _, err := ParseConfig(item.Config); err != nil {
+			return gerror.Wrapf(err, "invalid built-in channel type %s", item.Code)
+		}
+	}
+	return nil
 }
 
 func DefaultConfig() Config {
@@ -153,12 +165,19 @@ func defaultEndpoint(method, path, requestBody string, supportsStream bool) Endp
 func (s *Service) List(ctx context.Context) ([]View, error) {
 	rows := make([]entity.ChannelTypes, 0)
 	if err := dao.ChannelTypes.Ctx(ctx).
-		OrderDesc(dao.ChannelTypes.Columns().BuiltIn).
+		Where(dao.ChannelTypes.Columns().BuiltIn, 0).
 		OrderAsc(dao.ChannelTypes.Columns().Name).
 		Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list channel types")
 	}
-	views := make([]View, 0, len(rows))
+	views := make([]View, 0, len(s.builtins.ChannelTypes)+len(rows))
+	for _, item := range s.builtins.ChannelTypes {
+		view, err := toView(builtinEntity(item))
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
 	for _, row := range rows {
 		view, err := toView(row)
 		if err != nil {
@@ -170,8 +189,13 @@ func (s *Service) List(ctx context.Context) ([]View, error) {
 }
 
 func (s *Service) Get(ctx context.Context, id uint64) (entity.ChannelTypes, Config, error) {
+	if item, exists := s.builtins.ChannelTypeByID(id); exists {
+		row := builtinEntity(item)
+		parsed, err := ParseConfig([]byte(row.ConfigJson))
+		return row, parsed, err
+	}
 	var row entity.ChannelTypes
-	if err := dao.ChannelTypes.Ctx(ctx).Where(dao.ChannelTypes.Columns().Id, id).Scan(&row); err != nil {
+	if err := dao.ChannelTypes.Ctx(ctx).Where(dao.ChannelTypes.Columns().Id, id).Where(dao.ChannelTypes.Columns().BuiltIn, 0).Scan(&row); err != nil {
 		return row, Config{}, gerror.Wrap(err, "find channel type")
 	}
 	if row.Id == 0 {
@@ -182,9 +206,15 @@ func (s *Service) Get(ctx context.Context, id uint64) (entity.ChannelTypes, Conf
 }
 
 func (s *Service) GetByCode(ctx context.Context, code string) (entity.ChannelTypes, Config, error) {
+	if item, exists := s.builtins.ChannelTypeByCode(code); exists {
+		row := builtinEntity(item)
+		parsed, err := ParseConfig([]byte(row.ConfigJson))
+		return row, parsed, err
+	}
 	var row entity.ChannelTypes
 	if err := dao.ChannelTypes.Ctx(ctx).
 		Where(dao.ChannelTypes.Columns().Code, strings.TrimSpace(code)).
+		Where(dao.ChannelTypes.Columns().BuiltIn, 0).
 		Scan(&row); err != nil {
 		return row, Config{}, gerror.Wrap(err, "find channel type")
 	}
@@ -199,6 +229,9 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelTypeInput) (
 	name, code := strings.TrimSpace(input.Name), strings.TrimSpace(input.Code)
 	if !codePattern.MatchString(code) {
 		return 0, gerror.New("channel type code must start with a lowercase letter and contain only lowercase letters, numbers, underscores, or hyphens")
+	}
+	if _, exists := s.builtins.ChannelTypeByCode(code); exists {
+		return 0, gerror.New("渠道类型代码已由本地内置配置占用")
 	}
 	config, err := ParseConfig(input.Config)
 	if err != nil {
@@ -224,7 +257,7 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelT
 		return err
 	}
 	if current.BuiltIn == 1 {
-		return gerror.New("内置渠道类型仅允许启用或停用，配置不可修改")
+		return gerror.New("内置渠道类型由 manifest/builtins.json 管理")
 	}
 	if strings.TrimSpace(input.Code) != current.Code {
 		return gerror.New("channel type code cannot be changed")
@@ -244,8 +277,12 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelT
 }
 
 func (s *Service) SetStatus(ctx context.Context, id uint64, status int) error {
-	if _, _, err := s.Get(ctx, id); err != nil {
+	current, _, err := s.Get(ctx, id)
+	if err != nil {
 		return err
+	}
+	if current.BuiltIn == 1 {
+		return gerror.New("内置渠道类型由 manifest/builtins.json 管理")
 	}
 	if _, err := dao.ChannelTypes.Ctx(ctx).Where(dao.ChannelTypes.Columns().Id, id).Data(do.ChannelTypes{Status: normalizeStatus(status)}).Update(); err != nil {
 		return gerror.Wrap(err, "update channel type status")
@@ -259,7 +296,7 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 		return err
 	}
 	if current.BuiltIn == 1 {
-		return gerror.New("built-in channel types cannot be deleted")
+		return gerror.New("内置渠道类型由 manifest/builtins.json 管理")
 	}
 	count, err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().Type, current.Code).Count()
 	if err != nil {
@@ -279,6 +316,10 @@ func normalizeStatus(value int) int {
 		return 0
 	}
 	return 1
+}
+
+func builtinEntity(item config.BuiltinChannelType) entity.ChannelTypes {
+	return entity.ChannelTypes{Id: item.ID, Name: item.Name, Code: item.Code, ConfigJson: string(item.Config), Status: 1, BuiltIn: 1}
 }
 
 func toView(row entity.ChannelTypes) (View, error) {

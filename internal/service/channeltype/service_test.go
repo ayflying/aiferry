@@ -1,9 +1,25 @@
 package channeltype
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/yunloli/aiferry/internal/config"
 )
+
+func TestGetByCodeUsesBuiltinConfiguration(t *testing.T) {
+	builtins := &config.BuiltinRegistry{ChannelTypes: []config.BuiltinChannelType{{
+		ID: 42, Name: "OpenAI", Code: "openai", Config: json.RawMessage(`{"models":{"path":"/models","idPath":"id"},"costs":{"adapter":"none"}}`),
+	}}}
+	row, parsed, err := New(builtins).GetByCode(context.Background(), "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Id != 42 || row.BuiltIn != 1 || parsed.Models.Path != "/models" {
+		t.Fatalf("unexpected built-in channel type: %+v %+v", row, parsed)
+	}
+}
 
 func TestParseConfigNormalizesDefaults(t *testing.T) {
 	config, err := ParseConfig([]byte(`{"models":{"path":"/models","idPath":"id"},"costs":{"adapter":"none"}}`))

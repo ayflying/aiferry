@@ -15,24 +15,6 @@ INNER JOIN (
 ) AS `rule` ON `rule`.`model_name` = `price`.`public_name`
 SET `price`.`billing_mode` = 'rules';
 
-INSERT INTO `channel_types` (`name`, `code`, `config_json`, `status`, `built_in`) VALUES
-  ('BaseLLM 官方模型价格', 'newapi_ratio_metadata', '{"priceSyncOnly":true,"costs":{"adapter":"none"},"pricing":{"adapter":"newapi_ratio","method":"GET","path":"/llm-metadata/api/newapi/ratio_config-v1-base.json","authType":"none"}}', 1, 1)
-ON DUPLICATE KEY UPDATE
-  `name` = VALUES(`name`),
-  `config_json` = VALUES(`config_json`),
-  `status` = VALUES(`status`),
-  `built_in` = VALUES(`built_in`),
-  `deleted_at` = NULL;
-
-INSERT INTO `channels` (`name`, `type`, `base_url`, `api_key_cipher`, `status`, `priority`, `weight`, `cost_query_mode`, `cost_query_config`)
-SELECT 'BaseLLM 官方模型价格', 'newapi_ratio_metadata', 'https://basellm.github.io', '', 1, -1000, 1, 'none', '{}'
-WHERE NOT EXISTS (
-  SELECT 1 FROM `channels`
-  WHERE `type` = 'newapi_ratio_metadata'
-    AND `base_url` = 'https://basellm.github.io'
-    AND `deleted_at` IS NULL
-);
-
 -- +goose Down
 DELETE FROM `channels`
 WHERE `type` = 'newapi_ratio_metadata'

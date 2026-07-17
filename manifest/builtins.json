@@ -1,0 +1,72 @@
+{
+  "channelTypes": [
+    {
+      "id": 9000000000000001,
+      "name": "OpenAI",
+      "code": "openai",
+      "config": {
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "openai_costs", "method": "GET", "path": "/organization/costs", "authType": "management_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "fixedCurrency": "USD" }
+      }
+    },
+    {
+      "id": 9000000000000002,
+      "name": "Sub2API",
+      "code": "sub2api",
+      "config": {
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "sub2api_usage", "method": "GET", "path": "/usage", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "usedPath": "used", "remainingPath": "remaining", "currencyPath": "unit", "fixedCurrency": "USD" }
+      }
+    },
+    {
+      "id": 9000000000000003,
+      "name": "DeepSeek",
+      "code": "deepseek",
+      "config": {
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" }
+      }
+    },
+    {
+      "id": 9000000000000004,
+      "name": "火山方舟 Ark",
+      "code": "volcengine_ark",
+      "config": {
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" }
+      }
+    },
+    {
+      "id": 9000000000000005,
+      "name": "MiniMax",
+      "code": "minimax",
+      "config": {
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" }
+      }
+    },
+    {
+      "id": 9000000000000006,
+      "name": "Ollama",
+      "code": "ollama",
+      "config": {
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" }
+      }
+    },
+    {
+      "id": 9000000000000007,
+      "name": "小米 MiMo",
+      "code": "xiaomi_mimo",
+      "config": {
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" }
+      }
+    }
+  ]
+}

@@ -15,10 +15,6 @@ CREATE TABLE `channel_types` (
   KEY `idx_channel_types_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-INSERT INTO `channel_types` (`name`, `code`, `config_json`, `status`, `built_in`) VALUES
-  ('OpenAI', 'openai', '{"models":{"method":"GET","path":"/models","listPath":"data","idPath":"id","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer "},"costs":{"adapter":"openai_costs","method":"GET","path":"/organization/costs","authType":"management_key","headerName":"Authorization","headerPrefix":"Bearer ","fixedCurrency":"USD"}}', 1, 1),
-  ('Sub2API', 'sub2api', '{"models":{"method":"GET","path":"/models","listPath":"data","idPath":"id","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer "},"costs":{"adapter":"sub2api_usage","method":"GET","path":"/usage","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer ","usedPath":"used","remainingPath":"remaining","currencyPath":"unit","fixedCurrency":"USD"}}', 1, 1);
-
 UPDATE `channels` SET `type` = 'sub2api' WHERE `cost_query_mode` = 'sub2api_usage';
 UPDATE `channels` SET `type` = 'openai' WHERE `type` IS NULL OR `type` = '';
 
