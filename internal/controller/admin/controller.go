@@ -59,8 +59,10 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.PUT("/channels/{id}", c.updateChannel)
 	group.DELETE("/channels/{id}", c.deleteChannel)
 	group.GET("/channel-types", c.listChannelTypes)
+	group.GET("/channel-types/default-config", c.defaultChannelTypeConfig)
 	group.POST("/channel-types", c.createChannelType)
 	group.PUT("/channel-types/{id}", c.updateChannelType)
+	group.PUT("/channel-types/{id}/status", c.updateChannelTypeStatus)
 	group.DELETE("/channel-types/{id}", c.deleteChannelType)
 	group.GET("/channel-groups", c.listChannelGroups)
 	group.POST("/channel-groups", c.createChannelGroup)
@@ -111,6 +113,10 @@ func (c *Controller) listChannelTypes(r *ghttp.Request) {
 	respond(r, data, err)
 }
 
+func (c *Controller) defaultChannelTypeConfig(r *ghttp.Request) {
+	respond(r, channeltype.DefaultConfig(), nil)
+}
+
 func (c *Controller) createChannelType(r *ghttp.Request) {
 	var input adminapi.ChannelTypeInput
 	if !parse(r, &input) {
@@ -126,6 +132,14 @@ func (c *Controller) updateChannelType(r *ghttp.Request) {
 		return
 	}
 	respond(r, map[string]any{}, c.types.Update(r.Context(), routeID(r), input))
+}
+
+func (c *Controller) updateChannelTypeStatus(r *ghttp.Request) {
+	var input adminapi.ChannelTypeStatusInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, map[string]any{}, c.types.SetStatus(r.Context(), routeID(r), input.Status))
 }
 
 func (c *Controller) deleteChannelType(r *ghttp.Request) {

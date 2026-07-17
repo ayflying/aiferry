@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Braces, Coins, FlaskConical, Network, Pencil, Plus, RefreshCw, ScanSearch, Tags, Trash2 } from '@lucide/vue'
+import { Braces, Coins, Eye, FlaskConical, Network, Pencil, Plus, RefreshCw, ScanSearch, Tags, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelGroup, ChannelInput, ChannelType, ChannelTypeConfig, DiscoveredModel } from '../api/types'
@@ -29,7 +29,8 @@ const testChannel = ref<Channel>()
 const typeDrawerOpen = ref(false)
 const typeSaving = ref(false)
 const editingType = ref<ChannelType>()
-const typeForm = reactive({ name: '', code: '', status: 1, configText: '' })
+const typeStatusSaving = reactive<Record<number, boolean>>({})
+const typeForm = reactive({ name: '', code: '', configText: '' })
 const groupDrawerOpen = ref(false)
 const groupSaving = ref(false)
 const editingGroup = ref<ChannelGroup>()
@@ -39,6 +40,7 @@ const drawerSize = window.innerWidth <= 600 ? '94%' : '620px'
 const typeDrawerSize = window.innerWidth <= 600 ? '94%' : '680px'
 const activeTypes = computed(() => store.channelTypes.filter((item) => item.status === 1 || item.code === form.type))
 const selectedChannelType = computed(() => store.channelTypes.find((item) => item.code === form.type))
+const typeReadOnly = computed(() => editingType.value?.builtIn === 1)
 const usesManagementKey = computed(() => {
   const config = selectedChannelType.value?.config
   if (!config) return false
@@ -52,11 +54,6 @@ const visibleDiscoveredModels = computed(() => {
 const allVisibleSelected = computed(() => visibleDiscoveredModels.value.length > 0
   && visibleDiscoveredModels.value.every((item) => selectedModelNames.value.includes(item.name)))
 
-const emptyTypeConfig = (): ChannelTypeConfig => ({
-  models: { method: 'GET', path: '/models', listPath: 'data', idPath: 'id', authType: 'channel_key', headerName: 'Authorization', headerPrefix: 'Bearer ' },
-  costs: { adapter: 'none', method: 'GET', path: '', authType: 'channel_key', headerName: 'Authorization', headerPrefix: 'Bearer ', usedPath: '', remainingPath: '', currencyPath: '', fixedCurrency: 'USD' },
-  pricing: { adapter: 'none', method: 'GET', path: '', authType: 'channel_key', headerName: 'Authorization', headerPrefix: 'Bearer ', listPath: '', modelPath: '', namePath: '', currencyPath: '', conditionsPath: '', ratesPath: '', inputPricePath: '', cachedInputPricePath: '', cacheWritePricePath: '', outputPricePath: '', imageInputPricePath: '', audioInputPricePath: '', audioOutputPricePath: '', requestPricePath: '' },
-})
 const emptyForm = (): ChannelInput => ({
   name: '', type: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', managementKey: '', organizationId: '', projectId: '', status: 1, priority: 0, weight: 1, groupIds: [],
 })
@@ -174,31 +171,45 @@ async function remove(channel: Channel) {
   }
 }
 
-function openCreateType() {
+async function openCreateType() {
   editingType.value = undefined
-  Object.assign(typeForm, { name: '', code: '', status: 1, configText: JSON.stringify(emptyTypeConfig(), null, 2) })
+  Object.assign(typeForm, { name: '', code: '', configText: '' })
   typeDrawerOpen.value = true
+  try {
+    typeForm.configText = JSON.stringify(await apiGet<ChannelTypeConfig>('/channel-types/default-config'), null, 2)
+  } catch (error) { showError(error, '加载 OpenAI 默认配置失败') }
 }
 
 function openEditType(item: ChannelType) {
   editingType.value = item
-  Object.assign(typeForm, { name: item.name, code: item.code, status: item.status, configText: JSON.stringify(item.config, null, 2) })
+  Object.assign(typeForm, { name: item.name, code: item.code, configText: JSON.stringify(item.config, null, 2) })
   typeDrawerOpen.value = true
 }
 
 async function saveType() {
-  let config: ChannelTypeConfig
-  try { config = JSON.parse(typeForm.configText) } catch { showError('渠道类型 JSON 格式无效', '格式错误'); return }
+  let config: ChannelTypeConfig | undefined
+  if (typeForm.configText.trim()) {
+    try { config = JSON.parse(typeForm.configText) } catch { showError('渠道类型 JSON 格式无效', '格式错误'); return }
+  }
   if (!typeForm.name.trim() || !typeForm.code.trim()) { showError('请填写类型名称和类型代码', '信息不完整'); return }
   typeSaving.value = true
   try {
-    const payload = { name: typeForm.name, code: typeForm.code, status: typeForm.status, config }
+    const payload = { name: typeForm.name, code: typeForm.code, ...(config ? { config } : {}) }
     if (editingType.value) await apiPut(`/channel-types/${editingType.value.id}`, payload)
     else await apiPost('/channel-types', payload)
     ElMessage.success(editingType.value ? '渠道类型已更新' : '渠道类型已添加')
     typeDrawerOpen.value = false
     await load()
   } catch (error) { showError(error, '保存渠道类型失败') } finally { typeSaving.value = false }
+}
+
+async function setTypeStatus(item: ChannelType, enabled: boolean) {
+  typeStatusSaving[item.id] = true
+  try {
+    await apiPut(`/channel-types/${item.id}/status`, { status: enabled ? 1 : 0 })
+    item.status = enabled ? 1 : 0
+    ElMessage.success(enabled ? '渠道类型已启用' : '渠道类型已停用')
+  } catch (error) { showError(error, '更新渠道类型状态失败') } finally { typeStatusSaving[item.id] = false }
 }
 
 async function removeType(item: ChannelType) {
@@ -303,7 +314,7 @@ onMounted(load)
       <el-tab-pane name="types">
         <template #label><span class="tab-label"><Braces :size="15" />渠道类型</span></template>
         <div class="page-toolbar">
-          <div class="muted">JSON 定义模型发现、余额接口、鉴权和字段路径</div>
+          <div class="muted">JSON 定义模型发现、OpenAI 接口能力、鉴权和费用字段路径</div>
           <div class="spacer" />
           <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
           <el-button type="primary" :icon="Plus" @click="openCreateType">添加渠道类型</el-button>
@@ -313,9 +324,9 @@ onMounted(load)
             <el-table-column label="类型" min-width="170"><template #default="{ row }"><div class="type-cell"><strong>{{ row.name }}</strong><code>{{ row.code }}</code></div></template></el-table-column>
             <el-table-column label="模型接口" min-width="220"><template #default="{ row }"><span class="mono">{{ row.config.models.method }} {{ row.config.models.path }}</span></template></el-table-column>
             <el-table-column label="余额查询" min-width="160"><template #default="{ row }"><span>{{ costLabel(row) }}</span><small v-if="row.config.costs.path"> · {{ row.config.costs.path }}</small></template></el-table-column>
-            <el-table-column label="状态" width="96"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
+            <el-table-column label="状态" width="106"><template #default="{ row }"><el-switch :model-value="row.status === 1" :disabled="typeStatusSaving[row.id]" active-text="启用" inactive-text="停用" @update:model-value="setTypeStatus(row, $event)" /></template></el-table-column>
             <el-table-column label="来源" width="88"><template #default="{ row }"><span class="muted">{{ row.builtIn === 1 ? '内置' : '自定义' }}</span></template></el-table-column>
-            <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip content="编辑类型"><button class="icon-button" type="button" :aria-label="`编辑渠道类型 ${row.name}`" @click="openEditType(row)"><Pencil :size="16" /></button></el-tooltip><el-tooltip :disabled="row.builtIn === 0" :content="row.builtIn === 1 ? '内置类型不可删除' : ''"><button class="icon-button danger" type="button" :disabled="row.builtIn === 1" :aria-label="`删除渠道类型 ${row.name}`" @click="removeType(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
+            <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip :content="row.builtIn === 1 ? '查看内置配置' : '编辑类型'"><button class="icon-button" type="button" :aria-label="`${row.builtIn === 1 ? '查看' : '编辑'}渠道类型 ${row.name}`" @click="openEditType(row)"><Eye v-if="row.builtIn === 1" :size="16" /><Pencil v-else :size="16" /></button></el-tooltip><el-tooltip v-if="row.builtIn === 0" content="删除类型"><button class="icon-button danger" type="button" :aria-label="`删除渠道类型 ${row.name}`" @click="removeType(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
           </el-table>
           <div v-if="!loading && !store.channelTypes.length" class="empty-state"><div><strong>还没有渠道类型</strong><span>添加 JSON 配置后即可在渠道表单中选用</span></div></div>
         </div>
@@ -330,7 +341,7 @@ onMounted(load)
 
     <el-drawer v-model="groupDrawerOpen" :title="editingGroup ? '编辑渠道分组' : '添加渠道分组'" :size="drawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="分组名称"><el-input v-model="groupForm.name" placeholder="例如 高优先级" /></el-form-item><el-form-item label="分组代码"><el-input v-model="groupForm.code" :disabled="Boolean(editingGroup)" placeholder="例如 premium" /></el-form-item><el-form-item label="状态"><el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="说明"><el-input v-model="groupForm.description" maxlength="255" show-word-limit /></el-form-item><el-form-item label="包含渠道"><el-select v-model="groupForm.channelIds" multiple filterable clearable placeholder="选择渠道"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="groupDrawerOpen = false">取消</el-button><el-button type="primary" :loading="groupSaving" @click="saveGroup">保存分组</el-button></template></el-drawer>
 
-    <el-drawer v-model="typeDrawerOpen" :title="editingType ? '编辑渠道类型' : '添加渠道类型'" :size="typeDrawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="类型名称"><el-input v-model="typeForm.name" placeholder="例如 自建网关" /></el-form-item><el-form-item label="类型代码"><el-input v-model="typeForm.code" :disabled="Boolean(editingType)" placeholder="例如 custom_gateway" /></el-form-item><el-form-item label="状态"><el-switch v-model="typeForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="类型 JSON 配置"><el-input v-model="typeForm.configText" class="config-editor" type="textarea" :rows="22" spellcheck="false" /></el-form-item></el-form><template #footer><el-button @click="typeDrawerOpen = false">取消</el-button><el-button type="primary" :loading="typeSaving" @click="saveType">保存类型</el-button></template></el-drawer>
+    <el-drawer v-model="typeDrawerOpen" :title="typeReadOnly ? '查看内置渠道类型' : (editingType ? '编辑渠道类型' : '添加渠道类型')" :size="typeDrawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="类型名称"><el-input v-model="typeForm.name" :readonly="typeReadOnly" placeholder="例如 自建网关" /></el-form-item><el-form-item label="类型代码"><el-input v-model="typeForm.code" :disabled="Boolean(editingType)" placeholder="例如 custom_gateway" /></el-form-item></div><el-form-item label="类型 JSON 配置"><el-input v-model="typeForm.configText" class="config-editor" type="textarea" :rows="22" :readonly="typeReadOnly" spellcheck="false" /></el-form-item></el-form><template #footer><el-button @click="typeDrawerOpen = false">{{ typeReadOnly ? '关闭' : '取消' }}</el-button><el-button v-if="!typeReadOnly" type="primary" :loading="typeSaving" @click="saveType">保存类型</el-button></template></el-drawer>
   </div>
 </template>
 

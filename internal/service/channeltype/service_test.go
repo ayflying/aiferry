@@ -10,8 +10,30 @@ func TestParseConfigNormalizesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Models.Method != "GET" || config.Models.AuthType != "none" || config.Costs.Adapter != "none" {
+	if config.Models.Method != "GET" || config.Models.AuthType != AuthChannelKey || config.Costs.Adapter != AdapterNone {
 		t.Fatalf("unexpected normalized config: %+v", config)
+	}
+}
+
+func TestParseConfigUsesOpenAIDefaultsForEmptyInput(t *testing.T) {
+	config, err := ParseConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Models.Path != "/models" || config.Costs.Adapter != AdapterOpenAICosts {
+		t.Fatalf("unexpected OpenAI defaults: %+v", config)
+	}
+	for _, endpoint := range []string{"chatCompletions", "responses", "imagesGenerations", "audioSpeech", "audioTranscriptions", "videoGenerations", "videoContent", "realtimeSessions"} {
+		if _, ok := config.Endpoints[endpoint]; !ok {
+			t.Fatalf("default OpenAI endpoint is missing: %s", endpoint)
+		}
+	}
+}
+
+func TestParseConfigRejectsInvalidEndpoint(t *testing.T) {
+	_, err := ParseConfig([]byte(`{"endpoints":{"custom":{"method":"PATCH","path":"/custom","requestBody":"json","authType":"channel_key"}}}`))
+	if err == nil {
+		t.Fatal("expected unsupported endpoint method to fail validation")
 	}
 }
 

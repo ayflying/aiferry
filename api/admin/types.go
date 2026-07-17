@@ -32,8 +32,11 @@ type ChannelGroupInput struct {
 type ChannelTypeInput struct {
 	Name   string          `json:"name" v:"required|length:1,96"`
 	Code   string          `json:"code" v:"required|length:2,64"`
-	Status int             `json:"status" v:"in:0,1"`
-	Config json.RawMessage `json:"config" v:"required"`
+	Config json.RawMessage `json:"config"`
+}
+
+type ChannelTypeStatusInput struct {
+	Status int `json:"status" v:"in:0,1"`
 }
 
 type CostQueryConfig struct {

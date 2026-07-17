@@ -101,10 +101,21 @@ export interface ChannelTypePricingConfig {
   requestPricePath: string
 }
 
+export interface ChannelTypeEndpointConfig {
+  method: 'GET' | 'POST' | 'DELETE'
+  path: string
+  requestBody: 'json' | 'multipart' | 'none'
+  supportsStream: boolean
+  authType: 'none' | 'channel_key' | 'management_key'
+  headerName: string
+  headerPrefix: string
+}
+
 export interface ChannelTypeConfig {
   models: ChannelTypeModelConfig
   costs: ChannelTypeCostConfig
   pricing: ChannelTypePricingConfig
+  endpoints: Record<string, ChannelTypeEndpointConfig>
 }
 
 export interface PriceSourceConfig {

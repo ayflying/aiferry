@@ -11,16 +11,21 @@ import (
 const httpMethodGet = "GET"
 
 func ParseConfig(raw []byte) (Config, error) {
-	var config Config
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
-		return Config{}, gerror.Wrap(err, "invalid channel type JSON")
+	config := DefaultConfig()
+	if value := bytes.TrimSpace(raw); len(value) > 0 && string(value) != "null" {
+		decoder := json.NewDecoder(bytes.NewReader(value))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&config); err != nil {
+			return Config{}, gerror.Wrap(err, "invalid channel type JSON")
+		}
 	}
 	if err := normalizeModelConfig(&config.Models); err != nil {
 		return Config{}, err
 	}
 	if err := normalizeCostConfig(&config.Costs); err != nil {
+		return Config{}, err
+	}
+	if err := normalizeEndpointConfigs(config.Endpoints); err != nil {
 		return Config{}, err
 	}
 	pricing, err := ParsePricingConfig(config.Pricing)
@@ -32,6 +37,33 @@ func ParseConfig(raw []byte) (Config, error) {
 	}
 	config.Pricing = pricing
 	return config, nil
+}
+
+func normalizeEndpointConfigs(configs map[string]EndpointConfig) error {
+	if len(configs) == 0 {
+		return gerror.New("endpoints must not be empty")
+	}
+	for name, config := range configs {
+		config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
+		config.Path = strings.TrimSpace(config.Path)
+		config.RequestBody = strings.ToLower(strings.TrimSpace(config.RequestBody))
+		config.AuthType = normalizeAuth(config.AuthType)
+		config.HeaderName = normalizeHeader(config.HeaderName, config.AuthType)
+		if name == "" || config.Path == "" || !strings.HasPrefix(config.Path, "/") {
+			return gerror.New("each endpoint requires a non-empty name and absolute path")
+		}
+		if config.Method != httpMethodGet && config.Method != "POST" && config.Method != "DELETE" {
+			return gerror.Newf("unsupported endpoint method for %s", name)
+		}
+		if config.RequestBody != "json" && config.RequestBody != "multipart" && config.RequestBody != "none" {
+			return gerror.Newf("unsupported endpoint requestBody for %s", name)
+		}
+		if !validAuth(config.AuthType) {
+			return gerror.Newf("unsupported endpoint authType for %s", name)
+		}
+		configs[name] = config
+	}
+	return nil
 }
 
 func ParsePricingConfig(config PricingConfig) (PricingConfig, error) {

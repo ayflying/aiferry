@@ -75,10 +75,21 @@ type PricingConfig struct {
 	RequestPricePath     string `json:"requestPricePath"`
 }
 
+type EndpointConfig struct {
+	Method         string `json:"method"`
+	Path           string `json:"path"`
+	RequestBody    string `json:"requestBody"`
+	SupportsStream bool   `json:"supportsStream"`
+	AuthType       string `json:"authType"`
+	HeaderName     string `json:"headerName"`
+	HeaderPrefix   string `json:"headerPrefix"`
+}
+
 type Config struct {
-	Models  ModelConfig   `json:"models"`
-	Costs   CostConfig    `json:"costs"`
-	Pricing PricingConfig `json:"pricing"`
+	Models    ModelConfig               `json:"models"`
+	Costs     CostConfig                `json:"costs"`
+	Pricing   PricingConfig             `json:"pricing"`
+	Endpoints map[string]EndpointConfig `json:"endpoints"`
 }
 
 type View struct {
@@ -96,6 +107,47 @@ type Service struct{}
 
 func New() *Service {
 	return &Service{}
+}
+
+func DefaultConfig() Config {
+	return Config{
+		Models: ModelConfig{
+			Method: "GET", Path: "/models", ListPath: "data", IDPath: "id",
+			AuthType: AuthChannelKey, HeaderName: "Authorization", HeaderPrefix: "Bearer ",
+		},
+		Costs: CostConfig{
+			Adapter: AdapterOpenAICosts, Method: "GET", Path: "/organization/costs",
+			AuthType: AuthManagementKey, HeaderName: "Authorization", HeaderPrefix: "Bearer ", FixedCurrency: "USD",
+		},
+		Pricing: PricingConfig{Adapter: AdapterNone, Method: "GET", AuthType: AuthChannelKey, HeaderName: "Authorization", HeaderPrefix: "Bearer "},
+		Endpoints: map[string]EndpointConfig{
+			"chatCompletions":       defaultEndpoint("POST", "/chat/completions", "json", true),
+			"responses":             defaultEndpoint("POST", "/responses", "json", true),
+			"embeddings":            defaultEndpoint("POST", "/embeddings", "json", false),
+			"imagesGenerations":     defaultEndpoint("POST", "/images/generations", "json", false),
+			"imagesEdits":           defaultEndpoint("POST", "/images/edits", "multipart", false),
+			"audioSpeech":           defaultEndpoint("POST", "/audio/speech", "json", false),
+			"audioTranscriptions":   defaultEndpoint("POST", "/audio/transcriptions", "multipart", false),
+			"audioTranslations":     defaultEndpoint("POST", "/audio/translations", "multipart", false),
+			"videoGenerations":      defaultEndpoint("POST", "/videos", "json", false),
+			"videoRetrieve":         defaultEndpoint("GET", "/videos/{video_id}", "none", false),
+			"videoContent":          defaultEndpoint("GET", "/videos/{video_id}/content", "none", false),
+			"videoRemix":            defaultEndpoint("POST", "/videos/{video_id}/remix", "multipart", false),
+			"moderations":           defaultEndpoint("POST", "/moderations", "json", false),
+			"files":                 defaultEndpoint("POST", "/files", "multipart", false),
+			"batches":               defaultEndpoint("POST", "/batches", "json", false),
+			"fineTuningJobs":        defaultEndpoint("POST", "/fine_tuning/jobs", "json", false),
+			"realtimeSessions":      defaultEndpoint("POST", "/realtime/sessions", "json", false),
+			"realtimeClientSecrets": defaultEndpoint("POST", "/realtime/client_secrets", "json", false),
+		},
+	}
+}
+
+func defaultEndpoint(method, path, requestBody string, supportsStream bool) EndpointConfig {
+	return EndpointConfig{
+		Method: method, Path: path, RequestBody: requestBody, SupportsStream: supportsStream,
+		AuthType: AuthChannelKey, HeaderName: "Authorization", HeaderPrefix: "Bearer ",
+	}
 }
 
 func (s *Service) List(ctx context.Context) ([]View, error) {
@@ -157,7 +209,7 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelTypeInput) (
 		Name:       name,
 		Code:       code,
 		ConfigJson: string(encoded),
-		Status:     normalizeStatus(input.Status),
+		Status:     1,
 		BuiltIn:    0,
 	}).InsertAndGetId()
 	if err != nil {
@@ -171,6 +223,9 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelT
 	if err != nil {
 		return err
 	}
+	if current.BuiltIn == 1 {
+		return gerror.New("内置渠道类型仅允许启用或停用，配置不可修改")
+	}
 	if strings.TrimSpace(input.Code) != current.Code {
 		return gerror.New("channel type code cannot be changed")
 	}
@@ -182,9 +237,18 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelT
 	if _, err = dao.ChannelTypes.Ctx(ctx).Where(dao.ChannelTypes.Columns().Id, id).Data(do.ChannelTypes{
 		Name:       strings.TrimSpace(input.Name),
 		ConfigJson: string(encoded),
-		Status:     normalizeStatus(input.Status),
 	}).Update(); err != nil {
 		return gerror.Wrap(err, "update channel type")
+	}
+	return nil
+}
+
+func (s *Service) SetStatus(ctx context.Context, id uint64, status int) error {
+	if _, _, err := s.Get(ctx, id); err != nil {
+		return err
+	}
+	if _, err := dao.ChannelTypes.Ctx(ctx).Where(dao.ChannelTypes.Columns().Id, id).Data(do.ChannelTypes{Status: normalizeStatus(status)}).Update(); err != nil {
+		return gerror.Wrap(err, "update channel type status")
 	}
 	return nil
 }
