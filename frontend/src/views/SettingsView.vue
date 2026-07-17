@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Activity, Database, Gauge, HardDrive, RefreshCw, Route, ShieldCheck, Stethoscope } from '@lucide/vue'
+import { Activity, Database, Gauge, HardDrive, RefreshCw, Route, ShieldCheck } from '@lucide/vue'
 import { ElMessage } from 'element-plus'
 import { apiGet, apiPut } from '../api/client'
 import type { SystemResilienceSettings } from '../api/types'
 import { showError } from '../lib/error'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
-type SettingsTab = 'overview' | 'routing' | 'health' | 'autoDisable'
+type SettingsTab = 'overview' | 'resilience'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -28,9 +28,7 @@ const form = reactive({
 
 const sectionMeta = computed(() => ({
   overview: { title: '运行概览', description: '实例与依赖状态' },
-  routing: { title: '路由可靠性', description: '故障转移范围与尝试次数' },
-  health: { title: '渠道健康检查', description: '后台探测与自动恢复' },
-  autoDisable: { title: '自动禁用规则', description: '上游异常时下线渠道' },
+  resilience: { title: '路由可靠性', description: '故障转移、健康检查与自动禁用' },
 }[activeTab.value]))
 
 function applySettings(settings: SystemResilienceSettings) {
@@ -77,9 +75,7 @@ onMounted(load)
   <div v-loading="loading" class="page-stack settings-page">
     <el-tabs v-model="activeTab" class="settings-tabs">
       <el-tab-pane name="overview"><template #label><span class="tab-label"><Activity :size="15" />概览</span></template></el-tab-pane>
-      <el-tab-pane name="routing"><template #label><span class="tab-label"><Route :size="15" />路由</span></template></el-tab-pane>
-      <el-tab-pane name="health"><template #label><span class="tab-label"><Stethoscope :size="15" />健康检查</span></template></el-tab-pane>
-      <el-tab-pane name="autoDisable"><template #label><span class="tab-label"><ShieldCheck :size="15" />自动禁用</span></template></el-tab-pane>
+      <el-tab-pane name="resilience"><template #label><span class="tab-label"><Route :size="15" />路由可靠性</span></template></el-tab-pane>
     </el-tabs>
 
     <div class="page-toolbar settings-toolbar">
@@ -96,16 +92,10 @@ onMounted(load)
       <section class="settings-grid"><div><span>产品</span><strong>{{ info?.name || '—' }}</strong></div><div><span>管理模式</span><strong>{{ info?.adminMode || '—' }}</strong></div><div><span>中转 API</span><strong>{{ info?.apiVersion || '—' }}</strong></div><div><span>支持范围</span><strong>OpenAI 文本核心</strong></div></section>
     </template>
 
-    <template v-else-if="activeTab === 'routing'">
+    <template v-else>
       <section class="settings-section"><div class="section-heading"><div><h2>故障转移</h2><span>单次请求会按路由顺序切换不同渠道</span></div><Gauge :size="19" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="最大尝试渠道数"><el-input-number v-model="form.maxFailoverAttempts" :min="1" :max="10" controls-position="right" /></el-form-item><el-form-item label="可故障转移状态码"><el-input v-model="form.retryStatusCodes" placeholder="401,429,500-599" /></el-form-item></div><p class="field-hint">状态码支持逗号分隔和包含范围，例如 401,429,500-599。</p></el-form></section>
-    </template>
-
-    <template v-else-if="activeTab === 'health'">
       <section class="settings-section"><div class="section-heading"><div><h2>后台渠道探测</h2><span>使用已启用模型执行最小请求，不保存提示词或响应正文。</span></div><el-switch v-model="form.healthCheckEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="检查范围"><el-segmented v-model="form.healthCheckMode" :disabled="!form.healthCheckEnabled" :options="[{ label: '仅恢复自动禁用渠道', value: 'passive' }, { label: '检查全部可管理渠道', value: 'all' }]" /></el-form-item><el-form-item label="检查间隔（分钟）"><el-input-number v-model="form.healthCheckIntervalMinutes" :disabled="!form.healthCheckEnabled" :min="1" :max="1440" controls-position="right" /></el-form-item></div></el-form></section>
       <section class="settings-section compact"><div class="setting-switch"><div><strong>成功后自动恢复</strong><span>只恢复有自动禁用标记的渠道，手动停用保持不变。</span></div><el-switch v-model="form.recoveryEnabled" /></div></section>
-    </template>
-
-    <template v-else>
       <section class="settings-section"><div class="section-heading"><div><h2>上游异常自动下线</h2><span>命中任一规则后渠道停止参与路由，并保存触发原因。</span></div><el-switch v-model="form.autoDisableEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="慢响应阈值（秒）"><el-input-number v-model="form.disableLatencySeconds" :disabled="!form.autoDisableEnabled" :min="1" :max="3600" controls-position="right" /></el-form-item><el-form-item label="自动禁用状态码"><el-input v-model="form.disableStatusCodes" :disabled="!form.autoDisableEnabled" placeholder="401,429" /></el-form-item></div><el-form-item label="失败关键词"><el-input v-model="form.failureKeywordsText" :disabled="!form.autoDisableEnabled" type="textarea" :rows="10" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">关键词不区分大小写；状态码支持逗号分隔和包含范围。</p></el-form></section>
     </template>
   </div>
