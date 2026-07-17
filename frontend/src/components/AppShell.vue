@@ -29,7 +29,7 @@ const mobileOpen = ref(false)
 const adminItems = [
   { path: '/', label: '仪表盘', icon: Gauge },
   { path: '/api-keys', label: '访问密钥', icon: KeyRound },
-  { path: '/usage', label: '用量', icon: Activity },
+  { path: '/usage', label: '用量日志', icon: Activity },
   { path: '/channels', label: '渠道', icon: Cable },
   { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
   { path: '/users', label: '用户管理', icon: UsersRound },
@@ -40,7 +40,7 @@ const items = computed(() => auth.user?.isAdmin
   : [
       { path: '/profile', label: '个人中心', icon: UserRound },
       { path: '/api-keys', label: '访问密钥', icon: KeyRound },
-      { path: '/usage', label: '用量', icon: Activity },
+      { path: '/usage', label: '用量日志', icon: Activity },
       { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
     ])
 

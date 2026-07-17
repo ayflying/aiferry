@@ -254,7 +254,7 @@ func (s *Service) List(ctx context.Context, page, pageSize int, modelName string
 		return LogPage{}, gerror.Wrap(err, "count usage logs")
 	}
 	items := make([]LogView, 0)
-	err = query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,c.name AS channel_name,COALESCE(usr.name,'已删除用户') AS user_name").
+	err = query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,c.name AS channel_name,IF(u.api_key_id IS NULL,'系统',COALESCE(usr.name,'已删除用户')) AS user_name").
 		LeftJoin(dao.ApiKeys.Table()+" k", "k.id=u.api_key_id").
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").
 		LeftJoin(dao.Users.Table()+" usr", "usr.id=u.user_id").
