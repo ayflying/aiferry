@@ -4,6 +4,7 @@ import { Braces, Coins, FlaskConical, Network, Pencil, Plus, RefreshCw, ScanSear
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelGroup, ChannelInput, ChannelModel, ChannelType, ChannelTypeConfig, DiscoveredModel, ModelTestResult } from '../api/types'
+import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { formatCost, formatLatency, formatTime } from '../lib/format'
 import { enabledChannelModels, sortDiscoveredModels } from '../lib/models'
@@ -68,7 +69,7 @@ const title = computed(() => editingId.value ? '编辑渠道' : '添加渠道')
 
 async function load() {
   loading.value = true
-  try { await Promise.all([store.loadChannels(), store.loadChannelTypes(), store.loadChannelGroups()]) } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+  try { await Promise.all([store.loadChannels(), store.loadChannelTypes(), store.loadChannelGroups()]) } catch (error) { showError(error, '加载渠道失败') } finally { loading.value = false }
 }
 
 function openCreate() {
@@ -89,7 +90,7 @@ function openEdit(channel: Channel) {
 
 async function save() {
   if (!form.name.trim() || !form.type || !form.baseUrl.trim() || (!editingId.value && !form.apiKey?.trim())) {
-    ElMessage.warning('请填写渠道名称、渠道类型、API 根地址和密钥')
+    showError('请填写渠道名称、渠道类型、API 根地址和密钥', '信息不完整')
     return
   }
   saving.value = true
@@ -102,7 +103,7 @@ async function save() {
     ElMessage.success(editingId.value ? '渠道已更新' : '渠道已添加')
     drawerOpen.value = false
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { saving.value = false }
+  } catch (error) { showError(error, '保存渠道失败') } finally { saving.value = false }
 }
 
 async function discover(channel: Channel) {
@@ -148,7 +149,7 @@ async function saveModelSelection() {
     ElMessage.success(`已启用 ${selectedModelNames.value.length} 个模型`)
     discoveryOpen.value = false
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { applyingSelection.value = false }
+  } catch (error) { showError(error, '保存模型选择失败') } finally { applyingSelection.value = false }
 }
 
 async function openTest(channel: Channel) {
@@ -163,7 +164,7 @@ async function openTest(channel: Channel) {
     const models = await apiGet<ChannelModel[]>(`/channels/${channel.id}/models`)
     testModels.value = enabledChannelModels(models)
     testModelId.value = testModels.value[0]?.id
-  } catch (error) { ElMessage.error((error as Error).message) } finally { testLoading.value = false }
+  } catch (error) { showError(error, '加载测试模型失败') } finally { testLoading.value = false }
 }
 
 async function testModel() {
@@ -173,9 +174,9 @@ async function testModel() {
   try {
     testResult.value = await apiPost<ModelTestResult>('/models/test', { modelId: testModelId.value, endpoint: testEndpoint.value })
     if (testResult.value.success) ElMessage.success('模型测试通过')
-    else ElMessage.error(testResult.value.message || '模型测试失败')
+    else showError(testResult.value.message || '模型测试失败', '模型测试失败')
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { testLoading.value = false }
+  } catch (error) { showError(error, '模型测试失败') } finally { testLoading.value = false }
 }
 
 async function queryCost(channel: Channel) {
@@ -185,7 +186,7 @@ async function queryCost(channel: Channel) {
     const parts = [data.usedAmount === undefined ? '' : `已用 ${formatCost(data.usedAmount, data.currency)}`, data.remainingAmount === undefined ? '' : `剩余 ${formatCost(data.remainingAmount, data.currency)}`].filter(Boolean)
     ElMessage.success(parts.join('，') || '费用查询完成')
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+  } catch (error) { showError(error, '查询费用失败') } finally { loading.value = false }
 }
 
 async function remove(channel: Channel) {
@@ -195,7 +196,7 @@ async function remove(channel: Channel) {
     ElMessage.success('渠道已删除')
     await load()
   } catch (error) {
-    if (error !== 'cancel') ElMessage.error((error as Error).message)
+    if (error !== 'cancel') showError(error, '删除渠道失败')
   }
 }
 
@@ -213,8 +214,8 @@ function openEditType(item: ChannelType) {
 
 async function saveType() {
   let config: ChannelTypeConfig
-  try { config = JSON.parse(typeForm.configText) } catch { ElMessage.error('渠道类型 JSON 格式无效'); return }
-  if (!typeForm.name.trim() || !typeForm.code.trim()) { ElMessage.warning('请填写类型名称和类型代码'); return }
+  try { config = JSON.parse(typeForm.configText) } catch { showError('渠道类型 JSON 格式无效', '格式错误'); return }
+  if (!typeForm.name.trim() || !typeForm.code.trim()) { showError('请填写类型名称和类型代码', '信息不完整'); return }
   typeSaving.value = true
   try {
     const payload = { name: typeForm.name, code: typeForm.code, status: typeForm.status, config }
@@ -223,7 +224,7 @@ async function saveType() {
     ElMessage.success(editingType.value ? '渠道类型已更新' : '渠道类型已添加')
     typeDrawerOpen.value = false
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { typeSaving.value = false }
+  } catch (error) { showError(error, '保存渠道类型失败') } finally { typeSaving.value = false }
 }
 
 async function removeType(item: ChannelType) {
@@ -233,7 +234,7 @@ async function removeType(item: ChannelType) {
     ElMessage.success('渠道类型已删除')
     await load()
   } catch (error) {
-    if (error !== 'cancel') ElMessage.error((error as Error).message)
+    if (error !== 'cancel') showError(error, '删除渠道类型失败')
   }
 }
 
@@ -254,7 +255,7 @@ function openEditGroup(item: ChannelGroup) {
 }
 
 async function saveGroup() {
-  if (!groupForm.name.trim() || !groupForm.code.trim()) { ElMessage.warning('请填写分组名称和代码'); return }
+  if (!groupForm.name.trim() || !groupForm.code.trim()) { showError('请填写分组名称和代码', '信息不完整'); return }
   groupSaving.value = true
   try {
     const payload = { ...groupForm }
@@ -263,7 +264,7 @@ async function saveGroup() {
     ElMessage.success(editingGroup.value ? '渠道分组已更新' : '渠道分组已添加')
     groupDrawerOpen.value = false
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { groupSaving.value = false }
+  } catch (error) { showError(error, '保存渠道分组失败') } finally { groupSaving.value = false }
 }
 
 async function removeGroup(item: ChannelGroup) {
@@ -272,7 +273,7 @@ async function removeGroup(item: ChannelGroup) {
     await apiDelete(`/channel-groups/${item.id}`)
     ElMessage.success('渠道分组已删除')
     await load()
-  } catch (error) { if (error !== 'cancel') ElMessage.error((error as Error).message) }
+  } catch (error) { if (error !== 'cancel') showError(error, '删除渠道分组失败') }
 }
 
 onMounted(load)

@@ -15,8 +15,8 @@ import {
   ShipWheel,
   UserRound,
 } from '@lucide/vue'
-import { ElMessage } from 'element-plus'
 import { useAuthStore } from '../stores/auth'
+import { showError } from '../lib/error'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,7 +57,7 @@ async function handleUserCommand(command: string) {
     await auth.logout()
     await router.replace('/login')
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    showError(error, '退出登录失败')
   }
 }
 

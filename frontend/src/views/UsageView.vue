@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
-import { ElMessage } from 'element-plus'
 import { apiGet } from '../api/client'
 import type { UsagePage } from '../api/types'
+import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { formatCost, formatNumber, formatTime } from '../lib/format'
 
@@ -21,7 +21,7 @@ async function load() {
       store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys(),
     ])
     page.value = data
-  } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+  } catch (error) { showError(error, '加载用量记录失败') } finally { loading.value = false }
 }
 
 function search() { filters.page = 1; load() }

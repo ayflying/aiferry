@@ -4,6 +4,7 @@ import { Copy, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { APIKey, ChannelModel, CreatedAPIKey } from '../api/types'
+import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { formatTime } from '../lib/format'
 
@@ -26,7 +27,7 @@ async function load() {
     models.value = await apiGet<ChannelModel[]>('/models').catch(() => [])
   } catch (error) {
     loadError.value = (error as Error).message
-    ElMessage.error(loadError.value)
+    showError(loadError.value, '加载访问密钥失败')
   } finally {
     loading.value = false
   }
@@ -47,7 +48,7 @@ function openEdit(item: APIKey) {
 }
 
 async function save() {
-  if (!form.name.trim()) { ElMessage.warning('请填写密钥名称'); return }
+  if (!form.name.trim()) { showError('请填写密钥名称', '信息不完整'); return }
   saving.value = true
   try {
     if (editing.value) {
@@ -59,7 +60,7 @@ async function save() {
       ElMessage.success('访问密钥已创建')
     }
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { saving.value = false }
+  } catch (error) { showError(error, '保存访问密钥失败') } finally { saving.value = false }
 }
 
 async function copyKey() {
@@ -74,7 +75,7 @@ async function remove(item: APIKey) {
     await apiDelete(`/api-keys/${item.id}`)
     ElMessage.success('访问密钥已删除')
     await load()
-  } catch (error) { if (error !== 'cancel') ElMessage.error((error as Error).message) }
+  } catch (error) { if (error !== 'cancel') showError(error, '删除访问密钥失败') }
 }
 
 onMounted(load)

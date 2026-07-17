@@ -6,9 +6,9 @@ import { BarChart, LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import type { EChartsType } from 'echarts/core'
 import { Activity, CircleDollarSign, Clock3, RefreshCw, Route } from '@lucide/vue'
-import { ElMessage } from 'element-plus'
 import { apiGet } from '../api/client'
 import type { Dashboard } from '../api/types'
+import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { formatCost, formatNumber, successRate } from '../lib/format'
 import RouteStrip from '../components/RouteStrip.vue'
@@ -37,7 +37,7 @@ async function load() {
     await nextTick()
     renderChart()
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    showError(error, '加载仪表盘失败')
   } finally {
     loading.value = false
   }

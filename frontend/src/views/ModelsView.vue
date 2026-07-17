@@ -4,6 +4,7 @@ import { Coins, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { PriceRule, PublicModel } from '../api/types'
+import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { compareModelNames } from '../lib/models'
 
@@ -35,7 +36,7 @@ async function load() {
     const [items] = await Promise.all([apiGet<PublicModel[]>('/public-models'), store.loadChannels()])
     models.value = items
     if (priceSourceChannelId.value && !priceSources.value.some((item) => item.id === priceSourceChannelId.value)) priceSourceChannelId.value = undefined
-  } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+  } catch (error) { showError(error, '加载模型失败') } finally { loading.value = false }
 }
 
 function openEdit(model: PublicModel) {
@@ -46,7 +47,7 @@ function openEdit(model: PublicModel) {
 }
 
 async function loadRules(modelId: number) {
-  try { rules.value = await apiGet<PriceRule[]>(`/models/${modelId}/price-rules`) } catch (error) { ElMessage.error((error as Error).message) }
+  try { rules.value = await apiGet<PriceRule[]>(`/models/${modelId}/price-rules`) } catch (error) { showError(error, '加载价格规则失败') }
 }
 
 async function save() {
@@ -57,19 +58,19 @@ async function save() {
     ElMessage.success('公共模型价格已保存')
     editOpen.value = false
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { saving.value = false }
+  } catch (error) { showError(error, '保存公共价格失败') } finally { saving.value = false }
 }
 
 async function addRule() {
   if (!current.value) return
   let conditions: Record<string, unknown>; let rates: Record<string, number>
-  try { conditions = JSON.parse(ruleForm.conditionsText); rates = JSON.parse(ruleForm.ratesText) } catch { ElMessage.error('规则条件或费率 JSON 格式无效'); return }
+  try { conditions = JSON.parse(ruleForm.conditionsText); rates = JSON.parse(ruleForm.ratesText) } catch { showError('规则条件或费率 JSON 格式无效', '格式错误'); return }
   ruleSaving.value = true
   try {
     await apiPost(`/models/${current.value.id}/price-rules`, { name: ruleForm.name.trim() || '人工规则', source: 'manual', sourceRef: '', priority: ruleForm.priority, currency: ruleForm.currency, conditions, rates, status: ruleForm.status })
     ElMessage.success('高级价格规则已添加')
     await loadRules(current.value.id)
-  } catch (error) { ElMessage.error((error as Error).message) } finally { ruleSaving.value = false }
+  } catch (error) { showError(error, '添加价格规则失败') } finally { ruleSaving.value = false }
 }
 
 async function removeRule(rule: PriceRule) {
@@ -77,20 +78,20 @@ async function removeRule(rule: PriceRule) {
     await ElMessageBox.confirm(`删除价格规则“${rule.name}”？`, '删除价格规则', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     await apiDelete(`/price-rules/${rule.id}`)
     if (current.value) await loadRules(current.value.id)
-  } catch (error) { if (error !== 'cancel') ElMessage.error((error as Error).message) }
+  } catch (error) { if (error !== 'cancel') showError(error, '删除价格规则失败') }
 }
 
 async function syncPrices() {
-  if (!priceSourceChannelId.value) { ElMessage.warning('请选择用于同步价格的渠道'); return }
+  if (!priceSourceChannelId.value) { showError('请选择用于同步价格的渠道', '无法同步价格'); return }
   loading.value = true
   try {
     const result = await apiPost<{ count: number; sources: number; succeeded: number; failures: Array<{ channelName: string; message: string }> }>('/prices/sync', { channelId: priceSourceChannelId.value })
-    if (!result.succeeded) ElMessage.error(`价格同步失败：${formatSyncFailures(result.failures)}`)
-    else if (result.failures.length) ElMessage.warning(`已同步 ${result.count} 条公共价格规则；${formatSyncFailures(result.failures)}`)
+    if (!result.succeeded) showError(formatSyncFailures(result.failures), '价格同步失败')
+    else if (result.failures.length) showError(`已同步 ${result.count} 条公共价格规则，但以下渠道未完成：${formatSyncFailures(result.failures)}`, '价格同步未完全完成')
     else ElMessage.success(result.count ? `已同步 ${result.count} 条公共价格规则` : '所选渠道没有返回已匹配的公开模型价格')
     if (current.value) await loadRules(current.value.id)
     await load()
-  } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+  } catch (error) { showError(error, '价格同步失败') } finally { loading.value = false }
 }
 
 function formatSyncFailures(failures: Array<{ channelName: string; message: string }>) {

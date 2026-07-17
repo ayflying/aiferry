@@ -4,6 +4,7 @@ import { Activity, Database, Gauge, HardDrive, RefreshCw, Route, ShieldCheck, St
 import { ElMessage } from 'element-plus'
 import { apiGet, apiPut } from '../api/client'
 import type { SystemResilienceSettings } from '../api/types'
+import { showError } from '../lib/error'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
 type SettingsTab = 'overview' | 'routing' | 'health' | 'autoDisable'
@@ -46,7 +47,7 @@ async function load() {
     const [system, settings] = await Promise.all([apiGet<SystemInfo>('/system'), apiGet<SystemResilienceSettings>('/system/settings')])
     info.value = system
     applySettings(settings)
-  } catch (error) { ElMessage.error((error as Error).message) } finally { loading.value = false }
+  } catch (error) { showError(error, '加载系统设置失败') } finally { loading.value = false }
 }
 
 async function save() {
@@ -66,7 +67,7 @@ async function save() {
     })
     applySettings(settings)
     ElMessage.success('系统设置已保存')
-  } catch (error) { ElMessage.error((error as Error).message) } finally { saving.value = false }
+  } catch (error) { showError(error, '保存系统设置失败') } finally { saving.value = false }
 }
 
 onMounted(load)
