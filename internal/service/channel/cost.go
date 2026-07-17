@@ -216,7 +216,7 @@ func (s *Service) saveCostResult(ctx context.Context, channelID uint64, result C
 
 func costRange(startDate, endDate string) (time.Time, time.Time, error) {
 	now := time.Now()
-	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	end := now
 	var err error
 	if startDate != "" {

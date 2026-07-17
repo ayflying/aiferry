@@ -154,7 +154,7 @@ async function queryCost(channel: Channel) {
   loading.value = true
   try {
     const data = await apiPost<{ usedAmount?: number; remainingAmount?: number; currency: string }>(`/channels/${channel.id}/costs/query`, {})
-    const parts = [data.usedAmount === undefined ? '' : `已用 ${formatCost(data.usedAmount, data.currency)}`, data.remainingAmount === undefined ? '' : `剩余 ${formatCost(data.remainingAmount, data.currency)}`].filter(Boolean)
+    const parts = [data.usedAmount === undefined ? '' : `今日已用 ${formatCost(data.usedAmount, data.currency)}`, data.remainingAmount === undefined ? '' : `剩余 ${formatCost(data.remainingAmount, data.currency)}`].filter(Boolean)
     ElMessage.success(parts.join('，') || '费用查询完成')
     await load()
   } catch (error) { showError(error, '查询费用失败') } finally { loading.value = false }
@@ -283,7 +283,7 @@ onMounted(load)
             <el-table-column label="路由" width="108"><template #default="{ row }"><span class="mono">P{{ row.priority }} / W{{ row.weight }}</span></template></el-table-column>
             <el-table-column label="模型" width="100"><template #default="{ row }">{{ row.enabledModelCount }} / {{ row.discoveredModels }}</template></el-table-column>
             <el-table-column label="最近测试" min-width="130"><template #default="{ row }"><span v-if="row.lastTestStatus" class="status-dot" :class="row.lastTestStatus">{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : '失败' }}</span><span v-else class="muted">未测试</span></template></el-table-column>
-            <el-table-column label="上游费用" min-width="145"><template #default="{ row }"><div v-if="row.lastCostAt" class="cost-cell"><span v-if="row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="row.lastCostRemaining !== undefined">剩余 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><small>{{ formatTime(row.lastCostAt) }}</small></div><span v-else class="muted">未查询</span></template></el-table-column>
+            <el-table-column label="上游费用（今日）" min-width="145"><template #default="{ row }"><div v-if="row.lastCostAt" class="cost-cell"><span v-if="row.lastCostUsed !== undefined">今日已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="row.lastCostRemaining !== undefined">剩余 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><small>{{ formatTime(row.lastCostAt) }}</small></div><span v-else class="muted">未查询</span></template></el-table-column>
             <el-table-column label="操作" width="230" fixed="right" align="right"><template #default="{ row }"><div class="table-actions">
               <el-tooltip content="发现模型"><button class="icon-button" type="button" :aria-label="`发现 ${row.name} 的模型`" @click="discover(row)"><ScanSearch :size="16" /></button></el-tooltip>
               <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="openTest(row)"><FlaskConical :size="16" /></button></el-tooltip>

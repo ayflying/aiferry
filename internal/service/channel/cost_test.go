@@ -5,13 +5,14 @@ import (
 	"time"
 )
 
-func TestCostRangeDefaultsToCurrentMonth(t *testing.T) {
+func TestCostRangeDefaultsToCurrentDay(t *testing.T) {
 	start, end, err := costRange("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if start.Day() != 1 || start.Month() != now.Month() || !end.After(start) {
+	if start.Year() != now.Year() || start.Month() != now.Month() || start.Day() != now.Day() ||
+		start.Hour() != 0 || start.Minute() != 0 || start.Second() != 0 || !end.After(start) {
 		t.Fatalf("unexpected range: %v - %v", start, end)
 	}
 }
