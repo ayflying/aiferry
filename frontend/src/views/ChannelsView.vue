@@ -13,10 +13,14 @@ import { formatCost, formatLatency, formatTime } from '../lib/format'
 import { sortDiscoveredModels } from '../lib/models'
 
 const store = useAppStore()
-const activeTab = ref('channels')
-const loading = ref(false)
+type ChannelTab = 'channels' | 'groups' | 'types'
+
+const activeTab = ref<ChannelTab>('channels')
+const tabLoading = reactive<Record<ChannelTab, boolean>>({ channels: false, groups: false, types: false })
+const tabLoaded = reactive<Record<ChannelTab, boolean>>({ channels: false, groups: false, types: false })
 const saving = ref(false)
 const drawerOpen = ref(false)
+const channelFormLoading = ref(false)
 const editingId = ref<number>()
 const discoveryOpen = ref(false)
 const discovering = ref(false)
@@ -36,6 +40,7 @@ const typeStatusSaving = reactive<Record<number, boolean>>({})
 const typeForm = reactive({ name: '', code: '', configText: '' })
 const groupDrawerOpen = ref(false)
 const groupSaving = ref(false)
+const groupFormLoading = ref(false)
 const editingGroup = ref<ChannelGroup>()
 const groupForm = reactive({ name: '', code: '', description: '', status: 1, channelIds: [] as number[] })
 
@@ -72,19 +77,62 @@ const form = reactive<ChannelInput>(emptyForm())
 const title = computed(() => editingId.value ? '编辑渠道' : '添加渠道')
 const editingChannel = computed(() => store.channels.find((item) => item.id === editingId.value))
 
-async function load() {
-  loading.value = true
-  try { await Promise.all([store.loadChannels(), store.loadChannelTypes(), store.loadChannelGroups()]) } catch (error) { showError(error, '加载渠道失败') } finally { loading.value = false }
+async function loadChannels() {
+  tabLoading.channels = true
+  try {
+    await store.loadChannels()
+    tabLoaded.channels = true
+  } catch (error) { showError(error, '加载渠道失败') } finally { tabLoading.channels = false }
 }
 
-function openCreate() {
+async function loadChannelGroups() {
+  tabLoading.groups = true
+  try {
+    await store.loadChannelGroups()
+    tabLoaded.groups = true
+  } catch (error) { showError(error, '加载渠道分组失败') } finally { tabLoading.groups = false }
+}
+
+async function loadChannelTypes() {
+  tabLoading.types = true
+  try {
+    await store.loadChannelTypes()
+    tabLoaded.types = true
+  } catch (error) { showError(error, '加载渠道类型失败') } finally { tabLoading.types = false }
+}
+
+function loadTab(tab: ChannelTab) {
+  return { channels: loadChannels, groups: loadChannelGroups, types: loadChannelTypes }[tab]()
+}
+
+function handleTabChange(tab: string | number) {
+  void loadTab(tab as ChannelTab)
+}
+
+async function ensureTabs(...tabs: ChannelTab[]) {
+  await Promise.all(tabs.filter((tab) => !tabLoaded[tab]).map(loadTab))
+}
+
+async function loadChannelFormOptions() {
+  channelFormLoading.value = true
+  try { await ensureTabs('types', 'groups') } finally { channelFormLoading.value = false }
+}
+
+async function loadGroupFormChannels() {
+  groupFormLoading.value = true
+  try { await ensureTabs('channels') } finally { groupFormLoading.value = false }
+}
+
+async function openCreate() {
 	editingId.value = undefined
 	healthCheckModels.value = []
-  Object.assign(form, emptyForm(), { type: store.channelTypes.find((item) => item.status === 1)?.code || '' })
+  Object.assign(form, emptyForm())
   drawerOpen.value = true
+  await loadChannelFormOptions()
+  form.type = store.channelTypes.find((item) => item.status === 1)?.code || ''
 }
 
-function openEdit(channel: Channel) {
+async function openEdit(channel: Channel) {
   editingId.value = channel.id
   Object.assign(form, {
     name: channel.name, type: channel.type, baseUrl: channel.baseUrl, apiKey: '', managementKey: undefined, proxyUrl: undefined,
@@ -93,6 +141,7 @@ function openEdit(channel: Channel) {
 	})
 	drawerOpen.value = true
 	void loadHealthCheckModels(channel.id)
+	await loadChannelFormOptions()
 }
 
 async function loadHealthCheckModels(channelID: number) {
@@ -122,7 +171,8 @@ async function save() {
     else await apiPost('/channels', payload)
     ElMessage.success(editingId.value ? '渠道已更新' : '渠道已添加')
     drawerOpen.value = false
-    await load()
+    tabLoaded.groups = false
+    await loadChannels()
   } catch (error) { showError(error, '保存渠道失败') } finally { saving.value = false }
 }
 
@@ -168,7 +218,7 @@ async function saveModelSelection() {
     await apiPut(`/channels/${discoveryChannel.value.id}/models/selection`, { modelNames: selectedModelNames.value })
     ElMessage.success(`已启用 ${selectedModelNames.value.length} 个模型`)
     discoveryOpen.value = false
-    await load()
+    await loadChannels()
   } catch (error) { showError(error, '保存模型选择失败') } finally { applyingSelection.value = false }
 }
 
@@ -178,13 +228,13 @@ async function openTest(channel: Channel) {
 }
 
 async function queryCost(channel: Channel) {
-  loading.value = true
+  tabLoading.channels = true
   try {
     const data = await apiPost<{ usedAmount?: number; remainingAmount?: number; currency: string }>(`/channels/${channel.id}/costs/query`, {})
     const parts = [data.usedAmount === undefined ? '' : `累计已用 ${formatCost(data.usedAmount, data.currency)}`, data.remainingAmount === undefined ? '' : `剩余 ${formatCost(data.remainingAmount, data.currency)}`].filter(Boolean)
     ElMessage.success(parts.join('，') || '费用查询完成')
-    await load()
-  } catch (error) { showError(error, '查询费用失败') } finally { loading.value = false }
+    await loadChannels()
+  } catch (error) { showError(error, '查询费用失败') } finally { tabLoading.channels = false }
 }
 
 async function remove(channel: Channel) {
@@ -192,7 +242,8 @@ async function remove(channel: Channel) {
     await ElMessageBox.confirm(`删除渠道“${channel.name}”？`, '删除渠道', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     await apiDelete(`/channels/${channel.id}`)
     ElMessage.success('渠道已删除')
-    await load()
+    tabLoaded.groups = false
+    await loadChannels()
   } catch (error) {
     if (error !== 'cancel') showError(error, '删除渠道失败')
   }
@@ -226,7 +277,7 @@ async function saveType() {
     else await apiPost('/channel-types', payload)
     ElMessage.success(editingType.value ? '渠道类型已更新' : '渠道类型已添加')
     typeDrawerOpen.value = false
-    await load()
+    await loadChannelTypes()
   } catch (error) { showError(error, '保存渠道类型失败') } finally { typeSaving.value = false }
 }
 
@@ -244,7 +295,8 @@ async function removeType(item: ChannelType) {
     await ElMessageBox.confirm(`删除渠道类型“${item.name}”？`, '删除渠道类型', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     await apiDelete(`/channel-types/${item.id}`)
     ElMessage.success('渠道类型已删除')
-    await load()
+    tabLoaded.channels = false
+    await loadChannelTypes()
   } catch (error) {
     if (error !== 'cancel') showError(error, '删除渠道类型失败')
   }
@@ -254,16 +306,18 @@ function costLabel(item: ChannelType) {
   return { none: '不查询', openai_costs: 'OpenAI Costs', sub2api_usage: 'Sub2API Usage', custom_json: '自定义 JSON' }[item.config.costs.adapter] || item.config.costs.adapter
 }
 
-function openCreateGroup() {
+async function openCreateGroup() {
   editingGroup.value = undefined
   Object.assign(groupForm, { name: '', code: '', description: '', status: 1, channelIds: [] })
   groupDrawerOpen.value = true
+  await loadGroupFormChannels()
 }
 
-function openEditGroup(item: ChannelGroup) {
+async function openEditGroup(item: ChannelGroup) {
   editingGroup.value = item
   Object.assign(groupForm, { name: item.name, code: item.code, description: item.description, status: item.status, channelIds: [...item.channelIds] })
   groupDrawerOpen.value = true
+  await loadGroupFormChannels()
 }
 
 async function saveGroup() {
@@ -275,7 +329,7 @@ async function saveGroup() {
     else await apiPost('/channel-groups', payload)
     ElMessage.success(editingGroup.value ? '渠道分组已更新' : '渠道分组已添加')
     groupDrawerOpen.value = false
-    await load()
+    await loadChannelGroups()
   } catch (error) { showError(error, '保存渠道分组失败') } finally { groupSaving.value = false }
 }
 
@@ -284,26 +338,26 @@ async function removeGroup(item: ChannelGroup) {
     await ElMessageBox.confirm(`删除渠道分组“${item.name}”？`, '删除渠道分组', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     await apiDelete(`/channel-groups/${item.id}`)
     ElMessage.success('渠道分组已删除')
-    await load()
+    await loadChannelGroups()
   } catch (error) { if (error !== 'cancel') showError(error, '删除渠道分组失败') }
 }
 
-onMounted(load)
+onMounted(loadChannels)
 </script>
 
 <template>
   <div class="page-stack">
-    <el-tabs v-model="activeTab" class="channel-tabs">
+    <el-tabs v-model="activeTab" class="channel-tabs" @tab-change="handleTabChange">
       <el-tab-pane name="channels">
         <template #label><span class="tab-label"><Network :size="15" />渠道</span></template>
         <div class="page-toolbar">
           <div class="muted">管理上游、模型选择、路由顺序和费用查询</div>
           <div class="spacer" />
-          <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
+          <el-button :icon="RefreshCw" :loading="tabLoading.channels" @click="loadChannels">刷新</el-button>
           <el-button type="primary" :icon="Plus" @click="openCreate">添加渠道</el-button>
         </div>
         <div class="table-panel">
-          <el-table v-loading="loading" :data="store.channels" row-key="id">
+          <el-table v-loading="tabLoading.channels" :data="store.channels" row-key="id">
             <el-table-column label="渠道" min-width="180"><template #default="{ row }"><div class="channel-name"><strong>{{ row.name }}</strong><span>{{ row.baseUrl }}</span></div></template></el-table-column>
             <el-table-column label="类型" min-width="120"><template #default="{ row }"><div class="type-cell"><strong>{{ row.typeName }}</strong><code>{{ row.type }}</code></div></template></el-table-column>
             <el-table-column label="状态" width="112"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="row.autoDisabledReason || '渠道被自动禁用'" placement="top"><span class="status-dot warning">自动禁用</span></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '手动停用' }}</span></template></el-table-column>
@@ -319,22 +373,22 @@ onMounted(load)
               <el-tooltip content="删除"><button class="icon-button danger" type="button" :aria-label="`删除渠道 ${row.name}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip>
             </div></template></el-table-column>
           </el-table>
-          <div v-if="!loading && !store.channels.length" class="empty-state"><div><strong>还没有渠道</strong><span>先添加渠道类型，再接入第一个上游</span></div></div>
+          <div v-if="!tabLoading.channels && !store.channels.length" class="empty-state"><div><strong>还没有渠道</strong><span>先添加渠道类型，再接入第一个上游</span></div></div>
         </div>
       </el-tab-pane>
 
       <el-tab-pane name="groups">
         <template #label><span class="tab-label"><Tags :size="15" />渠道分组</span></template>
-        <div class="page-toolbar"><div class="muted">为密钥授权和路由策略维护渠道归属</div><div class="spacer" /><el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button><el-button type="primary" :icon="Plus" @click="openCreateGroup">添加分组</el-button></div>
+        <div class="page-toolbar"><div class="muted">为密钥授权和路由策略维护渠道归属</div><div class="spacer" /><el-button :icon="RefreshCw" :loading="tabLoading.groups" @click="loadChannelGroups">刷新</el-button><el-button type="primary" :icon="Plus" @click="openCreateGroup">添加分组</el-button></div>
         <div class="table-panel">
-          <el-table v-loading="loading" :data="store.channelGroups" row-key="id">
+          <el-table v-loading="tabLoading.groups" :data="store.channelGroups" row-key="id">
             <el-table-column label="分组" min-width="180"><template #default="{ row }"><div class="type-cell"><strong>{{ row.name }}</strong><code>{{ row.code }}</code></div></template></el-table-column>
             <el-table-column prop="description" label="说明" min-width="220" />
             <el-table-column label="渠道" min-width="180"><template #default="{ row }"><el-tag v-for="channelId in row.channelIds" :key="channelId" size="small" class="group-channel-tag">{{ store.channels.find(item => item.id === channelId)?.name || `#${channelId}` }}</el-tag><span v-if="!row.channelIds.length" class="muted">未分配</span></template></el-table-column>
             <el-table-column label="状态" width="96"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
             <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip content="编辑"><button class="icon-button" type="button" @click="openEditGroup(row)"><Pencil :size="16" /></button></el-tooltip><el-tooltip content="删除"><button class="icon-button danger" type="button" @click="removeGroup(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
           </el-table>
-          <div v-if="!loading && !store.channelGroups.length" class="empty-state"><div><strong>还没有渠道分组</strong><span>创建分组后可对访问密钥限定可用渠道</span></div></div>
+          <div v-if="!tabLoading.groups && !store.channelGroups.length" class="empty-state"><div><strong>还没有渠道分组</strong><span>创建分组后可对访问密钥限定可用渠道</span></div></div>
         </div>
       </el-tab-pane>
 
@@ -343,11 +397,11 @@ onMounted(load)
         <div class="page-toolbar">
           <div class="muted">JSON 定义模型发现、OpenAI 接口能力、鉴权和费用字段路径</div>
           <div class="spacer" />
-          <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
+          <el-button :icon="RefreshCw" :loading="tabLoading.types" @click="loadChannelTypes">刷新</el-button>
           <el-button type="primary" :icon="Plus" @click="openCreateType">添加渠道类型</el-button>
         </div>
         <div class="table-panel">
-          <el-table v-loading="loading" :data="store.channelTypes" row-key="id">
+          <el-table v-loading="tabLoading.types" :data="store.channelTypes" row-key="id">
             <el-table-column label="类型" min-width="170"><template #default="{ row }"><div class="type-cell"><strong>{{ row.name }}</strong><code>{{ row.code }}</code></div></template></el-table-column>
             <el-table-column label="模型接口" min-width="220"><template #default="{ row }"><span class="mono">{{ row.config.models.method }} {{ row.config.models.path }}</span></template></el-table-column>
             <el-table-column label="余额查询" min-width="160"><template #default="{ row }"><span>{{ costLabel(row) }}</span><small v-if="row.config.costs.path"> · {{ row.config.costs.path }}</small></template></el-table-column>
@@ -355,18 +409,18 @@ onMounted(load)
             <el-table-column label="来源" width="88"><template #default="{ row }"><span class="muted">{{ row.builtIn === 1 ? '内置' : '自定义' }}</span></template></el-table-column>
             <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip :content="row.builtIn === 1 ? '查看内置配置' : '编辑类型'"><button class="icon-button" type="button" :aria-label="`${row.builtIn === 1 ? '查看' : '编辑'}渠道类型 ${row.name}`" @click="openEditType(row)"><Eye v-if="row.builtIn === 1" :size="16" /><Pencil v-else :size="16" /></button></el-tooltip><el-tooltip v-if="row.builtIn === 0" content="删除类型"><button class="icon-button danger" type="button" :aria-label="`删除渠道类型 ${row.name}`" @click="removeType(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
           </el-table>
-          <div v-if="!loading && !store.channelTypes.length" class="empty-state"><div><strong>还没有渠道类型</strong><span>添加 JSON 配置后即可在渠道表单中选用</span></div></div>
+          <div v-if="!tabLoading.types && !store.channelTypes.length" class="empty-state"><div><strong>还没有渠道类型</strong><span>添加 JSON 配置后即可在渠道表单中选用</span></div></div>
         </div>
       </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="discoveryOpen" :title="`选择模型 · ${discoveryChannel?.name || ''}`" width="min(640px, 94vw)"><div v-loading="discovering" class="model-selection"><template v-if="discoveryError"><div class="discovery-error" role="alert"><strong>模型发现失败</strong><span>{{ discoveryError }}</span><el-button :icon="RefreshCw" @click="discoveryChannel && discover(discoveryChannel)">重新尝试</el-button></div></template><template v-else><div class="selection-toolbar"><el-input v-model="discoveryKeyword" clearable placeholder="搜索模型" /><el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消当前结果' : '选择当前结果' }}</el-button></div><div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div><el-checkbox-group v-if="visibleDiscoveredModels.length" v-model="selectedModelNames" class="model-check-list"><el-checkbox v-for="item in visibleDiscoveredModels" :key="item.name" :value="item.name"><code>{{ item.name }}</code></el-checkbox></el-checkbox-group><div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div></template></div><template #footer><el-button @click="discoveryOpen = false">取消</el-button><el-button type="primary" :loading="applyingSelection" :disabled="discovering || Boolean(discoveryError)" @click="saveModelSelection">确认选择</el-button></template></el-dialog>
 
-    <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="load" />
+    <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="loadChannels" />
 
-    <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" placeholder="https://api.openai.com/v1" /></el-form-item><el-form-item label="推理密钥"><el-input v-model="form.apiKey" type="password" show-password :placeholder="editingId ? '留空则保持不变' : 'sk-... 或上游密钥'" autocomplete="new-password" /></el-form-item><el-form-item v-if="usesManagementKey" label="上游管理密钥（可选）"><el-input v-model="form.managementKey" type="password" show-password :placeholder="editingId ? '留空则清除；不修改请勿聚焦' : '用于渠道类型声明的管理接口'" autocomplete="new-password" /></el-form-item><el-form-item label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><ChannelRouteCoverageSettings v-model:priority="form.priority" v-model:weight="form.weight" v-model:health-check-model-id="form.healthCheckModelId" v-model:auto-disable-enabled="form.autoDisableEnabled" :editing="Boolean(editingId)" :models="healthCheckModelOptions" /><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :editing="Boolean(editingId)" :has-proxy="editingChannel?.hasProxy === true" @clear-proxy="clearProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
+    <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form v-loading="channelFormLoading" label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" placeholder="https://api.openai.com/v1" /></el-form-item><el-form-item label="推理密钥"><el-input v-model="form.apiKey" type="password" show-password :placeholder="editingId ? '留空则保持不变' : 'sk-... 或上游密钥'" autocomplete="new-password" /></el-form-item><el-form-item v-if="usesManagementKey" label="上游管理密钥（可选）"><el-input v-model="form.managementKey" type="password" show-password :placeholder="editingId ? '留空则清除；不修改请勿聚焦' : '用于渠道类型声明的管理接口'" autocomplete="new-password" /></el-form-item><el-form-item label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><ChannelRouteCoverageSettings v-model:priority="form.priority" v-model:weight="form.weight" v-model:health-check-model-id="form.healthCheckModelId" v-model:auto-disable-enabled="form.autoDisableEnabled" :editing="Boolean(editingId)" :models="healthCheckModelOptions" /><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :editing="Boolean(editingId)" :has-proxy="editingChannel?.hasProxy === true" @clear-proxy="clearProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
 
-    <el-drawer v-model="groupDrawerOpen" :title="editingGroup ? '编辑渠道分组' : '添加渠道分组'" :size="drawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="分组名称"><el-input v-model="groupForm.name" placeholder="例如 高优先级" /></el-form-item><el-form-item label="分组代码"><el-input v-model="groupForm.code" :disabled="Boolean(editingGroup)" placeholder="例如 premium" /></el-form-item><el-form-item label="状态"><el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="说明"><el-input v-model="groupForm.description" maxlength="255" show-word-limit /></el-form-item><el-form-item label="包含渠道"><el-select v-model="groupForm.channelIds" multiple filterable clearable placeholder="选择渠道"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="groupDrawerOpen = false">取消</el-button><el-button type="primary" :loading="groupSaving" @click="saveGroup">保存分组</el-button></template></el-drawer>
+    <el-drawer v-model="groupDrawerOpen" :title="editingGroup ? '编辑渠道分组' : '添加渠道分组'" :size="drawerSize"><el-form v-loading="groupFormLoading" label-position="top"><div class="form-grid"><el-form-item label="分组名称"><el-input v-model="groupForm.name" placeholder="例如 高优先级" /></el-form-item><el-form-item label="分组代码"><el-input v-model="groupForm.code" :disabled="Boolean(editingGroup)" placeholder="例如 premium" /></el-form-item><el-form-item label="状态"><el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="说明"><el-input v-model="groupForm.description" maxlength="255" show-word-limit /></el-form-item><el-form-item label="包含渠道"><el-select v-model="groupForm.channelIds" multiple filterable clearable placeholder="选择渠道"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="groupDrawerOpen = false">取消</el-button><el-button type="primary" :loading="groupSaving" @click="saveGroup">保存分组</el-button></template></el-drawer>
 
     <el-drawer v-model="typeDrawerOpen" :title="typeReadOnly ? '查看内置渠道类型' : (editingType ? '编辑渠道类型' : '添加渠道类型')" :size="typeDrawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="类型名称"><el-input v-model="typeForm.name" :readonly="typeReadOnly" placeholder="例如 自建网关" /></el-form-item><el-form-item label="类型代码"><el-input v-model="typeForm.code" :disabled="Boolean(editingType)" placeholder="例如 custom_gateway" /></el-form-item></div><el-form-item label="类型 JSON 配置"><el-input v-model="typeForm.configText" class="config-editor" type="textarea" :rows="22" :readonly="typeReadOnly" spellcheck="false" /></el-form-item></el-form><template #footer><el-button @click="typeDrawerOpen = false">{{ typeReadOnly ? '关闭' : '取消' }}</el-button><el-button v-if="!typeReadOnly" type="primary" :loading="typeSaving" @click="saveType">保存类型</el-button></template></el-drawer>
   </div>
