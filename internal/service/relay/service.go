@@ -44,6 +44,8 @@ type Candidate struct {
 	APIKeyCipher   string `orm:"api_key_cipher"`
 	OrganizationID string `orm:"organization_id"`
 	ProjectID      string `orm:"project_id"`
+	ProxyURLCipher string `orm:"proxy_url_cipher"`
+	AdvancedConfig string `orm:"advanced_config"`
 	Priority       int    `orm:"priority"`
 	Weight         uint   `orm:"weight"`
 	PublicName     string `orm:"public_name"`
@@ -201,9 +203,13 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 }
 
 func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, retryStatusCodes string) (attemptResult, bool, error) {
-	body, err := sjson.SetBytes(originalBody, "model", candidate.UpstreamName)
+	advancedConfig, err := channel.ParseAdvancedConfig([]byte(candidate.AdvancedConfig))
 	if err != nil {
-		return attemptResult{}, false, gerror.Wrap(err, "map upstream model")
+		return attemptResult{}, false, err
+	}
+	body, err := prepareRequestBody(endpoint, originalBody, candidate.UpstreamName, advancedConfig)
+	if err != nil {
+		return attemptResult{}, false, err
 	}
 	apiKey, err := s.app.Secrets.Decrypt(candidate.APIKeyCipher)
 	if err != nil {
@@ -222,13 +228,18 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	if candidate.ProjectID != "" {
 		req.Header.Set("OpenAI-Project", candidate.ProjectID)
 	}
-	resp, err := s.app.HTTP.Do(req)
+	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
+	if err != nil {
+		return attemptResult{}, false, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "call upstream")
 	}
 	if !stream || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+		responseBody = normalizeResponseBody(endpoint, responseBody, candidate.UpstreamName, advancedConfig)
 		result := attemptResult{status: resp.StatusCode, body: responseBody, tokens: parseJSONUsage(responseBody), headers: resp.Header.Clone()}
 		if readErr != nil {
 			return result, false, gerror.Wrap(readErr, "read upstream response")
@@ -252,6 +263,7 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	firstChunk := true
 	for scanner.Scan() {
 		line := append(append([]byte(nil), scanner.Bytes()...), '\n')
+		line = normalizeSSELine(endpoint, line, candidate.UpstreamName, advancedConfig)
 		if firstChunk {
 			first := time.Since(startedAt).Milliseconds()
 			result.firstTokenMs = &first

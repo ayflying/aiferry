@@ -20,7 +20,7 @@ func (s *Service) route(ctx context.Context, model string, key apikey.AuthKey) (
 	err := dao.ChannelModels.Ctx(ctx).As("m").Fields(`
 		m.id AS channel_model_id,m.public_name,m.upstream_name,
 		c.id AS channel_id,c.name AS channel_name,c.base_url,c.api_key_cipher,
-		c.organization_id,c.project_id,c.priority,c.weight`).
+		c.organization_id,c.project_id,c.proxy_url_cipher,c.advanced_config,c.priority,c.weight`).
 		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id AND c.status=1").
 		Where("m.enabled", 1).
 		Where("m.public_name", model).

@@ -11,6 +11,7 @@ type ChannelInput struct {
 	BaseURL         string          `json:"baseUrl" v:"required|url"`
 	APIKey          *string         `json:"apiKey"`
 	ManagementKey   *string         `json:"managementKey"`
+	ProxyURL        *string         `json:"proxyUrl"`
 	OrganizationID  string          `json:"organizationId"`
 	ProjectID       string          `json:"projectId"`
 	Status          int             `json:"status"`
@@ -18,6 +19,7 @@ type ChannelInput struct {
 	Weight          uint            `json:"weight"`
 	CostQueryMode   string          `json:"costQueryMode"`
 	CostQueryConfig CostQueryConfig `json:"costQueryConfig"`
+	AdvancedConfig  json.RawMessage `json:"advancedConfig"`
 	GroupIDs        []uint64        `json:"groupIds"`
 }
 

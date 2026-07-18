@@ -28,6 +28,8 @@ type Channels struct {
 	Weight                 any //
 	CostQueryMode          any //
 	CostQueryConfig        any //
+	AdvancedConfig         any //
+	ProxyUrlCipher         any //
 	LastTestStatus         any //
 	LastTestLatencyMs      any //
 	LastTestError          any //

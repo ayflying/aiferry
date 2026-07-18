@@ -3,7 +3,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Braces, Coins, Eye, FlaskConical, Network, Pencil, Plus, RefreshCw, ScanSearch, Tags, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { Channel, ChannelGroup, ChannelInput, ChannelType, ChannelTypeConfig, DiscoveredModel } from '../api/types'
+import type { Channel, ChannelAdvancedConfig, ChannelGroup, ChannelInput, ChannelType, ChannelTypeConfig, DiscoveredModel } from '../api/types'
+import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelModelTestDialog from '../components/ChannelModelTestDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
@@ -54,11 +55,17 @@ const visibleDiscoveredModels = computed(() => {
 const allVisibleSelected = computed(() => visibleDiscoveredModels.value.length > 0
   && visibleDiscoveredModels.value.every((item) => selectedModelNames.value.includes(item.name)))
 
+const defaultAdvancedConfig = (): ChannelAdvancedConfig => ({
+  forceOpenAIFormat: false, reasoningToContent: false, passthroughRequestBody: false, skipAsyncPollingDelay: false,
+  systemPrompt: '', appendSystemPrompt: false, allowServiceTier: false, blockStore: true,
+  allowSafetyIdentifier: false, allowInclude: false, allowInferenceGeo: false,
+})
 const emptyForm = (): ChannelInput => ({
-  name: '', type: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', managementKey: '', organizationId: '', projectId: '', status: 1, priority: 0, weight: 1, groupIds: [],
+  name: '', type: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', managementKey: '', proxyUrl: '', organizationId: '', projectId: '', status: 1, priority: 0, weight: 1, advancedConfig: defaultAdvancedConfig(), groupIds: [],
 })
 const form = reactive<ChannelInput>(emptyForm())
 const title = computed(() => editingId.value ? '编辑渠道' : '添加渠道')
+const editingChannel = computed(() => store.channels.find((item) => item.id === editingId.value))
 
 async function load() {
   loading.value = true
@@ -74,11 +81,15 @@ function openCreate() {
 function openEdit(channel: Channel) {
   editingId.value = channel.id
   Object.assign(form, {
-    name: channel.name, type: channel.type, baseUrl: channel.baseUrl, apiKey: '', managementKey: undefined,
+    name: channel.name, type: channel.type, baseUrl: channel.baseUrl, apiKey: '', managementKey: undefined, proxyUrl: undefined,
     organizationId: channel.organizationId, projectId: channel.projectId, status: channel.status,
-    priority: channel.priority, weight: channel.weight, groupIds: channel.groupIds || [],
+    priority: channel.priority, weight: channel.weight, advancedConfig: JSON.parse(JSON.stringify(channel.advancedConfig || defaultAdvancedConfig())), groupIds: channel.groupIds || [],
   })
   drawerOpen.value = true
+}
+
+function clearProxy() {
+  form.proxyUrl = ''
 }
 
 async function save() {
@@ -337,7 +348,7 @@ onMounted(load)
 
     <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="load" />
 
-    <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" placeholder="https://api.openai.com/v1" /></el-form-item><el-form-item label="推理密钥"><el-input v-model="form.apiKey" type="password" show-password :placeholder="editingId ? '留空则保持不变' : 'sk-... 或上游密钥'" autocomplete="new-password" /></el-form-item><el-form-item v-if="usesManagementKey" label="上游管理密钥（可选）"><el-input v-model="form.managementKey" type="password" show-password :placeholder="editingId ? '留空则清除；不修改请勿聚焦' : '用于渠道类型声明的管理接口'" autocomplete="new-password" /></el-form-item><el-form-item label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="优先级"><el-input-number v-model="form.priority" :min="-999" :max="999" controls-position="right" /></el-form-item><el-form-item label="权重"><el-input-number v-model="form.weight" :min="1" :max="1000" controls-position="right" /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
+    <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" placeholder="https://api.openai.com/v1" /></el-form-item><el-form-item label="推理密钥"><el-input v-model="form.apiKey" type="password" show-password :placeholder="editingId ? '留空则保持不变' : 'sk-... 或上游密钥'" autocomplete="new-password" /></el-form-item><el-form-item v-if="usesManagementKey" label="上游管理密钥（可选）"><el-input v-model="form.managementKey" type="password" show-password :placeholder="editingId ? '留空则清除；不修改请勿聚焦' : '用于渠道类型声明的管理接口'" autocomplete="new-password" /></el-form-item><el-form-item label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="优先级"><el-input-number v-model="form.priority" :min="-999" :max="999" controls-position="right" /></el-form-item><el-form-item label="权重"><el-input-number v-model="form.weight" :min="1" :max="1000" controls-position="right" /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :editing="Boolean(editingId)" :has-proxy="editingChannel?.hasProxy === true" @clear-proxy="clearProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
 
     <el-drawer v-model="groupDrawerOpen" :title="editingGroup ? '编辑渠道分组' : '添加渠道分组'" :size="drawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="分组名称"><el-input v-model="groupForm.name" placeholder="例如 高优先级" /></el-form-item><el-form-item label="分组代码"><el-input v-model="groupForm.code" :disabled="Boolean(editingGroup)" placeholder="例如 premium" /></el-form-item><el-form-item label="状态"><el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="说明"><el-input v-model="groupForm.description" maxlength="255" show-word-limit /></el-form-item><el-form-item label="包含渠道"><el-select v-model="groupForm.channelIds" multiple filterable clearable placeholder="选择渠道"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="groupDrawerOpen = false">取消</el-button><el-button type="primary" :loading="groupSaving" @click="saveGroup">保存分组</el-button></template></el-drawer>
 

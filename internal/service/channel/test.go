@@ -106,7 +106,11 @@ func (s *Service) testModelEndpoint(ctx context.Context, channel entity.Channels
 		return TestResult{}, path, usage.TokenUsage{}, err
 	}
 	startedAt := time.Now()
-	resp, requestErr := s.app.HTTP.Do(req)
+	client, clientErr := s.HTTPClientForProxy(channel.ProxyUrlCipher)
+	if clientErr != nil {
+		return TestResult{}, path, usage.TokenUsage{}, clientErr
+	}
+	resp, requestErr := client.Do(req)
 	latency := time.Since(startedAt).Milliseconds()
 	result := TestResult{Endpoint: endpoint, Stream: streamed, Model: model.PublicName, LatencyMs: latency}
 	if requestErr != nil {

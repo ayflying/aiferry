@@ -55,6 +55,20 @@ export interface CostQueryConfig {
   fixedCurrency: string
 }
 
+export interface ChannelAdvancedConfig {
+  forceOpenAIFormat: boolean
+  reasoningToContent: boolean
+  passthroughRequestBody: boolean
+  skipAsyncPollingDelay: boolean
+  systemPrompt: string
+  appendSystemPrompt: boolean
+  allowServiceTier: boolean
+  blockStore: boolean
+  allowSafetyIdentifier: boolean
+  allowInclude: boolean
+  allowInferenceGeo: boolean
+}
+
 export interface ChannelTypeModelConfig {
   method: string
   path: string
@@ -156,6 +170,7 @@ export interface Channel {
   baseUrl: string
   hasApiKey: boolean
   hasManagementKey: boolean
+	 hasProxy: boolean
   organizationId: string
   projectId: string
   status: number
@@ -167,6 +182,7 @@ export interface Channel {
   weight: number
   costQueryMode: string
   costQueryConfig: CostQueryConfig
+	 advancedConfig: ChannelAdvancedConfig
   enabledModelCount: number
   discoveredModels: number
   lastTestStatus: string
@@ -213,11 +229,13 @@ export interface ChannelInput {
   baseUrl: string
   apiKey?: string
   managementKey?: string
+	 proxyUrl?: string
   organizationId: string
   projectId: string
   status: number
   priority: number
   weight: number
+	 advancedConfig: ChannelAdvancedConfig
   groupIds: number[]
 }
 

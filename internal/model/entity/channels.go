@@ -27,6 +27,8 @@ type Channels struct {
 	Weight                 uint      `json:"weight"                 orm:"weight"                    description:""` //
 	CostQueryMode          string    `json:"costQueryMode"          orm:"cost_query_mode"           description:""` //
 	CostQueryConfig        string    `json:"costQueryConfig"        orm:"cost_query_config"         description:""` //
+	AdvancedConfig         string    `json:"advancedConfig"         orm:"advanced_config"           description:""` //
+	ProxyUrlCipher         string    `json:"proxyUrlCipher"         orm:"proxy_url_cipher"          description:""` //
 	LastTestStatus         string    `json:"lastTestStatus"         orm:"last_test_status"          description:""` //
 	LastTestLatencyMs      uint      `json:"lastTestLatencyMs"      orm:"last_test_latency_ms"      description:""` //
 	LastTestError          string    `json:"lastTestError"          orm:"last_test_error"           description:""` //

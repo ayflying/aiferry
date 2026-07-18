@@ -75,6 +75,10 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 	if err != nil {
 		return 0, err
 	}
+	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, "")
+	if err != nil {
+		return 0, err
+	}
 	data := do.Channels{
 		Name:            strings.TrimSpace(input.Name),
 		Type:            typeRow.Code,
@@ -87,9 +91,16 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 		Weight:          normalizeWeight(input.Weight),
 		CostQueryMode:   typeConfig.Costs.Adapter,
 		CostQueryConfig: "{}",
+		AdvancedConfig:  advancedConfig,
 	}
 	if input.ManagementKey != nil && strings.TrimSpace(*input.ManagementKey) != "" {
 		data.ManagementKeyCipher, err = s.app.Secrets.Encrypt(strings.TrimSpace(*input.ManagementKey))
+		if err != nil {
+			return 0, err
+		}
+	}
+	if input.ProxyURL != nil && strings.TrimSpace(*input.ProxyURL) != "" {
+		data.ProxyUrlCipher, err = s.encryptProxyURL(*input.ProxyURL)
 		if err != nil {
 			return 0, err
 		}
@@ -122,6 +133,10 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 	if err != nil {
 		return err
 	}
+	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, current.AdvancedConfig)
+	if err != nil {
+		return err
+	}
 	data := do.Channels{
 		Name:                   strings.TrimSpace(input.Name),
 		Type:                   typeRow.Code,
@@ -137,11 +152,22 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 		Weight:                 normalizeWeight(input.Weight),
 		CostQueryMode:          typeConfig.Costs.Adapter,
 		CostQueryConfig:        "{}",
+		AdvancedConfig:         advancedConfig,
 	}
 	if input.APIKey != nil && strings.TrimSpace(*input.APIKey) != "" {
 		data.ApiKeyCipher, err = s.app.Secrets.Encrypt(strings.TrimSpace(*input.APIKey))
 		if err != nil {
 			return err
+		}
+	}
+	if input.ProxyURL != nil {
+		if strings.TrimSpace(*input.ProxyURL) == "" {
+			data.ProxyUrlCipher = gdb.Raw("NULL")
+		} else {
+			data.ProxyUrlCipher, err = s.encryptProxyURL(*input.ProxyURL)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	if input.ManagementKey != nil {
@@ -179,6 +205,10 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 }
 
 func (s *Service) toView(row entity.Channels) View {
+	advancedConfig, err := ParseAdvancedConfig([]byte(row.AdvancedConfig))
+	if err != nil {
+		advancedConfig = DefaultAdvancedConfig()
+	}
 	view := View{
 		Id:                row.Id,
 		Name:              row.Name,
@@ -186,12 +216,14 @@ func (s *Service) toView(row entity.Channels) View {
 		BaseURL:           row.BaseUrl,
 		HasAPIKey:         row.ApiKeyCipher != "",
 		HasManagementKey:  row.ManagementKeyCipher != "",
+		HasProxy:          row.ProxyUrlCipher != "",
 		OrganizationID:    row.OrganizationId,
 		ProjectID:         row.ProjectId,
 		Status:            row.Status,
 		Priority:          row.Priority,
 		Weight:            row.Weight,
 		CostQueryMode:     row.CostQueryMode,
+		AdvancedConfig:    advancedConfig,
 		LastTestStatus:    row.LastTestStatus,
 		LastTestLatencyMs: row.LastTestLatencyMs,
 		LastTestError:     row.LastTestError,
@@ -217,4 +249,15 @@ func (s *Service) toView(row entity.Channels) View {
 		view.LastCostRemaining = &row.LastCostRemaining
 	}
 	return view
+}
+
+func advancedConfigJSON(raw []byte, fallback string) (string, error) {
+	if len(raw) == 0 && fallback != "" {
+		return fallback, nil
+	}
+	config, err := ParseAdvancedConfig(raw)
+	if err != nil {
+		return "", err
+	}
+	return MarshalAdvancedConfig(config)
 }

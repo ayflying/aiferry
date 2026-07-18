@@ -1,9 +1,11 @@
 package relay
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/shopspring/decimal"
+	"github.com/yunloli/aiferry/internal/service/channel"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
@@ -69,6 +71,99 @@ func TestRuleCostSupportsRequestOnlyPricing(t *testing.T) {
 	cost, ok := ruleCost(`{}`, `{"request":0.01}`, "/images/generations", usage.TokenUsage{})
 	if !ok || !cost.Equal(decimalRequire("0.01")) {
 		t.Fatalf("unexpected request-only cost: %v, matched=%t", cost, ok)
+	}
+}
+
+func TestPrepareRequestBodyBlocksOptionalFieldsByDefault(t *testing.T) {
+	config := channel.DefaultAdvancedConfig()
+	config.SystemPrompt = "渠道规则"
+	body, err := prepareRequestBody("/chat/completions", []byte(`{"model":"public-model","messages":[{"role":"user","content":"你好"}],"service_tier":"flex","store":true,"include":["usage"],"unknown":"blocked"}`), "upstream-model", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err = json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["model"] != "upstream-model" {
+		t.Fatalf("model was not mapped: %#v", payload)
+	}
+	for _, field := range []string{"service_tier", "store", "include", "unknown"} {
+		if _, ok := payload[field]; ok {
+			t.Fatalf("%s should be blocked: %#v", field, payload)
+		}
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) != 2 {
+		t.Fatalf("default system prompt was not added: %#v", payload["messages"])
+	}
+}
+
+func TestPrepareRequestBodyAllowsConfiguredFieldsAndSystemPromptAppend(t *testing.T) {
+	config := channel.DefaultAdvancedConfig()
+	config.PassthroughRequestBody = true
+	config.AllowServiceTier = true
+	config.BlockStore = false
+	config.AllowSafetyIdentifier = true
+	config.AllowInclude = true
+	config.AllowInferenceGeo = true
+	config.SystemPrompt = "渠道规则"
+	config.AppendSystemPrompt = true
+	body, err := prepareRequestBody("/chat/completions", []byte(`{"model":"public-model","messages":[{"role":"system","content":"用户规则"}],"service_tier":"flex","store":true,"safety_identifier":"user-1","include":["usage"],"inference_geo":"cn","custom":{"enabled":true}}`), "upstream-model", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err = json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"service_tier", "store", "safety_identifier", "include", "inference_geo", "custom"} {
+		if _, ok := payload[field]; !ok {
+			t.Fatalf("%s should be forwarded: %#v", field, payload)
+		}
+	}
+	messages := payload["messages"].([]any)
+	message := messages[0].(map[string]any)
+	if message["content"] != "渠道规则\n\n用户规则" {
+		t.Fatalf("system prompt was not appended: %#v", message)
+	}
+}
+
+func TestNormalizeResponseMovesReasoningIntoThinkContent(t *testing.T) {
+	config := channel.DefaultAdvancedConfig()
+	config.ReasoningToContent = true
+	config.ForceOpenAIFormat = true
+	body := normalizeResponseBody("/chat/completions", []byte(`{"choices":[{"message":{"reasoning_content":"先思考","content":"回答"}}]}`), "upstream-model", config)
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	choice := payload["choices"].([]any)[0].(map[string]any)
+	message := choice["message"].(map[string]any)
+	if message["content"] != "<think>先思考</think>回答" {
+		t.Fatalf("unexpected normalized content: %#v", message)
+	}
+	if _, ok := message["reasoning_content"]; ok || payload["object"] != "chat.completion" {
+		t.Fatalf("response was not normalized: %#v", payload)
+	}
+}
+
+func TestNormalizeResponseKeepsMultimodalContent(t *testing.T) {
+	config := channel.DefaultAdvancedConfig()
+	config.ReasoningToContent = true
+	body := normalizeResponseBody("/chat/completions", []byte(`{"choices":[{"message":{"reasoning_content":"先思考","content":[{"type":"text","text":"回答"}]}}]}`), "upstream-model", config)
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	choice := payload["choices"].([]any)[0].(map[string]any)
+	message := choice["message"].(map[string]any)
+	if _, ok := message["reasoning_content"]; !ok {
+		t.Fatalf("reasoning content should stay with multimodal content: %#v", message)
+	}
+	content, ok := message["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("multimodal content should not be replaced: %#v", message)
 	}
 }
 

@@ -38,6 +38,8 @@ type ChannelsColumns struct {
 	Weight                 string //
 	CostQueryMode          string //
 	CostQueryConfig        string //
+	AdvancedConfig         string //
+	ProxyUrlCipher         string //
 	LastTestStatus         string //
 	LastTestLatencyMs      string //
 	LastTestError          string //
@@ -70,6 +72,8 @@ var channelsColumns = ChannelsColumns{
 	Weight:                 "weight",
 	CostQueryMode:          "cost_query_mode",
 	CostQueryConfig:        "cost_query_config",
+	AdvancedConfig:         "advanced_config",
+	ProxyUrlCipher:         "proxy_url_cipher",
 	LastTestStatus:         "last_test_status",
 	LastTestLatencyMs:      "last_test_latency_ms",
 	LastTestError:          "last_test_error",
