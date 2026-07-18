@@ -347,7 +347,7 @@ onMounted(loadChannels)
 
 <template>
   <div class="page-stack">
-    <el-tabs v-model="activeTab" class="channel-tabs" @tab-change="handleTabChange">
+    <el-tabs v-model="activeTab" class="channel-tabs sticky-page-tabs" @tab-change="handleTabChange">
       <el-tab-pane name="channels">
         <template #label><span class="tab-label"><Network :size="15" />渠道</span></template>
         <div class="page-toolbar">

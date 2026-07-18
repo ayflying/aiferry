@@ -99,6 +99,7 @@ button { color: inherit; }
 @keyframes ferry-route { from { transform: translateX(0); } to { transform: translateX(138%); } }
 
 .page-stack { display: flex; flex-direction: column; gap: 18px; }
+.sticky-page-tabs > .el-tabs__header { position: sticky; top: 64px; z-index: 12; padding: 12px 0 10px; background: var(--canvas); }
 .page-toolbar { display: flex; min-height: 36px; align-items: center; gap: 10px; }
 .page-toolbar .spacer { flex: 1; }
 .toolbar-group { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -156,6 +157,7 @@ button { color: inherit; }
 
 @media (max-width: 899px) {
   .topbar { height: 58px; padding-inline: 14px; }
+  .sticky-page-tabs > .el-tabs__header { top: 58px; }
   .page-content { padding: 16px 12px 30px; }
   .user-copy { display: none; }
   .page-toolbar { align-items: flex-start; flex-wrap: wrap; }
