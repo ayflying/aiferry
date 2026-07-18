@@ -6,21 +6,23 @@ import (
 )
 
 type ChannelInput struct {
-	Name            string          `json:"name" v:"required|length:1,96"`
-	Type            string          `json:"type" v:"required|length:1,64"`
-	BaseURL         string          `json:"baseUrl" v:"required|url"`
-	APIKey          *string         `json:"apiKey"`
-	ManagementKey   *string         `json:"managementKey"`
-	ProxyURL        *string         `json:"proxyUrl"`
-	OrganizationID  string          `json:"organizationId"`
-	ProjectID       string          `json:"projectId"`
-	Status          int             `json:"status"`
-	Priority        int             `json:"priority"`
-	Weight          uint            `json:"weight"`
-	CostQueryMode   string          `json:"costQueryMode"`
-	CostQueryConfig CostQueryConfig `json:"costQueryConfig"`
-	AdvancedConfig  json.RawMessage `json:"advancedConfig"`
-	GroupIDs        []uint64        `json:"groupIds"`
+	Name               string          `json:"name" v:"required|length:1,96"`
+	Type               string          `json:"type" v:"required|length:1,64"`
+	BaseURL            string          `json:"baseUrl" v:"required|url"`
+	APIKey             *string         `json:"apiKey"`
+	ManagementKey      *string         `json:"managementKey"`
+	ProxyURL           *string         `json:"proxyUrl"`
+	OrganizationID     string          `json:"organizationId"`
+	ProjectID          string          `json:"projectId"`
+	Status             int             `json:"status"`
+	Priority           int             `json:"priority"`
+	Weight             uint            `json:"weight"`
+	HealthCheckModelID uint64          `json:"healthCheckModelId"`
+	AutoDisableEnabled *bool           `json:"autoDisableEnabled"`
+	CostQueryMode      string          `json:"costQueryMode"`
+	CostQueryConfig    CostQueryConfig `json:"costQueryConfig"`
+	AdvancedConfig     json.RawMessage `json:"advancedConfig"`
+	GroupIDs           []uint64        `json:"groupIds"`
 }
 
 type ChannelGroupInput struct {

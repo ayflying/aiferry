@@ -25,6 +25,8 @@ type Channels struct {
 	AutoDisabledSource     string    `json:"autoDisabledSource"     orm:"auto_disabled_source"      description:""` //
 	Priority               int       `json:"priority"               orm:"priority"                  description:""` //
 	Weight                 uint      `json:"weight"                 orm:"weight"                    description:""` //
+	HealthCheckModelId     uint64    `json:"healthCheckModelId"     orm:"health_check_model_id"     description:""` //
+	AutoDisableEnabled     int       `json:"autoDisableEnabled"     orm:"auto_disable_enabled"      description:""` //
 	CostQueryMode          string    `json:"costQueryMode"          orm:"cost_query_mode"           description:""` //
 	CostQueryConfig        string    `json:"costQueryConfig"        orm:"cost_query_config"         description:""` //
 	AdvancedConfig         string    `json:"advancedConfig"         orm:"advanced_config"           description:""` //

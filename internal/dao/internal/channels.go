@@ -36,6 +36,8 @@ type ChannelsColumns struct {
 	AutoDisabledSource     string //
 	Priority               string //
 	Weight                 string //
+	HealthCheckModelId     string //
+	AutoDisableEnabled     string //
 	CostQueryMode          string //
 	CostQueryConfig        string //
 	AdvancedConfig         string //
@@ -70,6 +72,8 @@ var channelsColumns = ChannelsColumns{
 	AutoDisabledSource:     "auto_disabled_source",
 	Priority:               "priority",
 	Weight:                 "weight",
+	HealthCheckModelId:     "health_check_model_id",
+	AutoDisableEnabled:     "auto_disable_enabled",
 	CostQueryMode:          "cost_query_mode",
 	CostQueryConfig:        "cost_query_config",
 	AdvancedConfig:         "advanced_config",

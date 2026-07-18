@@ -26,6 +26,8 @@ type Channels struct {
 	AutoDisabledSource     any //
 	Priority               any //
 	Weight                 any //
+	HealthCheckModelId     any //
+	AutoDisableEnabled     any //
 	CostQueryMode          any //
 	CostQueryConfig        any //
 	AdvancedConfig         any //

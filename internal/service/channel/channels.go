@@ -63,6 +63,9 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 	if input.APIKey == nil || strings.TrimSpace(*input.APIKey) == "" {
 		return 0, gerror.New("API key is required")
 	}
+	if input.HealthCheckModelID != 0 {
+		return 0, gerror.New("test model can only be selected after the channel is created")
+	}
 	baseURL, err := normalizeBaseURL(input.BaseURL)
 	if err != nil {
 		return 0, err
@@ -80,18 +83,19 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 		return 0, err
 	}
 	data := do.Channels{
-		Name:            strings.TrimSpace(input.Name),
-		Type:            typeRow.Code,
-		BaseUrl:         baseURL,
-		ApiKeyCipher:    apiKeyCipher,
-		OrganizationId:  strings.TrimSpace(input.OrganizationID),
-		ProjectId:       strings.TrimSpace(input.ProjectID),
-		Status:          boolStatus(input.Status),
-		Priority:        input.Priority,
-		Weight:          normalizeWeight(input.Weight),
-		CostQueryMode:   typeConfig.Costs.Adapter,
-		CostQueryConfig: "{}",
-		AdvancedConfig:  advancedConfig,
+		Name:               strings.TrimSpace(input.Name),
+		Type:               typeRow.Code,
+		BaseUrl:            baseURL,
+		ApiKeyCipher:       apiKeyCipher,
+		OrganizationId:     strings.TrimSpace(input.OrganizationID),
+		ProjectId:          strings.TrimSpace(input.ProjectID),
+		Status:             boolStatus(input.Status),
+		Priority:           input.Priority,
+		Weight:             normalizeWeight(input.Weight),
+		AutoDisableEnabled: boolInt(channelAutoDisableEnabled(input.AutoDisableEnabled, true)),
+		CostQueryMode:      typeConfig.Costs.Adapter,
+		CostQueryConfig:    "{}",
+		AdvancedConfig:     advancedConfig,
 	}
 	if input.ManagementKey != nil && strings.TrimSpace(*input.ManagementKey) != "" {
 		data.ManagementKeyCipher, err = s.app.Secrets.Encrypt(strings.TrimSpace(*input.ManagementKey))
@@ -137,6 +141,10 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 	if err != nil {
 		return err
 	}
+	healthCheckModelID, err := s.validateHealthCheckModel(ctx, current.Id, input.HealthCheckModelID)
+	if err != nil {
+		return err
+	}
 	data := do.Channels{
 		Name:                   strings.TrimSpace(input.Name),
 		Type:                   typeRow.Code,
@@ -150,6 +158,8 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 		AutoDisabledSource:     gdb.Raw("NULL"),
 		Priority:               input.Priority,
 		Weight:                 normalizeWeight(input.Weight),
+		HealthCheckModelId:     healthCheckModelID,
+		AutoDisableEnabled:     boolInt(channelAutoDisableEnabled(input.AutoDisableEnabled, current.AutoDisableEnabled == 1)),
 		CostQueryMode:          typeConfig.Costs.Adapter,
 		CostQueryConfig:        "{}",
 		AdvancedConfig:         advancedConfig,
@@ -210,25 +220,27 @@ func (s *Service) toView(row entity.Channels) View {
 		advancedConfig = DefaultAdvancedConfig()
 	}
 	view := View{
-		Id:                row.Id,
-		Name:              row.Name,
-		Type:              row.Type,
-		BaseURL:           row.BaseUrl,
-		HasAPIKey:         row.ApiKeyCipher != "",
-		HasManagementKey:  row.ManagementKeyCipher != "",
-		HasProxy:          row.ProxyUrlCipher != "",
-		OrganizationID:    row.OrganizationId,
-		ProjectID:         row.ProjectId,
-		Status:            row.Status,
-		Priority:          row.Priority,
-		Weight:            row.Weight,
-		CostQueryMode:     row.CostQueryMode,
-		AdvancedConfig:    advancedConfig,
-		LastTestStatus:    row.LastTestStatus,
-		LastTestLatencyMs: row.LastTestLatencyMs,
-		LastTestError:     row.LastTestError,
-		LastCostCurrency:  row.LastCostCurrency,
-		CreatedAt:         row.CreatedAt,
+		Id:                 row.Id,
+		Name:               row.Name,
+		Type:               row.Type,
+		BaseURL:            row.BaseUrl,
+		HasAPIKey:          row.ApiKeyCipher != "",
+		HasManagementKey:   row.ManagementKeyCipher != "",
+		HasProxy:           row.ProxyUrlCipher != "",
+		OrganizationID:     row.OrganizationId,
+		ProjectID:          row.ProjectId,
+		Status:             row.Status,
+		Priority:           row.Priority,
+		Weight:             row.Weight,
+		HealthCheckModelID: row.HealthCheckModelId,
+		AutoDisableEnabled: row.AutoDisableEnabled == 1,
+		CostQueryMode:      row.CostQueryMode,
+		AdvancedConfig:     advancedConfig,
+		LastTestStatus:     row.LastTestStatus,
+		LastTestLatencyMs:  row.LastTestLatencyMs,
+		LastTestError:      row.LastTestError,
+		LastCostCurrency:   row.LastCostCurrency,
+		CreatedAt:          row.CreatedAt,
 	}
 	if !row.AutoDisabledAt.IsZero() {
 		value := row.AutoDisabledAt

@@ -180,6 +180,8 @@ export interface Channel {
   autoDisabledStatusCode?: number
   priority: number
   weight: number
+  healthCheckModelId: number
+  autoDisableEnabled: boolean
   costQueryMode: string
   costQueryConfig: CostQueryConfig
 	 advancedConfig: ChannelAdvancedConfig
@@ -229,13 +231,15 @@ export interface ChannelInput {
   baseUrl: string
   apiKey?: string
   managementKey?: string
-	 proxyUrl?: string
+  proxyUrl?: string
   organizationId: string
   projectId: string
   status: number
   priority: number
   weight: number
-	 advancedConfig: ChannelAdvancedConfig
+  healthCheckModelId: number
+  autoDisableEnabled: boolean
+  advancedConfig: ChannelAdvancedConfig
   groupIds: number[]
 }
 

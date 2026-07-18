@@ -41,12 +41,12 @@ func (s *Service) runHealthChecks(ctx context.Context, mode string) {
 		ModelID   uint64 `orm:"model_id"`
 	}
 	rows := make([]healthCheckModel, 0)
-	model := dao.ChannelModels.Ctx(ctx).As("m").
-		Fields("m.channel_id,m.id AS model_id").
-		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id").
-		Where("m.enabled", 1).
-		OrderAsc("m.channel_id").
-		OrderAsc("m.id")
+	model := dao.Channels.Ctx(ctx).As("c").
+		Fields("c.id AS channel_id,c.health_check_model_id AS model_id").
+		InnerJoin(dao.ChannelModels.Table()+" m", "m.id=c.health_check_model_id AND m.channel_id=c.id AND m.enabled=1 AND m.deleted_at IS NULL").
+		Where("c.health_check_model_id IS NOT NULL").
+		Where("c.auto_disable_enabled", 1).
+		OrderAsc("c.id")
 	if mode == "all" {
 		model = model.Where("c.status=1 OR (c.status=0 AND c.auto_disabled_at IS NOT NULL)")
 	} else {
@@ -59,14 +59,9 @@ func (s *Service) runHealthChecks(ctx context.Context, mode string) {
 	if err := model.Scan(&rows); err != nil {
 		return
 	}
-	seen := make(map[uint64]struct{}, len(rows))
 	for _, row := range rows {
-		if _, exists := seen[row.ChannelID]; exists {
-			continue
-		}
-		seen[row.ChannelID] = struct{}{}
 		testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		_, _ = s.TestModel(testCtx, adminapi.ModelTestInput{ModelID: row.ModelID, Endpoint: "chat"}, usage.SystemUserID)
+		_, _ = s.TestModel(testCtx, adminapi.ModelTestInput{ModelID: row.ModelID, Endpoint: "auto"}, usage.SystemUserID)
 		cancel()
 	}
 }

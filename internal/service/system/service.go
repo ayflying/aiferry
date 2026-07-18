@@ -131,6 +131,9 @@ func (s *Service) DisableIfNeededWithSettings(ctx context.Context, settings admi
 	if channel.Id == 0 {
 		return false, gerror.New("channel not found")
 	}
+	if channel.AutoDisableEnabled != 1 {
+		return false, nil
+	}
 	if channel.Status == 0 {
 		return false, nil
 	}

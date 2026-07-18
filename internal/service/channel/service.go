@@ -58,6 +58,8 @@ type View struct {
 	AutoDisabledStatusCode *uint          `json:"autoDisabledStatusCode"`
 	Priority               int            `json:"priority"`
 	Weight                 uint           `json:"weight"`
+	HealthCheckModelID     uint64         `json:"healthCheckModelId"`
+	AutoDisableEnabled     bool           `json:"autoDisableEnabled"`
 	CostQueryMode          string         `json:"costQueryMode"`
 	AdvancedConfig         AdvancedConfig `json:"advancedConfig"`
 	EnabledModelCount      int            `json:"enabledModelCount"`
