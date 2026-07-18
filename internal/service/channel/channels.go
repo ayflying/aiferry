@@ -39,6 +39,27 @@ func (s *Service) List(ctx context.Context) ([]View, error) {
 		view.DiscoveredModels, _ = dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().ChannelId, rows[i].Id).Count()
 		view.EnabledModelCount, _ = dao.ChannelModels.Ctx(ctx).
 			Where(do.ChannelModels{ChannelId: rows[i].Id, Enabled: 1}).Count()
+		view.CredentialCount, _ = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: rows[i].Id}).Count()
+		view.ActiveCredentialCount, _ = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: rows[i].Id, Status: 1}).Count()
+		view.HasAPIKey = view.CredentialCount > 0
+		view.CredentialsUnavailable = view.CredentialCount == 0 || view.ActiveCredentialCount == 0
+		view.CostSummaries, err = s.channelCostSummaries(ctx, rows[i].Id)
+		if err != nil {
+			return nil, err
+		}
+		currentCost, costErr := s.currentChannelCost(ctx, rows[i].Id)
+		if costErr != nil {
+			return nil, costErr
+		}
+		view.LastCostUsed = currentCost.Used
+		view.LastCostRemaining = currentCost.Remaining
+		view.LastCostCurrency = currentCost.Currency
+		view.LastCostAt = currentCost.At
+		if len(view.CostSummaries) == 0 && currentCost.Currency != "" {
+			view.CostSummaries = []CostSummary{{
+				Currency: currentCost.Currency, UsedAmount: currentCost.Used, RemainingAmount: currentCost.Remaining,
+			}}
+		}
 		view.GroupIDs, err = s.groups.ChannelIDs(ctx, rows[i].Id)
 		if err != nil {
 			return nil, err
@@ -116,7 +137,10 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 			return gerror.Wrap(createErr, "create channel")
 		}
 		id = uint64(created)
-		return s.groups.SetChannelIDs(txCtx, id, input.GroupIDs)
+		if groupErr := s.groups.SetChannelIDs(txCtx, id, input.GroupIDs); groupErr != nil {
+			return groupErr
+		}
+		return s.createCredentialTx(txCtx, id, strings.TrimSpace(*input.APIKey))
 	})
 	if err != nil {
 		return 0, err
@@ -164,12 +188,6 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 		CostQueryConfig:        "{}",
 		AdvancedConfig:         advancedConfig,
 	}
-	if input.APIKey != nil && strings.TrimSpace(*input.APIKey) != "" {
-		data.ApiKeyCipher, err = s.app.Secrets.Encrypt(strings.TrimSpace(*input.APIKey))
-		if err != nil {
-			return err
-		}
-	}
 	if input.ProxyURL != nil {
 		if strings.TrimSpace(*input.ProxyURL) == "" {
 			data.ProxyUrlCipher = gdb.Raw("NULL")
@@ -198,6 +216,11 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 	}); err != nil {
 		return err
 	}
+	if input.APIKey != nil && strings.TrimSpace(*input.APIKey) != "" {
+		if _, err = s.CreateCredential(ctx, current.Id, adminapi.ChannelCredentialInput{APIKey: strings.TrimSpace(*input.APIKey)}); err != nil {
+			return err
+		}
+	}
 	return s.invalidateRoutes(ctx)
 }
 
@@ -224,7 +247,7 @@ func (s *Service) toView(row entity.Channels) View {
 		Name:               row.Name,
 		Type:               row.Type,
 		BaseURL:            row.BaseUrl,
-		HasAPIKey:          row.ApiKeyCipher != "",
+		HasAPIKey:          false,
 		HasManagementKey:   row.ManagementKeyCipher != "",
 		HasProxy:           row.ProxyUrlCipher != "",
 		OrganizationID:     row.OrganizationId,
@@ -239,7 +262,6 @@ func (s *Service) toView(row entity.Channels) View {
 		LastTestStatus:     row.LastTestStatus,
 		LastTestLatencyMs:  row.LastTestLatencyMs,
 		LastTestError:      row.LastTestError,
-		LastCostCurrency:   row.LastCostCurrency,
 		CreatedAt:          row.CreatedAt,
 	}
 	if !row.AutoDisabledAt.IsZero() {
@@ -254,11 +276,6 @@ func (s *Service) toView(row entity.Channels) View {
 	}
 	if !row.LastTestAt.IsZero() {
 		view.LastTestAt = &row.LastTestAt
-	}
-	if !row.LastCostAt.IsZero() {
-		view.LastCostAt = &row.LastCostAt
-		view.LastCostUsed = &row.LastCostUsed
-		view.LastCostRemaining = &row.LastCostRemaining
 	}
 	return view
 }

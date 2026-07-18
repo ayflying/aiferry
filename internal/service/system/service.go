@@ -137,6 +137,9 @@ func (s *Service) DisableIfNeededWithSettings(ctx context.Context, settings admi
 	if channel.Status == 0 {
 		return false, nil
 	}
+	if input.ChannelCredentialID > 0 {
+		return s.disableCredential(ctx, input)
+	}
 
 	data := do.Channels{
 		Status:                 0,
@@ -158,6 +161,35 @@ func (s *Service) DisableIfNeededWithSettings(ctx context.Context, settings admi
 		return false, nil
 	}
 	s.clearTransient(ctx, input.ChannelID)
+	return true, nil
+}
+
+func (s *Service) disableCredential(ctx context.Context, input AutoDisableInput) (bool, error) {
+	var credential entity.ChannelCredentials
+	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: input.ChannelCredentialID, ChannelId: input.ChannelID}).Scan(&credential); err != nil {
+		return false, gerror.Wrap(err, "load channel credential for automatic disable")
+	}
+	if credential.Id == 0 || credential.Status == 0 {
+		return false, nil
+	}
+	data := do.ChannelCredentials{
+		Status:                 0,
+		AutoDisabledAt:         gtime.Now(),
+		AutoDisabledReason:     autoDisableReason(input),
+		AutoDisabledStatusCode: gdb.Raw("NULL"),
+		AutoDisabledSource:     autoDisableSource(input.Source),
+	}
+	if input.Status > 0 {
+		data.AutoDisabledStatusCode = input.Status
+	}
+	result, err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: credential.Id, Status: 1}).Data(data).Update()
+	if err != nil {
+		return false, gerror.Wrap(err, "automatically disable channel credential")
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return false, nil
+	}
+	s.clearCredentialTransient(ctx, credential.Id)
 	return true, nil
 }
 
@@ -196,8 +228,48 @@ func (s *Service) RecoverIfAllowed(ctx context.Context, channelID uint64) (bool,
 	return true, nil
 }
 
+func (s *Service) RecoverCredentialIfAllowed(ctx context.Context, credentialID uint64) (bool, error) {
+	settings, err := s.Get(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !settings.RecoveryEnabled {
+		return false, nil
+	}
+	var credential entity.ChannelCredentials
+	if err = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: credentialID}).Scan(&credential); err != nil {
+		return false, gerror.Wrap(err, "load channel credential for automatic recovery")
+	}
+	if credential.Id == 0 || credential.Status != 0 || credential.AutoDisabledAt.IsZero() {
+		return false, nil
+	}
+	result, err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: credential.Id, Status: 0}).Data(do.ChannelCredentials{
+		Status:                 1,
+		AutoDisabledAt:         gdb.Raw("NULL"),
+		AutoDisabledReason:     gdb.Raw("NULL"),
+		AutoDisabledStatusCode: gdb.Raw("NULL"),
+		AutoDisabledSource:     gdb.Raw("NULL"),
+	}).Update()
+	if err != nil {
+		return false, gerror.Wrap(err, "automatically recover channel credential")
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return false, nil
+	}
+	s.clearCredentialTransient(ctx, credential.Id)
+	return true, nil
+}
+
 func (s *Service) clearTransient(ctx context.Context, channelID uint64) {
 	_ = s.app.Redis.Del(ctx, failureKey(channelID), cooldownKey(channelID)).Err()
+	_ = s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()
+}
+
+func (s *Service) clearCredentialTransient(ctx context.Context, credentialID uint64) {
+	_ = s.app.Redis.Del(ctx,
+		fmt.Sprintf("aiferry:credential:%d:failures", credentialID),
+		fmt.Sprintf("aiferry:credential:%d:cooldown", credentialID),
+	).Err()
 	_ = s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()
 }
 

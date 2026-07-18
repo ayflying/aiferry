@@ -25,6 +25,14 @@ type ChannelInput struct {
 	GroupIDs           []uint64        `json:"groupIds"`
 }
 
+type ChannelCredentialInput struct {
+	APIKey string `json:"apiKey" v:"required|length:1,4096"`
+}
+
+type ChannelCredentialStatusInput struct {
+	Status int `json:"status" v:"in:0,1"`
+}
+
 type ChannelGroupInput struct {
 	Name        string   `json:"name" v:"required|length:1,96"`
 	Code        string   `json:"code" v:"required|length:2,64"`
@@ -96,9 +104,10 @@ type ModelSelectionInput struct {
 }
 
 type ModelTestInput struct {
-	ModelID  uint64 `json:"modelId" v:"required|min:1"`
-	Endpoint string `json:"endpoint" v:"required|in:auto,chat,responses,embeddings,images"`
-	Stream   bool   `json:"stream"`
+	ModelID             uint64 `json:"modelId" v:"required|min:1"`
+	ChannelCredentialID uint64 `json:"channelCredentialId"`
+	Endpoint            string `json:"endpoint" v:"required|in:auto,chat,responses,embeddings,images"`
+	Stream              bool   `json:"stream"`
 }
 
 type APIKeyInput struct {

@@ -20,17 +20,19 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 	if result.status >= 200 && result.status < 300 {
 		if cost == nil {
 			chargeErr = gerror.New("上游响应未返回可计费的用量信息")
-		} else if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
-			chargeErr = err
 		} else {
-			_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
 			if s.channels != nil {
-				if err := s.channels.ApplyUsageCost(ctx, candidate.ChannelID, *cost); err != nil {
+				if err := s.channels.ApplyCredentialUsageCost(ctx, candidate.ChannelID, candidate.ChannelCredentialID, *cost); err != nil {
 					g.Log().Warningf(ctx, "apply channel %d usage cost: %v", candidate.ChannelID, err)
 				}
 			}
-			if s.mail != nil {
-				s.mail.NotifyLowBalance(ctx, key.UserId)
+			if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
+				chargeErr = err
+			} else {
+				_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
+				if s.mail != nil {
+					s.mail.NotifyLowBalance(ctx, key.UserId)
+				}
 			}
 		}
 		if chargeErr != nil {
@@ -39,21 +41,22 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		}
 	}
 	_ = s.usage.Record(ctx, usage.RecordInput{
-		RequestID:      requestID,
-		UserID:         key.UserId,
-		APIKeyID:       key.Id,
-		ChannelID:      candidate.ChannelID,
-		Endpoint:       endpoint,
-		RequestedModel: requestedModel,
-		UpstreamModel:  candidate.UpstreamName,
-		HTTPStatus:     recordStatus,
-		Stream:         stream,
-		Tokens:         result.tokens,
-		EstimatedCost:  cost,
-		DurationMs:     time.Since(startedAt).Milliseconds(),
-		FirstTokenMs:   result.firstTokenMs,
-		Attempts:       attempts,
-		ErrorMessage:   recordError,
+		RequestID:           requestID,
+		UserID:              key.UserId,
+		APIKeyID:            key.Id,
+		ChannelID:           candidate.ChannelID,
+		ChannelCredentialID: candidate.ChannelCredentialID,
+		Endpoint:            endpoint,
+		RequestedModel:      requestedModel,
+		UpstreamModel:       candidate.UpstreamName,
+		HTTPStatus:          recordStatus,
+		Stream:              stream,
+		Tokens:              result.tokens,
+		EstimatedCost:       cost,
+		DurationMs:          time.Since(startedAt).Milliseconds(),
+		FirstTokenMs:        result.firstTokenMs,
+		Attempts:            attempts,
+		ErrorMessage:        recordError,
 	})
 	return chargeErr
 }

@@ -64,6 +64,9 @@ type View struct {
 	AdvancedConfig         AdvancedConfig `json:"advancedConfig"`
 	EnabledModelCount      int            `json:"enabledModelCount"`
 	DiscoveredModels       int            `json:"discoveredModels"`
+	CredentialCount        int            `json:"credentialCount"`
+	ActiveCredentialCount  int            `json:"activeCredentialCount"`
+	CredentialsUnavailable bool           `json:"credentialsUnavailable"`
 	LastTestStatus         string         `json:"lastTestStatus"`
 	LastTestLatencyMs      uint           `json:"lastTestLatencyMs"`
 	LastTestError          string         `json:"lastTestError"`
@@ -72,6 +75,7 @@ type View struct {
 	LastCostRemaining      *float64       `json:"lastCostRemaining"`
 	LastCostCurrency       string         `json:"lastCostCurrency"`
 	LastCostAt             *time.Time     `json:"lastCostAt"`
+	CostSummaries          []CostSummary  `json:"costSummaries"`
 	GroupIDs               []uint64       `json:"groupIds"`
 	CreatedAt              time.Time      `json:"createdAt"`
 }
@@ -144,12 +148,15 @@ func (s *Service) writableType(ctx context.Context, code string) (entity.Channel
 	return row, config, nil
 }
 
-func (s *Service) setConfiguredHeaders(ctx context.Context, req *http.Request, channel entity.Channels, authType, headerName, headerPrefix string) error {
+func (s *Service) setConfiguredHeaders(ctx context.Context, req *http.Request, channel entity.Channels, credentialCipher, authType, headerName, headerPrefix string) error {
 	req.Header.Set("Accept", "application/json")
 	switch authType {
 	case channeltype.AuthNone:
 	case channeltype.AuthChannelKey:
-		key, err := s.app.Secrets.Decrypt(channel.ApiKeyCipher)
+		if credentialCipher == "" {
+			return gerror.New("channel credential is required")
+		}
+		key, err := s.app.Secrets.Decrypt(credentialCipher)
 		if err != nil {
 			return err
 		}

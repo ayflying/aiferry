@@ -2,7 +2,6 @@ package relay
 
 import (
 	"context"
-	"fmt"
 	mathrand "math/rand/v2"
 	"sort"
 	"time"
@@ -12,6 +11,7 @@ import (
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/service/apikey"
+	"github.com/yunloli/aiferry/internal/service/channel"
 	"github.com/yunloli/aiferry/internal/service/system"
 )
 
@@ -19,7 +19,7 @@ func (s *Service) route(ctx context.Context, model string, key apikey.AuthKey) (
 	var candidates []Candidate
 	err := dao.ChannelModels.Ctx(ctx).As("m").Fields(`
 		m.id AS channel_model_id,m.public_name,m.upstream_name,
-		c.id AS channel_id,c.name AS channel_name,c.base_url,c.api_key_cipher,
+		c.id AS channel_id,c.name AS channel_name,c.base_url,
 		c.organization_id,c.project_id,c.proxy_url_cipher,c.advanced_config,c.priority,c.weight`).
 		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id AND c.status=1").
 		Where("m.enabled", 1).
@@ -37,10 +37,15 @@ func (s *Service) route(ctx context.Context, model string, key apikey.AuthKey) (
 		if !keyAllowsGroups(key, groupIDs) {
 			continue
 		}
-		if exists, _ := s.app.Redis.Exists(ctx, cooldownKey(candidate.ChannelID)).Result(); exists == 0 {
-			candidate.GroupIDs = groupIDs
-			available = append(available, candidate)
+		hasCredential, credentialErr := s.channels.HasAvailableCredential(ctx, candidate.ChannelID)
+		if credentialErr != nil {
+			return nil, credentialErr
 		}
+		if !hasCredential {
+			continue
+		}
+		candidate.GroupIDs = groupIDs
+		available = append(available, candidate)
 	}
 	return weightedOrder(available), nil
 }
@@ -116,29 +121,29 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func (s *Service) markFailure(ctx context.Context, channelID uint64) {
-	key := failureKey(channelID)
+func (s *Service) markFailure(ctx context.Context, credentialID uint64) {
+	key := channel.CredentialFailureKey(credentialID)
 	count, err := s.app.Redis.Incr(ctx, key).Result()
 	if err != nil {
 		return
 	}
 	_ = s.app.Redis.Expire(ctx, key, 10*time.Minute).Err()
 	if count >= s.app.Config.FailureThreshold {
-		_ = s.app.Redis.Set(ctx, cooldownKey(channelID), "1", time.Duration(s.app.Config.ChannelCooldownSeconds)*time.Second).Err()
+		_ = s.app.Redis.Set(ctx, channel.CredentialCooldownKey(credentialID), "1", time.Duration(s.app.Config.ChannelCooldownSeconds)*time.Second).Err()
 	}
 }
 
-func (s *Service) markSuccess(ctx context.Context, channelID uint64) {
-	_ = s.app.Redis.Del(ctx, failureKey(channelID), cooldownKey(channelID)).Err()
+func (s *Service) markSuccess(ctx context.Context, credentialID uint64) {
+	_ = s.app.Redis.Del(ctx, channel.CredentialFailureKey(credentialID), channel.CredentialCooldownKey(credentialID)).Err()
 }
 
 func (s *Service) maybeAutoDisable(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, candidate Candidate, result attemptResult) {
 	_, _ = s.resilience.DisableIfNeededWithSettings(ctx, settings, system.AutoDisableInput{
-		ChannelID: candidate.ChannelID,
-		Source:    system.AutoDisableSourceRelayRequest,
-		Status:    result.status,
-		Latency:   result.latency,
-		Message:   result.errorMessage,
+		ChannelID: candidate.ChannelID, ChannelCredentialID: candidate.ChannelCredentialID,
+		Source:  system.AutoDisableSourceRelayRequest,
+		Status:  result.status,
+		Latency: result.latency,
+		Message: result.errorMessage,
 	})
 }
 
@@ -148,12 +153,4 @@ func retryableStatus(status int) bool {
 
 func retryableStatusForRules(status int, rules string) bool {
 	return system.MatchesStatusCodeRules(rules, status)
-}
-
-func failureKey(channelID uint64) string {
-	return fmt.Sprintf("aiferry:channel:%d:failures", channelID)
-}
-
-func cooldownKey(channelID uint64) string {
-	return fmt.Sprintf("aiferry:channel:%d:cooldown", channelID)
 }

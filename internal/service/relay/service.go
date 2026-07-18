@@ -37,20 +37,21 @@ type Service struct {
 }
 
 type Candidate struct {
-	ChannelModelID uint64 `orm:"channel_model_id"`
-	ChannelID      uint64 `orm:"channel_id"`
-	ChannelName    string `orm:"channel_name"`
-	BaseURL        string `orm:"base_url"`
-	APIKeyCipher   string `orm:"api_key_cipher"`
-	OrganizationID string `orm:"organization_id"`
-	ProjectID      string `orm:"project_id"`
-	ProxyURLCipher string `orm:"proxy_url_cipher"`
-	AdvancedConfig string `orm:"advanced_config"`
-	Priority       int    `orm:"priority"`
-	Weight         uint   `orm:"weight"`
-	PublicName     string `orm:"public_name"`
-	UpstreamName   string `orm:"upstream_name"`
-	GroupIDs       []uint64
+	ChannelModelID      uint64 `orm:"channel_model_id"`
+	ChannelID           uint64 `orm:"channel_id"`
+	ChannelName         string `orm:"channel_name"`
+	BaseURL             string `orm:"base_url"`
+	ChannelCredentialID uint64
+	APIKeyCipher        string
+	OrganizationID      string `orm:"organization_id"`
+	ProjectID           string `orm:"project_id"`
+	ProxyURLCipher      string `orm:"proxy_url_cipher"`
+	AdvancedConfig      string `orm:"advanced_config"`
+	Priority            int    `orm:"priority"`
+	Weight              uint   `orm:"weight"`
+	PublicName          string `orm:"public_name"`
+	UpstreamName        string `orm:"upstream_name"`
+	GroupIDs            []uint64
 }
 
 type Model struct {
@@ -73,6 +74,7 @@ type attemptResult struct {
 	errorMessage string
 	latency      time.Duration
 	headers      http.Header
+	wroteBytes   bool
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service) *Service {
@@ -149,33 +151,21 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 		settings = system.DefaultResilienceSettings()
 	}
 	maxAttempts := min(len(candidates), settings.MaxFailoverAttempts)
-	var last attemptResult
+	var (
+		last     attemptResult
+		attempts int
+	)
 	for index := 0; index < maxAttempts; index++ {
-		candidate := candidates[index]
-		attemptStartedAt := time.Now()
-		attemptWriter := writer
-		if !isStream {
-			attemptWriter = nil
-		}
-		result, handled, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, candidate, isStream, startedAt, settings.RetryStatusCodes)
-		result.latency = time.Since(attemptStartedAt)
-		last = result
-		if attemptErr != nil {
-			last.errorMessage = attemptErr.Error()
-			s.maybeAutoDisable(ctx, settings, candidate, last)
-			s.markFailure(ctx, candidate.ChannelID)
-			if index+1 < maxAttempts {
-				continue
-			}
-			break
-		} else {
-			s.maybeAutoDisable(ctx, settings, candidate, result)
-		}
-		if handled {
+		outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings)
+		attempts += outcome.attempts
+		last = outcome.result
+		if outcome.handled {
+			candidate := outcome.candidate
+			result := outcome.result
 			if result.status >= 200 && result.status < 300 {
-				s.markSuccess(ctx, candidate.ChannelID)
+				s.markSuccess(ctx, candidate.ChannelCredentialID)
 			}
-			if recordErr := s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, index+1, startedAt, result); recordErr != nil {
+			if recordErr := s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, attempts, startedAt, result); recordErr != nil {
 				if !isStream {
 					s.writeBufferedResponse(writer, http.StatusPaymentRequired, openAIError("insufficient_balance", recordErr.Error()), http.Header{"Content-Type": []string{"application/json"}})
 				}
@@ -186,13 +176,6 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 			}
 			return nil
 		}
-		if retryableStatusForRules(result.status, settings.RetryStatusCodes) && index+1 < maxAttempts {
-			s.markFailure(ctx, candidate.ChannelID)
-			continue
-		}
-		s.writeBufferedResponse(writer, result.status, result.body, result.headers)
-		_ = s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, index+1, startedAt, result)
-		return nil
 	}
 	if last.status == 0 {
 		last.status = http.StatusBadGateway
@@ -254,10 +237,8 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 		return result, true, nil
 	}
 	defer resp.Body.Close()
-	copyResponseHeaders(writer.Header(), resp.Header)
-	writer.WriteHeader(resp.StatusCode)
 	flusher, _ := writer.(http.Flusher)
-	result := attemptResult{status: resp.StatusCode}
+	result := attemptResult{status: resp.StatusCode, headers: resp.Header.Clone()}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 8<<20)
 	firstChunk := true
@@ -270,16 +251,28 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 			firstChunk = false
 		}
 		parseSSEUsage(line, &result.tokens)
+		if !result.wroteBytes {
+			copyResponseHeaders(writer.Header(), resp.Header)
+			writer.WriteHeader(resp.StatusCode)
+		}
 		if _, err = writer.Write(line); err != nil {
 			result.errorMessage = err.Error()
 			return result, true, nil
 		}
+		result.wroteBytes = true
 		if flusher != nil {
 			flusher.Flush()
 		}
 	}
 	if err = scanner.Err(); err != nil {
 		result.errorMessage = err.Error()
+		if !result.wroteBytes {
+			return result, false, gerror.Wrap(err, "read upstream stream")
+		}
+	}
+	if !result.wroteBytes {
+		copyResponseHeaders(writer.Header(), resp.Header)
+		writer.WriteHeader(resp.StatusCode)
 	}
 	return result, true, nil
 }

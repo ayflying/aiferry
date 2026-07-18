@@ -58,6 +58,7 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.POST("/channels", c.createChannel)
 	group.PUT("/channels/{id}", c.updateChannel)
 	group.DELETE("/channels/{id}", c.deleteChannel)
+	c.registerChannelCredentialRoutes(group)
 	group.GET("/channel-types", c.listChannelTypes)
 	group.GET("/channel-types/default-config", c.defaultChannelTypeConfig)
 	group.POST("/channel-types", c.createChannelType)

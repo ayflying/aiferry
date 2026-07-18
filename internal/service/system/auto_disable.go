@@ -15,11 +15,12 @@ const (
 )
 
 type AutoDisableInput struct {
-	ChannelID uint64
-	Source    string
-	Status    int
-	Latency   time.Duration
-	Message   string
+	ChannelID           uint64
+	ChannelCredentialID uint64
+	Source              string
+	Status              int
+	Latency             time.Duration
+	Message             string
 }
 
 func matchesAutoDisable(settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) bool {

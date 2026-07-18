@@ -55,6 +55,10 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput, 
 	if err != nil {
 		return TestResult{}, err
 	}
+	credential, err := s.CredentialForTest(ctx, channel.Id, input.ChannelCredentialID)
+	if err != nil {
+		return TestResult{}, err
+	}
 	_, typeConfig, err := s.types.GetByCode(ctx, channel.Type)
 	if err != nil {
 		return TestResult{}, err
@@ -65,26 +69,28 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput, 
 		billingErr error
 	)
 	for index, endpoint := range endpoints {
-		current, path, tokens, requestErr := s.testModelEndpoint(ctx, channel, typeConfig, model, endpoint, input.Stream)
+		current, path, tokens, requestErr := s.testModelEndpoint(ctx, channel, credential, typeConfig, model, endpoint, input.Stream)
 		if requestErr != nil {
 			return TestResult{}, requestErr
 		}
 		result = current
-		billingErr = s.recordTestUsage(ctx, userID, channel, model, path, &result, tokens)
+		billingErr = s.recordTestUsage(ctx, userID, channel, credential.ID, model, path, &result, tokens)
 		if result.Success || index == len(endpoints)-1 || !canTryAlternativeEndpoint(result) {
 			break
 		}
 	}
 	if result.Success {
-		_ = s.app.Redis.Del(ctx, failureKey(channel.Id), cooldownKey(channel.Id)).Err()
+		s.clearCredentialTransient(ctx, credential.ID)
+		_, _ = s.resilience.RecoverCredentialIfAllowed(ctx, credential.ID)
 		_, _ = s.resilience.RecoverIfAllowed(ctx, channel.Id)
 	} else {
 		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{
-			ChannelID: channel.Id,
-			Source:    system.AutoDisableSourceModelTest,
-			Status:    result.HTTPStatus,
-			Latency:   time.Duration(result.LatencyMs) * time.Millisecond,
-			Message:   result.Message,
+			ChannelID:           channel.Id,
+			ChannelCredentialID: credential.ID,
+			Source:              system.AutoDisableSourceModelTest,
+			Status:              result.HTTPStatus,
+			Latency:             time.Duration(result.LatencyMs) * time.Millisecond,
+			Message:             result.Message,
 		})
 	}
 	s.saveTestResult(ctx, channel.Id, model.Id, result.Endpoint, result)
@@ -94,7 +100,7 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput, 
 	return result, nil
 }
 
-func (s *Service) testModelEndpoint(ctx context.Context, channel entity.Channels, typeConfig channeltype.Config, model entity.ChannelModels, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
+func (s *Service) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
 	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream)
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, channel.BaseUrl+path, bytes.NewReader(body))
@@ -102,7 +108,7 @@ func (s *Service) testModelEndpoint(ctx context.Context, channel entity.Channels
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if err = s.setConfiguredHeaders(ctx, req, channel, typeConfig.Models.AuthType, typeConfig.Models.HeaderName, typeConfig.Models.HeaderPrefix); err != nil {
+	if err = s.setConfiguredHeaders(ctx, req, channel, credential.APIKeyCipher, typeConfig.Models.AuthType, typeConfig.Models.HeaderName, typeConfig.Models.HeaderPrefix); err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, err
 	}
 	startedAt := time.Now()
@@ -132,7 +138,7 @@ func (s *Service) testModelEndpoint(ctx context.Context, channel entity.Channels
 	return result, path, tokens, nil
 }
 
-func (s *Service) recordTestUsage(ctx context.Context, userID uint64, channel entity.Channels, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage) error {
+func (s *Service) recordTestUsage(ctx context.Context, userID uint64, channel entity.Channels, credentialID uint64, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage) error {
 	if s.usage == nil {
 		return nil
 	}
@@ -140,17 +146,19 @@ func (s *Service) recordTestUsage(ctx context.Context, userID uint64, channel en
 	recordStatus := result.HTTPStatus
 	recordMessage := result.Message
 	var chargeErr error
-	if result.Success && userID != usage.SystemUserID {
-		if cost == nil {
+	if result.Success {
+		if cost == nil && userID != usage.SystemUserID {
 			chargeErr = gerror.New("上游响应未返回可计费的用量信息")
-		} else if err := s.users.Debit(ctx, userID, *cost); err != nil {
-			chargeErr = err
-		} else {
-			if err = s.ApplyUsageCost(ctx, channel.Id, *cost); err != nil {
-				g.Log().Warningf(ctx, "apply channel %d test usage cost: %v", channel.Id, err)
+		} else if cost != nil {
+			if applyErr := s.ApplyCredentialUsageCost(ctx, channel.Id, credentialID, *cost); applyErr != nil {
+				g.Log().Warningf(ctx, "apply channel %d test usage cost: %v", channel.Id, applyErr)
 			}
-			if s.mail != nil {
-				s.mail.NotifyLowBalance(ctx, userID)
+			if userID != usage.SystemUserID {
+				if debitErr := s.users.Debit(ctx, userID, *cost); debitErr != nil {
+					chargeErr = debitErr
+				} else if s.mail != nil {
+					s.mail.NotifyLowBalance(ctx, userID)
+				}
 			}
 		}
 		if chargeErr != nil {
@@ -158,23 +166,24 @@ func (s *Service) recordTestUsage(ctx context.Context, userID uint64, channel en
 			recordMessage = chargeErr.Error()
 		}
 	}
-	err := s.usage.Record(ctx, usage.RecordInput{
-		RequestID:      usage.NewRequestID("aftest"),
-		UserID:         userID,
-		ChannelID:      channel.Id,
-		Endpoint:       "test:" + path,
-		RequestedModel: model.PublicName,
-		UpstreamModel:  model.UpstreamName,
-		HTTPStatus:     recordStatus,
-		Stream:         result.Stream,
-		Tokens:         tokens,
-		EstimatedCost:  cost,
-		DurationMs:     result.LatencyMs,
-		Attempts:       1,
-		ErrorMessage:   recordMessage,
+	recordErr := s.usage.Record(ctx, usage.RecordInput{
+		RequestID:           usage.NewRequestID("aftest"),
+		UserID:              userID,
+		ChannelID:           channel.Id,
+		ChannelCredentialID: credentialID,
+		Endpoint:            "test:" + path,
+		RequestedModel:      model.PublicName,
+		UpstreamModel:       model.UpstreamName,
+		HTTPStatus:          recordStatus,
+		Stream:              result.Stream,
+		Tokens:              tokens,
+		EstimatedCost:       cost,
+		DurationMs:          result.LatencyMs,
+		Attempts:            1,
+		ErrorMessage:        recordMessage,
 	})
-	if err != nil {
-		result.Message = truncate(result.Message+"；用量记录失败："+err.Error(), 1024)
+	if recordErr != nil {
+		result.Message = truncate(result.Message+"；用量记录失败："+recordErr.Error(), 1024)
 	}
 	return chargeErr
 }

@@ -37,21 +37,22 @@ type PriceRates struct {
 }
 
 type RecordInput struct {
-	RequestID      string
-	UserID         uint64
-	APIKeyID       uint64
-	ChannelID      uint64
-	Endpoint       string
-	RequestedModel string
-	UpstreamModel  string
-	HTTPStatus     int
-	Stream         bool
-	Tokens         TokenUsage
-	EstimatedCost  *decimal.Decimal
-	DurationMs     int64
-	FirstTokenMs   *int64
-	Attempts       int
-	ErrorMessage   string
+	RequestID           string
+	UserID              uint64
+	APIKeyID            uint64
+	ChannelID           uint64
+	ChannelCredentialID uint64
+	Endpoint            string
+	RequestedModel      string
+	UpstreamModel       string
+	HTTPStatus          int
+	Stream              bool
+	Tokens              TokenUsage
+	EstimatedCost       *decimal.Decimal
+	DurationMs          int64
+	FirstTokenMs        *int64
+	Attempts            int
+	ErrorMessage        string
 }
 
 type Summary struct {
@@ -145,6 +146,11 @@ func (s *Service) Record(ctx context.Context, input RecordInput) error {
 		DurationMs:     input.DurationMs,
 		Attempts:       input.Attempts,
 		ErrorMessage:   truncate(input.ErrorMessage, 1024),
+	}
+	if input.ChannelCredentialID > 0 {
+		data.ChannelCredentialId = input.ChannelCredentialID
+	} else {
+		data.ChannelCredentialId = gdb.Raw("NULL")
 	}
 	if input.APIKeyID == 0 {
 		data.ApiKeyId = gdb.Raw("NULL")

@@ -25,12 +25,12 @@ type upstreamJSONRequest struct {
 	StatusError  func(status int, body []byte) error
 }
 
-func (s *Service) fetchUpstreamJSON(ctx context.Context, channel entity.Channels, input upstreamJSONRequest) ([]byte, error) {
+func (s *Service) fetchUpstreamJSON(ctx context.Context, channel entity.Channels, credentialCipher string, input upstreamJSONRequest) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, input.Method, input.Endpoint, nil)
 	if err != nil {
 		return nil, gerror.Wrap(err, input.RequestError)
 	}
-	if err = s.setConfiguredHeaders(ctx, req, channel, input.AuthType, input.HeaderName, input.HeaderPrefix); err != nil {
+	if err = s.setConfiguredHeaders(ctx, req, channel, credentialCipher, input.AuthType, input.HeaderName, input.HeaderPrefix); err != nil {
 		return nil, err
 	}
 	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)

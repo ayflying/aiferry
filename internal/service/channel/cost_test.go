@@ -36,3 +36,24 @@ func TestResolveEndpointURL(t *testing.T) {
 		t.Fatalf("unexpected leading-slash URL: %q %v", value, err)
 	}
 }
+
+func TestCostResultDoesNotFlattenMixedCurrencies(t *testing.T) {
+	usd, cny := 2.5, 18.0
+	result := CostResult{Summaries: []CostSummary{
+		{Currency: "USD", RemainingAmount: &usd},
+		{Currency: "CNY", RemainingAmount: &cny},
+	}}
+	result.applySingleSummary()
+	if result.Currency != "" || result.RemainingAmount != nil || result.UsedAmount != nil {
+		t.Fatalf("mixed currencies must remain grouped: %+v", result)
+	}
+}
+
+func TestCostResultUsesSingleCurrencySummary(t *testing.T) {
+	used, remaining := 1.25, 8.75
+	result := CostResult{Summaries: []CostSummary{{Currency: "USD", UsedAmount: &used, RemainingAmount: &remaining}}}
+	result.applySingleSummary()
+	if result.Currency != "USD" || result.UsedAmount == nil || *result.UsedAmount != used || result.RemainingAmount == nil || *result.RemainingAmount != remaining {
+		t.Fatalf("single currency summary was not exposed: %+v", result)
+	}
+}

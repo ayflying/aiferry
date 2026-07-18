@@ -21,50 +21,52 @@ type UsageLogsDao struct {
 
 // UsageLogsColumns defines and stores column names for the table usage_logs.
 type UsageLogsColumns struct {
-	Id                string //
-	RequestId         string //
-	UserId            string //
-	ApiKeyId          string //
-	ChannelId         string //
-	Endpoint          string //
-	RequestedModel    string //
-	UpstreamModel     string //
-	HttpStatus        string //
-	IsStream          string //
-	InputTokens       string //
-	CachedInputTokens string //
-	OutputTokens      string //
-	TotalTokens       string //
-	EstimatedCost     string //
-	DurationMs        string //
-	FirstTokenMs      string //
-	Attempts          string //
-	ErrorMessage      string //
-	CreatedAt         string //
+	Id                  string //
+	RequestId           string //
+	UserId              string //
+	ApiKeyId            string //
+	ChannelId           string //
+	ChannelCredentialId string //
+	Endpoint            string //
+	RequestedModel      string //
+	UpstreamModel       string //
+	HttpStatus          string //
+	IsStream            string //
+	InputTokens         string //
+	CachedInputTokens   string //
+	OutputTokens        string //
+	TotalTokens         string //
+	EstimatedCost       string //
+	DurationMs          string //
+	FirstTokenMs        string //
+	Attempts            string //
+	ErrorMessage        string //
+	CreatedAt           string //
 }
 
 // usageLogsColumns holds the columns for the table usage_logs.
 var usageLogsColumns = UsageLogsColumns{
-	Id:                "id",
-	RequestId:         "request_id",
-	UserId:            "user_id",
-	ApiKeyId:          "api_key_id",
-	ChannelId:         "channel_id",
-	Endpoint:          "endpoint",
-	RequestedModel:    "requested_model",
-	UpstreamModel:     "upstream_model",
-	HttpStatus:        "http_status",
-	IsStream:          "is_stream",
-	InputTokens:       "input_tokens",
-	CachedInputTokens: "cached_input_tokens",
-	OutputTokens:      "output_tokens",
-	TotalTokens:       "total_tokens",
-	EstimatedCost:     "estimated_cost",
-	DurationMs:        "duration_ms",
-	FirstTokenMs:      "first_token_ms",
-	Attempts:          "attempts",
-	ErrorMessage:      "error_message",
-	CreatedAt:         "created_at",
+	Id:                  "id",
+	RequestId:           "request_id",
+	UserId:              "user_id",
+	ApiKeyId:            "api_key_id",
+	ChannelId:           "channel_id",
+	ChannelCredentialId: "channel_credential_id",
+	Endpoint:            "endpoint",
+	RequestedModel:      "requested_model",
+	UpstreamModel:       "upstream_model",
+	HttpStatus:          "http_status",
+	IsStream:            "is_stream",
+	InputTokens:         "input_tokens",
+	CachedInputTokens:   "cached_input_tokens",
+	OutputTokens:        "output_tokens",
+	TotalTokens:         "total_tokens",
+	EstimatedCost:       "estimated_cost",
+	DurationMs:          "duration_ms",
+	FirstTokenMs:        "first_token_ms",
+	Attempts:            "attempts",
+	ErrorMessage:        "error_message",
+	CreatedAt:           "created_at",
 }
 
 // NewUsageLogsDao creates and returns a new DAO object for table data access.

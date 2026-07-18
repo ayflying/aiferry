@@ -29,7 +29,11 @@ func (s *Service) DiscoverModels(ctx context.Context, channelID uint64) ([]Disco
 	if err != nil {
 		return nil, err
 	}
-	body, err := s.fetchUpstreamJSON(ctx, channel, upstreamJSONRequest{
+	credential, err := s.CredentialForTest(ctx, channelID, 0)
+	if err != nil && config.Models.AuthType != "management_key" && config.Models.AuthType != "none" {
+		return nil, err
+	}
+	body, err := s.fetchUpstreamJSON(ctx, channel, credential.APIKeyCipher, upstreamJSONRequest{
 		Method:       config.Models.Method,
 		Endpoint:     endpoint,
 		AuthType:     config.Models.AuthType,

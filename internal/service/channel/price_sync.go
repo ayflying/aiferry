@@ -109,7 +109,11 @@ func (s *Service) syncPricesFromChannel(ctx context.Context, channel entity.Chan
 	if err != nil {
 		return 0, err
 	}
-	body, err := s.fetchUpstreamJSON(ctx, channel, upstreamJSONRequest{
+	credential, err := s.CredentialForTest(ctx, channel.Id, 0)
+	if err != nil && config.Pricing.AuthType != channeltype.AuthManagementKey && config.Pricing.AuthType != channeltype.AuthNone {
+		return 0, err
+	}
+	body, err := s.fetchUpstreamJSON(ctx, channel, credential.APIKeyCipher, upstreamJSONRequest{
 		Method:       config.Pricing.Method,
 		Endpoint:     endpoint,
 		AuthType:     config.Pricing.AuthType,

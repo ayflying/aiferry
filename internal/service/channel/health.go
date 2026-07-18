@@ -64,4 +64,33 @@ func (s *Service) runHealthChecks(ctx context.Context, mode string) {
 		_, _ = s.TestModel(testCtx, adminapi.ModelTestInput{ModelID: row.ModelID, Endpoint: "auto"}, usage.SystemUserID)
 		cancel()
 	}
+	s.runCredentialHealthChecks(ctx, mode)
+}
+
+func (s *Service) runCredentialHealthChecks(ctx context.Context, mode string) {
+	type healthCheckModel struct {
+		ChannelID    uint64 `orm:"channel_id"`
+		ModelID      uint64 `orm:"model_id"`
+		CredentialID uint64 `orm:"credential_id"`
+	}
+	rows := make([]healthCheckModel, 0)
+	model := dao.ChannelCredentials.Ctx(ctx).As("cc").
+		Fields("cc.channel_id,cc.id AS credential_id,c.health_check_model_id AS model_id").
+		InnerJoin(dao.Channels.Table()+" c", "c.id=cc.channel_id AND c.status=1 AND c.auto_disable_enabled=1").
+		InnerJoin(dao.ChannelModels.Table()+" m", "m.id=c.health_check_model_id AND m.channel_id=c.id AND m.enabled=1 AND m.deleted_at IS NULL").
+		Where("cc.status=0 AND cc.auto_disabled_at IS NOT NULL").
+		OrderAsc("cc.id")
+	if mode == "passive" {
+		model = model.Where("cc.auto_disabled_source=?", system.AutoDisableSourceRelayRequest)
+	}
+	if err := model.Scan(&rows); err != nil {
+		return
+	}
+	for _, row := range rows {
+		testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		_, _ = s.TestModel(testCtx, adminapi.ModelTestInput{
+			ModelID: row.ModelID, ChannelCredentialID: row.CredentialID, Endpoint: "auto",
+		}, usage.SystemUserID)
+		cancel()
+	}
 }

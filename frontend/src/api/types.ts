@@ -187,6 +187,9 @@ export interface Channel {
 	 advancedConfig: ChannelAdvancedConfig
   enabledModelCount: number
   discoveredModels: number
+  credentialCount: number
+  activeCredentialCount: number
+  credentialsUnavailable: boolean
   lastTestStatus: string
   lastTestLatencyMs: number
   lastTestError: string
@@ -195,8 +198,51 @@ export interface Channel {
   lastCostRemaining?: number
   lastCostCurrency: string
   lastCostAt?: string
+  costSummaries: CostSummary[]
   groupIds: number[]
   createdAt: string
+}
+
+export interface CostSummary {
+  currency: string
+  usedAmount?: number
+  remainingAmount?: number
+}
+
+export interface ChannelCredential {
+  id: number
+  keyPrefix: string
+  status: number
+  autoDisabled: boolean
+  autoDisabledAt?: string
+  autoDisabledReason: string
+  autoDisabledStatusCode?: number
+  lastCostUsed?: number
+  lastCostRemaining?: number
+  lastCostCurrency: string
+  lastCostAt?: string
+  createdAt: string
+}
+
+export interface ChannelCredentialCost {
+  credentialId: number
+  keyPrefix: string
+  shared: boolean
+  usedAmount?: number
+  remainingAmount?: number
+  currency: string
+  queriedAt: string
+  error: string
+}
+
+export interface ChannelCostResult {
+  mode: string
+  usedAmount?: number
+  remainingAmount?: number
+  currency: string
+  queriedAt: string
+  summaries: CostSummary[]
+  credentials: ChannelCredentialCost[]
 }
 
 export interface SystemResilienceSettings {

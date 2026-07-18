@@ -2,16 +2,10 @@ package channel
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/tidwall/gjson"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
@@ -21,13 +15,26 @@ import (
 )
 
 type CostResult struct {
-	Mode            string     `json:"mode"`
-	UsedAmount      *float64   `json:"usedAmount"`
-	RemainingAmount *float64   `json:"remainingAmount"`
-	Currency        string     `json:"currency"`
-	PeriodStart     *time.Time `json:"periodStart"`
-	PeriodEnd       *time.Time `json:"periodEnd"`
-	QueriedAt       time.Time  `json:"queriedAt"`
+	Mode            string                 `json:"mode"`
+	UsedAmount      *float64               `json:"usedAmount"`
+	RemainingAmount *float64               `json:"remainingAmount"`
+	Currency        string                 `json:"currency"`
+	PeriodStart     *time.Time             `json:"periodStart"`
+	PeriodEnd       *time.Time             `json:"periodEnd"`
+	QueriedAt       time.Time              `json:"queriedAt"`
+	Summaries       []CostSummary          `json:"summaries"`
+	Credentials     []CredentialCostResult `json:"credentials"`
+}
+
+type CredentialCostResult struct {
+	CredentialID    uint64    `json:"credentialId"`
+	KeyPrefix       string    `json:"keyPrefix"`
+	Shared          bool      `json:"shared"`
+	UsedAmount      *float64  `json:"usedAmount"`
+	RemainingAmount *float64  `json:"remainingAmount"`
+	Currency        string    `json:"currency"`
+	QueriedAt       time.Time `json:"queriedAt"`
+	Error           string    `json:"error"`
 }
 
 func (s *Service) QueryCost(ctx context.Context, channelID uint64, input adminapi.CostQueryInput) (CostResult, error) {
@@ -43,249 +50,113 @@ func (s *Service) QueryCost(ctx context.Context, channelID uint64, input adminap
 	if err != nil {
 		return CostResult{}, err
 	}
-	result := CostResult{Mode: config.Costs.Adapter, Currency: "USD", PeriodStart: &start, PeriodEnd: &end, QueriedAt: time.Now()}
-	if config.Costs.FixedCurrency != "" {
-		result.Currency = config.Costs.FixedCurrency
+	result := CostResult{
+		Mode: config.Costs.Adapter, Currency: defaultCostCurrency(config.Costs), PeriodStart: &start, PeriodEnd: &end, QueriedAt: time.Now(),
+		Credentials: make([]CredentialCostResult, 0),
 	}
-	switch config.Costs.Adapter {
-	case channeltype.AdapterOpenAICosts:
-		err = s.queryOpenAICosts(ctx, channel, config.Costs, start, end, &result)
-	case channeltype.AdapterSub2API:
-		err = s.querySub2API(ctx, channel, config.Costs, &result)
-	case channeltype.AdapterCustomJSON:
-		err = s.queryCustomJSON(ctx, channel, config.Costs, &result)
-	default:
-		err = gerror.New("cost query is not configured")
+	if config.Costs.Adapter == channeltype.AdapterNone {
+		return CostResult{}, gerror.New("cost query is not configured")
 	}
-	if err != nil {
+	if config.Costs.AuthType == channeltype.AuthChannelKey {
+		rows := make([]credentialRow, 0)
+		if err = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channel.Id, Status: 1}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
+			return CostResult{}, gerror.Wrap(err, "list channel credentials for cost query")
+		}
+		if len(rows) == 0 {
+			return CostResult{}, gerror.New("channel has no enabled upstream credential")
+		}
+		for _, credential := range rows {
+			if err = s.ensureCredentialMetadata(ctx, &credential); err != nil {
+				return CostResult{}, err
+			}
+			cost, queryErr := s.queryCredentialCost(ctx, channel, config.Costs, start, end, credential.ApiKeyCipher)
+			detail := costCredentialResult(credential.Id, credential.KeyPrefix, false, cost, queryErr)
+			result.Credentials = append(result.Credentials, detail)
+			if queryErr != nil {
+				continue
+			}
+			if saveErr := s.saveCredentialCostResult(ctx, credential.Id, cost); saveErr != nil {
+				return CostResult{}, saveErr
+			}
+		}
+		if !hasSuccessfulCostResult(result.Credentials) {
+			return CostResult{}, gerror.New("all enabled upstream credential cost queries failed")
+		}
+		if err = s.refreshChannelCostSummary(ctx, channel.Id); err != nil {
+			return CostResult{}, err
+		}
+		result.Summaries, err = s.channelCostSummaries(ctx, channel.Id)
+		if err != nil {
+			return CostResult{}, err
+		}
+		result.applySingleSummary()
+		return result, nil
+	}
+
+	cost, queryErr := s.queryCredentialCost(ctx, channel, config.Costs, start, end, "")
+	if queryErr != nil {
+		return CostResult{}, queryErr
+	}
+	result.Credentials = append(result.Credentials, costCredentialResult(0, "管理密钥共享余额", config.Costs.AuthType == channeltype.AuthManagementKey, cost, nil))
+	if err = s.saveChannelCostResult(ctx, channel.Id, cost); err != nil {
 		return CostResult{}, err
 	}
-	if err = s.saveCostResult(ctx, channel.Id, result); err != nil {
-		return CostResult{}, err
-	}
+	result.UsedAmount, result.RemainingAmount, result.Currency = cost.UsedAmount, cost.RemainingAmount, cost.Currency
+	result.Summaries = []CostSummary{{Currency: cost.Currency, UsedAmount: cost.UsedAmount, RemainingAmount: cost.RemainingAmount}}
 	return result, nil
 }
 
-func (s *Service) queryOpenAICosts(ctx context.Context, channel entity.Channels, config channeltype.CostConfig, start, end time.Time, result *CostResult) error {
-	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
-	if err != nil {
-		return err
+func defaultCostCurrency(config channeltype.CostConfig) string {
+	if config.FixedCurrency != "" {
+		return strings.ToUpper(config.FixedCurrency)
 	}
-	values := url.Values{}
-	values.Set("start_time", strconv.FormatInt(start.Unix(), 10))
-	values.Set("end_time", strconv.FormatInt(end.Unix(), 10))
-	values.Set("bucket_width", "1d")
-	values.Set("limit", "180")
-	if channel.ProjectId != "" {
-		values.Add("project_ids", channel.ProjectId)
-	}
-	parsed, _ := url.Parse(endpoint)
-	parsed.RawQuery = values.Encode()
-	body, err := s.getCostJSON(ctx, channel, parsed.String(), config)
-	if err != nil {
-		return err
-	}
-	var payload struct {
-		Data []struct {
-			Results []struct {
-				Amount *struct {
-					Value    float64 `json:"value"`
-					Currency string  `json:"currency"`
-				} `json:"amount"`
-			} `json:"results"`
-		} `json:"data"`
-	}
-	if err = json.Unmarshal(body, &payload); err != nil {
-		return gerror.Wrap(err, "decode OpenAI costs")
-	}
-	used := 0.0
-	for _, bucket := range payload.Data {
-		for _, item := range bucket.Results {
-			if item.Amount != nil {
-				used += item.Amount.Value
-				if item.Amount.Currency != "" {
-					result.Currency = strings.ToUpper(item.Amount.Currency)
-				}
-			}
-		}
-	}
-	result.UsedAmount = &used
-	return nil
+	return "USD"
 }
 
-func (s *Service) querySub2API(ctx context.Context, channel entity.Channels, config channeltype.CostConfig, result *CostResult) error {
-	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
-	if err != nil {
-		return err
-	}
-	body, err := s.getCostJSON(ctx, channel, endpoint, config)
-	if err != nil {
-		return err
-	}
-	result.RemainingAmount = firstFloat(body, config.RemainingPath, "remaining", "balance", "quota.remaining")
-	result.UsedAmount = firstFloat(body, config.UsedPath, "used", "usage.total.cost", "usage.total.actual_cost", "quota.used")
-	if currency := firstString(body, config.CurrencyPath, "unit", "currency", "quota.unit"); currency != "" {
-		result.Currency = strings.ToUpper(currency)
-	}
-	if result.RemainingAmount == nil && result.UsedAmount == nil {
-		return gerror.New("Sub2API usage response did not contain supported cost fields")
-	}
-	return nil
-}
-
-func (s *Service) queryCustomJSON(ctx context.Context, channel entity.Channels, config channeltype.CostConfig, result *CostResult) error {
-	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
-	if err != nil {
-		return err
-	}
-	body, err := s.getCostJSON(ctx, channel, endpoint, config)
-	if err != nil {
-		return err
-	}
-	if config.UsedPath != "" {
-		result.UsedAmount = jsonFloat(body, config.UsedPath)
-	}
-	if config.RemainingPath != "" {
-		result.RemainingAmount = jsonFloat(body, config.RemainingPath)
-	}
-	if config.CurrencyPath != "" {
-		result.Currency = strings.ToUpper(gjson.GetBytes(body, config.CurrencyPath).String())
-	} else if config.FixedCurrency != "" {
-		result.Currency = strings.ToUpper(config.FixedCurrency)
-	}
-	if result.UsedAmount == nil && result.RemainingAmount == nil {
-		return gerror.New("custom cost query paths did not match numeric values")
-	}
-	return nil
-}
-
-func (s *Service) getCostJSON(ctx context.Context, channel entity.Channels, endpoint string, config channeltype.CostConfig) ([]byte, error) {
-	return s.fetchUpstreamJSON(ctx, channel, upstreamJSONRequest{
-		Method:       config.Method,
-		Endpoint:     endpoint,
-		AuthType:     config.AuthType,
-		HeaderName:   config.HeaderName,
-		HeaderPrefix: config.HeaderPrefix,
-		BodyLimit:    4 << 20,
-		RequestError: "create cost query request",
-		FetchError:   "query upstream cost",
-		ReadError:    "read upstream cost response",
-		InvalidError: "upstream cost query returned invalid JSON",
-		StatusError: func(status int, body []byte) error {
-			return gerror.Newf("upstream cost query returned HTTP %d: %s", status, upstreamError(body, http.StatusText(status)))
-		},
-	})
-}
-
-func (s *Service) saveCostResult(ctx context.Context, channelID uint64, result CostResult) error {
-	snapshot := do.ChannelCostSnapshots{
-		ChannelId: channelID,
-		Mode:      result.Mode,
-		Currency:  result.Currency,
-		QueriedAt: result.QueriedAt,
-	}
-	channelUpdate := do.Channels{LastCostCurrency: result.Currency, LastCostAt: result.QueriedAt}
-	if result.UsedAmount == nil {
-		snapshot.UsedAmount = gdb.Raw("NULL")
-		channelUpdate.LastCostUsed = gdb.Raw("NULL")
-	} else {
-		snapshot.UsedAmount = *result.UsedAmount
-		channelUpdate.LastCostUsed = *result.UsedAmount
-	}
-	if result.RemainingAmount == nil {
-		snapshot.RemainingAmount = gdb.Raw("NULL")
-		channelUpdate.LastCostRemaining = gdb.Raw("NULL")
-	} else {
-		snapshot.RemainingAmount = *result.RemainingAmount
-		channelUpdate.LastCostRemaining = *result.RemainingAmount
-	}
-	if result.PeriodStart != nil {
-		snapshot.PeriodStart = *result.PeriodStart
-	}
-	if result.PeriodEnd != nil {
-		snapshot.PeriodEnd = *result.PeriodEnd
-	}
-	if _, err := dao.ChannelCostSnapshots.Ctx(ctx).Data(snapshot).Insert(); err != nil {
-		return gerror.Wrap(err, "save cost snapshot")
-	}
-	if _, err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().Id, channelID).Data(channelUpdate).Update(); err != nil {
-		return gerror.Wrap(err, "update channel cost snapshot")
-	}
-	return nil
-}
-
-func costRange(startDate, endDate string) (time.Time, time.Time, error) {
-	now := time.Now()
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	end := now
+func (s *Service) queryCredentialCost(ctx context.Context, channel entity.Channels, config channeltype.CostConfig, start, end time.Time, credentialCipher string) (CostResult, error) {
+	result := CostResult{Mode: config.Adapter, Currency: defaultCostCurrency(config), PeriodStart: &start, PeriodEnd: &end, QueriedAt: time.Now()}
 	var err error
-	if startDate != "" {
-		start, err = time.ParseInLocation("2006-01-02", startDate, now.Location())
-		if err != nil {
-			return time.Time{}, time.Time{}, gerror.New("startDate must use YYYY-MM-DD")
-		}
+	switch config.Adapter {
+	case channeltype.AdapterOpenAICosts:
+		err = s.queryOpenAICosts(ctx, channel, credentialCipher, config, start, end, &result)
+	case channeltype.AdapterSub2API:
+		err = s.querySub2API(ctx, channel, credentialCipher, config, &result)
+	case channeltype.AdapterCustomJSON:
+		err = s.queryCustomJSON(ctx, channel, credentialCipher, config, &result)
+	default:
+		err = gerror.New("cost query is not configured")
 	}
-	if endDate != "" {
-		end, err = time.ParseInLocation("2006-01-02", endDate, now.Location())
-		if err != nil {
-			return time.Time{}, time.Time{}, gerror.New("endDate must use YYYY-MM-DD")
-		}
-		end = end.Add(24 * time.Hour)
-	}
-	if !end.After(start) {
-		return time.Time{}, time.Time{}, gerror.New("endDate must be after startDate")
-	}
-	return start, end, nil
+	return result, err
 }
 
-func resolveEndpointURL(baseURL, configured string) (string, error) {
-	configured = strings.TrimSpace(configured)
-	if configured == "" {
-		return "", gerror.New("configured endpoint URL is required")
-	}
-	parsed, err := url.Parse(configured)
+func costCredentialResult(credentialID uint64, keyPrefix string, shared bool, cost CostResult, err error) CredentialCostResult {
+	detail := CredentialCostResult{CredentialID: credentialID, KeyPrefix: keyPrefix, Shared: shared, Currency: cost.Currency, QueriedAt: cost.QueriedAt}
 	if err != nil {
-		return "", gerror.Wrap(err, "parse configured endpoint URL")
+		detail.Error = err.Error()
+		return detail
 	}
-	if parsed.IsAbs() {
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return "", gerror.New("configured endpoint URL must use HTTP(S)")
-		}
-		return parsed.String(), nil
-	}
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if baseURL == "" {
-		return "", gerror.New("channel base URL is required")
-	}
-	return baseURL + "/" + strings.TrimLeft(parsed.String(), "/"), nil
+	detail.UsedAmount = cost.UsedAmount
+	detail.RemainingAmount = cost.RemainingAmount
+	return detail
 }
 
-func firstFloat(body []byte, paths ...string) *float64 {
-	for _, path := range paths {
-		if value := jsonFloat(body, path); value != nil {
-			return value
+func hasSuccessfulCostResult(results []CredentialCostResult) bool {
+	for _, item := range results {
+		if item.Error == "" {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
-func jsonFloat(body []byte, path string) *float64 {
-	value := gjson.GetBytes(body, path)
-	if !value.Exists() || (value.Type != gjson.Number && value.Type != gjson.String) {
-		return nil
+func (r *CostResult) applySingleSummary() {
+	if len(r.Summaries) != 1 {
+		r.UsedAmount = nil
+		r.RemainingAmount = nil
+		r.Currency = ""
+		return
 	}
-	number, err := strconv.ParseFloat(value.String(), 64)
-	if err != nil {
-		return nil
-	}
-	return &number
-}
-
-func firstString(body []byte, paths ...string) string {
-	for _, path := range paths {
-		if value := strings.TrimSpace(gjson.GetBytes(body, path).String()); value != "" {
-			return value
-		}
-	}
-	return ""
+	r.UsedAmount = r.Summaries[0].UsedAmount
+	r.RemainingAmount = r.Summaries[0].RemainingAmount
+	r.Currency = r.Summaries[0].Currency
 }
