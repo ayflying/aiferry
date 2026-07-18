@@ -13,6 +13,7 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
+	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	"github.com/yunloli/aiferry/internal/service/app"
@@ -75,6 +76,7 @@ type attemptResult struct {
 	latency      time.Duration
 	headers      http.Header
 	wroteBytes   bool
+	timedOut     bool
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service) *Service {
@@ -185,7 +187,7 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	return nil
 }
 
-func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, retryStatusCodes string) (attemptResult, bool, error) {
+func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput) (attemptResult, bool, error) {
 	advancedConfig, err := channel.ParseAdvancedConfig([]byte(candidate.AdvancedConfig))
 	if err != nil {
 		return attemptResult{}, false, err
@@ -198,7 +200,13 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, candidate.BaseURL+endpoint, bytes.NewReader(body))
+	requestCtx := ctx
+	cancel := func() {}
+	if !stream {
+		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(settings.NonStreamTimeoutSeconds)*time.Second)
+	}
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, candidate.BaseURL+endpoint, bytes.NewReader(body))
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "create upstream request")
 	}
@@ -215,7 +223,13 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	resp, err := client.Do(req)
+	requestStartedAt := time.Now()
+	var resp *http.Response
+	if stream {
+		resp, err = doStreamRequest(ctx, client, req, time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second)
+	} else {
+		resp, err = client.Do(req)
+	}
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "call upstream")
 	}
@@ -227,7 +241,7 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 		if readErr != nil {
 			return result, false, gerror.Wrap(readErr, "read upstream response")
 		}
-		if retryableStatusForRules(resp.StatusCode, retryStatusCodes) {
+		if retryableStatusForRules(resp.StatusCode, settings.RetryStatusCodes) {
 			result.errorMessage = upstreamError(responseBody, resp.Status)
 			return result, false, nil
 		}
@@ -239,7 +253,11 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	defer resp.Body.Close()
 	flusher, _ := writer.(http.Flusher)
 	result := attemptResult{status: resp.StatusCode, headers: resp.Header.Clone()}
-	scanner := bufio.NewScanner(resp.Body)
+	firstByteTimeout := time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second - time.Since(requestStartedAt)
+	if firstByteTimeout <= 0 {
+		return result, false, upstreamTimeoutError{phase: "stream first-byte"}
+	}
+	scanner := bufio.NewScanner(newStreamTimeoutReader(resp.Body, firstByteTimeout, time.Duration(settings.StreamIdleTimeoutSeconds)*time.Second))
 	scanner.Buffer(make([]byte, 64*1024), 8<<20)
 	firstChunk := true
 	for scanner.Scan() {
@@ -266,6 +284,7 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	}
 	if err = scanner.Err(); err != nil {
 		result.errorMessage = err.Error()
+		result.timedOut = isUpstreamTimeout(err)
 		if !result.wroteBytes {
 			return result, false, gerror.Wrap(err, "read upstream stream")
 		}

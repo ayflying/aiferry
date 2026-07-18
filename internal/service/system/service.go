@@ -41,15 +41,18 @@ func New(appSvc *app.Service) *Service {
 
 func DefaultResilienceSettings() adminapi.SystemResilienceSettingsInput {
 	return adminapi.SystemResilienceSettingsInput{
-		MaxFailoverAttempts:        3,
-		RetryStatusCodes:           "401,403,404,408,429,500-599",
-		HealthCheckEnabled:         false,
-		HealthCheckMode:            "passive",
-		HealthCheckIntervalMinutes: 5,
-		RecoveryEnabled:            true,
-		AutoDisableEnabled:         true,
-		DisableLatencySeconds:      120,
-		DisableStatusCodes:         "401,429",
+		MaxFailoverAttempts:           3,
+		RetryStatusCodes:              "401,403,404,408,429,500-599",
+		StreamFirstByteTimeoutSeconds: 60,
+		StreamIdleTimeoutSeconds:      180,
+		NonStreamTimeoutSeconds:       600,
+		HealthCheckEnabled:            false,
+		HealthCheckMode:               "passive",
+		HealthCheckIntervalMinutes:    5,
+		RecoveryEnabled:               true,
+		AutoDisableEnabled:            true,
+		DisableLatencySeconds:         120,
+		DisableStatusCodes:            "401,429",
 		FailureKeywords: []string{
 			"Your credit balance is too low",
 			"This organization has been disabled.",
@@ -296,6 +299,15 @@ func normalizeSettings(input adminapi.SystemResilienceSettingsInput) (adminapi.S
 	var err error
 	if input.RetryStatusCodes, _, err = normalizeStatusCodeRules(input.RetryStatusCodes); err != nil {
 		return input, gerror.Wrap(err, "retryStatusCodes is invalid")
+	}
+	if input.StreamFirstByteTimeoutSeconds < 1 || input.StreamFirstByteTimeoutSeconds > 120 {
+		return input, gerror.New("streamFirstByteTimeoutSeconds must be between 1 and 120")
+	}
+	if input.StreamIdleTimeoutSeconds < 0 || input.StreamIdleTimeoutSeconds > 600 {
+		return input, gerror.New("streamIdleTimeoutSeconds must be between 0 and 600")
+	}
+	if input.NonStreamTimeoutSeconds < 60 || input.NonStreamTimeoutSeconds > 1200 {
+		return input, gerror.New("nonStreamTimeoutSeconds must be between 60 and 1200")
 	}
 	if input.HealthCheckMode == "" {
 		input.HealthCheckMode = "passive"

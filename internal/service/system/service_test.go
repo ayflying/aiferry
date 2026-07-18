@@ -29,6 +29,9 @@ func TestMatchesAutoDisable(t *testing.T) {
 	if matchesAutoDisable(settings, AutoDisableInput{Status: 400, Latency: time.Second, Message: "validation failed"}) {
 		t.Fatal("unconfigured error should not disable a channel")
 	}
+	if !matchesAutoDisable(settings, AutoDisableInput{TimedOut: true}) {
+		t.Fatal("upstream timeout should disable a channel")
+	}
 }
 
 func TestAutoDisableSource(t *testing.T) {
@@ -40,5 +43,31 @@ func TestAutoDisableSource(t *testing.T) {
 	}
 	if source := autoDisableSource("manual"); source != autoDisableSourceUnknown {
 		t.Fatalf("unexpected unknown source: %q", source)
+	}
+}
+
+func TestNormalizeSettingsValidatesRelayTimeouts(t *testing.T) {
+	settings := DefaultResilienceSettings()
+	settings.StreamFirstByteTimeoutSeconds = 121
+	if _, err := normalizeSettings(settings); err == nil {
+		t.Fatal("first-byte timeout above the limit must be rejected")
+	}
+
+	settings = DefaultResilienceSettings()
+	settings.StreamIdleTimeoutSeconds = -1
+	if _, err := normalizeSettings(settings); err == nil {
+		t.Fatal("negative stream idle timeout must be rejected")
+	}
+
+	settings = DefaultResilienceSettings()
+	settings.NonStreamTimeoutSeconds = 59
+	if _, err := normalizeSettings(settings); err == nil {
+		t.Fatal("non-stream timeout below the limit must be rejected")
+	}
+
+	settings = DefaultResilienceSettings()
+	settings.StreamIdleTimeoutSeconds = 0
+	if _, err := normalizeSettings(settings); err != nil {
+		t.Fatalf("zero must disable stream idle timeout: %v", err)
 	}
 }

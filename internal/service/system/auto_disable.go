@@ -21,9 +21,13 @@ type AutoDisableInput struct {
 	Status              int
 	Latency             time.Duration
 	Message             string
+	TimedOut            bool
 }
 
 func matchesAutoDisable(settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) bool {
+	if input.TimedOut {
+		return true
+	}
 	if input.Status > 0 && MatchesStatusCodeRules(settings.DisableStatusCodes, input.Status) {
 		return true
 	}

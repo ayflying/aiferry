@@ -38,11 +38,12 @@ func (s *Service) attemptChannel(ctx context.Context, writer http.ResponseWriter
 		if !stream {
 			attemptWriter = nil
 		}
-		result, handled, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, startedAt, settings.RetryStatusCodes)
+		result, handled, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, startedAt, settings)
 		result.latency = time.Since(attemptStartedAt)
 		last = channelAttempt{candidate: current, result: result, handled: handled, attempts: last.attempts + 1}
 		if attemptErr != nil {
 			last.result.errorMessage = attemptErr.Error()
+			last.result.timedOut = isUpstreamTimeout(attemptErr)
 		}
 		s.maybeAutoDisable(ctx, settings, current, last.result)
 		if handled {

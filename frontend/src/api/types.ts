@@ -248,6 +248,9 @@ export interface ChannelCostResult {
 export interface SystemResilienceSettings {
   maxFailoverAttempts: number
   retryStatusCodes: string
+  streamFirstByteTimeoutSeconds: number
+  streamIdleTimeoutSeconds: number
+  nonStreamTimeoutSeconds: number
   healthCheckEnabled: boolean
   healthCheckMode: 'passive' | 'all'
   healthCheckIntervalMinutes: number

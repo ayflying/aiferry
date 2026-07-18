@@ -145,16 +145,19 @@ type PriceSourceInput struct {
 }
 
 type SystemResilienceSettingsInput struct {
-	MaxFailoverAttempts        int      `json:"maxFailoverAttempts"`
-	RetryStatusCodes           string   `json:"retryStatusCodes"`
-	HealthCheckEnabled         bool     `json:"healthCheckEnabled"`
-	HealthCheckMode            string   `json:"healthCheckMode" v:"in:passive,all"`
-	HealthCheckIntervalMinutes int      `json:"healthCheckIntervalMinutes"`
-	RecoveryEnabled            bool     `json:"recoveryEnabled"`
-	AutoDisableEnabled         bool     `json:"autoDisableEnabled"`
-	DisableLatencySeconds      int      `json:"disableLatencySeconds"`
-	DisableStatusCodes         string   `json:"disableStatusCodes"`
-	FailureKeywords            []string `json:"failureKeywords"`
+	MaxFailoverAttempts           int      `json:"maxFailoverAttempts"`
+	RetryStatusCodes              string   `json:"retryStatusCodes"`
+	StreamFirstByteTimeoutSeconds int      `json:"streamFirstByteTimeoutSeconds"`
+	StreamIdleTimeoutSeconds      int      `json:"streamIdleTimeoutSeconds"`
+	NonStreamTimeoutSeconds       int      `json:"nonStreamTimeoutSeconds"`
+	HealthCheckEnabled            bool     `json:"healthCheckEnabled"`
+	HealthCheckMode               string   `json:"healthCheckMode" v:"in:passive,all"`
+	HealthCheckIntervalMinutes    int      `json:"healthCheckIntervalMinutes"`
+	RecoveryEnabled               bool     `json:"recoveryEnabled"`
+	AutoDisableEnabled            bool     `json:"autoDisableEnabled"`
+	DisableLatencySeconds         int      `json:"disableLatencySeconds"`
+	DisableStatusCodes            string   `json:"disableStatusCodes"`
+	FailureKeywords               []string `json:"failureKeywords"`
 }
 
 type MailSettingsInput struct {
