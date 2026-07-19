@@ -28,6 +28,8 @@ type UsageLogsColumns struct {
 	ChannelId           string //
 	ChannelCredentialId string //
 	Endpoint            string //
+	UpstreamEndpoint    string //
+	ProtocolConversion  string //
 	RequestedModel      string //
 	UpstreamModel       string //
 	HttpStatus          string //
@@ -53,6 +55,8 @@ var usageLogsColumns = UsageLogsColumns{
 	ChannelId:           "channel_id",
 	ChannelCredentialId: "channel_credential_id",
 	Endpoint:            "endpoint",
+	UpstreamEndpoint:    "upstream_endpoint",
+	ProtocolConversion:  "protocol_conversion",
 	RequestedModel:      "requested_model",
 	UpstreamModel:       "upstream_model",
 	HttpStatus:          "http_status",

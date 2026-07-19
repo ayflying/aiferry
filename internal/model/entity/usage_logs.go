@@ -17,6 +17,8 @@ type UsageLogs struct {
 	ChannelId           uint64    `json:"channelId"           orm:"channel_id"            description:""` //
 	ChannelCredentialId uint64    `json:"channelCredentialId" orm:"channel_credential_id" description:""` //
 	Endpoint            string    `json:"endpoint"            orm:"endpoint"              description:""` //
+	UpstreamEndpoint    string    `json:"upstreamEndpoint"    orm:"upstream_endpoint"     description:""` //
+	ProtocolConversion  string    `json:"protocolConversion"  orm:"protocol_conversion"   description:""` //
 	RequestedModel      string    `json:"requestedModel"      orm:"requested_model"       description:""` //
 	UpstreamModel       string    `json:"upstreamModel"       orm:"upstream_model"        description:""` //
 	HttpStatus          uint      `json:"httpStatus"          orm:"http_status"           description:""` //

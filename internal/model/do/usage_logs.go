@@ -18,6 +18,8 @@ type UsageLogs struct {
 	ChannelId           any //
 	ChannelCredentialId any //
 	Endpoint            any //
+	UpstreamEndpoint    any //
+	ProtocolConversion  any //
 	RequestedModel      any //
 	UpstreamModel       any //
 	HttpStatus          any //

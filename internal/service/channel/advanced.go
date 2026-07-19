@@ -13,21 +13,22 @@ const maxSystemPromptLength = 16 << 10
 // AdvancedConfig controls how a channel normalizes request and response payloads.
 // All optional request fields are blocked until explicitly enabled.
 type AdvancedConfig struct {
-	ForceOpenAIFormat      bool   `json:"forceOpenAIFormat"`
-	ReasoningToContent     bool   `json:"reasoningToContent"`
-	PassthroughRequestBody bool   `json:"passthroughRequestBody"`
-	SkipAsyncPollingDelay  bool   `json:"skipAsyncPollingDelay"`
-	SystemPrompt           string `json:"systemPrompt"`
-	AppendSystemPrompt     bool   `json:"appendSystemPrompt"`
-	AllowServiceTier       bool   `json:"allowServiceTier"`
-	BlockStore             bool   `json:"blockStore"`
-	AllowSafetyIdentifier  bool   `json:"allowSafetyIdentifier"`
-	AllowInclude           bool   `json:"allowInclude"`
-	AllowInferenceGeo      bool   `json:"allowInferenceGeo"`
+	ForceOpenAIFormat        bool   `json:"forceOpenAIFormat"`
+	ReasoningToContent       bool   `json:"reasoningToContent"`
+	EnableProtocolConversion bool   `json:"enableProtocolConversion"`
+	PassthroughRequestBody   bool   `json:"passthroughRequestBody"`
+	SkipAsyncPollingDelay    bool   `json:"skipAsyncPollingDelay"`
+	SystemPrompt             string `json:"systemPrompt"`
+	AppendSystemPrompt       bool   `json:"appendSystemPrompt"`
+	AllowServiceTier         bool   `json:"allowServiceTier"`
+	BlockStore               bool   `json:"blockStore"`
+	AllowSafetyIdentifier    bool   `json:"allowSafetyIdentifier"`
+	AllowInclude             bool   `json:"allowInclude"`
+	AllowInferenceGeo        bool   `json:"allowInferenceGeo"`
 }
 
 func DefaultAdvancedConfig() AdvancedConfig {
-	return AdvancedConfig{BlockStore: true}
+	return AdvancedConfig{BlockStore: true, EnableProtocolConversion: true}
 }
 
 func ParseAdvancedConfig(raw []byte) (AdvancedConfig, error) {

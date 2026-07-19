@@ -13,7 +13,11 @@ import (
 )
 
 func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) error {
-	cost := s.prices.Estimate(candidate.PublicName, endpoint, result.tokens)
+	upstreamEndpoint := result.upstreamEndpoint
+	if upstreamEndpoint == "" {
+		upstreamEndpoint = endpoint
+	}
+	cost := s.prices.Estimate(candidate.PublicName, upstreamEndpoint, result.tokens)
 	recordStatus := result.status
 	recordError := result.errorMessage
 	var chargeErr error
@@ -47,6 +51,8 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		ChannelID:           candidate.ChannelID,
 		ChannelCredentialID: candidate.ChannelCredentialID,
 		Endpoint:            endpoint,
+		UpstreamEndpoint:    upstreamEndpoint,
+		ProtocolConversion:  result.protocolConversion,
 		RequestedModel:      requestedModel,
 		UpstreamModel:       candidate.UpstreamName,
 		HTTPStatus:          recordStatus,

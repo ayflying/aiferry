@@ -26,6 +26,10 @@ function setStoreAllowed(value: boolean | string | number) {
         <el-switch v-model="config.reasoningToContent" />
       </div>
       <div class="setting-row">
+        <div><strong>智能协议转换</strong><span>上游不支持当前端点时，在 Chat Completions 与 Responses 间自动适配</span></div>
+        <el-switch v-model="config.enableProtocolConversion" />
+      </div>
+      <div class="setting-row">
         <div><strong>透传请求体</strong><span>默认关闭，仅转发已支持字段；下方字段开关仍优先执行</span></div>
         <el-switch v-model="config.passthroughRequestBody" />
       </div>

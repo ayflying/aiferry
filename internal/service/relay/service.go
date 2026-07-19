@@ -1,10 +1,7 @@
 package relay
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -13,7 +10,6 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
-	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	"github.com/yunloli/aiferry/internal/service/app"
@@ -68,15 +64,17 @@ type ModelList struct {
 }
 
 type attemptResult struct {
-	status       int
-	body         []byte
-	tokens       usage.TokenUsage
-	firstTokenMs *int64
-	errorMessage string
-	latency      time.Duration
-	headers      http.Header
-	wroteBytes   bool
-	timedOut     bool
+	status             int
+	body               []byte
+	tokens             usage.TokenUsage
+	firstTokenMs       *int64
+	errorMessage       string
+	latency            time.Duration
+	headers            http.Header
+	wroteBytes         bool
+	timedOut           bool
+	upstreamEndpoint   string
+	protocolConversion string
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service) *Service {
@@ -185,113 +183,4 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	}
 	s.writeBufferedResponse(writer, last.status, last.body, http.Header{"Content-Type": []string{"application/json"}})
 	return nil
-}
-
-func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput) (attemptResult, bool, error) {
-	advancedConfig, err := channel.ParseAdvancedConfig([]byte(candidate.AdvancedConfig))
-	if err != nil {
-		return attemptResult{}, false, err
-	}
-	body, err := prepareRequestBody(endpoint, originalBody, candidate.UpstreamName, advancedConfig)
-	if err != nil {
-		return attemptResult{}, false, err
-	}
-	apiKey, err := s.app.Secrets.Decrypt(candidate.APIKeyCipher)
-	if err != nil {
-		return attemptResult{}, false, err
-	}
-	requestCtx := ctx
-	cancel := func() {}
-	if !stream {
-		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(settings.NonStreamTimeoutSeconds)*time.Second)
-	}
-	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, candidate.BaseURL+endpoint, bytes.NewReader(body))
-	if err != nil {
-		return attemptResult{}, false, gerror.Wrap(err, "create upstream request")
-	}
-	copyRequestHeaders(req.Header, incomingHeaders)
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	if candidate.OrganizationID != "" {
-		req.Header.Set("OpenAI-Organization", candidate.OrganizationID)
-	}
-	if candidate.ProjectID != "" {
-		req.Header.Set("OpenAI-Project", candidate.ProjectID)
-	}
-	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
-	if err != nil {
-		return attemptResult{}, false, err
-	}
-	requestStartedAt := time.Now()
-	var resp *http.Response
-	if stream {
-		resp, err = doStreamRequest(ctx, client, req, time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second)
-	} else {
-		resp, err = client.Do(req)
-	}
-	if err != nil {
-		return attemptResult{}, false, gerror.Wrap(err, "call upstream")
-	}
-	if !stream || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
-		responseBody = normalizeResponseBody(endpoint, responseBody, candidate.UpstreamName, advancedConfig)
-		result := attemptResult{status: resp.StatusCode, body: responseBody, tokens: parseJSONUsage(responseBody), headers: resp.Header.Clone()}
-		if readErr != nil {
-			return result, false, gerror.Wrap(readErr, "read upstream response")
-		}
-		if retryableStatusForRules(resp.StatusCode, settings.RetryStatusCodes) {
-			result.errorMessage = upstreamError(responseBody, resp.Status)
-			return result, false, nil
-		}
-		if writer != nil {
-			s.writeBufferedResponse(writer, resp.StatusCode, responseBody, resp.Header)
-		}
-		return result, true, nil
-	}
-	defer resp.Body.Close()
-	flusher, _ := writer.(http.Flusher)
-	result := attemptResult{status: resp.StatusCode, headers: resp.Header.Clone()}
-	firstByteTimeout := time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second - time.Since(requestStartedAt)
-	if firstByteTimeout <= 0 {
-		return result, false, upstreamTimeoutError{phase: "stream first-byte"}
-	}
-	scanner := bufio.NewScanner(newStreamTimeoutReader(resp.Body, firstByteTimeout, time.Duration(settings.StreamIdleTimeoutSeconds)*time.Second))
-	scanner.Buffer(make([]byte, 64*1024), 8<<20)
-	firstChunk := true
-	for scanner.Scan() {
-		line := append(append([]byte(nil), scanner.Bytes()...), '\n')
-		line = normalizeSSELine(endpoint, line, candidate.UpstreamName, advancedConfig)
-		if firstChunk {
-			first := time.Since(startedAt).Milliseconds()
-			result.firstTokenMs = &first
-			firstChunk = false
-		}
-		parseSSEUsage(line, &result.tokens)
-		if !result.wroteBytes {
-			copyResponseHeaders(writer.Header(), resp.Header)
-			writer.WriteHeader(resp.StatusCode)
-		}
-		if _, err = writer.Write(line); err != nil {
-			result.errorMessage = err.Error()
-			return result, true, nil
-		}
-		result.wroteBytes = true
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	if err = scanner.Err(); err != nil {
-		result.errorMessage = err.Error()
-		result.timedOut = isUpstreamTimeout(err)
-		if !result.wroteBytes {
-			return result, false, gerror.Wrap(err, "read upstream stream")
-		}
-	}
-	if !result.wroteBytes {
-		copyResponseHeaders(writer.Header(), resp.Header)
-		writer.WriteHeader(resp.StatusCode)
-	}
-	return result, true, nil
 }

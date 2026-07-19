@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Braces, Coins, Eye, FlaskConical, KeyRound, Network, Pencil, Plus, RefreshCw, ScanSearch, Tags, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { Channel, ChannelAdvancedConfig, ChannelGroup, ChannelInput, ChannelModel, ChannelType, ChannelTypeConfig, DiscoveredModel } from '../api/types'
+import type { Channel, ChannelInput, ChannelModel, DiscoveredModel } from '../api/types'
 import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
 import ChannelModelTestDialog from '../components/ChannelModelTestDialog.vue'
@@ -11,10 +11,11 @@ import ChannelRouteCoverageSettings from '../components/ChannelRouteCoverageSett
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { formatCost, formatLatency, formatTime } from '../lib/format'
+import { createDefaultChannelAdvancedConfig, createEmptyChannelInput } from '../lib/channelForm'
 import { sortDiscoveredModels } from '../lib/models'
+import { type ChannelTab, useChannelConfiguration } from '../composables/useChannelConfiguration'
 
 const store = useAppStore()
-type ChannelTab = 'channels' | 'groups' | 'types'
 
 const activeTab = ref<ChannelTab>('channels')
 const tabLoading = reactive<Record<ChannelTab, boolean>>({ channels: false, groups: false, types: false })
@@ -36,22 +37,11 @@ const testChannel = ref<Channel>()
 const credentialsOpen = ref(false)
 const credentialChannel = ref<Channel>()
 const healthCheckModels = ref<ChannelModel[]>([])
-const typeDrawerOpen = ref(false)
-const typeSaving = ref(false)
-const editingType = ref<ChannelType>()
-const typeStatusSaving = reactive<Record<number, boolean>>({})
-const typeForm = reactive({ name: '', code: '', configText: '' })
-const groupDrawerOpen = ref(false)
-const groupSaving = ref(false)
-const groupFormLoading = ref(false)
-const editingGroup = ref<ChannelGroup>()
-const groupForm = reactive({ name: '', code: '', description: '', status: 1, channelIds: [] as number[] })
 
 const drawerSize = window.innerWidth <= 600 ? '94%' : '620px'
 const typeDrawerSize = window.innerWidth <= 600 ? '94%' : '680px'
 const activeTypes = computed(() => store.channelTypes.filter((item) => item.status === 1 || item.code === form.type))
 const selectedChannelType = computed(() => store.channelTypes.find((item) => item.code === form.type))
-const typeReadOnly = computed(() => editingType.value?.builtIn === 1)
 const usesManagementKey = computed(() => {
   const config = selectedChannelType.value?.config
   if (!config) return false
@@ -68,15 +58,7 @@ const healthCheckModelOptions = computed(() => [...healthCheckModels.value]
   .filter((item) => item.enabled === 1)
   .sort((left, right) => left.publicName.localeCompare(right.publicName) || left.upstreamName.localeCompare(right.upstreamName)))
 
-const defaultAdvancedConfig = (): ChannelAdvancedConfig => ({
-  forceOpenAIFormat: false, reasoningToContent: false, passthroughRequestBody: false, skipAsyncPollingDelay: false,
-  systemPrompt: '', appendSystemPrompt: false, allowServiceTier: false, blockStore: true,
-  allowSafetyIdentifier: false, allowInclude: false, allowInferenceGeo: false,
-})
-const emptyForm = (): ChannelInput => ({
-  name: '', type: '', baseUrl: 'https://api.openai.com/v1', apiKey: '', managementKey: '', proxyUrl: '', organizationId: '', projectId: '', status: 1, priority: 0, weight: 1, healthCheckModelId: 0, autoDisableEnabled: true, advancedConfig: defaultAdvancedConfig(), groupIds: [],
-})
-const form = reactive<ChannelInput>(emptyForm())
+const form = reactive<ChannelInput>(createEmptyChannelInput())
 const title = computed(() => editingId.value ? '编辑渠道' : '添加渠道')
 const editingChannel = computed(() => store.channels.find((item) => item.id === editingId.value))
 
@@ -121,15 +103,34 @@ async function loadChannelFormOptions() {
   try { await ensureTabs('types', 'groups') } finally { channelFormLoading.value = false }
 }
 
-async function loadGroupFormChannels() {
-  groupFormLoading.value = true
-  try { await ensureTabs('channels') } finally { groupFormLoading.value = false }
-}
+const {
+  costLabel,
+  editingGroup,
+  editingType,
+  groupDrawerOpen,
+  groupForm,
+  groupFormLoading,
+  groupSaving,
+  openCreateGroup,
+  openCreateType,
+  openEditGroup,
+  openEditType,
+  removeGroup,
+  removeType,
+  saveGroup,
+  saveType,
+  setTypeStatus,
+  typeDrawerOpen,
+  typeForm,
+  typeReadOnly,
+  typeSaving,
+  typeStatusSaving,
+} = useChannelConfiguration({ store, tabLoaded, ensureTabs, loadChannelGroups, loadChannelTypes })
 
 async function openCreate() {
 	editingId.value = undefined
 	healthCheckModels.value = []
-  Object.assign(form, emptyForm())
+  Object.assign(form, createEmptyChannelInput())
   drawerOpen.value = true
   await loadChannelFormOptions()
   form.type = store.channelTypes.find((item) => item.status === 1)?.code || ''
@@ -140,7 +141,7 @@ async function openEdit(channel: Channel) {
   Object.assign(form, {
     name: channel.name, type: channel.type, baseUrl: channel.baseUrl, apiKey: '', managementKey: undefined, proxyUrl: undefined,
 	organizationId: channel.organizationId, projectId: channel.projectId, status: channel.status,
-	priority: channel.priority, weight: channel.weight, healthCheckModelId: channel.healthCheckModelId, autoDisableEnabled: channel.autoDisableEnabled, advancedConfig: JSON.parse(JSON.stringify(channel.advancedConfig || defaultAdvancedConfig())), groupIds: channel.groupIds || [],
+	priority: channel.priority, weight: channel.weight, healthCheckModelId: channel.healthCheckModelId, autoDisableEnabled: channel.autoDisableEnabled, advancedConfig: JSON.parse(JSON.stringify(channel.advancedConfig || createDefaultChannelAdvancedConfig())), groupIds: channel.groupIds || [],
 	})
 	drawerOpen.value = true
 	void loadHealthCheckModels(channel.id)
@@ -249,99 +250,6 @@ async function remove(channel: Channel) {
   } catch (error) {
     if (error !== 'cancel') showError(error, '删除渠道失败')
   }
-}
-
-async function openCreateType() {
-  editingType.value = undefined
-  Object.assign(typeForm, { name: '', code: '', configText: '' })
-  typeDrawerOpen.value = true
-  try {
-    typeForm.configText = JSON.stringify(await apiGet<ChannelTypeConfig>('/channel-types/default-config'), null, 2)
-  } catch (error) { showError(error, '加载 OpenAI 默认配置失败') }
-}
-
-function openEditType(item: ChannelType) {
-  editingType.value = item
-  Object.assign(typeForm, { name: item.name, code: item.code, configText: JSON.stringify(item.config, null, 2) })
-  typeDrawerOpen.value = true
-}
-
-async function saveType() {
-  let config: ChannelTypeConfig | undefined
-  if (typeForm.configText.trim()) {
-    try { config = JSON.parse(typeForm.configText) } catch { showError('渠道类型 JSON 格式无效', '格式错误'); return }
-  }
-  if (!typeForm.name.trim() || !typeForm.code.trim()) { showError('请填写类型名称和类型代码', '信息不完整'); return }
-  typeSaving.value = true
-  try {
-    const payload = { name: typeForm.name, code: typeForm.code, ...(config ? { config } : {}) }
-    if (editingType.value) await apiPut(`/channel-types/${editingType.value.id}`, payload)
-    else await apiPost('/channel-types', payload)
-    ElMessage.success(editingType.value ? '渠道类型已更新' : '渠道类型已添加')
-    typeDrawerOpen.value = false
-    await loadChannelTypes()
-  } catch (error) { showError(error, '保存渠道类型失败') } finally { typeSaving.value = false }
-}
-
-async function setTypeStatus(item: ChannelType, enabled: boolean) {
-  typeStatusSaving[item.id] = true
-  try {
-    await apiPut(`/channel-types/${item.id}/status`, { status: enabled ? 1 : 0 })
-    item.status = enabled ? 1 : 0
-    ElMessage.success(enabled ? '渠道类型已启用' : '渠道类型已停用')
-  } catch (error) { showError(error, '更新渠道类型状态失败') } finally { typeStatusSaving[item.id] = false }
-}
-
-async function removeType(item: ChannelType) {
-  try {
-    await ElMessageBox.confirm(`删除渠道类型“${item.name}”？`, '删除渠道类型', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
-    await apiDelete(`/channel-types/${item.id}`)
-    ElMessage.success('渠道类型已删除')
-    tabLoaded.channels = false
-    await loadChannelTypes()
-  } catch (error) {
-    if (error !== 'cancel') showError(error, '删除渠道类型失败')
-  }
-}
-
-function costLabel(item: ChannelType) {
-  return { none: '不查询', openai_costs: 'OpenAI Costs', sub2api_usage: 'Sub2API Usage', custom_json: '自定义 JSON' }[item.config.costs.adapter] || item.config.costs.adapter
-}
-
-async function openCreateGroup() {
-  editingGroup.value = undefined
-  Object.assign(groupForm, { name: '', code: '', description: '', status: 1, channelIds: [] })
-  groupDrawerOpen.value = true
-  await loadGroupFormChannels()
-}
-
-async function openEditGroup(item: ChannelGroup) {
-  editingGroup.value = item
-  Object.assign(groupForm, { name: item.name, code: item.code, description: item.description, status: item.status, channelIds: [...item.channelIds] })
-  groupDrawerOpen.value = true
-  await loadGroupFormChannels()
-}
-
-async function saveGroup() {
-  if (!groupForm.name.trim() || !groupForm.code.trim()) { showError('请填写分组名称和代码', '信息不完整'); return }
-  groupSaving.value = true
-  try {
-    const payload = { ...groupForm }
-    if (editingGroup.value) await apiPut(`/channel-groups/${editingGroup.value.id}`, payload)
-    else await apiPost('/channel-groups', payload)
-    ElMessage.success(editingGroup.value ? '渠道分组已更新' : '渠道分组已添加')
-    groupDrawerOpen.value = false
-    await loadChannelGroups()
-  } catch (error) { showError(error, '保存渠道分组失败') } finally { groupSaving.value = false }
-}
-
-async function removeGroup(item: ChannelGroup) {
-  try {
-    await ElMessageBox.confirm(`删除渠道分组“${item.name}”？`, '删除渠道分组', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
-    await apiDelete(`/channel-groups/${item.id}`)
-    ElMessage.success('渠道分组已删除')
-    await loadChannelGroups()
-  } catch (error) { if (error !== 'cancel') showError(error, '删除渠道分组失败') }
 }
 
 onMounted(loadChannels)
