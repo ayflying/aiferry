@@ -12,5 +12,4 @@ type UserView struct {
 	Role      string   `json:"role"`
 	IsAdmin   bool     `json:"isAdmin"`
 	AvatarURL string   `json:"avatarUrl"`
-	Groups    []string `json:"groups"`
 }

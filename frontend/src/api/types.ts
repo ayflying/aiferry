@@ -16,7 +16,6 @@ export interface AuthUser {
   role: string
   isAdmin: boolean
   avatarUrl: string
-	groups: string[]
 }
 
 export interface AccountUsageSummary {

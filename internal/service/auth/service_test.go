@@ -14,7 +14,7 @@ func TestAccountRole(t *testing.T) {
 	if role := accountRole(casdoorAccount{IsGlobalAdmin: true}); role != "admin" {
 		t.Fatalf("accountRole() = %q, want admin", role)
 	}
-	if role := accountRole(casdoorAccount{Groups: []string{"built-in/任意用户组"}}); role != "user" {
+	if role := accountRole(casdoorAccount{}); role != "user" {
 		t.Fatalf("accountRole() = %q, want user", role)
 	}
 }

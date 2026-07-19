@@ -42,7 +42,6 @@ type SessionUser struct {
 	Name            string   `json:"name"`
 	Role            string   `json:"role"`
 	AvatarURL       string   `json:"avatarUrl"`
-	Groups          []string `json:"groups"`
 }
 
 type oauthState struct {
@@ -71,7 +70,6 @@ type casdoorAccount struct {
 	DisplayName   string   `json:"displayName"`
 	Avatar        string   `json:"avatar"`
 	Email         string   `json:"email"`
-	Groups        []string `json:"groups"`
 	IsAdmin       bool     `json:"isAdmin"`
 	IsGlobalAdmin bool     `json:"isGlobalAdmin"`
 	IsForbidden   bool     `json:"isForbidden"`
@@ -158,7 +156,7 @@ func (s *Service) CompleteLogin(ctx context.Context, state, stateCookie, code, c
 
 func (s *Service) View(user SessionUser) authapi.UserView {
 	return authapi.UserView{
-		Id: user.Id, Name: user.Name, Role: user.Role, IsAdmin: s.IsAdmin(user), AvatarURL: user.AvatarURL, Groups: user.Groups,
+		Id: user.Id, Name: user.Name, Role: user.Role, IsAdmin: s.IsAdmin(user), AvatarURL: user.AvatarURL,
 	}
 }
 

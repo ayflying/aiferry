@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -17,14 +16,10 @@ import (
 
 func (s *Service) syncUser(ctx context.Context, account casdoorAccount) (SessionUser, error) {
 	var (
-		uid    = accountUID(account)
-		groups = append([]string(nil), account.Groups...)
-		role   = accountRole(account)
+		uid  = accountUID(account)
+		role = accountRole(account)
+		err  error
 	)
-	groupsJSON, err := json.Marshal(groups)
-	if err != nil {
-		return SessionUser{}, gerror.Wrap(err, "encode Casdoor groups")
-	}
 	columns := dao.Users.Columns()
 	var current entity.Users
 	if err = dao.Users.Ctx(ctx).
@@ -42,7 +37,6 @@ func (s *Service) syncUser(ctx context.Context, account casdoorAccount) (Session
 			IdentityProvider: "casdoor",
 			IdentitySubject:  uid,
 			AvatarUrl:        account.Avatar,
-			GroupsJson:       string(groupsJSON),
 			LastLoginAt:      time.Now(),
 		}).InsertIgnore(); err != nil {
 			return SessionUser{}, gerror.Wrap(err, "create Casdoor user")
@@ -61,7 +55,6 @@ func (s *Service) syncUser(ctx context.Context, account casdoorAccount) (Session
 	if _, err = dao.Users.Ctx(ctx).Where(columns.Id, current.Id).Data(do.Users{
 		Role:        role,
 		AvatarUrl:   account.Avatar,
-		GroupsJson:  string(groupsJSON),
 		LastLoginAt: time.Now(),
 	}).Update(); err != nil {
 		return SessionUser{}, gerror.Wrap(err, "refresh Casdoor user")
@@ -72,7 +65,6 @@ func (s *Service) syncUser(ctx context.Context, account casdoorAccount) (Session
 		Name:            name,
 		Role:            role,
 		AvatarURL:       account.Avatar,
-		Groups:          groups,
 	}, nil
 }
 
