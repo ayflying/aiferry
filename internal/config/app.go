@@ -10,6 +10,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
+const defaultSessionTTLHours = 24 * 30
+
 type App struct {
 	MySQLHost              string
 	MySQLPort              int
@@ -62,7 +64,7 @@ func Load() (App, error) {
 		CasdoorEndpoint:        strings.TrimRight(env("CASDOOR_ENDPOINT", ""), "/"),
 		CasdoorClientID:        strings.TrimSpace(os.Getenv("CASDOOR_CLIENT_ID")),
 		CasdoorClientSecret:    os.Getenv("CASDOOR_CLIENT_SECRET"),
-		SessionTTL:             envInt("SESSION_TTL_HOURS", 12),
+		SessionTTL:             envInt("SESSION_TTL_HOURS", defaultSessionTTLHours),
 		AdminRoles:             envList("AIFERRY_ADMIN_ROLES", []string{"admin"}),
 	}
 	if strings.TrimSpace(app.MySQLPassword) == "" {

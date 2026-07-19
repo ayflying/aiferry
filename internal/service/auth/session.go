@@ -52,17 +52,20 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 }
 
 func (s *Service) RequireUser(r *ghttp.Request) {
-	user, err := s.Authenticate(r.Context(), r.Cookie.Get(sessionCookieName).String())
+	token := r.Cookie.Get(sessionCookieName).String()
+	user, err := s.Authenticate(r.Context(), token)
 	if err != nil {
 		writeUnauthorized(r)
 		return
 	}
+	s.SetSessionCookie(r, token)
 	r.SetCtx(context.WithValue(r.Context(), userContextKey, user))
 	r.Middleware.Next()
 }
 
 func (s *Service) RequireAdmin(r *ghttp.Request) {
-	user, err := s.Authenticate(r.Context(), r.Cookie.Get(sessionCookieName).String())
+	token := r.Cookie.Get(sessionCookieName).String()
+	user, err := s.Authenticate(r.Context(), token)
 	if err != nil {
 		writeUnauthorized(r)
 		return
@@ -71,6 +74,7 @@ func (s *Service) RequireAdmin(r *ghttp.Request) {
 		writeForbidden(r)
 		return
 	}
+	s.SetSessionCookie(r, token)
 	r.SetCtx(context.WithValue(r.Context(), userContextKey, user))
 	r.Middleware.Next()
 }
@@ -107,6 +111,27 @@ func StateCookieName() string {
 
 func (s *Service) SessionTTL() time.Duration {
 	return s.sessionTTL()
+}
+
+// SetSessionCookie extends the browser session to match the Redis sliding expiry.
+func (s *Service) SetSessionCookie(r *ghttp.Request, token string) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	r.Cookie.SetHttpCookie(newSessionCookie(SecureRequest(r), token, s.sessionTTL()))
+}
+
+func newSessionCookie(secure bool, token string, ttl time.Duration) *http.Cookie {
+	return &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  time.Now().Add(ttl),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	}
 }
 
 func CallbackURL(r *ghttp.Request) (string, error) {

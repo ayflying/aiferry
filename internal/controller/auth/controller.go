@@ -63,7 +63,7 @@ func (c *Controller) Callback(r *ghttp.Request) {
 		}
 		return
 	}
-	setCookie(r, auth.SessionCookieName(), token, c.auth.SessionTTL())
+	c.auth.SetSessionCookie(r, token)
 	r.Response.RedirectTo(returnTo, http.StatusFound)
 }
 
