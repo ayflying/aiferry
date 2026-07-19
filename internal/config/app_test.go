@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestLoadUsesThirtyDaySessionByDefault(t *testing.T) {
+func TestLoadUsesSevenDaySessionByDefault(t *testing.T) {
 	t.Setenv("MYSQL_PASSWORD", "test-password")
 	t.Setenv("AIFERRY_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	t.Setenv("CASDOOR_ENDPOINT", "https://casdoor.example.test")
@@ -17,7 +17,11 @@ func TestLoadUsesThirtyDaySessionByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if app.SessionTTL != defaultSessionTTLHours {
-		t.Fatalf("SessionTTL = %d, want %d", app.SessionTTL, defaultSessionTTLHours)
+	const sevenDaysInHours = 24 * 7
+	if defaultSessionTTLHours != sevenDaysInHours {
+		t.Fatalf("defaultSessionTTLHours = %d, want %d", defaultSessionTTLHours, sevenDaysInHours)
+	}
+	if app.SessionTTL != sevenDaysInHours {
+		t.Fatalf("SessionTTL = %d, want %d", app.SessionTTL, sevenDaysInHours)
 	}
 }

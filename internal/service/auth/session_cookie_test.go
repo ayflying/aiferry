@@ -8,7 +8,7 @@ import (
 
 func TestNewSessionCookieUsesPersistentSecureSlidingAttributes(t *testing.T) {
 	const token = "session-token"
-	ttl := 30 * 24 * time.Hour
+	ttl := 7 * 24 * time.Hour
 	before := time.Now()
 
 	cookie := newSessionCookie(true, token, ttl)

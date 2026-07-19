@@ -10,7 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
-const defaultSessionTTLHours = 24 * 30
+const defaultSessionTTLHours = 24 * 7
 
 type App struct {
 	MySQLHost              string
