@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Braces, Coins, Eye, FlaskConical, KeyRound, Network, Pencil, Plus, RefreshCw, ScanSearch, Tags, Trash2 } from '@lucide/vue'
+import { Braces, Coins, Eye, FlaskConical, KeyRound, LoaderCircle, Network, Pencil, Plus, RefreshCw, ScanSearch, Tags, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { Channel, ChannelInput, ChannelModel, DiscoveredModel } from '../api/types'
+import type { Channel, ChannelCostResult, ChannelInput, ChannelModel, DiscoveredModel } from '../api/types'
 import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
 import ChannelModelTestDialog from '../components/ChannelModelTestDialog.vue'
@@ -37,6 +37,7 @@ const testChannel = ref<Channel>()
 const credentialsOpen = ref(false)
 const credentialChannel = ref<Channel>()
 const healthCheckModels = ref<ChannelModel[]>([])
+const queryingCostID = ref<number>()
 
 const drawerSize = window.innerWidth <= 600 ? '94%' : '620px'
 const typeDrawerSize = window.innerWidth <= 600 ? '94%' : '680px'
@@ -241,8 +242,19 @@ function openCredentials(channel: Channel) {
   credentialsOpen.value = true
 }
 
-function queryCost(channel: Channel) {
-  openCredentials(channel)
+async function queryCost(channel: Channel) {
+  if (queryingCostID.value) return
+  queryingCostID.value = channel.id
+  try {
+    const result = await apiPost<ChannelCostResult>(`/channels/${channel.id}/costs/query`, {})
+    const failures = result.credentials.filter((item) => item.error).length
+    ElMessage.success(failures ? `费用已更新，${failures} 个上游密钥查询失败` : '费用已更新')
+    await loadChannels()
+  } catch (error) {
+    showError(error, '查询上游费用失败')
+  } finally {
+    queryingCostID.value = undefined
+  }
 }
 
 async function remove(channel: Channel) {
@@ -284,7 +296,7 @@ onMounted(loadChannels)
               <el-tooltip content="管理上游密钥"><button class="icon-button" type="button" :aria-label="`管理 ${row.name} 的上游密钥`" @click="openCredentials(row)"><KeyRound :size="16" /></button></el-tooltip>
               <el-tooltip content="发现模型"><button class="icon-button" type="button" :aria-label="`发现 ${row.name} 的模型`" @click="discover(row)"><ScanSearch :size="16" /></button></el-tooltip>
               <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="openTest(row)"><FlaskConical :size="16" /></button></el-tooltip>
-              <el-tooltip content="查询费用"><button class="icon-button" type="button" :aria-label="`查询 ${row.name} 的费用`" :disabled="row.costQueryMode === 'none'" @click="queryCost(row)"><Coins :size="16" /></button></el-tooltip>
+              <el-tooltip :content="queryingCostID === row.id ? '正在查询费用' : '查询费用'"><button class="icon-button" type="button" :aria-label="`${queryingCostID === row.id ? '正在查询' : '查询'} ${row.name} 的费用`" :disabled="row.costQueryMode === 'none' || Boolean(queryingCostID)" @click="queryCost(row)"><LoaderCircle v-if="queryingCostID === row.id" :size="16" class="cost-query-spinner" /><Coins v-else :size="16" /></button></el-tooltip>
               <el-tooltip content="编辑"><button class="icon-button" type="button" :aria-label="`编辑渠道 ${row.name}`" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip>
               <el-tooltip content="删除"><button class="icon-button danger" type="button" :aria-label="`删除渠道 ${row.name}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip>
             </div></template></el-table-column>
@@ -346,5 +358,8 @@ onMounted(loadChannels)
 <style scoped>
 .channel-tabs :deep(.el-tabs__header) { margin: 0 0 18px; }.channel-tabs :deep(.el-tabs__nav-wrap::after) { background: #dce2e7; }.tab-label { display: inline-flex; align-items: center; gap: 7px; }.page-toolbar { display: flex; min-height: 36px; align-items: center; gap: 10px; margin-bottom: 18px; }.page-toolbar .spacer { flex: 1; }.channel-name, .type-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.channel-name strong, .type-cell strong { font-size: 13px; }.channel-name span, .type-cell code { overflow: hidden; color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.type-status-control { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }.type-status-control :deep(.el-switch) { flex: 0 0 auto; }.cost-cell { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.cost-cell small, .table-panel small { color: #7b8792; }.group-channel-tag { margin: 0 4px 4px 0; }.model-selection { min-height: 300px; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-check-list .el-checkbox { min-width: 0; height: 38px; margin: 0; padding: 0 10px; border-bottom: 1px solid #eef1f3; }.model-check-list .el-checkbox:last-child { border-bottom: 0; }.model-check-list code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; min-height: 220px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; padding: 20px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 14px; }.test-dialog { min-height: 180px; }.test-result { padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; }.test-result.success { border-color: #acd7cc; background: #f2faf8; }.test-result.failed { border-color: #e9abb2; background: #fff6f7; }.test-result span { display: block; margin-top: 5px; color: #66717d; font-size: 11px; }.test-result p { margin: 8px 0 0; font-size: 12px; }.model-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.model-option small { color: #7b8792; font-family: 'JetBrains Mono', monospace; font-size: 10px; }.config-editor :deep(textarea) { min-height: 440px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
 .cost-link { display: block; width: 100%; border: 0; padding: 0; text-align: left; color: inherit; background: transparent; cursor: pointer; }.cost-link:hover span { color: #1677ff; }
+.cost-query-spinner { animation: cost-query-spin 0.9s linear infinite; }
+@keyframes cost-query-spin { to { transform: rotate(360deg); } }
 @media (max-width: 600px) { .page-toolbar { align-items: flex-start; flex-wrap: wrap; }.page-toolbar .spacer { display: none; }.selection-toolbar { grid-template-columns: 1fr; }.model-option small { display: none; } }
+@media (prefers-reduced-motion: reduce) { .cost-query-spinner { animation: none; } }
 </style>
