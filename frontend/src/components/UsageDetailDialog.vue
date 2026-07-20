@@ -142,8 +142,9 @@ function itemLabel(item: BillingItem) {
 </template>
 
 <style scoped>
-:deep(.usage-detail-dialog) { width: min(760px, calc(100vw - 32px)) !important; }
-:deep(.usage-detail-dialog .el-dialog__body) { height: min(620px, calc(100vh - 168px)); overflow-y: auto; }
+:deep(.usage-detail-dialog) { display: flex; width: min(760px, calc(100vw - 32px)) !important; height: min(720px, calc(100vh - 32px)); max-height: calc(100vh - 32px); margin: 16px auto !important; flex-direction: column; overflow: hidden; }
+:deep(.usage-detail-dialog .el-dialog__header), :deep(.usage-detail-dialog .el-dialog__footer) { flex: 0 0 auto; }
+:deep(.usage-detail-dialog .el-dialog__body) { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; border: 1px solid #dce2e7; }
 .detail-summary div { display: flex; min-height: 66px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 14px; border-right: 1px solid #dce2e7; }
 .detail-summary div:last-child { border-right: 0; }
@@ -165,7 +166,7 @@ function itemLabel(item: BillingItem) {
 .result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }
 .failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
-  :deep(.usage-detail-dialog .el-dialog__body) { height: min(560px, calc(100vh - 148px)); }
+  :deep(.usage-detail-dialog) { height: calc(100vh - 24px); max-height: calc(100vh - 24px); margin: 12px auto !important; }
   .detail-summary { grid-template-columns: 1fr; }
   .detail-summary div { min-height: 58px; border-right: 0; border-bottom: 1px solid #dce2e7; }
   .detail-summary div:last-child { border-bottom: 0; }
