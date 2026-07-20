@@ -5,15 +5,30 @@ export function formatNumber(value?: number | null): string {
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value)
 }
 
-export function formatCost(value?: number | null, currency = 'USD'): string {
+export function formatCost(value?: number | string | null, currency = 'USD'): string {
   if (value === undefined || value === null) return '未定价'
+	const numericValue = typeof value === 'string' ? Number(value) : value
+	if (!Number.isFinite(numericValue)) return '未定价'
   const normalizedCurrency = (currency || 'USD').toUpperCase()
   return new Intl.NumberFormat(normalizedCurrency === 'USD' ? 'en-US' : 'zh-CN', {
     style: 'currency',
     currency: normalizedCurrency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 6,
-  }).format(value)
+  }).format(numericValue)
+}
+
+export function formatPreciseCost(value?: number | string | null, currency = 'USD'): string {
+	if (value === undefined || value === null) return '—'
+	const numericValue = typeof value === 'string' ? Number(value) : value
+	if (!Number.isFinite(numericValue)) return '—'
+	const normalizedCurrency = (currency || 'USD').toUpperCase()
+	return new Intl.NumberFormat(normalizedCurrency === 'USD' ? 'en-US' : 'zh-CN', {
+		style: 'currency',
+		currency: normalizedCurrency,
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 8,
+	}).format(numericValue)
 }
 
 export function formatTime(value?: string | null): string {

@@ -31,6 +31,7 @@ type UsageLogs struct {
 	OutputTokens        any //
 	TotalTokens         any //
 	EstimatedCost       any //
+	BillingDetailsJson  any //
 	DurationMs          any //
 	FirstTokenMs        any //
 	Attempts            any //

@@ -79,8 +79,30 @@ func RuleCost(conditionsJSON, ratesJSON, endpoint string, tokens TokenUsage) (*d
 	if !matchesTokenRange(conditions, "inputTokens", input) || !matchesTokenRange(conditions, "outputTokens", output) || !matchesTokenRange(conditions, "totalTokens", input+output) {
 		return nil, false
 	}
+	breakdown := EstimateBreakdown(tokens, rulePriceRates(ratesJSON))
+	if breakdown == nil {
+		return nil, false
+	}
+	cost := breakdown.Cost()
+	return &cost, true
+}
+
+func RuleBreakdown(conditionsJSON, ratesJSON, endpoint string, tokens TokenUsage) (*BillingBreakdown, bool) {
+	conditions := gjson.Parse(conditionsJSON)
+	if configured := strings.TrimSpace(conditions.Get("endpoint").String()); configured != "" && configured != endpoint {
+		return nil, false
+	}
+	input, output := tokenValue(tokens.Input), tokenValue(tokens.Output)
+	if !matchesTokenRange(conditions, "inputTokens", input) || !matchesTokenRange(conditions, "outputTokens", output) || !matchesTokenRange(conditions, "totalTokens", input+output) {
+		return nil, false
+	}
+	breakdown := EstimateBreakdown(tokens, rulePriceRates(ratesJSON))
+	return breakdown, breakdown != nil
+}
+
+func rulePriceRates(ratesJSON string) PriceRates {
 	rates := gjson.Parse(ratesJSON)
-	cost := EstimateCost(tokens, PriceRates{
+	return PriceRates{
 		Input:       priceRate(rates.Get("inputPerMillion")),
 		CachedInput: priceRate(rates.Get("cachedInputPerMillion")),
 		CacheWrite:  priceRate(rates.Get("cacheWritePerMillion")),
@@ -89,8 +111,7 @@ func RuleCost(conditionsJSON, ratesJSON, endpoint string, tokens TokenUsage) (*d
 		AudioInput:  priceRate(rates.Get("audioInputPerMillion")),
 		AudioOutput: priceRate(rates.Get("audioOutputPerMillion")),
 		Request:     priceRate(rates.Get("request")),
-	})
-	return cost, cost != nil
+	}
 }
 
 func matchesTokenRange(conditions gjson.Result, prefix string, value uint64) bool {

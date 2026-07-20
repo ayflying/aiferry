@@ -41,6 +41,7 @@ type UsageLogsColumns struct {
 	OutputTokens        string //
 	TotalTokens         string //
 	EstimatedCost       string //
+	BillingDetailsJson  string //
 	DurationMs          string //
 	FirstTokenMs        string //
 	Attempts            string //
@@ -70,6 +71,7 @@ var usageLogsColumns = UsageLogsColumns{
 	OutputTokens:        "output_tokens",
 	TotalTokens:         "total_tokens",
 	EstimatedCost:       "estimated_cost",
+	BillingDetailsJson:  "billing_details_json",
 	DurationMs:          "duration_ms",
 	FirstTokenMs:        "first_token_ms",
 	Attempts:            "attempts",

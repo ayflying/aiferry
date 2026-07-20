@@ -29,10 +29,12 @@ type modelPrice struct {
 }
 
 type priceRule struct {
+	Name       string
 	Conditions string
 	Rates      string
 	Priority   int
 	Source     string
+	Currency   string
 	ID         uint64
 }
 
@@ -53,10 +55,12 @@ type priceRow struct {
 
 type ruleRow struct {
 	ModelName      string `orm:"model_name"`
+	Name           string `orm:"name"`
 	ConditionsJSON string `orm:"conditions_json"`
 	RatesJSON      string `orm:"rates_json"`
 	Priority       int    `orm:"priority"`
 	Source         string `orm:"source"`
+	Currency       string `orm:"currency"`
 	ID             uint64 `orm:"id"`
 }
 
@@ -95,7 +99,8 @@ func (s *Service) Load(ctx context.Context) error {
 			price = modelPrice{BillingMode: billingModeRules}
 		}
 		price.Rules = append(price.Rules, priceRule{
-			Conditions: rule.ConditionsJSON, Rates: rule.RatesJSON, Priority: rule.Priority, Source: rule.Source, ID: rule.ID,
+			Name: rule.Name, Conditions: rule.ConditionsJSON, Rates: rule.RatesJSON, Priority: rule.Priority,
+			Source: rule.Source, Currency: rule.Currency, ID: rule.ID,
 		})
 		loaded[rule.ModelName] = price
 	}
@@ -131,7 +136,7 @@ func (s *Service) IsPriced(modelName string) bool {
 	}
 }
 
-func (s *Service) Estimate(modelName, endpoint string, tokens usage.TokenUsage) *decimal.Decimal {
+func (s *Service) EstimateBreakdown(modelName, endpoint string, tokens usage.TokenUsage) *usage.BillingBreakdown {
 	price, exists := s.current()[modelName]
 	if !exists {
 		return nil
@@ -139,16 +144,34 @@ func (s *Service) Estimate(modelName, endpoint string, tokens usage.TokenUsage) 
 	switch price.BillingMode {
 	case billingModeRules:
 		for _, rule := range price.Rules {
-			if cost, matches := usage.RuleCost(rule.Conditions, rule.Rates, endpoint, tokens); matches {
-				return cost
+			if breakdown, matches := usage.RuleBreakdown(rule.Conditions, rule.Rates, endpoint, tokens); matches {
+				breakdown.BillingMode = billingModeRules
+				breakdown.Currency = normalizeCurrency(rule.Currency)
+				breakdown.Rule = &usage.BillingRuleSnapshot{
+					ID: rule.ID, Name: rule.Name, Source: rule.Source, Priority: rule.Priority, Conditions: rule.Conditions,
+				}
+				return breakdown
 			}
 		}
 		return nil
 	case billingModeRequest:
-		return usage.EstimateCost(tokens, usage.PriceRates{Request: price.Rates.Request})
+		breakdown := usage.EstimateBreakdown(tokens, usage.PriceRates{Request: price.Rates.Request})
+		if breakdown != nil {
+			breakdown.BillingMode = billingModeRequest
+		}
+		return breakdown
 	default:
-		return usage.EstimateCost(tokens, price.Rates)
+		return usage.EstimateBreakdown(tokens, price.Rates)
 	}
+}
+
+func (s *Service) Estimate(modelName, endpoint string, tokens usage.TokenUsage) *decimal.Decimal {
+	breakdown := s.EstimateBreakdown(modelName, endpoint, tokens)
+	if breakdown == nil {
+		return nil
+	}
+	cost := breakdown.Cost()
+	return &cost
 }
 
 func (s *Service) current() snapshot {
@@ -162,4 +185,11 @@ func normalizeBillingMode(value string) string {
 	default:
 		return billingModeToken
 	}
+}
+
+func normalizeCurrency(value string) string {
+	if value == "" {
+		return "USD"
+	}
+	return value
 }

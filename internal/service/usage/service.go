@@ -55,6 +55,7 @@ type RecordInput struct {
 	Stream              bool
 	Tokens              TokenUsage
 	EstimatedCost       *decimal.Decimal
+	BillingDetails      *BillingBreakdown
 	DurationMs          int64
 	FirstTokenMs        *int64
 	Attempts            int
@@ -124,6 +125,8 @@ type LogView struct {
 	OutputTokens       *uint64   `json:"outputTokens" orm:"output_tokens"`
 	TotalTokens        *uint64   `json:"totalTokens" orm:"total_tokens"`
 	EstimatedCost      *float64  `json:"estimatedCost" orm:"estimated_cost"`
+	BillingDetailsJSON string    `json:"-" orm:"billing_details_json"`
+	BillingDetails     *BillingBreakdown `json:"billingDetails,omitempty" orm:"-"`
 	DurationMs         uint64    `json:"durationMs" orm:"duration_ms"`
 	FirstTokenMs       *uint64   `json:"firstTokenMs" orm:"first_token_ms"`
 	Attempts           uint      `json:"attempts" orm:"attempts"`
@@ -199,93 +202,18 @@ func (s *Service) Record(ctx context.Context, input RecordInput) error {
 	if input.EstimatedCost != nil {
 		data.EstimatedCost = *input.EstimatedCost
 	}
+	if input.BillingDetails != nil {
+		encoded, err := input.BillingDetails.JSON()
+		if err != nil {
+			return gerror.Wrap(err, "encode billing details")
+		}
+		data.BillingDetailsJson = encoded
+	}
 	if input.FirstTokenMs != nil {
 		data.FirstTokenMs = *input.FirstTokenMs
 	}
 	_, err := dao.UsageLogs.Ctx(ctx).Data(data).Insert()
 	return gerror.Wrap(err, "record usage")
-}
-
-func EstimateCost(tokens TokenUsage, rates PriceRates) *decimal.Decimal {
-	cost := decimal.Zero
-	priced := false
-	inputRemaining := remainingTokens(tokens.Input)
-	outputRemaining := remainingTokens(tokens.Output)
-	denominator := decimal.NewFromInt(1_000_000)
-
-	chargeInputComponent := func(tokens *uint64, preferred, fallback *float64) {
-		amount := tokenCount(tokens)
-		if inputRemaining != nil && amount > *inputRemaining {
-			amount = *inputRemaining
-		}
-		if inputRemaining != nil {
-			*inputRemaining -= amount
-		}
-		rate := preferred
-		if rate == nil {
-			rate = fallback
-		}
-		if rate == nil || amount == 0 {
-			return
-		}
-		cost = cost.Add(decimal.NewFromInt(int64(amount)).Mul(decimal.NewFromFloat(*rate)).Div(denominator))
-		priced = true
-	}
-	chargeOutputComponent := func(tokens *uint64, preferred, fallback *float64) {
-		amount := tokenCount(tokens)
-		if outputRemaining != nil && amount > *outputRemaining {
-			amount = *outputRemaining
-		}
-		if outputRemaining != nil {
-			*outputRemaining -= amount
-		}
-		rate := preferred
-		if rate == nil {
-			rate = fallback
-		}
-		if rate == nil || amount == 0 {
-			return
-		}
-		cost = cost.Add(decimal.NewFromInt(int64(amount)).Mul(decimal.NewFromFloat(*rate)).Div(denominator))
-		priced = true
-	}
-
-	chargeInputComponent(tokens.CachedInput, rates.CachedInput, rates.Input)
-	chargeInputComponent(tokens.CacheWrite, rates.CacheWrite, rates.Input)
-	chargeInputComponent(tokens.ImageInput, rates.ImageInput, rates.Input)
-	chargeInputComponent(tokens.AudioInput, rates.AudioInput, rates.Input)
-	if inputRemaining != nil && rates.Input != nil && *inputRemaining > 0 {
-		cost = cost.Add(decimal.NewFromInt(int64(*inputRemaining)).Mul(decimal.NewFromFloat(*rates.Input)).Div(denominator))
-		priced = true
-	}
-	chargeOutputComponent(tokens.AudioOutput, rates.AudioOutput, rates.Output)
-	if outputRemaining != nil && rates.Output != nil && *outputRemaining > 0 {
-		cost = cost.Add(decimal.NewFromInt(int64(*outputRemaining)).Mul(decimal.NewFromFloat(*rates.Output)).Div(denominator))
-		priced = true
-	}
-	if rates.Request != nil {
-		cost = cost.Add(decimal.NewFromFloat(*rates.Request))
-		priced = true
-	}
-	if !priced {
-		return nil
-	}
-	return &cost
-}
-
-func tokenCount(value *uint64) uint64 {
-	if value == nil {
-		return 0
-	}
-	return *value
-}
-
-func remainingTokens(value *uint64) *uint64 {
-	if value == nil {
-		return nil
-	}
-	result := *value
-	return &result
 }
 
 func boolInt(value bool) int {

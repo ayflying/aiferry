@@ -3,7 +3,7 @@ import dayjs from 'dayjs'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
-import type { ManagedUser, PriceRule, PublicModel, UsageLog, UsagePage } from '../api/types'
+import type { ManagedUser, UsageLog, UsagePage } from '../api/types'
 import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
@@ -20,11 +20,7 @@ const filters = reactive({ model: '', userId: undefined as number | undefined, c
 const users = ref<ManagedUser[]>([])
 const isAdmin = computed(() => auth.user?.isAdmin === true)
 const usageItems = computed(() => page.value.items ?? [])
-const currentModels = ref<PublicModel[]>([])
 const selectedUsage = ref<UsageLog>()
-const selectedModel = ref<PublicModel>()
-const selectedPriceRules = ref<PriceRule[]>([])
-const priceLoading = ref(false)
 const detailOpen = ref(false)
 
 async function load() {
@@ -33,7 +29,6 @@ async function load() {
     const dataPromise = apiGet<UsagePage>('/usage', filters)
     const support = [
       store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys(),
-      apiGet<PublicModel[]>('/public-models').then((items) => { currentModels.value = items }),
     ]
     if (isAdmin.value) {
       support.push(store.channels.length ? Promise.resolve() : store.loadChannels())
@@ -61,14 +56,6 @@ function changeTimeRange(value: [Date, Date] | null) {
 }
 function isSuccessful(row: UsageLog) { return row.httpStatus >= 200 && row.httpStatus < 300 }
 function failurePreview(row: UsageLog) { return row.errorMessage.split('\n', 1)[0] || '查看失败日志' }
-function currentModelPrice(row: UsageLog) {
-  const model = currentModels.value.find((item) => item.publicName === row.requestedModel)
-  if (!model) return { primary: '—', secondary: '' }
-  if (model.billingMode === 'request') return { primary: formatCost(model.requestPrice), secondary: '每请求固定价格' }
-  if (model.billingMode === 'rules') return { primary: '高级计费规则', secondary: '按规则匹配价格' }
-  const cache = model.cachedInputPrice === undefined ? '' : ` · 缓存 ${formatCost(model.cachedInputPrice)}`
-  return { primary: `入 ${formatCost(model.inputPrice)} · 出 ${formatCost(model.outputPrice)}`, secondary: `每 1M Token${cache}` }
-}
 function latencyTone(value: number | undefined | null, fastMs: number, slowMs: number) {
   if (value === undefined || value === null) return 'latency-unknown'
   if (value <= fastMs) return 'latency-fast'
@@ -81,27 +68,9 @@ function formatElapsed(value?: number | null) {
   if (value === undefined || value === null) return '—'
   return `${(value / 1000).toFixed(1)}s`
 }
-async function openUsageDetail(row: UsageLog) {
+function openUsageDetail(row: UsageLog) {
   selectedUsage.value = row
-  selectedModel.value = undefined
-  selectedPriceRules.value = []
   detailOpen.value = true
-  priceLoading.value = true
-  try {
-    const models = await apiGet<PublicModel[]>('/public-models')
-    currentModels.value = models
-    const model = models.find((item) => item.publicName === row.requestedModel)
-    if (!model || selectedUsage.value?.requestId !== row.requestId) return
-    selectedModel.value = model
-    if (model.billingMode === 'rules') {
-      const rules = await apiGet<PriceRule[]>(`/models/${model.id}/price-rules`)
-      if (selectedUsage.value?.requestId === row.requestId) selectedPriceRules.value = rules
-    }
-  } catch (error) {
-    showError(error, '加载模型价格失败')
-  } finally {
-    if (selectedUsage.value?.requestId === row.requestId) priceLoading.value = false
-  }
 }
 onMounted(load)
 </script>
@@ -140,12 +109,12 @@ onMounted(load)
         <el-table-column label="Token" min-width="185"><template #default="{ row }"><div class="token-cell"><strong>入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</strong><small>缓存 {{ formatNumber(row.cachedInputTokens) }}</small></div></template></el-table-column>
         <el-table-column label="估算成本" min-width="125"><template #default="{ row }"><span :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</span></template></el-table-column>
         <el-table-column label="耗时" min-width="116"><template #default="{ row }"><div class="latency-cell"><span class="latency-strip" :class="{ 'single-latency': !row.isStream }"><i :class="row.isStream ? firstTokenTone(row) : totalLatencyTone(row)" /><i v-if="row.isStream" :class="totalLatencyTone(row)" /></span><div class="latency-copy"><template v-if="row.isStream"><strong>首字 <span :class="firstTokenTone(row)">{{ formatElapsed(row.firstTokenMs) }}</span></strong><small>耗时 <span :class="totalLatencyTone(row)">{{ formatElapsed(row.durationMs) }}</span></small></template><template v-else><strong>响应 <span :class="totalLatencyTone(row)">{{ formatElapsed(row.durationMs) }}</span></strong><small>非流式响应</small></template></div></div></template></el-table-column>
-        <el-table-column label="详情" min-width="165"><template #default="{ row }"><el-button text class="detail-trigger" @click="openUsageDetail(row)"><span v-if="isSuccessful(row)" class="price-cell"><strong>{{ currentModelPrice(row).primary }}</strong><small v-if="currentModelPrice(row).secondary">{{ currentModelPrice(row).secondary }}</small></span><span v-else class="failure-cell"><strong>{{ failurePreview(row) }}</strong><small>查看失败日志</small></span></el-button></template></el-table-column>
+        <el-table-column label="详情" min-width="165"><template #default="{ row }"><el-button text class="detail-trigger" @click="openUsageDetail(row)"><span v-if="isSuccessful(row)" class="price-cell"><strong>{{ row.billingDetails?.charged ? formatCost(row.billingDetails.total, row.billingDetails.currency) : (row.billingDetails ? '未扣费' : '无扣费快照') }}</strong><small>查看扣费明细</small></span><span v-else class="failure-cell"><strong>{{ failurePreview(row) }}</strong><small>查看失败日志</small></span></el-button></template></el-table-column>
       </el-table>
       <div v-if="!loading && !usageItems.length" class="empty-state"><div><strong>暂无用量记录</strong><span>成功调用中转接口后会显示在这里</span></div></div>
       <div class="pagination-row"><el-pagination :current-page="filters.page" :page-size="filters.pageSize" :page-sizes="[20, 50, 100]" :total="page.total" layout="total, sizes, prev, pager, next" @current-change="changePage" @size-change="changePageSize" /></div>
     </div>
-    <UsageDetailDialog v-model="detailOpen" :usage="selectedUsage" :model="selectedModel" :price-rules="selectedPriceRules" :price-loading="priceLoading" />
+    <UsageDetailDialog v-model="detailOpen" :usage="selectedUsage" />
   </div>
 </template>
 

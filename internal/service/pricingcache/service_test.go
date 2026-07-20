@@ -56,3 +56,29 @@ func TestEstimateUsesCachedRule(t *testing.T) {
 		t.Fatalf("unmatched cached rule should not calculate a cost: %v", unmatched)
 	}
 }
+
+func TestEstimateBreakdownSnapshotsMatchedRule(t *testing.T) {
+	var input uint64 = 1_000_000
+	service := New()
+	service.snapshot.Store(snapshot{
+		"rule-model": {
+			BillingMode: billingModeRules,
+			Rules: []priceRule{{
+				ID: 42, Name: "嵌入向量", Source: "manual", Priority: 100, Currency: "CNY",
+				Conditions: `{"endpoint":"/embeddings"}`,
+				Rates:      `{"inputPerMillion":0.25}`,
+			}},
+		},
+	})
+
+	breakdown := service.EstimateBreakdown("rule-model", "/embeddings", usage.TokenUsage{Input: &input})
+	if breakdown == nil || breakdown.BillingMode != billingModeRules || breakdown.Currency != "CNY" {
+		t.Fatalf("unexpected rule billing snapshot: %+v", breakdown)
+	}
+	if breakdown.Rule == nil || breakdown.Rule.ID != 42 || breakdown.Rule.Name != "嵌入向量" || breakdown.Rule.Conditions != `{"endpoint":"/embeddings"}` {
+		t.Fatalf("matched rule metadata was not recorded: %+v", breakdown.Rule)
+	}
+	if !breakdown.Cost().Equal(decimal.RequireFromString("0.25")) {
+		t.Fatalf("unexpected rule cost: %s", breakdown.Total)
+	}
+}

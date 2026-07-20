@@ -51,11 +51,39 @@ export interface UsageLog {
   outputTokens?: number
   totalTokens?: number
   estimatedCost?: number
+  billingDetails?: BillingDetails
   durationMs: number
   firstTokenMs?: number
   attempts: number
   errorMessage: string
   createdAt: string
+}
+
+export interface BillingItem {
+  type: 'input' | 'cached_input' | 'cache_write' | 'output' | 'image_input' | 'audio_input' | 'audio_output' | 'request' | 'rounding'
+  quantity: number
+  unit: 'per_million_tokens' | 'per_request' | 'settlement'
+  unitPrice: string
+  priceSource?: string
+  amount: string
+}
+
+export interface BillingRuleSnapshot {
+  id: number
+  name: string
+  source: string
+  priority: number
+  conditions: string
+}
+
+export interface BillingDetails {
+  billingMode: 'token' | 'request' | 'rules'
+  currency: string
+  charged: boolean
+  rule?: BillingRuleSnapshot
+  items: BillingItem[]
+  subtotal: string
+  total: string
 }
 
 export interface UsagePage {

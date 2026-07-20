@@ -30,6 +30,7 @@ type UsageLogs struct {
 	OutputTokens        uint64    `json:"outputTokens"        orm:"output_tokens"         description:""` //
 	TotalTokens         uint64    `json:"totalTokens"         orm:"total_tokens"          description:""` //
 	EstimatedCost       float64   `json:"estimatedCost"       orm:"estimated_cost"        description:""` //
+	BillingDetailsJson  string    `json:"billingDetailsJson"  orm:"billing_details_json"  description:""` //
 	DurationMs          uint64    `json:"durationMs"          orm:"duration_ms"           description:""` //
 	FirstTokenMs        uint64    `json:"firstTokenMs"        orm:"first_token_ms"        description:""` //
 	Attempts            uint      `json:"attempts"            orm:"attempts"              description:""` //

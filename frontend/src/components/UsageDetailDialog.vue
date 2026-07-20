@@ -1,81 +1,83 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { PriceRule, PublicModel, UsageLog } from '../api/types'
-import { formatCost, formatNumber, formatTime } from '../lib/format'
+import type { BillingItem, UsageLog } from '../api/types'
+import { formatNumber, formatPreciseCost, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 
 const props = defineProps<{
   modelValue: boolean
   usage?: UsageLog
-  model?: PublicModel
-  priceRules: PriceRule[]
-  priceLoading: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
-const tokenPrices = [
-  ['输入价格', 'inputPrice'],
-  ['补全价格', 'outputPrice'],
-  ['缓存读取价格', 'cachedInputPrice'],
-  ['缓存写入价格', 'cacheWritePrice'],
-  ['图像输入价格', 'imageInputPrice'],
-  ['音频输入价格', 'audioInputPrice'],
-  ['音频输出价格', 'audioOutputPrice'],
-] as const
+const itemLabels: Record<BillingItem['type'], string> = {
+  input: '输入 Token',
+  cached_input: '缓存读取 Token',
+  cache_write: '缓存写入 Token',
+  output: '输出 Token',
+  image_input: '图像输入 Token',
+  audio_input: '音频输入 Token',
+  audio_output: '音频输出 Token',
+  request: '请求固定费用',
+  rounding: '结算取整',
+}
+const priceSourceLabels: Record<string, string> = {
+  input: '输入单价', cached_input: '缓存读取单价', cache_write: '缓存写入单价', output: '输出单价',
+  image_input: '图像输入单价', audio_input: '音频输入单价', audio_output: '音频输出单价',
+  request: '请求单价', settlement: '结算取整',
+}
 
 const visible = computed({
   get: () => props.modelValue,
   set: (value: boolean) => emit('update:modelValue', value),
 })
 const isSuccess = computed(() => !!props.usage && props.usage.httpStatus >= 200 && props.usage.httpStatus < 300)
+const billingDetails = computed(() => props.usage?.billingDetails)
+const billingItems = computed(() => billingDetails.value?.items ?? [])
 const resultMessage = computed(() => {
   if (!props.usage) return ''
   return props.usage.errorMessage || (isSuccess.value ? '模型响应正常' : '未返回错误详情')
 })
 const billingModeLabel = computed(() => {
-	if (props.model?.billingMode === 'request') return '按次'
-	if (props.model?.billingMode === 'rules') return '高级规则'
-	return '按 Token'
+  switch (billingDetails.value?.billingMode) {
+    case 'request': return '按次'
+    case 'rules': return '高级规则'
+    case 'token': return '按 Token'
+    default: return '未保存'
+  }
 })
 const chargeStatus = computed(() => {
   if (!props.usage) return '—'
-  if (props.usage.userId === 0) return '测试请求，不扣费'
-  if (!isSuccess.value) return '未扣费'
-  return props.usage.estimatedCost === undefined ? '无需扣费' : '已扣费'
+  if (!isSuccess.value) return '调用失败，未扣费'
+  if (billingDetails.value?.charged) return '已扣费'
+  if (billingDetails.value) return '未扣费'
+  if (props.usage.estimatedCost === undefined) return '无需扣费'
+  return '未保存扣费状态'
 })
-const activePriceRules = computed(() => props.priceRules.filter((rule) => rule.status === 1))
-const configuredTokenPrices = computed(() => tokenPrices.filter(([, field]) => isConfiguredPrice(props.model?.[field])))
+const totalLabel = computed(() => billingDetails.value?.charged ? '实际扣费' : '应扣金额')
 
-function tokenPrice(field: typeof tokenPrices[number][1]) {
-	const value = props.model?.[field]
-	return isConfiguredPrice(value) ? `${formatCost(value)} / 1M Token` : ''
+function itemFormula(item: BillingItem) {
+  const currency = billingDetails.value?.currency
+  if (item.unit === 'per_request') return `1 次 × ${formatPreciseCost(item.unitPrice, currency)}`
+  if (item.unit === 'settlement') return `小计结算调整 ${formatPreciseCost(item.amount, currency)}`
+  return `${formatNumber(item.quantity)} Token × ${formatPreciseCost(item.unitPrice, currency)} / 1M Token`
 }
 
-function requestPrice() {
-  const value = props.model?.requestPrice
-  return value === undefined ? '—' : `${formatCost(value)} / 请求`
+function itemPriceSource(item: BillingItem) {
+  const source = priceSourceLabels[item.priceSource || '']
+  return source && item.priceSource !== item.type ? `采用${source}` : ''
 }
 
-function ruleRates(rule: PriceRule) {
-  const labels: Record<string, string> = {
-    inputPerMillion: '输入', cachedInputPerMillion: '缓存读取', cacheWritePerMillion: '缓存写入',
-    outputPerMillion: '补全', imageInputPerMillion: '图像输入', audioInputPerMillion: '音频输入',
-    audioOutputPerMillion: '音频输出', request: '按次',
-  }
-  const rates = Object.entries(rule.rates).filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
-	return rates.map(([name, value]) => `${labels[name] || name} ${formatCost(value, rule.currency)}`).join(' · ') || '未配置价格'
-}
-
-function isConfiguredPrice(value: unknown): value is number {
-	return typeof value === 'number' && Number.isFinite(value)
+function itemLabel(item: BillingItem) {
+  return itemLabels[item.type] || item.type
 }
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="调用详情" width="720px" class="usage-detail-dialog" destroy-on-close>
+  <el-dialog v-model="visible" title="调用详情" width="760px" class="usage-detail-dialog" destroy-on-close>
     <template v-if="usage">
       <div class="detail-summary">
-        <div><span>计费方式</span><strong>{{ billingModeLabel }}</strong></div>
+        <div><span>扣费状态</span><strong>{{ chargeStatus }}</strong></div>
         <div><span>总 Token</span><strong>{{ formatNumber(usage.totalTokens) }}</strong></div>
         <div><span>响应耗时</span><strong>{{ usage.durationMs }} ms</strong></div>
       </div>
@@ -89,8 +91,8 @@ function isConfiguredPrice(value: unknown): value is number {
           <el-descriptions-item label="接口"><span class="mono">{{ usage.endpoint }}</span></el-descriptions-item>
           <el-descriptions-item label="上游接口"><span class="mono">{{ usage.upstreamEndpoint || usage.endpoint }}</span></el-descriptions-item>
           <el-descriptions-item label="协议转换" :span="2">{{ usage.protocolConversion ? `${usage.endpoint} → ${usage.upstreamEndpoint || usage.endpoint}` : '未转换' }}</el-descriptions-item>
-		  <el-descriptions-item label="客户端 IP"><span class="mono">{{ usage.clientIp || '—' }}</span></el-descriptions-item>
-		  <el-descriptions-item label="归属地"><span class="detail-value">{{ formatIPLocation(usage.ipLocation) }}</span></el-descriptions-item>
+          <el-descriptions-item label="客户端 IP"><span class="mono">{{ usage.clientIp || '—' }}</span></el-descriptions-item>
+          <el-descriptions-item label="归属地"><span class="detail-value">{{ formatIPLocation(usage.ipLocation) }}</span></el-descriptions-item>
           <el-descriptions-item label="状态"><el-tag :type="isSuccess ? 'success' : 'danger'" effect="plain" size="small">{{ usage.httpStatus }}</el-tag></el-descriptions-item>
           <el-descriptions-item label="请求模型">{{ usage.requestedModel }}</el-descriptions-item>
           <el-descriptions-item label="上游模型">{{ usage.upstreamModel || '—' }}</el-descriptions-item>
@@ -100,40 +102,23 @@ function isConfiguredPrice(value: unknown): value is number {
       </section>
 
       <section class="detail-section">
-        <h3>模型价格</h3>
-        <template v-if="priceLoading">
-          <p class="empty-price">正在读取当前模型价格</p>
-        </template>
-        <template v-else-if="!model">
-          <p class="empty-price">当前模型未配置价格</p>
-        </template>
-		<template v-else-if="model.billingMode === 'token'">
-		  <div v-if="configuredTokenPrices.length" class="price-metrics">
-			<div v-for="([label, field]) in configuredTokenPrices" :key="field"><span>{{ label }}</span><strong>{{ tokenPrice(field) }}</strong></div>
-		  </div>
-		  <p v-else class="empty-price">当前模型未配置 Token 价格</p>
-		</template>
-        <el-descriptions v-else-if="model.billingMode === 'request'" :column="2" border size="small">
-          <el-descriptions-item label="固定价格"><strong class="cost-value">{{ requestPrice() }}</strong></el-descriptions-item>
-          <el-descriptions-item label="计费说明">每次请求固定扣费，不考虑 Token 数</el-descriptions-item>
-        </el-descriptions>
-        <el-descriptions v-else :column="1" border size="small">
-          <el-descriptions-item label="生效规则">{{ activePriceRules.length }} 条</el-descriptions-item>
-          <el-descriptions-item v-for="rule in activePriceRules" :key="rule.id" :label="rule.name">
-            <span class="detail-value">{{ ruleRates(rule) }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item v-if="!activePriceRules.length" label="高级规则">未配置生效规则</el-descriptions-item>
-        </el-descriptions>
-      </section>
-
-      <section class="detail-section">
         <h3>扣费明细</h3>
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="扣费状态">{{ chargeStatus }}</el-descriptions-item>
-          <el-descriptions-item label="估算金额"><strong class="cost-value">{{ formatCost(usage.estimatedCost) }}</strong></el-descriptions-item>
-          <el-descriptions-item label="计价模型">{{ usage.requestedModel }}</el-descriptions-item>
-          <el-descriptions-item label="计费方式">{{ billingModeLabel }}</el-descriptions-item>
-        </el-descriptions>
+        <template v-if="billingDetails">
+          <el-descriptions :column="2" border size="small" class="billing-summary">
+            <el-descriptions-item label="计费方式">{{ billingModeLabel }}</el-descriptions-item>
+            <el-descriptions-item label="币种">{{ billingDetails.currency }}</el-descriptions-item>
+            <el-descriptions-item v-if="billingDetails.rule" label="命中规则">{{ billingDetails.rule.name || `规则 #${billingDetails.rule.id}` }} · P{{ billingDetails.rule.priority }} · {{ billingDetails.rule.source === 'sync' ? '上游同步' : '人工规则' }}</el-descriptions-item>
+            <el-descriptions-item v-if="billingDetails.rule" label="规则条件"><span class="detail-value mono">{{ billingDetails.rule.conditions }}</span></el-descriptions-item>
+            <el-descriptions-item label="计算小计"><strong class="cost-value">{{ formatPreciseCost(billingDetails.subtotal, billingDetails.currency) }}</strong></el-descriptions-item>
+            <el-descriptions-item :label="totalLabel"><strong class="cost-value">{{ formatPreciseCost(billingDetails.total, billingDetails.currency) }}</strong></el-descriptions-item>
+          </el-descriptions>
+          <el-table :data="billingItems" border size="small" table-layout="fixed" class="billing-items">
+            <el-table-column label="扣费项" min-width="128"><template #default="{ row }"><div class="billing-item-name"><strong>{{ itemLabel(row) }}</strong><small v-if="itemPriceSource(row)">{{ itemPriceSource(row) }}</small></div></template></el-table-column>
+            <el-table-column label="计算公式" min-width="326"><template #default="{ row }"><span class="formula-value">{{ itemFormula(row) }}</span></template></el-table-column>
+            <el-table-column label="金额" width="138" align="right"><template #default="{ row }"><strong class="cost-value">{{ formatPreciseCost(row.amount, billingDetails.currency) }}</strong></template></el-table-column>
+          </el-table>
+        </template>
+        <p v-else class="empty-billing">该历史记录未保存分项扣费快照，无法按当前价格回算历史账单。</p>
       </section>
 
       <section class="detail-section">
@@ -157,5 +142,40 @@ function isConfiguredPrice(value: unknown): value is number {
 </template>
 
 <style scoped>
-:deep(.usage-detail-dialog) { width: min(720px, calc(100vw - 32px)) !important; }:deep(.usage-detail-dialog .el-dialog__body) { height: min(620px, calc(100vh - 168px)); overflow-y: auto; }.detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; border: 1px solid #dce2e7; }.detail-summary div { display: flex; min-height: 66px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 14px; border-right: 1px solid #dce2e7; }.detail-summary div:last-child { border-right: 0; }.detail-summary span, .result-meta, .price-metrics span { color: #66717d; font-size: 11px; }.detail-summary strong, .token-metrics strong, .price-metrics strong, .cost-value { color: #15202b; font-family: 'JetBrains Mono', monospace; font-size: 13px; }.detail-section { padding: 18px 0; border-top: 1px solid #dce2e7; }.detail-section h3 { margin: 0 0 12px; color: #15202b; font-size: 13px; }.mono { font-family: 'JetBrains Mono', monospace; }.detail-value { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }.token-metrics, .price-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #dce2e7; }.token-metrics div, .price-metrics div { display: flex; min-height: 64px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 12px; border-right: 1px solid #dce2e7; }.token-metrics div:last-child, .price-metrics div:last-child { border-right: 0; }.price-metrics div:nth-child(4n) { border-right: 0; }.price-metrics div:nth-child(-n + 4) { border-bottom: 1px solid #dce2e7; }.result-section { padding-bottom: 0; }.result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }.failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }.empty-price { margin: 0; color: #66717d; font-size: 13px; }@media (max-width: 720px) { :deep(.usage-detail-dialog .el-dialog__body) { height: min(560px, calc(100vh - 148px)); }.detail-summary { grid-template-columns: 1fr; }.detail-summary div { min-height: 58px; border-right: 0; border-bottom: 1px solid #dce2e7; }.detail-summary div:last-child { border-bottom: 0; }.token-metrics, .price-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.token-metrics div:nth-child(2), .price-metrics div:nth-child(2n) { border-right: 0; }.token-metrics div:nth-child(-n + 2), .price-metrics div:nth-child(-n + 6) { border-bottom: 1px solid #dce2e7; } }@media (max-width: 480px) { .token-metrics, .price-metrics { grid-template-columns: 1fr; }.token-metrics div, .price-metrics div { border-right: 0; border-bottom: 1px solid #dce2e7; }.token-metrics div:last-child, .price-metrics div:last-child { border-bottom: 0; } }
+:deep(.usage-detail-dialog) { width: min(760px, calc(100vw - 32px)) !important; }
+:deep(.usage-detail-dialog .el-dialog__body) { height: min(620px, calc(100vh - 168px)); overflow-y: auto; }
+.detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; border: 1px solid #dce2e7; }
+.detail-summary div { display: flex; min-height: 66px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 14px; border-right: 1px solid #dce2e7; }
+.detail-summary div:last-child { border-right: 0; }
+.detail-summary span, .result-meta, .token-metrics span, .billing-item-name small { color: #66717d; font-size: 11px; }
+.detail-summary strong, .token-metrics strong, .cost-value, .formula-value { color: #15202b; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.detail-section { padding: 18px 0; border-top: 1px solid #dce2e7; }
+.detail-section h3 { margin: 0 0 12px; color: #15202b; font-size: 13px; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.detail-value { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.billing-summary { margin-bottom: 12px; }
+.billing-items { width: 100%; }
+.billing-item-name { display: flex; flex-direction: column; gap: 3px; }
+.formula-value { display: inline-block; color: #40505f; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.empty-billing { margin: 0; color: #66717d; font-size: 13px; }
+.token-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #dce2e7; }
+.token-metrics div { display: flex; min-height: 64px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 12px; border-right: 1px solid #dce2e7; }
+.token-metrics div:last-child { border-right: 0; }
+.result-section { padding-bottom: 0; }
+.result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }
+.failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  :deep(.usage-detail-dialog .el-dialog__body) { height: min(560px, calc(100vh - 148px)); }
+  .detail-summary { grid-template-columns: 1fr; }
+  .detail-summary div { min-height: 58px; border-right: 0; border-bottom: 1px solid #dce2e7; }
+  .detail-summary div:last-child { border-bottom: 0; }
+  .token-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .token-metrics div:nth-child(2n) { border-right: 0; }
+  .token-metrics div:nth-child(-n + 2) { border-bottom: 1px solid #dce2e7; }
+}
+@media (max-width: 480px) {
+  .token-metrics { grid-template-columns: 1fr; }
+  .token-metrics div { border-right: 0; border-bottom: 1px solid #dce2e7; }
+  .token-metrics div:last-child { border-bottom: 0; }
+}
 </style>

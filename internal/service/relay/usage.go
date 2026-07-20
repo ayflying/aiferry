@@ -17,7 +17,12 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 	if upstreamEndpoint == "" {
 		upstreamEndpoint = endpoint
 	}
-	cost := s.prices.Estimate(candidate.PublicName, upstreamEndpoint, result.tokens)
+	billingDetails := s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens)
+	var cost *decimal.Decimal
+	if billingDetails != nil {
+		calculated := billingDetails.Cost()
+		cost = &calculated
+	}
 	recordStatus := result.status
 	recordError := result.errorMessage
 	var chargeErr error
@@ -30,10 +35,11 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 					g.Log().Warningf(ctx, "apply channel %d usage cost: %v", candidate.ChannelID, err)
 				}
 			}
-			if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
-				chargeErr = err
-			} else {
-				_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
+				if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
+					chargeErr = err
+				} else {
+					billingDetails.Charged = true
+					_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
 				if s.mail != nil {
 					s.mail.NotifyLowBalance(ctx, key.UserId)
 				}
@@ -62,6 +68,7 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		Stream:              stream,
 		Tokens:              result.tokens,
 		EstimatedCost:       cost,
+		BillingDetails:      billingDetails,
 		DurationMs:          time.Since(startedAt).Milliseconds(),
 		FirstTokenMs:        result.firstTokenMs,
 		Attempts:            attempts,
