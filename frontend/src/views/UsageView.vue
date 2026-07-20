@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import dayjs from 'dayjs'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
@@ -12,8 +13,9 @@ import { formatCost, formatLatency, formatNumber, formatStreamSpeed, formatTime 
 const store = useAppStore()
 const auth = useAuthStore()
 const loading = ref(false)
-const page = ref<UsagePage>({ items: [], total: 0, page: 1, pageSize: 20 })
-const filters = reactive({ model: '', userId: undefined as number | undefined, channelId: undefined as number | undefined, apiKeyId: undefined as number | undefined, page: 1, pageSize: 20 })
+const timeRange = ref(todayRange())
+const page = ref<UsagePage>({ items: [], summary: { requests: 0, estimatedCost: 0 }, startAt: timeRange.value[0].toISOString(), endAt: endOfSecond(timeRange.value[1]).toISOString(), total: 0, page: 1, pageSize: 20 })
+const filters = reactive({ model: '', userId: undefined as number | undefined, channelId: undefined as number | undefined, apiKeyId: undefined as number | undefined, startAt: timeRange.value[0].toISOString(), endAt: endOfSecond(timeRange.value[1]).toISOString(), page: 1, pageSize: 20 })
 const users = ref<ManagedUser[]>([])
 const isAdmin = computed(() => auth.user?.isAdmin === true)
 const usageItems = computed(() => page.value.items ?? [])
@@ -37,6 +39,18 @@ async function load() {
 function search() { filters.page = 1; load() }
 function changePage(value: number) { filters.page = value; load() }
 function changePageSize(value: number) { filters.pageSize = value; filters.page = 1; load() }
+function todayRange(): [Date, Date] {
+  const now = dayjs()
+  return [now.startOf('day').toDate(), now.endOf('day').millisecond(0).toDate()]
+}
+function endOfSecond(value: Date) { return new Date(value.getTime() + 999) }
+function changeTimeRange(value: [Date, Date] | null) {
+  const next = value ?? todayRange()
+  timeRange.value = next
+  filters.startAt = next[0].toISOString()
+  filters.endAt = endOfSecond(next[1]).toISOString()
+  search()
+}
 function isSuccessful(row: UsageLog) { return row.httpStatus >= 200 && row.httpStatus < 300 }
 function protocolName(endpoint: string) {
   if (endpoint === '/chat/completions') return 'Chat'
@@ -55,6 +69,7 @@ onMounted(load)
   <div class="page-stack">
     <div class="page-toolbar">
       <div class="toolbar-group">
+        <el-date-picker v-model="timeRange" type="datetimerange" range-separator="至" start-placeholder="开始时间" end-placeholder="结束时间" :clearable="false" :editable="false" style="width: min(100%, 352px)" @change="changeTimeRange" />
         <el-input v-model="filters.model" clearable placeholder="模型名称" style="width: 200px" @keyup.enter="search" />
         <el-select v-if="isAdmin" v-model="filters.userId" clearable filterable placeholder="全部用户" style="width: 160px"><el-option v-for="item in users" :key="item.id" :label="item.nickname" :value="item.id" /></el-select>
         <el-select v-if="isAdmin" v-model="filters.channelId" clearable placeholder="全部渠道" style="width: 160px"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select>
@@ -63,6 +78,19 @@ onMounted(load)
       </div>
       <div class="spacer" />
       <el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
+    </div>
+
+    <div class="usage-filter-summary" aria-live="polite">
+      <span>筛选时段</span>
+      <time>{{ formatTime(page.startAt) }}</time>
+      <span>至</span>
+      <time>{{ formatTime(page.endAt) }}</time>
+      <i aria-hidden="true" />
+      <span>费用</span>
+      <strong class="mono">{{ formatCost(page.summary.estimatedCost) }}</strong>
+      <i aria-hidden="true" />
+      <span>请求</span>
+      <strong class="mono">{{ formatNumber(page.summary.requests) }}</strong>
     </div>
 
     <div class="table-panel">
@@ -88,4 +116,6 @@ onMounted(load)
 
 <style scoped>
 .request-cell, .token-cell, .stream-cell, .performance-cell, .protocol-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.request-cell > span, .request-cell > strong, .protocol-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.request-cell small, .token-cell small, .stream-cell small, .performance-cell small, .protocol-cell small { color: #7b8792; font-size: 10px; }.protocol-cell.converted strong { color: #1677ff; }.token-cell strong, .stream-cell strong, .performance-cell strong, .protocol-cell strong, .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }.detail-trigger { height: auto; padding: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.detail-trigger:hover span:not(.muted) { text-decoration: underline; }
+.usage-filter-summary { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 2px; color: #6c7a88; border-top: 1px solid #e6ebf0; border-bottom: 1px solid #e6ebf0; font-size: 12px; }.usage-filter-summary time, .usage-filter-summary strong { color: #293643; font-variant-numeric: tabular-nums; }.usage-filter-summary i { width: 1px; height: 14px; margin: 0 4px; background: #d9e1e8; }
+@media (max-width: 720px) { .usage-filter-summary { align-items: flex-start; flex-wrap: wrap; gap: 5px 7px; padding: 7px 2px; }.usage-filter-summary i { display: none; }.usage-filter-summary time { white-space: nowrap; } }
 </style>

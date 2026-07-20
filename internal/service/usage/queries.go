@@ -2,12 +2,60 @@ package usage
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/yunloli/aiferry/internal/dao"
 )
+
+const logTimeLayout = "2006-01-02 15:04:05"
+
+type LogFilter struct {
+	Page      int
+	PageSize  int
+	ModelName string
+	ChannelID uint64
+	APIKeyID  uint64
+	UserID    uint64
+	StartAt   time.Time
+	EndAt     time.Time
+}
+
+func ParseLogRange(startValue, endValue string) (time.Time, time.Time, error) {
+	return parseLogRange(time.Now(), startValue, endValue)
+}
+
+func parseLogRange(now time.Time, startValue, endValue string) (time.Time, time.Time, error) {
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	end := start.AddDate(0, 0, 1).Add(-time.Millisecond)
+	var err error
+	if strings.TrimSpace(startValue) != "" {
+		start, err = parseLogTime(startValue)
+		if err != nil {
+			return time.Time{}, time.Time{}, gerror.New("开始时间格式无效")
+		}
+	}
+	if strings.TrimSpace(endValue) != "" {
+		end, err = parseLogTime(endValue)
+		if err != nil {
+			return time.Time{}, time.Time{}, gerror.New("结束时间格式无效")
+		}
+	}
+	if end.Before(start) {
+		return time.Time{}, time.Time{}, gerror.New("结束时间不能早于开始时间")
+	}
+	return start, end, nil
+}
+
+func parseLogTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed, nil
+	}
+	return time.ParseInLocation(logTimeLayout, value, time.Local)
+}
 
 func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 	if days <= 0 || days > 90 {
@@ -67,35 +115,39 @@ func (s *Service) UserSummary(ctx context.Context, userID uint64, days int) (Use
 	return result, gerror.Wrap(err, "load user usage summary")
 }
 
-func (s *Service) List(ctx context.Context, page, pageSize int, modelName string, channelID, apiKeyID, userID uint64) (LogPage, error) {
-	if page < 1 {
-		page = 1
+func (s *Service) List(ctx context.Context, input LogFilter) (LogPage, error) {
+	if input.Page < 1 {
+		input.Page = 1
 	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
+	if input.PageSize < 1 || input.PageSize > 100 {
+		input.PageSize = 20
+	}
+	if input.EndAt.Before(input.StartAt) {
+		return LogPage{}, gerror.New("结束时间不能早于开始时间")
 	}
 	query := dao.UsageLogs.Ctx(ctx).As("u")
-	if modelName != "" {
-		query = query.WhereLike("u.requested_model", "%"+modelName+"%")
+	query = query.WhereGTE("u.created_at", input.StartAt).WhereLTE("u.created_at", input.EndAt)
+	if input.ModelName != "" {
+		query = query.WhereLike("u.requested_model", "%"+input.ModelName+"%")
 	}
-	if channelID > 0 {
-		query = query.Where("u.channel_id", channelID)
+	if input.ChannelID > 0 {
+		query = query.Where("u.channel_id", input.ChannelID)
 	}
-	if apiKeyID > 0 {
-		query = query.Where("u.api_key_id", apiKeyID)
+	if input.APIKeyID > 0 {
+		query = query.Where("u.api_key_id", input.APIKeyID)
 	}
-	if userID > 0 {
-		query = query.Where("u.user_id", userID)
+	if input.UserID > 0 {
+		query = query.Where("u.user_id", input.UserID)
 	}
-	total, err := query.Clone().Count()
-	if err != nil {
+	var summary LogSummary
+	if err := query.Clone().Fields("COUNT(*) AS requests,COALESCE(SUM(u.estimated_cost),0) AS estimated_cost").Scan(&summary); err != nil {
 		return LogPage{}, gerror.Wrap(err, "count usage logs")
 	}
 	items := make([]LogView, 0)
-	err = query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,c.name AS channel_name,IF(u.api_key_id IS NULL,'系统',COALESCE(usr.name,'已删除用户')) AS user_name").
+	err := query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,c.name AS channel_name,IF(u.api_key_id IS NULL,'系统',COALESCE(usr.name,'已删除用户')) AS user_name").
 		LeftJoin(dao.ApiKeys.Table()+" k", "k.id=u.api_key_id").
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").
 		LeftJoin(dao.Users.Table()+" usr", "usr.id=u.user_id").
-		OrderDesc("u.id").Page(page, pageSize).Scan(&items)
-	return LogPage{Items: items, Total: total, Page: page, PageSize: pageSize}, gerror.Wrap(err, "list usage logs")
+		OrderDesc("u.id").Page(input.Page, input.PageSize).Scan(&items)
+	return LogPage{Items: items, Summary: summary, StartAt: input.StartAt, EndAt: input.EndAt, Total: int(summary.Requests), Page: input.Page, PageSize: input.PageSize}, gerror.Wrap(err, "list usage logs")
 }

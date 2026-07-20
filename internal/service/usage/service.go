@@ -125,11 +125,19 @@ type LogView struct {
 	CreatedAt          time.Time `json:"createdAt" orm:"created_at"`
 }
 
+type LogSummary struct {
+	Requests      int64   `json:"requests" orm:"requests"`
+	EstimatedCost float64 `json:"estimatedCost" orm:"estimated_cost"`
+}
+
 type LogPage struct {
-	Items    []LogView `json:"items"`
-	Total    int       `json:"total"`
-	Page     int       `json:"page"`
-	PageSize int       `json:"pageSize"`
+	Items    []LogView  `json:"items"`
+	Summary  LogSummary `json:"summary"`
+	StartAt  time.Time  `json:"startAt"`
+	EndAt    time.Time  `json:"endAt"`
+	Total    int        `json:"total"`
+	Page     int        `json:"page"`
+	PageSize int        `json:"pageSize"`
 }
 
 func New() *Service {

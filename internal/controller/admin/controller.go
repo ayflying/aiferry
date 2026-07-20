@@ -253,15 +253,21 @@ func (c *Controller) listUsage(r *ghttp.Request) {
 	if !isAdmin {
 		userID = current.Id
 	}
-	data, err := c.usage.List(
-		r.Context(),
-		r.GetQuery("page", 1).Int(),
-		r.GetQuery("pageSize", 20).Int(),
-		r.GetQuery("model").String(),
-		r.GetQuery("channelId").Uint64(),
-		r.GetQuery("apiKeyId").Uint64(),
-		userID,
-	)
+	startAt, endAt, err := usage.ParseLogRange(r.GetQuery("startAt").String(), r.GetQuery("endAt").String())
+	if err != nil {
+		respond(r, nil, err)
+		return
+	}
+	data, err := c.usage.List(r.Context(), usage.LogFilter{
+		Page:      r.GetQuery("page", 1).Int(),
+		PageSize:  r.GetQuery("pageSize", 20).Int(),
+		ModelName: r.GetQuery("model").String(),
+		ChannelID: r.GetQuery("channelId").Uint64(),
+		APIKeyID:  r.GetQuery("apiKeyId").Uint64(),
+		UserID:    userID,
+		StartAt:   startAt,
+		EndAt:     endAt,
+	})
 	if !isAdmin {
 		for index := range data.Items {
 			data.Items[index].ChannelName = ""

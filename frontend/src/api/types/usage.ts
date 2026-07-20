@@ -58,7 +58,15 @@ export interface UsageLog {
 
 export interface UsagePage {
   items: UsageLog[]
+  summary: UsageLogSummary
+  startAt: string
+  endAt: string
   total: number
   page: number
   pageSize: number
+}
+
+export interface UsageLogSummary {
+  requests: number
+  estimatedCost: number
 }
