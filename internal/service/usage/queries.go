@@ -149,5 +149,9 @@ func (s *Service) List(ctx context.Context, input LogFilter) (LogPage, error) {
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").
 		LeftJoin(dao.Users.Table()+" usr", "usr.id=u.user_id").
 		OrderDesc("u.id").Page(input.Page, input.PageSize).Scan(&items)
-	return LogPage{Items: items, Summary: summary, StartAt: input.StartAt, EndAt: input.EndAt, Total: int(summary.Requests), Page: input.Page, PageSize: input.PageSize}, gerror.Wrap(err, "list usage logs")
+	if err != nil {
+		return LogPage{}, gerror.Wrap(err, "list usage logs")
+	}
+	s.populateIPLocations(items)
+	return LogPage{Items: items, Summary: summary, StartAt: input.StartAt, EndAt: input.EndAt, Total: int(summary.Requests), Page: input.Page, PageSize: input.PageSize}, nil
 }

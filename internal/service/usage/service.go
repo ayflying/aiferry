@@ -12,7 +12,9 @@ import (
 	"github.com/yunloli/aiferry/internal/model/do"
 )
 
-type Service struct{}
+type Service struct {
+	location IPLocator
+}
 
 type TokenUsage struct {
 	Input       *uint64 `json:"input"`
@@ -111,8 +113,8 @@ type LogView struct {
 	Endpoint           string    `json:"endpoint" orm:"endpoint"`
 	UpstreamEndpoint   string    `json:"upstreamEndpoint" orm:"upstream_endpoint"`
 	ProtocolConversion string    `json:"protocolConversion" orm:"protocol_conversion"`
-	ClientIP            string    `json:"clientIp" orm:"client_ip"`
-	IPLocation          string    `json:"ipLocation" orm:"ip_location"`
+	ClientIP           string    `json:"clientIp" orm:"client_ip"`
+	IPLocation         string    `json:"ipLocation" orm:"ip_location"`
 	RequestedModel     string    `json:"requestedModel" orm:"requested_model"`
 	UpstreamModel      string    `json:"upstreamModel" orm:"upstream_model"`
 	HttpStatus         uint      `json:"httpStatus" orm:"http_status"`
@@ -144,11 +146,12 @@ type LogPage struct {
 	PageSize int        `json:"pageSize"`
 }
 
-func New() *Service {
-	return &Service{}
+func New(location IPLocator) *Service {
+	return &Service{location: location}
 }
 
 func (s *Service) Record(ctx context.Context, input RecordInput) error {
+	input.IPLocation = s.resolveIPLocation(input.ClientIP, input.IPLocation)
 	data := do.UsageLogs{
 		RequestId:          input.RequestID,
 		UserId:             input.UserID,

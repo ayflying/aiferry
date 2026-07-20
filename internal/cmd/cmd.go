@@ -54,7 +54,7 @@ var (
 			var (
 				apiKeySvc       = apikey.New(appSvc)
 				authSvc         = auth.New(appSvc)
-				usageSvc        = usage.New()
+				usageSvc        = usage.New(locationSvc)
 				userSvc         = user.New(appSvc, usageSvc)
 				priceCache      = pricingcache.New()
 				channelGroupSvc = channelgroup.New()
