@@ -3,12 +3,12 @@ import dayjs from 'dayjs'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
-import type { ManagedUser, UsageLog, UsagePage } from '../api/types'
+import type { BillingItem, ManagedUser, UsageLog, UsagePage } from '../api/types'
 import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
-import { formatCost, formatNumber, formatTokenSpeed, formatTime } from '../lib/format'
+import { formatCost, formatNumber, formatPreciseCost, formatTokenSpeed, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 
 const store = useAppStore()
@@ -68,6 +68,25 @@ function formatElapsed(value?: number | null) {
   if (value === undefined || value === null) return '—'
   return `${(value / 1000).toFixed(1)}s`
 }
+function modelPriceSummary(row: UsageLog) {
+  const details = row.billingDetails
+  if (!details) return '无价格快照'
+  const items = new Map<BillingItem['type'], BillingItem>()
+  for (const item of details.items) {
+    if (item.unit !== 'settlement') items.set(item.type, item)
+  }
+  const label = details.rule?.name || '标准'
+  const input = items.get('input')
+  const output = items.get('output')
+  const primary = [input, output].filter((item): item is BillingItem => Boolean(item))
+  if (!primary.length) {
+    const request = items.get('request')
+    return request ? `${label} · ${formatPreciseCost(request.unitPrice, details.currency)}/次` : `${label} · 未配置单价`
+  }
+  const extraCount = [...items.values()].filter((item) => item.type !== 'input' && item.type !== 'output').length
+  const prices = primary.map((item) => formatPreciseCost(item.unitPrice, details.currency)).join(' / ')
+  return `${label} · ${prices}/M${extraCount ? ` +${extraCount}` : ''}`
+}
 function openUsageDetail(row: UsageLog) {
   selectedUsage.value = row
   detailOpen.value = true
@@ -109,7 +128,7 @@ onMounted(load)
         <el-table-column label="Token" min-width="185"><template #default="{ row }"><div class="token-cell"><strong>入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</strong><small>缓存 {{ formatNumber(row.cachedInputTokens) }}</small></div></template></el-table-column>
         <el-table-column label="估算成本" min-width="125"><template #default="{ row }"><span :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</span></template></el-table-column>
         <el-table-column label="耗时" min-width="116"><template #default="{ row }"><div class="latency-cell"><span class="latency-strip" :class="{ 'single-latency': !row.isStream }"><i :class="row.isStream ? firstTokenTone(row) : totalLatencyTone(row)" /><i v-if="row.isStream" :class="totalLatencyTone(row)" /></span><div class="latency-copy"><template v-if="row.isStream"><strong>首字 <span :class="firstTokenTone(row)">{{ formatElapsed(row.firstTokenMs) }}</span></strong><small>耗时 <span :class="totalLatencyTone(row)">{{ formatElapsed(row.durationMs) }}</span></small></template><template v-else><strong>响应 <span :class="totalLatencyTone(row)">{{ formatElapsed(row.durationMs) }}</span></strong><small>非流式响应</small></template></div></div></template></el-table-column>
-        <el-table-column label="模型价格" min-width="165"><template #default="{ row }"><el-button text class="detail-trigger" @click="openUsageDetail(row)"><span v-if="isSuccessful(row)" class="price-cell"><strong>{{ row.billingDetails ? formatCost(row.billingDetails.total, row.billingDetails.currency) : '无价格快照' }}</strong><small>查看模型价格</small></span><span v-else class="failure-cell"><strong>{{ failurePreview(row) }}</strong><small>查看失败日志</small></span></el-button></template></el-table-column>
+        <el-table-column label="详情" min-width="190"><template #default="{ row }"><el-button text class="detail-trigger" @click="openUsageDetail(row)"><span v-if="isSuccessful(row)" class="price-cell"><strong>{{ modelPriceSummary(row) }}</strong></span><span v-else class="failure-cell"><strong>{{ failurePreview(row) }}</strong><small>查看失败日志</small></span></el-button></template></el-table-column>
       </el-table>
       <div v-if="!loading && !usageItems.length" class="empty-state"><div><strong>暂无用量记录</strong><span>成功调用中转接口后会显示在这里</span></div></div>
       <div class="pagination-row"><el-pagination :current-page="filters.page" :page-size="filters.pageSize" :page-sizes="[20, 50, 100]" :total="page.total" layout="total, sizes, prev, pager, next" @current-change="changePage" @size-change="changePageSize" /></div>
