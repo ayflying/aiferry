@@ -8,7 +8,7 @@ import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
-import { formatCost, formatLatency, formatNumber, formatStreamSpeed, formatTime } from '../lib/format'
+import { formatCost, formatLatency, formatNumber, formatTokenSpeed, formatTime } from '../lib/format'
 
 const store = useAppStore()
 const auth = useAuthStore()
@@ -145,7 +145,7 @@ onMounted(load)
         <el-table-column :label="isAdmin ? '渠道 / 密钥' : '访问密钥'" min-width="150"><template #default="{ row }"><div class="request-cell"><span v-if="isAdmin">{{ row.channelName || '—' }}</span><span v-else>{{ row.apiKeyName || '—' }}</span><small v-if="isAdmin">{{ row.apiKeyName || '—' }}</small></div></template></el-table-column>
         <el-table-column label="协议" min-width="128"><template #default="{ row }"><div class="protocol-cell" :class="{ converted: Boolean(row.protocolConversion) }"><strong>{{ protocolRoute(row) }}</strong><small>{{ row.protocolConversion ? '已智能转换' : '原始协议' }}</small></div></template></el-table-column>
         <el-table-column label="状态" width="86"><template #default="{ row }"><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag></template></el-table-column>
-        <el-table-column label="流式" min-width="96"><template #default="{ row }"><div class="stream-cell"><strong>{{ row.isStream ? '流式' : '非流式' }}</strong><small>{{ row.isStream ? formatStreamSpeed(row.outputTokens, row.durationMs, row.firstTokenMs) : '—' }}</small></div></template></el-table-column>
+        <el-table-column label="流式" min-width="96"><template #default="{ row }"><div class="stream-cell"><strong>{{ row.isStream ? '流式' : '非流式' }}</strong><small>{{ formatTokenSpeed(row.outputTokens, row.durationMs, row.firstTokenMs) }}</small></div></template></el-table-column>
         <el-table-column label="Token" min-width="185"><template #default="{ row }"><div class="token-cell"><strong>入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</strong><small>缓存 {{ formatNumber(row.cachedInputTokens) }}</small></div></template></el-table-column>
         <el-table-column label="估算成本" min-width="125"><template #default="{ row }"><span :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</span></template></el-table-column>
         <el-table-column label="性能" min-width="164"><template #default="{ row }"><div class="performance-cell"><template v-if="row.isStream"><strong :class="firstTokenTone(row)">首 token {{ formatLatency(row.firstTokenMs) }}</strong><small :class="totalLatencyTone(row)">总耗时 {{ formatLatency(row.durationMs) }}</small></template><strong v-else :class="totalLatencyTone(row)">总耗时 {{ formatLatency(row.durationMs) }}</strong></div></template></el-table-column>

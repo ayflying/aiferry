@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCost, formatLatency, formatNumber, formatStreamSpeed, successRate } from './format'
+import { formatCost, formatLatency, formatNumber, formatTokenSpeed, successRate } from './format'
 
 describe('format helpers', () => {
   it('does not report missing prices as zero', () => {
@@ -20,8 +20,9 @@ describe('format helpers', () => {
     expect(formatLatency(2544)).toBe('2.54 秒')
   })
 
-  it('calculates stream speed after the first token arrives', () => {
-    expect(formatStreamSpeed(102, 2500, 500)).toBe('51t/s')
-    expect(formatStreamSpeed(102, 500, 500)).toBe('—')
+  it('calculates Token speed after the first token arrives or from the total duration', () => {
+    expect(formatTokenSpeed(102, 2500, 500)).toBe('51t/s')
+    expect(formatTokenSpeed(102, 2500)).toBe('41t/s')
+    expect(formatTokenSpeed(102, 500, 500)).toBe('—')
   })
 })

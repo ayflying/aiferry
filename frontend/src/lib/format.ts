@@ -27,9 +27,9 @@ export function formatLatency(value?: number | null): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(2)} 秒`
 }
 
-export function formatStreamSpeed(outputTokens?: number | null, durationMs?: number | null, firstTokenMs?: number | null): string {
-  if (outputTokens === undefined || outputTokens === null || durationMs === undefined || durationMs === null || firstTokenMs === undefined || firstTokenMs === null) return '—'
-  const generationMs = durationMs - firstTokenMs
+export function formatTokenSpeed(outputTokens?: number | null, durationMs?: number | null, firstTokenMs?: number | null): string {
+  if (outputTokens === undefined || outputTokens === null || durationMs === undefined || durationMs === null) return '—'
+  const generationMs = firstTokenMs === undefined || firstTokenMs === null ? durationMs : durationMs - firstTokenMs
   if (generationMs <= 0) return '—'
   return `${Math.round((outputTokens * 1000) / generationMs)}t/s`
 }
