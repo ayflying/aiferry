@@ -12,6 +12,8 @@ func (c *Controller) registerSystemRoutes(group *ghttp.RouterGroup) {
 	group.PUT("/system/basic", c.updateBaseSettings)
 	group.GET("/system/settings", c.getSystemSettings)
 	group.PUT("/system/settings", c.updateSystemSettings)
+	group.GET("/system/sensitive-words", c.getSensitiveWordSettings)
+	group.PUT("/system/sensitive-words", c.updateSensitiveWordSettings)
 	group.GET("/system/mail", c.getMailSettings)
 	group.PUT("/system/mail", c.updateMailSettings)
 	group.POST("/system/mail/test", c.sendMailTest)
@@ -52,6 +54,20 @@ func (c *Controller) updateSystemSettings(r *ghttp.Request) {
 		return
 	}
 	data, err := c.settings.Update(r.Context(), input)
+	respond(r, data, err)
+}
+
+func (c *Controller) getSensitiveWordSettings(r *ghttp.Request) {
+	data, err := c.settings.GetSensitiveWordSettings(r.Context())
+	respond(r, data, err)
+}
+
+func (c *Controller) updateSensitiveWordSettings(r *ghttp.Request) {
+	var input adminapi.SensitiveWordSettingsInput
+	if !parse(r, &input) {
+		return
+	}
+	data, err := c.settings.UpdateSensitiveWordSettings(r.Context(), input)
 	respond(r, data, err)
 }
 

@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Activity, Clock3, Database, Gauge, HardDrive, Mail, Route, Send, ShieldCheck } from '@lucide/vue'
+import { Activity, Clock3, Database, Gauge, HardDrive, Mail, Route, Send, ShieldAlert, ShieldCheck } from '@lucide/vue'
 import { ElMessage } from 'element-plus'
 import { apiGet, apiPost, apiPut } from '../api/client'
-import type { BaseSettings, MailSettings, SystemResilienceSettings } from '../api/types'
+import type { BaseSettings, MailSettings, SensitiveWordSettings, SystemResilienceSettings } from '../api/types'
 import { showError } from '../lib/error'
 import { setDisplayTimeZone } from '../lib/format'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
-type SettingsTab = 'overview' | 'basic' | 'resilience' | 'mail'
+type SettingsTab = 'overview' | 'basic' | 'resilience' | 'sensitive' | 'mail'
 
-const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, resilience: false, mail: false })
+const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, resilience: false, sensitive: false, mail: false })
 const saving = ref(false)
+const sensitiveSaving = ref(false)
 const mailSaving = ref(false)
 const testSending = ref(false)
 const activeTab = ref<SettingsTab>('overview')
@@ -41,6 +42,11 @@ const form = reactive({
   disableStatusCodes: '401,429',
   failureKeywordsText: '',
 })
+const sensitiveForm = reactive({
+  enabled: false,
+  checkUserPrompt: false,
+  keywordsText: '',
+})
 const mailForm = reactive({
   enabled: false,
   host: '',
@@ -60,6 +66,7 @@ const sectionMeta = computed(() => ({
   overview: { title: '运行概览', description: '实例与依赖状态' },
   basic: { title: '基础设置', description: '全局时区与时间展示规则' },
   resilience: { title: '路由可靠性', description: '故障转移、健康检查与自动禁用' },
+  sensitive: { title: '敏感词', description: '在请求到达上游模型前检查用户输入' },
   mail: { title: '邮件提醒', description: '按模型使用触发的余额提醒与 SMTP 投递配置' },
 }[activeTab.value]))
 const activeTabLoading = computed(() => tabLoading[activeTab.value])
@@ -74,6 +81,14 @@ function applySettings(settings: SystemResilienceSettings) {
 
 function applyMailSettings(settings: MailSettings) {
   Object.assign(mailForm, { ...settings, password: '' })
+}
+
+function applySensitiveWordSettings(settings: SensitiveWordSettings) {
+  Object.assign(sensitiveForm, {
+    enabled: settings.enabled,
+    checkUserPrompt: settings.checkUserPrompt,
+    keywordsText: settings.keywords.join('\n'),
+  })
 }
 
 async function loadOverview() {
@@ -104,8 +119,15 @@ async function loadMail() {
   } catch (error) { showError(error, '加载邮件提醒设置失败') } finally { tabLoading.mail = false }
 }
 
+async function loadSensitiveWords() {
+  tabLoading.sensitive = true
+  try {
+    applySensitiveWordSettings(await apiGet<SensitiveWordSettings>('/system/sensitive-words'))
+  } catch (error) { showError(error, '加载敏感词设置失败') } finally { tabLoading.sensitive = false }
+}
+
 function loadTab(tab: SettingsTab) {
-  return { overview: loadOverview, basic: loadBasic, resilience: loadResilience, mail: loadMail }[tab]()
+  return { overview: loadOverview, basic: loadBasic, resilience: loadResilience, sensitive: loadSensitiveWords, mail: loadMail }[tab]()
 }
 
 function handleTabChange(tab: string | number) {
@@ -166,6 +188,19 @@ async function saveMail() {
   } catch (error) { showError(error, '保存邮件设置失败') } finally { mailSaving.value = false }
 }
 
+async function saveSensitiveWords() {
+  sensitiveSaving.value = true
+  try {
+    const settings = await apiPut<SensitiveWordSettings>('/system/sensitive-words', {
+      enabled: sensitiveForm.enabled,
+      checkUserPrompt: sensitiveForm.checkUserPrompt,
+      keywords: sensitiveForm.keywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
+    })
+    applySensitiveWordSettings(settings)
+    ElMessage.success('敏感词设置已保存')
+  } catch (error) { showError(error, '保存敏感词设置失败') } finally { sensitiveSaving.value = false }
+}
+
 async function sendTestMail() {
   testSending.value = true
   try {
@@ -177,6 +212,7 @@ async function sendTestMail() {
 function saveActive() {
   if (activeTab.value === 'basic') return saveBasic()
   if (activeTab.value === 'resilience') return saveReliability()
+  if (activeTab.value === 'sensitive') return saveSensitiveWords()
   if (activeTab.value === 'mail') return saveMail()
 }
 
@@ -189,6 +225,7 @@ onMounted(loadOverview)
       <el-tab-pane name="overview"><template #label><span class="tab-label"><Activity :size="15" />概览</span></template></el-tab-pane>
       <el-tab-pane name="basic"><template #label><span class="tab-label"><Clock3 :size="15" />基础设置</span></template></el-tab-pane>
       <el-tab-pane name="resilience"><template #label><span class="tab-label"><Route :size="15" />路由可靠性</span></template></el-tab-pane>
+      <el-tab-pane name="sensitive"><template #label><span class="tab-label"><ShieldAlert :size="15" />敏感词</span></template></el-tab-pane>
       <el-tab-pane name="mail"><template #label><span class="tab-label"><Mail :size="15" />邮件提醒</span></template></el-tab-pane>
     </el-tabs>
 
@@ -215,16 +252,26 @@ onMounted(loadOverview)
       <section class="settings-section"><div class="section-heading"><div><h2>上游异常自动下线</h2><span>命中任一规则后渠道停止参与路由，并保存触发原因。</span></div><el-switch v-model="form.autoDisableEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="慢响应阈值（秒）"><el-input-number v-model="form.disableLatencySeconds" :disabled="!form.autoDisableEnabled" :min="1" :max="3600" controls-position="right" /></el-form-item><el-form-item label="自动禁用状态码"><el-input v-model="form.disableStatusCodes" :disabled="!form.autoDisableEnabled" placeholder="401,429" /></el-form-item></div><el-form-item label="失败关键词"><el-input v-model="form.failureKeywordsText" :disabled="!form.autoDisableEnabled" type="textarea" :rows="10" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">关键词不区分大小写；状态码支持逗号分隔和包含范围。</p></el-form></section>
     </template>
 
+    <template v-else-if="activeTab === 'sensitive'">
+      <section class="settings-section">
+        <div class="section-heading"><div><h2>请求过滤</h2><span>按配置检查用户提交的文本内容。</span></div><ShieldAlert :size="19" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>启用过滤</strong><span>检测到敏感关键词时阻止消息。</span></div><el-switch v-model="sensitiveForm.enabled" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>检查用户提示</strong><span>启用后，提示将在到达上游模型之前被扫描。</span></div><el-switch v-model="sensitiveForm.checkUserPrompt" /></div>
+        <el-form label-position="top" class="settings-form"><el-form-item label="已阻止的关键词"><el-input v-model="sensitiveForm.keywordsText" type="textarea" :rows="12" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">每行代表一个关键词。留空以禁用列表，但保留开关状态。</p></el-form>
+      </section>
+    </template>
+
     <template v-else>
       <section class="settings-section"><div class="section-heading"><div><h2>余额提醒</h2><span>用户在 24 小时内有模型使用且余额低于阈值时，最多发送一次提醒；没有使用不发送。</span></div><el-switch v-model="mailForm.enabled" /></div><el-form label-position="top" class="settings-form"><el-form-item label="提醒阈值（美元）"><el-input-number v-model="mailForm.threshold" :min="0" :max="1000000" :precision="6" controls-position="right" /></el-form-item><div class="form-subsection"><strong>提醒模板</strong><span>可使用 {nickname}、{balance} 和 {threshold} 作为变量。</span></div><el-form-item label="邮件主题"><el-input v-model="mailForm.subjectTemplate" /></el-form-item><el-form-item label="邮件正文"><el-input v-model="mailForm.bodyTemplate" type="textarea" :rows="8" spellcheck="false" /></el-form-item></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>SMTP 服务配置</h2><span>密码只会加密保存，读取时不会返回原始内容。</span></div><Mail :size="19" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="SMTP 主机"><el-input v-model="mailForm.host" placeholder="smtp.example.com" /></el-form-item><el-form-item label="端口"><el-input-number v-model="mailForm.port" :min="1" :max="65535" controls-position="right" /></el-form-item></div><div class="form-grid"><el-form-item label="加密方式"><el-select v-model="mailForm.security"><el-option label="STARTTLS" value="starttls" /><el-option label="TLS" value="tls" /><el-option label="不加密" value="none" /></el-select></el-form-item><el-form-item label="用户名"><el-input v-model="mailForm.username" autocomplete="username" /></el-form-item></div><div class="form-grid"><el-form-item :label="mailForm.passwordConfigured ? '密码（留空不修改）' : '密码'"><el-input v-model="mailForm.password" type="password" show-password autocomplete="new-password" /></el-form-item><el-form-item label="发件人邮箱"><el-input v-model="mailForm.from" placeholder="noreply@example.com" /></el-form-item></div></el-form><div class="setting-switch smtp-test"><div><strong>发送测试邮件</strong><span>使用当前已保存的 SMTP 配置投递。</span></div><div class="mail-test-actions"><el-input v-model="testRecipient" type="email" placeholder="recipient@example.com" /><el-button type="primary" :icon="Send" :loading="testSending" :disabled="testSending" @click="sendTestMail">发送</el-button></div></div></section>
     </template>
 
-    <div v-if="activeTab !== 'overview'" class="settings-save-actions"><el-button type="primary" :loading="saving || mailSaving" @click="saveActive">保存更改</el-button></div>
+    <div v-if="activeTab !== 'overview'" class="settings-save-actions"><el-button type="primary" :loading="saving || sensitiveSaving || mailSaving" @click="saveActive">保存更改</el-button></div>
   </div>
 </template>
 
 <style scoped>
 .settings-page { width: 100%; }.settings-tabs :deep(.el-tabs__nav-wrap::after) { background: #dce2e7; }.tab-label { display: inline-flex; align-items: center; gap: 7px; }.settings-toolbar { display: flex; min-height: 54px; align-items: center; gap: 10px; padding: 16px 0 18px; border-bottom: 1px solid #dce2e7; }.settings-toolbar h1 { margin: 0 0 4px; color: #15202b; font-size: 16px; font-weight: 650; }.spacer { flex: 1; }.settings-band { display: grid; min-height: 78px; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.auth-band { color: #126a59; }.auth-band div, .settings-title, .settings-value { display: flex; flex-direction: column; gap: 3px; }.auth-band span, .settings-title span, .settings-value small, .field-hint, .setting-switch span, .section-heading span, .probe-option span, .probe-interval small { color: #66717d; font-size: 11px; }.settings-value { align-items: flex-end; }.settings-value span { font-family: 'JetBrains Mono', monospace; font-size: 13px; text-transform: uppercase; }.settings-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #dce2e7; }.settings-grid div { display: flex; min-height: 72px; flex-direction: column; justify-content: center; gap: 6px; border-right: 1px solid #dce2e7; }.settings-grid div:last-child { border: 0; }.settings-grid span { color: #66717d; font-size: 11px; }.settings-grid strong { font-size: 13px; }.settings-section { padding: 20px 0; border-bottom: 1px solid #dce2e7; }.settings-section.compact { padding: 18px 0; }.section-heading, .setting-switch { display: flex; align-items: center; justify-content: space-between; gap: 18px; }.section-heading h2 { margin: 0 0 4px; color: #15202b; font-size: 14px; }.settings-form { margin-top: 18px; }.settings-form :deep(.el-form-item) { margin-bottom: 10px; }.settings-form :deep(.el-input-number) { width: 100%; }.timeout-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }.timeout-grid .field-hint { min-height: 34px; }.setting-switch div, .probe-option div { display: flex; flex-direction: column; gap: 4px; }.probe-settings { padding: 18px 0; }.probe-controls { display: grid; grid-template-columns: minmax(150px, .65fr) repeat(2, minmax(230px, 1fr)); align-items: center; gap: 18px; margin-top: 16px; }.probe-interval, .probe-option { display: flex; align-items: center; min-width: 0; gap: 10px; }.probe-interval { white-space: nowrap; }.probe-interval :deep(.el-input-number) { width: 112px; }.probe-option { justify-content: space-between; padding-left: 18px; border-left: 1px solid #dce2e7; }.probe-option div { min-width: 0; }.probe-option strong { font-size: 13px; }.probe-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.smtp-test { margin-top: 8px; padding-top: 16px; border-top: 1px solid #dce2e7; }.field-hint { margin: 2px 0 0; line-height: 1.55; }.settings-form :deep(textarea) { font-family: 'JetBrains Mono', monospace; font-size: 12px; }.mail-test-actions { display: flex; width: min(440px, 100%); flex-direction: row !important; gap: 8px !important; }.mail-test-actions .el-input { min-width: 0; }.settings-save-actions { display: flex; justify-content: flex-end; padding-top: 6px; }@media (max-width: 720px) { .settings-toolbar { align-items: flex-start; flex-wrap: wrap; }.settings-toolbar .spacer { display: none; }.settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.settings-grid div:nth-child(2) { border-right: 0; }.settings-grid div:nth-child(-n+2) { border-bottom: 1px solid #dce2e7; }.section-heading { align-items: flex-start; }.settings-form :deep(.el-segmented) { max-width: 100%; height: auto; flex-wrap: wrap; }.timeout-grid { grid-template-columns: 1fr; gap: 0; }.timeout-grid .field-hint { min-height: 0; }.setting-switch { align-items: flex-start; flex-direction: column; }.probe-controls { grid-template-columns: 1fr; gap: 12px; }.probe-option { padding: 12px 0 0; border-top: 1px solid #dce2e7; border-left: 0; }.mail-test-actions { width: 100%; } }@media (max-width: 480px) { .settings-grid { grid-template-columns: 1fr; }.settings-grid div { border-right: 0; border-bottom: 1px solid #dce2e7; }.settings-grid div:last-child { border-bottom: 0; } }
 .form-subsection { display: flex; flex-direction: column; gap: 4px; margin: 10px 0 16px; padding-top: 16px; border-top: 1px solid #dce2e7; }.form-subsection strong { color: #15202b; font-size: 13px; }.form-subsection span { color: #66717d; font-size: 11px; }
+.sensitive-switch { margin-top: 18px; }.sensitive-switch + .sensitive-switch { padding-top: 16px; border-top: 1px solid #dce2e7; }
 </style>

@@ -9,6 +9,7 @@ import (
 
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	relaysvc "github.com/yunloli/aiferry/internal/service/relay"
+	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/user"
 )
 
@@ -55,6 +56,10 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 			return
 		}
 		if err = c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, clientIP(r), endpoint, body, key); err != nil {
+			if system.IsSensitiveWordBlocked(err) {
+				writeError(r, http.StatusBadRequest, "sensitive_word_blocked", err.Error())
+				return
+			}
 			if user.IsInsufficientBalance(err) {
 				writeError(r, http.StatusPaymentRequired, "insufficient_balance", err.Error())
 				return

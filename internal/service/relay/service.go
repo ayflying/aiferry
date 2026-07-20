@@ -124,6 +124,9 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	if !gjson.ValidBytes(body) {
 		return gerror.New("request body must be valid JSON")
 	}
+	if err := s.resilience.CheckSensitivePrompt(ctx, endpoint, body); err != nil {
+		return err
+	}
 	requestedModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if requestedModel == "" {
 		return gerror.New("model is required")
