@@ -19,6 +19,7 @@ const filters = reactive({ model: '', userId: undefined as number | undefined, c
 const users = ref<ManagedUser[]>([])
 const isAdmin = computed(() => auth.user?.isAdmin === true)
 const usageItems = computed(() => page.value.items ?? [])
+const currentModels = ref<PublicModel[]>([])
 const selectedUsage = ref<UsageLog>()
 const selectedModel = ref<PublicModel>()
 const selectedPriceRules = ref<PriceRule[]>([])
@@ -29,7 +30,10 @@ async function load() {
   loading.value = true
   try {
     const dataPromise = apiGet<UsagePage>('/usage', filters)
-    const support = [store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys()]
+    const support = [
+      store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys(),
+      apiGet<PublicModel[]>('/public-models').then((items) => { currentModels.value = items }),
+    ]
     if (isAdmin.value) {
       support.push(store.channels.length ? Promise.resolve() : store.loadChannels())
       support.push(apiGet<ManagedUser[]>('/users').then((items) => { users.value = items }))
@@ -64,6 +68,14 @@ function protocolRoute(row: UsageLog) {
   const upstream = row.upstreamEndpoint || row.endpoint
   return row.protocolConversion ? `${protocolName(row.endpoint)} → ${protocolName(upstream)}` : protocolName(row.endpoint)
 }
+function currentModelPrice(row: UsageLog) {
+  const model = currentModels.value.find((item) => item.publicName === row.requestedModel)
+  if (!model) return { primary: '—', secondary: '' }
+  if (model.billingMode === 'request') return { primary: formatCost(model.requestPrice), secondary: '每请求固定价格' }
+  if (model.billingMode === 'rules') return { primary: '高级计费规则', secondary: '按规则匹配价格' }
+  const cache = model.cachedInputPrice === undefined ? '' : ` · 缓存 ${formatCost(model.cachedInputPrice)}`
+  return { primary: `入 ${formatCost(model.inputPrice)} · 出 ${formatCost(model.outputPrice)}`, secondary: `每 1M Token${cache}` }
+}
 async function openUsageDetail(row: UsageLog) {
   selectedUsage.value = row
   selectedModel.value = undefined
@@ -72,6 +84,7 @@ async function openUsageDetail(row: UsageLog) {
   priceLoading.value = true
   try {
     const models = await apiGet<PublicModel[]>('/public-models')
+    currentModels.value = models
     const model = models.find((item) => item.publicName === row.requestedModel)
     if (!model || selectedUsage.value?.requestId !== row.requestId) return
     selectedModel.value = model
@@ -125,10 +138,10 @@ onMounted(load)
         <el-table-column label="协议" min-width="128"><template #default="{ row }"><div class="protocol-cell" :class="{ converted: Boolean(row.protocolConversion) }"><strong>{{ protocolRoute(row) }}</strong><small>{{ row.protocolConversion ? '已智能转换' : '原始协议' }}</small></div></template></el-table-column>
         <el-table-column label="状态" width="86"><template #default="{ row }"><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag></template></el-table-column>
         <el-table-column label="流式" min-width="96"><template #default="{ row }"><div class="stream-cell"><strong>{{ row.isStream ? '流式' : '非流式' }}</strong><small>{{ row.isStream ? formatStreamSpeed(row.outputTokens, row.durationMs, row.firstTokenMs) : '—' }}</small></div></template></el-table-column>
-        <el-table-column label="Token" min-width="185"><template #default="{ row }"><div class="token-cell"><strong>{{ formatNumber(row.totalTokens) }}</strong><small>入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</small><small>缓存 {{ formatNumber(row.cachedInputTokens) }}</small></div></template></el-table-column>
+        <el-table-column label="Token" min-width="185"><template #default="{ row }"><div class="token-cell"><strong>入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</strong><small>缓存 {{ formatNumber(row.cachedInputTokens) }}</small></div></template></el-table-column>
         <el-table-column label="估算成本" min-width="125"><template #default="{ row }"><span :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</span></template></el-table-column>
         <el-table-column label="性能" min-width="164"><template #default="{ row }"><div class="performance-cell"><template v-if="row.isStream"><strong>首 token {{ formatLatency(row.firstTokenMs) }}</strong><small>总耗时 {{ formatLatency(row.durationMs) }}</small></template><strong v-else>总耗时 {{ formatLatency(row.durationMs) }}</strong></div></template></el-table-column>
-        <el-table-column label="详情" min-width="150" show-overflow-tooltip><template #default="{ row }"><el-button v-if="isSuccessful(row)" text class="detail-trigger" title="查看当前模型价格" @click="openUsageDetail(row)">模型价格</el-button><span v-else class="danger-text">{{ row.errorMessage || '—' }}</span></template></el-table-column>
+        <el-table-column label="详情" min-width="165" show-overflow-tooltip><template #default="{ row }"><el-button v-if="isSuccessful(row)" text class="detail-trigger" title="查看当前模型价格" @click="openUsageDetail(row)"><span class="price-cell"><strong>{{ currentModelPrice(row).primary }}</strong><small v-if="currentModelPrice(row).secondary">{{ currentModelPrice(row).secondary }}</small></span></el-button><span v-else class="danger-text">{{ row.errorMessage || '—' }}</span></template></el-table-column>
       </el-table>
       <div v-if="!loading && !usageItems.length" class="empty-state"><div><strong>暂无用量记录</strong><span>成功调用中转接口后会显示在这里</span></div></div>
       <div class="pagination-row"><el-pagination :current-page="filters.page" :page-size="filters.pageSize" :page-sizes="[20, 50, 100]" :total="page.total" layout="total, sizes, prev, pager, next" @current-change="changePage" @size-change="changePageSize" /></div>
@@ -138,7 +151,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.request-cell, .token-cell, .stream-cell, .performance-cell, .protocol-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.request-cell > span, .request-cell > strong, .protocol-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.request-cell small, .token-cell small, .stream-cell small, .performance-cell small, .protocol-cell small { color: #7b8792; font-size: 10px; }.protocol-cell.converted strong { color: #1677ff; }.token-cell strong, .stream-cell strong, .performance-cell strong, .protocol-cell strong, .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }.detail-trigger { height: auto; padding: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.detail-trigger:hover span:not(.muted) { text-decoration: underline; }
+.request-cell, .token-cell, .stream-cell, .performance-cell, .protocol-cell, .price-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.request-cell > span, .request-cell > strong, .protocol-cell strong, .price-cell strong, .price-cell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.request-cell small, .token-cell small, .stream-cell small, .performance-cell small, .protocol-cell small, .price-cell small { color: #7b8792; font-size: 10px; }.protocol-cell.converted strong { color: #1677ff; }.token-cell strong, .stream-cell strong, .performance-cell strong, .protocol-cell strong, .price-cell strong, .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }.detail-trigger { height: auto; max-width: 100%; padding: 0; text-align: left; }.detail-trigger:hover .price-cell strong { text-decoration: underline; }
 .usage-filter-summary { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 2px; color: #6c7a88; border-top: 1px solid #e6ebf0; border-bottom: 1px solid #e6ebf0; font-size: 12px; }.usage-filter-summary time, .usage-filter-summary strong { color: #293643; font-variant-numeric: tabular-nums; }.usage-filter-summary i { width: 1px; height: 14px; margin: 0 4px; background: #d9e1e8; }
 @media (max-width: 720px) { .usage-filter-summary { align-items: flex-start; flex-wrap: wrap; gap: 5px 7px; padding: 7px 2px; }.usage-filter-summary i { display: none; }.usage-filter-summary time { white-space: nowrap; } }
 </style>
