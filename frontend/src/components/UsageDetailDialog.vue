@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { PriceRule, PublicModel, UsageLog } from '../api/types'
 import { formatCost, formatNumber, formatTime } from '../lib/format'
+import { formatIPLocation } from '../lib/ip-location'
 
 const props = defineProps<{
   modelValue: boolean
@@ -82,8 +83,7 @@ function isConfiguredPrice(value: unknown): value is number {
           <el-descriptions-item label="接口"><span class="mono">{{ usage.endpoint }}</span></el-descriptions-item>
           <el-descriptions-item label="上游接口"><span class="mono">{{ usage.upstreamEndpoint || usage.endpoint }}</span></el-descriptions-item>
           <el-descriptions-item label="协议转换" :span="2">{{ usage.protocolConversion ? `${usage.endpoint} → ${usage.upstreamEndpoint || usage.endpoint}` : '未转换' }}</el-descriptions-item>
-		  <el-descriptions-item label="客户端 IP"><span class="mono">{{ usage.clientIp || '—' }}</span></el-descriptions-item>
-		  <el-descriptions-item label="IP 位置"><span class="detail-value">{{ usage.ipLocation || '—' }}</span></el-descriptions-item>
+		  <el-descriptions-item label="归属地" :span="2"><span class="detail-value">{{ formatIPLocation(usage.ipLocation) }}</span></el-descriptions-item>
           <el-descriptions-item label="状态"><el-tag :type="isSuccess ? 'success' : 'danger'" effect="plain" size="small">{{ usage.httpStatus }}</el-tag></el-descriptions-item>
           <el-descriptions-item label="请求模型">{{ usage.requestedModel }}</el-descriptions-item>
           <el-descriptions-item label="上游模型">{{ usage.upstreamModel || '—' }}</el-descriptions-item>

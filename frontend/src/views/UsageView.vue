@@ -9,6 +9,7 @@ import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
 import { formatCost, formatNumber, formatTokenSpeed, formatTime } from '../lib/format'
+import { formatIPLocation } from '../lib/ip-location'
 
 const store = useAppStore()
 const auth = useAuthStore()
@@ -67,9 +68,6 @@ function protocolName(endpoint: string) {
 function protocolRoute(row: UsageLog) {
   const upstream = row.upstreamEndpoint || row.endpoint
   return row.protocolConversion ? `${protocolName(row.endpoint)} → ${protocolName(upstream)}` : protocolName(row.endpoint)
-}
-function formatIPLocation(location?: string) {
-  return location?.split('/').map((part) => part.trim()).filter(Boolean).join(' - ') || '归属地未识别'
 }
 function currentModelPrice(row: UsageLog) {
   const model = currentModels.value.find((item) => item.publicName === row.requestedModel)
