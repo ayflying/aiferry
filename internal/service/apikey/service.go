@@ -27,33 +27,40 @@ type Service struct {
 }
 
 type View struct {
-	Id              uint64     `json:"id"`
-	UserId          uint64     `json:"userId"`
-	Name            string     `json:"name"`
-	KeyPrefix       string     `json:"keyPrefix"`
-	SecretAvailable bool       `json:"secretAvailable"`
-	Status          int        `json:"status"`
-	SpendLimit      *float64   `json:"spendLimit"`
-	SpentAmount     float64    `json:"spentAmount"`
-	AvailableAmount *float64   `json:"availableAmount"`
-	AllowedModels   []string   `json:"allowedModels"`
-	ChannelGroupIDs []uint64   `json:"channelGroupIds"`
-	ExpiresAt       *time.Time `json:"expiresAt"`
-	LastUsedAt      *time.Time `json:"lastUsedAt"`
-	CreatedAt       time.Time  `json:"createdAt"`
+	Id                   uint64     `json:"id"`
+	UserId               uint64     `json:"userId"`
+	Name                 string     `json:"name"`
+	KeyPrefix            string     `json:"keyPrefix"`
+	SecretAvailable      bool       `json:"secretAvailable"`
+	Status               int        `json:"status"`
+	SpendLimit           *float64   `json:"spendLimit"`
+	DailySpendLimit      *float64   `json:"dailySpendLimit"`
+	SpentAmount          float64    `json:"spentAmount"`
+	AvailableAmount      *float64   `json:"availableAmount"`
+	DailySpentAmount     float64    `json:"dailySpentAmount"`
+	DailySpendDate       *time.Time `json:"dailySpendDate"`
+	DailyAvailableAmount *float64   `json:"dailyAvailableAmount"`
+	AllowedModels        []string   `json:"allowedModels"`
+	ChannelGroupIDs      []uint64   `json:"channelGroupIds"`
+	ExpiresAt            *time.Time `json:"expiresAt"`
+	LastUsedAt           *time.Time `json:"lastUsedAt"`
+	CreatedAt            time.Time  `json:"createdAt"`
 }
 
 type AuthKey struct {
-	Id              uint64     `json:"id" orm:"id"`
-	UserId          uint64     `json:"userId" orm:"user_id"`
-	Name            string     `json:"name" orm:"name"`
-	KeyHash         string     `json:"keyHash" orm:"key_hash"`
-	Status          int        `json:"status" orm:"status"`
-	SpendLimit      *float64   `json:"spendLimit" orm:"spend_limit"`
-	SpentAmount     float64    `json:"spentAmount" orm:"spent_amount"`
-	AllowedModels   []string   `json:"allowedModels"`
-	ChannelGroupIDs []uint64   `json:"channelGroupIds"`
-	ExpiresAt       *time.Time `json:"expiresAt" orm:"expires_at"`
+	Id               uint64     `json:"id" orm:"id"`
+	UserId           uint64     `json:"userId" orm:"user_id"`
+	Name             string     `json:"name" orm:"name"`
+	KeyHash          string     `json:"keyHash" orm:"key_hash"`
+	Status           int        `json:"status" orm:"status"`
+	SpendLimit       *float64   `json:"spendLimit" orm:"spend_limit"`
+	DailySpendLimit  *float64   `json:"dailySpendLimit" orm:"daily_spend_limit"`
+	SpentAmount      float64    `json:"spentAmount" orm:"spent_amount"`
+	DailySpentAmount float64    `json:"dailySpentAmount" orm:"daily_spent_amount"`
+	DailySpendDate   *time.Time `json:"dailySpendDate" orm:"daily_spend_date"`
+	AllowedModels    []string   `json:"allowedModels"`
+	ChannelGroupIDs  []uint64   `json:"channelGroupIds"`
+	ExpiresAt        *time.Time `json:"expiresAt" orm:"expires_at"`
 }
 
 type Created struct {
@@ -72,7 +79,7 @@ func (s *Service) List(ctx context.Context) ([]View, error) {
 	}
 	rows := make([]View, 0)
 	query := dao.ApiKeys.Ctx(ctx).
-		Fields("id,user_id,name,key_prefix,key_cipher IS NOT NULL AND key_cipher <> '' AS secret_available,status,spend_limit,spent_amount,expires_at,last_used_at,created_at").
+		Fields("id,user_id,name,key_prefix,key_cipher IS NOT NULL AND key_cipher <> '' AS secret_available,status,spend_limit,daily_spend_limit,spent_amount,daily_spent_amount,daily_spend_date,expires_at,last_used_at,created_at").
 		OrderDesc(dao.ApiKeys.Columns().Id)
 	if !s.app.Config.IsAdminRole(current.Role) {
 		query = query.Where(dao.ApiKeys.Columns().UserId, current.Id)
@@ -113,6 +120,9 @@ func (s *Service) Create(ctx context.Context, input adminapi.APIKeyInput) (Creat
 	if input.SpendLimit != nil {
 		data.SpendLimit = *input.SpendLimit
 	}
+	if input.DailySpendLimit != nil {
+		data.DailySpendLimit = *input.DailySpendLimit
+	}
 	if input.ExpiresAt != nil {
 		data.ExpiresAt = *input.ExpiresAt
 	}
@@ -128,10 +138,14 @@ func (s *Service) Create(ctx context.Context, input adminapi.APIKeyInput) (Creat
 	if err != nil {
 		return Created{}, err
 	}
-	view := View{Id: id, UserId: user.Id, Name: input.Name, KeyPrefix: prefix, SecretAvailable: true, Status: 1, SpendLimit: input.SpendLimit, AllowedModels: normalizeModels(input.AllowedModels), ChannelGroupIDs: uniqueIDs(input.ChannelGroupIDs), ExpiresAt: input.ExpiresAt, CreatedAt: time.Now()}
+	view := View{Id: id, UserId: user.Id, Name: input.Name, KeyPrefix: prefix, SecretAvailable: true, Status: 1, SpendLimit: input.SpendLimit, DailySpendLimit: input.DailySpendLimit, AllowedModels: normalizeModels(input.AllowedModels), ChannelGroupIDs: uniqueIDs(input.ChannelGroupIDs), ExpiresAt: input.ExpiresAt, CreatedAt: time.Now()}
 	if input.SpendLimit != nil {
 		available := *input.SpendLimit
 		view.AvailableAmount = &available
+	}
+	if input.DailySpendLimit != nil {
+		available := *input.DailySpendLimit
+		view.DailyAvailableAmount = &available
 	}
 	return Created{
 		View: view,
@@ -182,6 +196,11 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.APIKeyUp
 		data.SpendLimit = gdb.Raw("NULL")
 	} else {
 		data.SpendLimit = *input.SpendLimit
+	}
+	if input.DailySpendLimit == nil {
+		data.DailySpendLimit = gdb.Raw("NULL")
+	} else {
+		data.DailySpendLimit = *input.DailySpendLimit
 	}
 	if input.ExpiresAt == nil {
 		data.ExpiresAt = gdb.Raw("NULL")
@@ -239,6 +258,9 @@ func (s *Service) Authenticate(ctx context.Context, bearer string) (AuthKey, err
 	if key.Id == 0 || key.Status != 1 || (key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now())) || (key.SpendLimit != nil && key.SpentAmount >= *key.SpendLimit) {
 		return AuthKey{}, gerror.New("invalid or expired API key")
 	}
+	if key.dailyLimitReached(time.Now()) {
+		return AuthKey{}, ErrDailySpendLimitReached
+	}
 	s.touchLastUsed(key.Id)
 	return key, nil
 }
@@ -254,7 +276,7 @@ func (s *Service) getCached(ctx context.Context, hash string) (AuthKey, error) {
 		return AuthKey{}, gerror.Wrap(err, "read API key cache")
 	}
 	if err = dao.ApiKeys.Ctx(ctx).
-		Fields("id,user_id,name,key_hash,status,spend_limit,spent_amount,expires_at").
+		Fields("id,user_id,name,key_hash,status,spend_limit,daily_spend_limit,spent_amount,daily_spent_amount,daily_spend_date,expires_at").
 		Where(dao.ApiKeys.Columns().KeyHash, hash).
 		Scan(&key); err != nil {
 		return AuthKey{}, gerror.Wrap(err, "find API key")
@@ -301,7 +323,13 @@ func (s *Service) AddSpend(ctx context.Context, key AuthKey, amount float64) err
 	if amount <= 0 {
 		return nil
 	}
-	result, err := dao.ApiKeys.Ctx(ctx).Where(dao.ApiKeys.Columns().Id, key.Id).Data(do.ApiKeys{SpentAmount: gdb.Raw("spent_amount + " + decimalLiteral(amount))}).Update()
+	literal := decimalLiteral(amount)
+	today := time.Now().Format(time.DateOnly)
+	result, err := dao.ApiKeys.Ctx(ctx).Where(dao.ApiKeys.Columns().Id, key.Id).Data(do.ApiKeys{
+		SpentAmount:      gdb.Raw("spent_amount + " + literal),
+		DailySpentAmount: gdb.Raw("CASE WHEN daily_spend_date = '" + today + "' THEN daily_spent_amount + " + literal + " ELSE " + literal + " END"),
+		DailySpendDate:   today,
+	}).Update()
 	if err != nil {
 		return gerror.Wrap(err, "add API key spend")
 	}

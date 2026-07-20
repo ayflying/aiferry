@@ -114,6 +114,7 @@ type APIKeyInput struct {
 	Name            string     `json:"name" v:"required|length:1,96"`
 	ExpiresAt       *time.Time `json:"expiresAt"`
 	SpendLimit      *float64   `json:"spendLimit" v:"min:0"`
+	DailySpendLimit *float64   `json:"dailySpendLimit" v:"min:0"`
 	AllowedModels   []string   `json:"allowedModels"`
 	ChannelGroupIDs []uint64   `json:"channelGroupIds"`
 }
@@ -123,6 +124,7 @@ type APIKeyUpdate struct {
 	Status          int        `json:"status" v:"in:0,1"`
 	ExpiresAt       *time.Time `json:"expiresAt"`
 	SpendLimit      *float64   `json:"spendLimit" v:"min:0"`
+	DailySpendLimit *float64   `json:"dailySpendLimit" v:"min:0"`
 	AllowedModels   []string   `json:"allowedModels"`
 	ChannelGroupIDs []uint64   `json:"channelGroupIds"`
 }

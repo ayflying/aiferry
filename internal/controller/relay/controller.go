@@ -74,6 +74,10 @@ func (c *Controller) authenticate(r *ghttp.Request) (apikey.AuthKey, bool) {
 	}
 	key, err := c.apiKeys.Authenticate(r.Context(), strings.TrimSpace(authorization[7:]))
 	if err != nil {
+		if apikey.IsDailySpendLimitReached(err) {
+			writeError(r, http.StatusTooManyRequests, "daily_spend_limit_exceeded", err.Error())
+			return apikey.AuthKey{}, false
+		}
 		writeError(r, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return apikey.AuthKey{}, false
 	}

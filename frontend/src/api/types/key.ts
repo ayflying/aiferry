@@ -8,6 +8,9 @@ export interface APIKey {
   spendLimit?: number
   spentAmount: number
   availableAmount?: number
+  dailySpendLimit?: number
+  dailySpentAmount: number
+  dailyAvailableAmount?: number
   allowedModels: string[]
   channelGroupIds: number[]
   expiresAt?: string

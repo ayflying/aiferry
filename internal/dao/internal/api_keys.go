@@ -21,38 +21,44 @@ type ApiKeysDao struct {
 
 // ApiKeysColumns defines and stores column names for the table api_keys.
 type ApiKeysColumns struct {
-	Id          string //
-	UserId      string //
-	Name        string //
-	KeyPrefix   string //
-	KeyHash     string //
-	KeyCipher   string //
-	Status      string //
-	SpendLimit  string //
-	SpentAmount string //
-	ExpiresAt   string //
-	LastUsedAt  string //
-	CreatedAt   string //
-	UpdatedAt   string //
-	DeletedAt   string //
+	Id               string //
+	UserId           string //
+	Name             string //
+	KeyPrefix        string //
+	KeyHash          string //
+	KeyCipher        string //
+	Status           string //
+	SpendLimit       string //
+	DailySpendLimit  string //
+	SpentAmount      string //
+	DailySpentAmount string //
+	DailySpendDate   string //
+	ExpiresAt        string //
+	LastUsedAt       string //
+	CreatedAt        string //
+	UpdatedAt        string //
+	DeletedAt        string //
 }
 
 // apiKeysColumns holds the columns for the table api_keys.
 var apiKeysColumns = ApiKeysColumns{
-	Id:          "id",
-	UserId:      "user_id",
-	Name:        "name",
-	KeyPrefix:   "key_prefix",
-	KeyHash:     "key_hash",
-	KeyCipher:   "key_cipher",
-	Status:      "status",
-	SpendLimit:  "spend_limit",
-	SpentAmount: "spent_amount",
-	ExpiresAt:   "expires_at",
-	LastUsedAt:  "last_used_at",
-	CreatedAt:   "created_at",
-	UpdatedAt:   "updated_at",
-	DeletedAt:   "deleted_at",
+	Id:               "id",
+	UserId:           "user_id",
+	Name:             "name",
+	KeyPrefix:        "key_prefix",
+	KeyHash:          "key_hash",
+	KeyCipher:        "key_cipher",
+	Status:           "status",
+	SpendLimit:       "spend_limit",
+	DailySpendLimit:  "daily_spend_limit",
+	SpentAmount:      "spent_amount",
+	DailySpentAmount: "daily_spent_amount",
+	DailySpendDate:   "daily_spend_date",
+	ExpiresAt:        "expires_at",
+	LastUsedAt:       "last_used_at",
+	CreatedAt:        "created_at",
+	UpdatedAt:        "updated_at",
+	DeletedAt:        "deleted_at",
 }
 
 // NewApiKeysDao creates and returns a new DAO object for table data access.

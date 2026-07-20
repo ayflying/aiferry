@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
@@ -39,6 +40,10 @@ func (s *Service) populatePolicy(ctx context.Context, view *View) error {
 			remaining = 0
 		}
 		view.AvailableAmount = &remaining
+	}
+	if view.DailySpendLimit != nil {
+		remaining := dailyRemaining(*view.DailySpendLimit, view.DailySpentAmount, view.DailySpendDate, time.Now())
+		view.DailyAvailableAmount = &remaining
 	}
 	var err error
 	if view.AllowedModels, err = listModels(ctx, view.Id); err != nil {
