@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -17,12 +19,18 @@ import (
 )
 
 const (
-	maxDatabaseSize = 64 << 20
-	v4DatabaseName  = "ip2region_v4.xdb"
-	v6DatabaseName  = "ip2region_v6.xdb"
-	v4DatabaseURL   = "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb"
-	v6DatabaseURL   = "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v6.xdb"
+	maxDatabaseSize         = 64 << 20
+	databaseDownloadTimeout = 2 * time.Minute
+	v4DatabaseName          = "ip2region_v4.xdb"
+	v6DatabaseName          = "ip2region_v6.xdb"
+	v4DatabaseURL           = "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb"
+	v6DatabaseURL           = "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v6.xdb"
 )
+
+var defaultDatabases = []database{
+	{name: v4DatabaseName, url: v4DatabaseURL},
+	{name: v6DatabaseName, url: v6DatabaseURL},
+}
 
 type database struct {
 	name string
@@ -30,27 +38,69 @@ type database struct {
 }
 
 type Service struct {
-	searcher *ip2service.Ip2Region
+	searcher atomic.Pointer[ip2service.Ip2Region]
 }
 
 func New(ctx context.Context, client *http.Client, dataDir string) *Service {
+	return newService(ctx, client, dataDir, defaultDatabases, databaseDownloadTimeout)
+}
+
+func newService(ctx context.Context, client *http.Client, dataDir string, databases []database, downloadTimeout time.Duration) *Service {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	v4Path, v4Err := ensureDatabase(ctx, client, dataDir, database{name: v4DatabaseName, url: v4DatabaseURL})
-	v6Path, v6Err := ensureDatabase(ctx, client, dataDir, database{name: v6DatabaseName, url: v6DatabaseURL})
-	if v4Err != nil {
-		g.Log().Warningf(ctx, "IP location IPv4 database unavailable: %v", v4Err)
+	service := &Service{}
+	paths, complete := localDatabasePaths(dataDir, databases)
+	if complete {
+		service.activate(ctx, paths)
+		return service
 	}
-	if v6Err != nil {
-		g.Log().Warningf(ctx, "IP location IPv6 database unavailable: %v", v6Err)
+
+	g.Log().Info(ctx, "IP location databases unavailable locally; downloading in background")
+	go service.downloadAndActivate(ctx, client, dataDir, databases, downloadTimeout)
+	return service
+}
+
+func localDatabasePaths(dataDir string, databases []database) ([]string, bool) {
+	paths := make([]string, len(databases))
+	for index, item := range databases {
+		path := filepath.Join(dataDir, item.name)
+		if err := xdb.VerifyFromFile(path); err != nil {
+			return paths, false
+		}
+		paths[index] = path
 	}
-	searcher, err := ip2service.NewIp2RegionWithPath(v4Path, v6Path)
+	return paths, true
+}
+
+func (s *Service) downloadAndActivate(ctx context.Context, client *http.Client, dataDir string, databases []database, downloadTimeout time.Duration) {
+	downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	defer cancel()
+
+	paths := make([]string, len(databases))
+	for index, item := range databases {
+		path, err := ensureDatabase(downloadCtx, client, dataDir, item)
+		if err != nil {
+			g.Log().Warningf(ctx, "IP location database %s unavailable: %v", item.name, err)
+			return
+		}
+		paths[index] = path
+	}
+	s.activate(ctx, paths)
+}
+
+func (s *Service) activate(ctx context.Context, paths []string) {
+	if len(paths) != 2 {
+		g.Log().Warningf(ctx, "IP location lookup disabled: expected 2 databases, got %d", len(paths))
+		return
+	}
+	searcher, err := ip2service.NewIp2RegionWithPath(paths[0], paths[1])
 	if err != nil {
 		g.Log().Warningf(ctx, "IP location lookup disabled: %v", err)
-		return &Service{}
+		return
 	}
-	return &Service{searcher: searcher}
+	s.searcher.Store(searcher)
+	g.Log().Info(ctx, "IP location lookup enabled")
 }
 
 func (s *Service) Lookup(value string) string {
@@ -68,10 +118,11 @@ func (s *Service) Lookup(value string) string {
 	if address.IsPrivate() || address.IsLinkLocalUnicast() {
 		return "内网地址"
 	}
-	if s.searcher == nil {
+	searcher := s.searcher.Load()
+	if searcher == nil {
 		return ""
 	}
-	region, err := s.searcher.Search(ip)
+	region, err := searcher.Search(ip)
 	if err != nil {
 		return ""
 	}
