@@ -54,7 +54,7 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
 			return
 		}
-		if err = c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, endpoint, body, key); err != nil {
+		if err = c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, clientIP(r), endpoint, body, key); err != nil {
 			if user.IsInsufficientBalance(err) {
 				writeError(r, http.StatusPaymentRequired, "insufficient_balance", err.Error())
 				return

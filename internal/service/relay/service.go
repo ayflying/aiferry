@@ -15,6 +15,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/apikey"
 	"github.com/yunloli/aiferry/internal/service/app"
 	"github.com/yunloli/aiferry/internal/service/channel"
+	"github.com/yunloli/aiferry/internal/service/iplocation"
 	mailservice "github.com/yunloli/aiferry/internal/service/mail"
 	"github.com/yunloli/aiferry/internal/service/pricingcache"
 	"github.com/yunloli/aiferry/internal/service/system"
@@ -32,6 +33,7 @@ type Service struct {
 	prices     *pricingcache.Service
 	mail       *mailservice.Service
 	channels   *channel.Service
+	locations  *iplocation.Service
 }
 
 type Candidate struct {
@@ -78,8 +80,8 @@ type attemptResult struct {
 	protocolConversion string
 }
 
-func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service) *Service {
-	return &Service{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc}
+func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, locationSvc *iplocation.Service) *Service {
+	return &Service{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc, locations: locationSvc}
 }
 
 func (s *Service) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
@@ -114,7 +116,7 @@ func (s *Service) Models(ctx context.Context, key apikey.AuthKey) (ModelList, er
 	return ModelList{Object: "list", Data: models}, nil
 }
 
-func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, key apikey.AuthKey) error {
+func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, clientIP, endpoint string, body []byte, key apikey.AuthKey) error {
 	if len(body) > maxRequestBody {
 		return gerror.New("request body exceeds 16 MiB")
 	}
@@ -168,7 +170,7 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 			if result.status >= 200 && result.status < 300 {
 				s.markSuccess(ctx, candidate.ChannelCredentialID)
 			}
-			if recordErr := s.record(ctx, requestID, key, candidate, endpoint, requestedModel, isStream, attempts, startedAt, result); recordErr != nil {
+			if recordErr := s.record(ctx, requestID, key, candidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, result); recordErr != nil {
 				if !isStream {
 					s.writeBufferedResponse(writer, http.StatusPaymentRequired, openAIError("insufficient_balance", recordErr.Error()), http.Header{"Content-Type": []string{"application/json"}})
 				}
@@ -182,7 +184,7 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	}
 	if attempts > 0 {
 		last = failedAttemptResult(last, "All eligible channels failed")
-		if recordErr := s.record(ctx, requestID, key, lastCandidate, endpoint, requestedModel, isStream, attempts, startedAt, last); recordErr != nil {
+		if recordErr := s.record(ctx, requestID, key, lastCandidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, last); recordErr != nil {
 			g.Log().Errorf(ctx, "record failed request %s: %v", requestID, recordErr)
 		}
 	} else {

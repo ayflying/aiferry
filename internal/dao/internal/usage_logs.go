@@ -30,6 +30,8 @@ type UsageLogsColumns struct {
 	Endpoint            string //
 	UpstreamEndpoint    string //
 	ProtocolConversion  string //
+	ClientIp            string //
+	IpLocation          string //
 	RequestedModel      string //
 	UpstreamModel       string //
 	HttpStatus          string //
@@ -57,6 +59,8 @@ var usageLogsColumns = UsageLogsColumns{
 	Endpoint:            "endpoint",
 	UpstreamEndpoint:    "upstream_endpoint",
 	ProtocolConversion:  "protocol_conversion",
+	ClientIp:            "client_ip",
+	IpLocation:          "ip_location",
 	RequestedModel:      "requested_model",
 	UpstreamModel:       "upstream_model",
 	HttpStatus:          "http_status",

@@ -20,6 +20,8 @@ type UsageLogs struct {
 	Endpoint            any //
 	UpstreamEndpoint    any //
 	ProtocolConversion  any //
+	ClientIp            any //
+	IpLocation          any //
 	RequestedModel      any //
 	UpstreamModel       any //
 	HttpStatus          any //

@@ -19,6 +19,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channel"
 	"github.com/yunloli/aiferry/internal/service/channelgroup"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
+	"github.com/yunloli/aiferry/internal/service/iplocation"
 	"github.com/yunloli/aiferry/internal/service/mail"
 	"github.com/yunloli/aiferry/internal/service/pricesource"
 	"github.com/yunloli/aiferry/internal/service/pricingcache"
@@ -49,6 +50,7 @@ var (
 			if err != nil {
 				return err
 			}
+			locationSvc := iplocation.New(ctx, appSvc.HTTP, filepath.Join(filepath.Dir(cfg.WebRoot), "data"))
 			var (
 				apiKeySvc       = apikey.New(appSvc)
 				authSvc         = auth.New(appSvc)
@@ -61,7 +63,7 @@ var (
 				mailSvc         = mail.New(appSvc, systemSvc, userSvc)
 				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc, priceCache, userSvc, mailSvc)
 				priceSourceSvc  = pricesource.New(channelSvc)
-				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc, channelSvc)
+				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc, channelSvc, locationSvc)
 				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc, authSvc, mailSvc)
 				authCtrl        = authctrl.New(authSvc, userSvc)
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)

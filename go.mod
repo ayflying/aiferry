@@ -6,6 +6,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/gogf/gf/contrib/drivers/mysql/v2 v2.10.0
 	github.com/gogf/gf/v2 v2.10.0
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20260709160242-cd40e3a1d532
 	github.com/pressly/goose/v3 v3.25.0
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/shopspring/decimal v1.4.0

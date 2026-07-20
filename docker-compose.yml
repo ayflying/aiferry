@@ -5,6 +5,8 @@ services:
       - .env
     environment:
       WEB_ROOT: /app/web
+    volumes:
+      - aiferry-data:/app/data
     ports:
       - "38517:8080"
     healthcheck:
@@ -12,3 +14,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 12
+
+volumes:
+  aiferry-data:

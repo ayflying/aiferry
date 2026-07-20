@@ -19,6 +19,8 @@ type UsageLogs struct {
 	Endpoint            string    `json:"endpoint"            orm:"endpoint"              description:""` //
 	UpstreamEndpoint    string    `json:"upstreamEndpoint"    orm:"upstream_endpoint"     description:""` //
 	ProtocolConversion  string    `json:"protocolConversion"  orm:"protocol_conversion"   description:""` //
+	ClientIp            string    `json:"clientIp"            orm:"client_ip"             description:""` //
+	IpLocation          string    `json:"ipLocation"          orm:"ip_location"           description:""` //
 	RequestedModel      string    `json:"requestedModel"      orm:"requested_model"       description:""` //
 	UpstreamModel       string    `json:"upstreamModel"       orm:"upstream_model"        description:""` //
 	HttpStatus          uint      `json:"httpStatus"          orm:"http_status"           description:""` //

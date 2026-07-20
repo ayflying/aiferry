@@ -40,6 +40,8 @@ export interface UsageLog {
   endpoint: string
   upstreamEndpoint: string
   protocolConversion: string
+  clientIp?: string
+  ipLocation?: string
   requestedModel: string
   upstreamModel: string
   httpStatus: number

@@ -12,7 +12,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
-func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) error {
+func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, clientIP, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) error {
 	upstreamEndpoint := result.upstreamEndpoint
 	if upstreamEndpoint == "" {
 		upstreamEndpoint = endpoint
@@ -53,6 +53,8 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		Endpoint:            endpoint,
 		UpstreamEndpoint:    upstreamEndpoint,
 		ProtocolConversion:  result.protocolConversion,
+		ClientIP:            clientIP,
+		IPLocation:          s.location(clientIP),
 		RequestedModel:      requestedModel,
 		UpstreamModel:       candidate.UpstreamName,
 		HTTPStatus:          recordStatus,
@@ -67,6 +69,13 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		g.Log().Errorf(ctx, "record usage %s: %v", requestID, err)
 	}
 	return chargeErr
+}
+
+func (s *Service) location(clientIP string) string {
+	if s.locations == nil {
+		return ""
+	}
+	return s.locations.Lookup(clientIP)
 }
 
 func parseJSONUsage(body []byte) usage.TokenUsage {

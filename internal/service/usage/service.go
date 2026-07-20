@@ -45,6 +45,8 @@ type RecordInput struct {
 	Endpoint            string
 	UpstreamEndpoint    string
 	ProtocolConversion  string
+	ClientIP            string
+	IPLocation          string
 	RequestedModel      string
 	UpstreamModel       string
 	HTTPStatus          int
@@ -109,6 +111,8 @@ type LogView struct {
 	Endpoint           string    `json:"endpoint" orm:"endpoint"`
 	UpstreamEndpoint   string    `json:"upstreamEndpoint" orm:"upstream_endpoint"`
 	ProtocolConversion string    `json:"protocolConversion" orm:"protocol_conversion"`
+	ClientIP            string    `json:"clientIp" orm:"client_ip"`
+	IPLocation          string    `json:"ipLocation" orm:"ip_location"`
 	RequestedModel     string    `json:"requestedModel" orm:"requested_model"`
 	UpstreamModel      string    `json:"upstreamModel" orm:"upstream_model"`
 	HttpStatus         uint      `json:"httpStatus" orm:"http_status"`
@@ -153,6 +157,8 @@ func (s *Service) Record(ctx context.Context, input RecordInput) error {
 		Endpoint:           input.Endpoint,
 		UpstreamEndpoint:   input.UpstreamEndpoint,
 		ProtocolConversion: input.ProtocolConversion,
+		ClientIp:           input.ClientIP,
+		IpLocation:         input.IPLocation,
 		RequestedModel:     input.RequestedModel,
 		UpstreamModel:      input.UpstreamModel,
 		HttpStatus:         input.HTTPStatus,
@@ -168,6 +174,12 @@ func (s *Service) Record(ctx context.Context, input RecordInput) error {
 	}
 	if input.APIKeyID == 0 {
 		data.ApiKeyId = gdb.Raw("NULL")
+	}
+	if input.ClientIP == "" {
+		data.ClientIp = gdb.Raw("NULL")
+	}
+	if input.IPLocation == "" {
+		data.IpLocation = gdb.Raw("NULL")
 	}
 	if input.Tokens.Input != nil {
 		data.InputTokens = *input.Tokens.Input
