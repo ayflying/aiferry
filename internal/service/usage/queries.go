@@ -10,7 +10,13 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 )
 
-const logTimeLayout = "2006-01-02 15:04:05"
+const (
+	logTimeLayout        = "2006-01-02 15:04:05"
+	hourBucketLayout     = "2006-01-02 15:00:00"
+	recentCostHours      = 24
+	recentCostModelLimit = 5
+	otherCostModelName   = "其他模型"
+)
 
 type LogFilter struct {
 	Page      int
@@ -61,7 +67,8 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 	if days <= 0 || days > 90 {
 		days = 7
 	}
-	start := time.Now().AddDate(0, 0, -days+1).Truncate(24 * time.Hour)
+	now := time.Now()
+	start := now.AddDate(0, 0, -days+1).Truncate(24 * time.Hour)
 	var result Dashboard
 	base := dao.UsageLogs.Ctx(ctx).WhereGTE(dao.UsageLogs.Columns().CreatedAt, start)
 	if err := base.Clone().Fields(`
@@ -92,7 +99,85 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").Group("u.channel_id,c.name").OrderDesc("requests").Limit(8).Scan(&result.ByChannel); err != nil {
 		return result, gerror.Wrap(err, "load channel breakdown")
 	}
+	recentCost, err := s.recentCostDistribution(ctx, now)
+	if err != nil {
+		return result, err
+	}
+	result.RecentCost = recentCost
 	return result, nil
+}
+
+func (s *Service) recentCostDistribution(ctx context.Context, now time.Time) (RecentCostDistribution, error) {
+	start := now.Add(-time.Duration(recentCostHours-1) * time.Hour).Truncate(time.Hour)
+	result := RecentCostDistribution{Models: make([]RecentCostModel, 0)}
+	base := dao.UsageLogs.Ctx(ctx).WhereGTE(dao.UsageLogs.Columns().CreatedAt, start)
+
+	var total struct {
+		EstimatedCost float64 `orm:"estimated_cost"`
+	}
+	if err := base.Clone().Fields("COALESCE(SUM(estimated_cost),0) AS estimated_cost").Scan(&total); err != nil {
+		return result, gerror.Wrap(err, "load recent cost total")
+	}
+	result.TotalEstimatedCost = total.EstimatedCost
+
+	var models []struct {
+		Name          string  `orm:"name"`
+		EstimatedCost float64 `orm:"estimated_cost"`
+	}
+	if err := base.Clone().Fields("requested_model AS name, COALESCE(SUM(estimated_cost),0) AS estimated_cost").
+		Group(dao.UsageLogs.Columns().RequestedModel).OrderDesc("estimated_cost").OrderAsc(dao.UsageLogs.Columns().RequestedModel).
+		Limit(recentCostModelLimit).Scan(&models); err != nil {
+		return result, gerror.Wrap(err, "load recent cost models")
+	}
+	if len(models) == 0 {
+		return result, nil
+	}
+
+	selectedNames := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		selectedNames[model.Name] = struct{}{}
+	}
+	var rows []struct {
+		Bucket        string  `orm:"bucket"`
+		Name          string  `orm:"name"`
+		EstimatedCost float64 `orm:"estimated_cost"`
+	}
+	if err := base.Clone().
+		Fields("DATE_FORMAT(created_at,'%Y-%m-%d %H:00:00') AS bucket, requested_model AS name, COALESCE(SUM(estimated_cost),0) AS estimated_cost").
+		Group("bucket, requested_model").OrderAsc("bucket").Scan(&rows); err != nil {
+		return result, gerror.Wrap(err, "load hourly recent costs")
+	}
+
+	costsByModel := make(map[string]map[string]float64, len(models)+1)
+	hasOtherModels := false
+	for _, row := range rows {
+		name := row.Name
+		if _, selected := selectedNames[name]; !selected {
+			name = otherCostModelName
+			hasOtherModels = true
+		}
+		if costsByModel[name] == nil {
+			costsByModel[name] = make(map[string]float64)
+		}
+		costsByModel[name][row.Bucket] += row.EstimatedCost
+	}
+	for _, model := range models {
+		result.Models = append(result.Models, RecentCostModel{Name: model.Name, Points: hourlyCostPoints(start, costsByModel[model.Name])})
+	}
+	if hasOtherModels {
+		result.Models = append(result.Models, RecentCostModel{Name: otherCostModelName, Points: hourlyCostPoints(start, costsByModel[otherCostModelName])})
+	}
+	return result, nil
+}
+
+func hourlyCostPoints(start time.Time, costs map[string]float64) []HourlyCostPoint {
+	points := make([]HourlyCostPoint, 0, recentCostHours)
+	for offset := 0; offset < recentCostHours; offset++ {
+		hour := start.Add(time.Duration(offset) * time.Hour)
+		bucket := hour.Format(hourBucketLayout)
+		points = append(points, HourlyCostPoint{Bucket: bucket, EstimatedCost: costs[bucket]})
+	}
+	return points
 }
 
 func (s *Service) UserSummary(ctx context.Context, userID uint64, days int) (UserSummary, error) {

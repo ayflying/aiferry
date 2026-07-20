@@ -20,10 +20,14 @@ const loading = ref(false)
 const days = ref(7)
 const dashboard = ref<Dashboard>({
   summary: { requests: 0, successes: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, averageLatency: 0 },
-  trend: [], byModel: [], byChannel: [],
+  trend: [], byModel: [], byChannel: [], recentCost: { totalEstimatedCost: 0, models: [] },
 })
 const chartElement = ref<HTMLDivElement>()
+const costChartElement = ref<HTMLDivElement>()
+const costChartMode = ref<'bar' | 'area'>('bar')
+const costChartModes = [{ label: '柱状图', value: 'bar' }, { label: '面积图', value: 'area' }]
 let chart: EChartsType | undefined
+let costChart: EChartsType | undefined
 
 const success = computed(() => successRate(dashboard.value.summary.requests, dashboard.value.summary.successes))
 
@@ -36,6 +40,7 @@ async function load() {
     ])
     await nextTick()
     renderChart()
+    renderCostChart()
   } catch (error) {
     showError(error, '加载仪表盘失败')
   } finally {
@@ -64,10 +69,55 @@ function renderChart() {
   })
 }
 
-function resize() { chart?.resize() }
+function renderCostChart() {
+  if (!costChartElement.value || !dashboard.value.recentCost.models.length) return
+  costChart ||= init(costChartElement.value)
+  const models = dashboard.value.recentCost.models
+  const buckets = models[0]?.points.map((point) => point.bucket.slice(5, 16)) || []
+  const area = costChartMode.value === 'area'
+  costChart.setOption({
+    animationDuration: 450,
+    color: ['#31bd7b', '#19a8d8', '#2563eb', '#f58a17', '#7c4dd8'],
+    grid: { top: 28, right: 22, bottom: 56, left: 58 },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: number | string) => formatCost(Number(value)),
+    },
+    legend: { bottom: 4, type: 'scroll', textStyle: { color: '#66717d', fontSize: 11 } },
+    xAxis: {
+      type: 'category',
+      data: buckets,
+      axisLine: { lineStyle: { color: '#dce2e7' } },
+      axisLabel: { color: '#7b8792', hideOverlap: true, interval: 2 },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'USD',
+      nameTextStyle: { color: '#7b8792', padding: [0, 0, 0, -28] },
+      axisLabel: { color: '#7b8792' },
+      splitLine: { lineStyle: { color: '#edf0f2' } },
+    },
+    series: models.map((model) => ({
+      name: model.name,
+      type: area ? 'line' : 'bar',
+      stack: 'cost',
+      data: model.points.map((point) => point.estimatedCost),
+      barMaxWidth: 34,
+      smooth: area,
+      showSymbol: false,
+      areaStyle: area ? { opacity: 0.72 } : undefined,
+      lineStyle: area ? { width: 1.5 } : undefined,
+      emphasis: { focus: 'series' },
+    })),
+  }, true)
+}
+
+function resize() { chart?.resize(); costChart?.resize() }
 watch(days, load)
+watch(costChartMode, renderCostChart)
 onMounted(() => { load(); window.addEventListener('resize', resize) })
-onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dispose() })
+onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dispose(); costChart?.dispose() })
 </script>
 
 <template>
@@ -83,6 +133,18 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dis
       <article class="metric-card"><div class="label"><Route :size="15" />总 Token</div><div class="value">{{ formatNumber(dashboard.summary.totalTokens) }}</div><div class="detail">输入 {{ formatNumber(dashboard.summary.inputTokens) }} · 输出 {{ formatNumber(dashboard.summary.outputTokens) }}</div></article>
       <article class="metric-card"><div class="label"><CircleDollarSign :size="15" />估算成本</div><div class="value">{{ formatCost(dashboard.summary.estimatedCost) }}</div><div class="detail">未定价请求不计入</div></article>
       <article class="metric-card"><div class="label"><Clock3 :size="15" />平均耗时</div><div class="value">{{ Math.round(dashboard.summary.averageLatency) }} ms</div><div class="detail">包含上游响应时间</div></article>
+    </section>
+
+    <section class="recent-cost-panel panel" aria-label="近 24 小时消费分布">
+      <div class="recent-cost-header">
+        <div class="recent-cost-title">
+          <span class="recent-cost-icon"><CircleDollarSign :size="17" /></span>
+          <div><h2>消费分布</h2><span>近 24 小时 · 总计 {{ formatCost(dashboard.recentCost.totalEstimatedCost) }}</span></div>
+        </div>
+        <el-segmented v-model="costChartMode" :options="costChartModes" size="small" aria-label="消费图表类型" />
+      </div>
+      <div v-if="dashboard.recentCost.models.length" ref="costChartElement" class="recent-cost-chart" />
+      <div v-else class="recent-cost-empty">近 24 小时暂无消费数据</div>
     </section>
 
     <section>
@@ -114,11 +176,19 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dis
 </template>
 
 <style scoped>
+.recent-cost-panel { overflow: hidden; padding: 0; }
+.recent-cost-header { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 14px; border-bottom: 1px solid #edf0f2; }
+.recent-cost-title { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.recent-cost-title h2 { margin: 0; color: #15202b; font-size: 14px; font-weight: 700; }
+.recent-cost-title span { color: #66717d; font-size: 11px; }
+.recent-cost-icon { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 50%; color: #16866f !important; background: #e7f5f1; }
+.recent-cost-chart, .recent-cost-empty { width: 100%; height: 330px; }
+.recent-cost-empty { display: grid; place-items: center; color: #7b8792; font-size: 12px; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr) minmax(220px, 1fr); gap: 20px; }
 .trend-chart { width: 100%; height: 300px; }
 .ranking-list { border: 1px solid #dce2e7; border-radius: 6px; background: #fff; }
 .ranking-row { display: flex; min-height: 39px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 11px; border-bottom: 1px solid #edf0f2; font-size: 12px; }
 .ranking-row:last-child { border-bottom: 0; }.ranking-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.ranking-row strong { font-family: 'JetBrains Mono', monospace; font-size: 11px; }.empty-mini { display: grid; min-height: 120px; place-items: center; color: #7b8792; font-size: 12px; }
 @media (max-width: 1100px) { .dashboard-grid { grid-template-columns: 1fr 1fr; }.chart-block { grid-column: 1 / -1; } }
-@media (max-width: 650px) { .dashboard-grid { grid-template-columns: 1fr; }.chart-block { grid-column: auto; }.trend-chart { height: 250px; } }
+@media (max-width: 650px) { .recent-cost-header { align-items: stretch; flex-direction: column; }.recent-cost-chart, .recent-cost-empty { height: 280px; }.dashboard-grid { grid-template-columns: 1fr; }.chart-block { grid-column: auto; }.trend-chart { height: 250px; } }
 </style>

@@ -36,3 +36,21 @@ func TestParseLogRangeRejectsReverseRange(t *testing.T) {
 		t.Fatal("expected reverse range to be rejected")
 	}
 }
+
+func TestHourlyCostPointsIncludesEveryRecentHour(t *testing.T) {
+	location := time.FixedZone("CST", 8*60*60)
+	start := time.Date(2026, time.July, 20, 9, 0, 0, 0, location)
+	points := hourlyCostPoints(start, map[string]float64{
+		"2026-07-20 10:00:00": 3.5,
+		"2026-07-21 08:00:00": 1.25,
+	})
+	if len(points) != recentCostHours {
+		t.Fatalf("point count = %d, want %d", len(points), recentCostHours)
+	}
+	if points[0].Bucket != "2026-07-20 09:00:00" || points[1].EstimatedCost != 3.5 {
+		t.Fatalf("unexpected first points: %+v", points[:2])
+	}
+	if points[len(points)-1].Bucket != "2026-07-21 08:00:00" || points[len(points)-1].EstimatedCost != 1.25 {
+		t.Fatalf("unexpected final point: %+v", points[len(points)-1])
+	}
+}

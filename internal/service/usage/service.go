@@ -87,11 +87,27 @@ type Breakdown struct {
 	EstimatedCost *float64 `json:"estimatedCost" orm:"estimated_cost"`
 }
 
+type HourlyCostPoint struct {
+	Bucket        string  `json:"bucket" orm:"bucket"`
+	EstimatedCost float64 `json:"estimatedCost" orm:"estimated_cost"`
+}
+
+type RecentCostModel struct {
+	Name   string            `json:"name"`
+	Points []HourlyCostPoint `json:"points"`
+}
+
+type RecentCostDistribution struct {
+	TotalEstimatedCost float64           `json:"totalEstimatedCost"`
+	Models             []RecentCostModel `json:"models"`
+}
+
 type Dashboard struct {
-	Summary   Summary      `json:"summary"`
-	Trend     []TrendPoint `json:"trend"`
-	ByModel   []Breakdown  `json:"byModel"`
-	ByChannel []Breakdown  `json:"byChannel"`
+	Summary    Summary                `json:"summary"`
+	Trend      []TrendPoint           `json:"trend"`
+	ByModel    []Breakdown            `json:"byModel"`
+	ByChannel  []Breakdown            `json:"byChannel"`
+	RecentCost RecentCostDistribution `json:"recentCost"`
 }
 
 type UserSummary struct {
@@ -105,33 +121,33 @@ type UserSummary struct {
 }
 
 type LogView struct {
-	Id                 uint64    `json:"id" orm:"id"`
-	RequestId          string    `json:"requestId" orm:"request_id"`
-	UserId             uint64    `json:"userId" orm:"user_id"`
-	UserName           string    `json:"userName" orm:"user_name"`
-	APIKeyName         string    `json:"apiKeyName" orm:"api_key_name"`
-	ChannelName        string    `json:"channelName" orm:"channel_name"`
-	Endpoint           string    `json:"endpoint" orm:"endpoint"`
-	UpstreamEndpoint   string    `json:"upstreamEndpoint" orm:"upstream_endpoint"`
-	ProtocolConversion string    `json:"protocolConversion" orm:"protocol_conversion"`
-	ClientIP           string    `json:"clientIp" orm:"client_ip"`
-	IPLocation         string    `json:"ipLocation" orm:"ip_location"`
-	RequestedModel     string    `json:"requestedModel" orm:"requested_model"`
-	UpstreamModel      string    `json:"upstreamModel" orm:"upstream_model"`
-	HttpStatus         uint      `json:"httpStatus" orm:"http_status"`
-	IsStream           int       `json:"isStream" orm:"is_stream"`
-	InputTokens        *uint64   `json:"inputTokens" orm:"input_tokens"`
-	CachedInputTokens  *uint64   `json:"cachedInputTokens" orm:"cached_input_tokens"`
-	OutputTokens       *uint64   `json:"outputTokens" orm:"output_tokens"`
-	TotalTokens        *uint64   `json:"totalTokens" orm:"total_tokens"`
-	EstimatedCost      *float64  `json:"estimatedCost" orm:"estimated_cost"`
-	BillingDetailsJSON string    `json:"-" orm:"billing_details_json"`
+	Id                 uint64            `json:"id" orm:"id"`
+	RequestId          string            `json:"requestId" orm:"request_id"`
+	UserId             uint64            `json:"userId" orm:"user_id"`
+	UserName           string            `json:"userName" orm:"user_name"`
+	APIKeyName         string            `json:"apiKeyName" orm:"api_key_name"`
+	ChannelName        string            `json:"channelName" orm:"channel_name"`
+	Endpoint           string            `json:"endpoint" orm:"endpoint"`
+	UpstreamEndpoint   string            `json:"upstreamEndpoint" orm:"upstream_endpoint"`
+	ProtocolConversion string            `json:"protocolConversion" orm:"protocol_conversion"`
+	ClientIP           string            `json:"clientIp" orm:"client_ip"`
+	IPLocation         string            `json:"ipLocation" orm:"ip_location"`
+	RequestedModel     string            `json:"requestedModel" orm:"requested_model"`
+	UpstreamModel      string            `json:"upstreamModel" orm:"upstream_model"`
+	HttpStatus         uint              `json:"httpStatus" orm:"http_status"`
+	IsStream           int               `json:"isStream" orm:"is_stream"`
+	InputTokens        *uint64           `json:"inputTokens" orm:"input_tokens"`
+	CachedInputTokens  *uint64           `json:"cachedInputTokens" orm:"cached_input_tokens"`
+	OutputTokens       *uint64           `json:"outputTokens" orm:"output_tokens"`
+	TotalTokens        *uint64           `json:"totalTokens" orm:"total_tokens"`
+	EstimatedCost      *float64          `json:"estimatedCost" orm:"estimated_cost"`
+	BillingDetailsJSON string            `json:"-" orm:"billing_details_json"`
 	BillingDetails     *BillingBreakdown `json:"billingDetails,omitempty" orm:"-"`
-	DurationMs         uint64    `json:"durationMs" orm:"duration_ms"`
-	FirstTokenMs       *uint64   `json:"firstTokenMs" orm:"first_token_ms"`
-	Attempts           uint      `json:"attempts" orm:"attempts"`
-	ErrorMessage       string    `json:"errorMessage" orm:"error_message"`
-	CreatedAt          time.Time `json:"createdAt" orm:"created_at"`
+	DurationMs         uint64            `json:"durationMs" orm:"duration_ms"`
+	FirstTokenMs       *uint64           `json:"firstTokenMs" orm:"first_token_ms"`
+	Attempts           uint              `json:"attempts" orm:"attempts"`
+	ErrorMessage       string            `json:"errorMessage" orm:"error_message"`
+	CreatedAt          time.Time         `json:"createdAt" orm:"created_at"`
 }
 
 type LogSummary struct {

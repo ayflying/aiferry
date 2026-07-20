@@ -23,11 +23,27 @@ export interface Breakdown {
   estimatedCost?: number
 }
 
+export interface HourlyCostPoint {
+  bucket: string
+  estimatedCost: number
+}
+
+export interface RecentCostModel {
+  name: string
+  points: HourlyCostPoint[]
+}
+
+export interface RecentCostDistribution {
+  totalEstimatedCost: number
+  models: RecentCostModel[]
+}
+
 export interface Dashboard {
   summary: Summary
   trend: TrendPoint[]
   byModel: Breakdown[]
   byChannel: Breakdown[]
+  recentCost: RecentCostDistribution
 }
 
 export interface UsageLog {
