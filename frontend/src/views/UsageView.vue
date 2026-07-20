@@ -3,7 +3,7 @@ import dayjs from 'dayjs'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
-import type { ManagedUser, UsageLog, UsagePage } from '../api/types'
+import type { ManagedUser, PriceRule, PublicModel, UsageLog, UsagePage } from '../api/types'
 import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
@@ -20,6 +20,9 @@ const users = ref<ManagedUser[]>([])
 const isAdmin = computed(() => auth.user?.isAdmin === true)
 const usageItems = computed(() => page.value.items ?? [])
 const selectedUsage = ref<UsageLog>()
+const selectedModel = ref<PublicModel>()
+const selectedPriceRules = ref<PriceRule[]>([])
+const priceLoading = ref(false)
 const detailOpen = ref(false)
 
 async function load() {
@@ -61,7 +64,27 @@ function protocolRoute(row: UsageLog) {
   const upstream = row.upstreamEndpoint || row.endpoint
   return row.protocolConversion ? `${protocolName(row.endpoint)} → ${protocolName(upstream)}` : protocolName(row.endpoint)
 }
-function openUsageDetail(row: UsageLog) { selectedUsage.value = row; detailOpen.value = true }
+async function openUsageDetail(row: UsageLog) {
+  selectedUsage.value = row
+  selectedModel.value = undefined
+  selectedPriceRules.value = []
+  detailOpen.value = true
+  priceLoading.value = true
+  try {
+    const models = await apiGet<PublicModel[]>('/public-models')
+    const model = models.find((item) => item.publicName === row.requestedModel)
+    if (!model || selectedUsage.value?.requestId !== row.requestId) return
+    selectedModel.value = model
+    if (model.billingMode === 'rules') {
+      const rules = await apiGet<PriceRule[]>(`/models/${model.id}/price-rules`)
+      if (selectedUsage.value?.requestId === row.requestId) selectedPriceRules.value = rules
+    }
+  } catch (error) {
+    showError(error, '加载模型价格失败')
+  } finally {
+    if (selectedUsage.value?.requestId === row.requestId) priceLoading.value = false
+  }
+}
 onMounted(load)
 </script>
 
@@ -110,7 +133,7 @@ onMounted(load)
       <div v-if="!loading && !usageItems.length" class="empty-state"><div><strong>暂无用量记录</strong><span>成功调用中转接口后会显示在这里</span></div></div>
       <div class="pagination-row"><el-pagination :current-page="filters.page" :page-size="filters.pageSize" :page-sizes="[20, 50, 100]" :total="page.total" layout="total, sizes, prev, pager, next" @current-change="changePage" @size-change="changePageSize" /></div>
     </div>
-    <UsageDetailDialog v-model="detailOpen" :usage="selectedUsage" />
+    <UsageDetailDialog v-model="detailOpen" :usage="selectedUsage" :model="selectedModel" :price-rules="selectedPriceRules" :price-loading="priceLoading" />
   </div>
 </template>
 
