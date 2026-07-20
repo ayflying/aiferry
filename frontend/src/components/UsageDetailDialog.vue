@@ -32,15 +32,16 @@ const resultMessage = computed(() => {
   return props.usage.errorMessage || (isSuccess.value ? '模型响应正常' : '未返回错误详情')
 })
 const billingModeLabel = computed(() => {
-  if (props.model?.billingMode === 'request') return '按次'
-  if (props.model?.billingMode === 'rules') return '高级规则'
-  return '按 Token'
+	if (props.model?.billingMode === 'request') return '按次'
+	if (props.model?.billingMode === 'rules') return '高级规则'
+	return '按 Token'
 })
 const activePriceRules = computed(() => props.priceRules.filter((rule) => rule.status === 1))
+const configuredTokenPrices = computed(() => tokenPrices.filter(([, field]) => isConfiguredPrice(props.model?.[field])))
 
 function tokenPrice(field: typeof tokenPrices[number][1]) {
-  const value = props.model?.[field]
-  return value === undefined ? '—' : `${formatCost(value)} / 1M Token`
+	const value = props.model?.[field]
+	return isConfiguredPrice(value) ? `${formatCost(value)} / 1M Token` : ''
 }
 
 function requestPrice() {
@@ -55,7 +56,11 @@ function ruleRates(rule: PriceRule) {
     audioOutputPerMillion: '音频输出', request: '按次',
   }
   const rates = Object.entries(rule.rates).filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
-  return rates.map(([name, value]) => `${labels[name] || name} ${formatCost(value, rule.currency)}`).join(' · ') || '未配置价格'
+	return rates.map(([name, value]) => `${labels[name] || name} ${formatCost(value, rule.currency)}`).join(' · ') || '未配置价格'
+}
+
+function isConfiguredPrice(value: unknown): value is number {
+	return typeof value === 'number' && Number.isFinite(value)
 }
 </script>
 
@@ -95,11 +100,12 @@ function ruleRates(rule: PriceRule) {
         <template v-else-if="!model">
           <p class="empty-price">当前模型未配置价格</p>
         </template>
-        <template v-else-if="model.billingMode === 'token'">
-          <div class="price-metrics">
-            <div v-for="([label, field]) in tokenPrices" :key="field"><span>{{ label }}</span><strong>{{ tokenPrice(field) }}</strong></div>
-          </div>
-        </template>
+		<template v-else-if="model.billingMode === 'token'">
+		  <div v-if="configuredTokenPrices.length" class="price-metrics">
+			<div v-for="([label, field]) in configuredTokenPrices" :key="field"><span>{{ label }}</span><strong>{{ tokenPrice(field) }}</strong></div>
+		  </div>
+		  <p v-else class="empty-price">当前模型未配置 Token 价格</p>
+		</template>
         <el-descriptions v-else-if="model.billingMode === 'request'" :column="2" border size="small">
           <el-descriptions-item label="固定价格"><strong class="cost-value">{{ requestPrice() }}</strong></el-descriptions-item>
           <el-descriptions-item label="计费说明">每次请求固定扣费，不考虑 Token 数</el-descriptions-item>
