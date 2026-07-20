@@ -68,6 +68,9 @@ function protocolRoute(row: UsageLog) {
   const upstream = row.upstreamEndpoint || row.endpoint
   return row.protocolConversion ? `${protocolName(row.endpoint)} → ${protocolName(upstream)}` : protocolName(row.endpoint)
 }
+function formatIPLocation(location?: string) {
+  return location?.split('/').map((part) => part.trim()).filter(Boolean).join(' - ') || '归属地未识别'
+}
 function currentModelPrice(row: UsageLog) {
   const model = currentModels.value.find((item) => item.publicName === row.requestedModel)
   if (!model) return { primary: '—', secondary: '' }
@@ -143,7 +146,7 @@ onMounted(load)
 
     <div class="table-panel">
       <el-table v-loading="loading" :data="usageItems" row-key="id">
-        <el-table-column label="时间" min-width="230"><template #default="{ row }"><div class="time-cell"><strong>{{ formatTime(row.createdAt) }}</strong><small v-if="row.clientIp">{{ row.clientIp }}<template v-if="row.ipLocation"> · {{ row.ipLocation }}</template></small><small v-else>IP 未记录</small></div></template></el-table-column>
+        <el-table-column label="时间" min-width="230"><template #default="{ row }"><div class="time-cell"><strong>{{ formatTime(row.createdAt) }}</strong><small>{{ formatIPLocation(row.ipLocation) }}</small></div></template></el-table-column>
         <el-table-column label="模型" min-width="160"><template #default="{ row }"><div class="request-cell"><strong>{{ row.requestedModel }}</strong><small v-if="row.upstreamModel && row.upstreamModel !== row.requestedModel">→ {{ row.upstreamModel }}</small></div></template></el-table-column>
         <el-table-column v-if="isAdmin" label="用户" min-width="130"><template #default="{ row }">{{ row.userName || `#${row.userId}` }}</template></el-table-column>
         <el-table-column :label="isAdmin ? '渠道 / 密钥' : '访问密钥'" min-width="150"><template #default="{ row }"><div class="request-cell"><span v-if="isAdmin">{{ row.channelName || '—' }}</span><span v-else>{{ row.apiKeyName || '—' }}</span><small v-if="isAdmin">{{ row.apiKeyName || '—' }}</small></div></template></el-table-column>
