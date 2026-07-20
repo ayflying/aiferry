@@ -130,11 +130,6 @@ onMounted(load)
     </div>
 
     <div class="usage-filter-summary" aria-live="polite">
-      <span>筛选时段</span>
-      <time>{{ formatTime(page.startAt) }}</time>
-      <span>至</span>
-      <time>{{ formatTime(page.endAt) }}</time>
-      <i aria-hidden="true" />
       <span>费用</span>
       <strong class="mono">{{ formatCost(page.summary.estimatedCost) }}</strong>
       <i aria-hidden="true" />
@@ -165,6 +160,5 @@ onMounted(load)
 
 <style scoped>
 .time-cell, .request-cell, .token-cell, .stream-cell, .protocol-cell, .price-cell { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.time-cell strong, .time-cell small, .request-cell > span, .request-cell > strong, .protocol-cell strong, .price-cell strong, .price-cell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.time-cell small, .request-cell small, .token-cell small, .stream-cell small, .protocol-cell small, .price-cell small { color: #7b8792; font-size: 11px; }.protocol-cell.converted strong { color: #1677ff; }.time-cell strong, .token-cell strong, .stream-cell strong, .protocol-cell strong, .price-cell strong, .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }.latency-cell { display: flex; min-width: 0; align-items: stretch; gap: 8px; }.latency-strip { display: flex; width: 4px; min-width: 4px; flex-direction: column; overflow: hidden; }.latency-strip i { flex: 1; }.latency-strip.single-latency i { height: 100%; }.latency-copy { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: #4d5c69; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.2; }.latency-copy strong, .latency-copy small { font: inherit; white-space: nowrap; }.latency-copy small { font-size: 12px; }.latency-fast { color: #14956a; }.latency-medium { color: #cf8916; }.latency-slow { color: #ef3f4d; }.latency-unknown { color: #7b8792; }.latency-strip .latency-fast { background: #14956a; }.latency-strip .latency-medium { background: #cf8916; }.latency-strip .latency-slow { background: #ef3f4d; }.latency-strip .latency-unknown { background: #b7c1ca; }.detail-trigger { height: auto; max-width: 100%; padding: 0; text-align: left; }.detail-trigger:hover .price-cell strong { text-decoration: underline; }
-.usage-filter-summary { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 2px; color: #6c7a88; border-top: 1px solid #e6ebf0; border-bottom: 1px solid #e6ebf0; font-size: 12px; }.usage-filter-summary time, .usage-filter-summary strong { color: #293643; font-variant-numeric: tabular-nums; }.usage-filter-summary i { width: 1px; height: 14px; margin: 0 4px; background: #d9e1e8; }
-@media (max-width: 720px) { .usage-filter-summary { align-items: flex-start; flex-wrap: wrap; gap: 5px 7px; padding: 7px 2px; }.usage-filter-summary i { display: none; }.usage-filter-summary time { white-space: nowrap; } }
+.usage-filter-summary { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 2px; color: #6c7a88; border-top: 1px solid #e6ebf0; border-bottom: 1px solid #e6ebf0; font-size: 12px; }.usage-filter-summary strong { color: #293643; font-variant-numeric: tabular-nums; }.usage-filter-summary i { width: 1px; height: 14px; margin: 0 4px; background: #d9e1e8; }
 </style>
