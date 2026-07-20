@@ -6,6 +6,10 @@ describe('format helpers', () => {
     expect(formatCost(undefined)).toBe('未定价')
   })
 
+  it('uses the dollar sign for USD', () => {
+    expect(formatCost(2.5)).toBe('$2.50')
+  })
+
   it('formats token counts', () => {
     expect(formatNumber(12345)).toBe('12,345')
   })

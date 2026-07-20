@@ -7,9 +7,10 @@ export function formatNumber(value?: number | null): string {
 
 export function formatCost(value?: number | null, currency = 'USD'): string {
   if (value === undefined || value === null) return '未定价'
-  return new Intl.NumberFormat('zh-CN', {
+  const normalizedCurrency = (currency || 'USD').toUpperCase()
+  return new Intl.NumberFormat(normalizedCurrency === 'USD' ? 'en-US' : 'zh-CN', {
     style: 'currency',
-    currency: currency || 'USD',
+    currency: normalizedCurrency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 6,
   }).format(value)
