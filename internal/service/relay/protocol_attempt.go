@@ -84,11 +84,13 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 		result := attemptResult{status: resp.StatusCode, body: plan.convertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
 		result.upstreamEndpoint = plan.upstreamEndpoint
 		result.protocolConversion = plan.conversion
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			result.errorMessage = upstreamError(responseBody, resp.Status)
+		}
 		if readErr != nil {
 			return result, false, gerror.Wrap(readErr, "read upstream response")
 		}
 		if retryableStatusForRules(resp.StatusCode, settings.RetryStatusCodes) {
-			result.errorMessage = upstreamError(responseBody, resp.Status)
 			return result, false, nil
 		}
 		if writer != nil {

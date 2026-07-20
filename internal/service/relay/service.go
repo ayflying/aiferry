@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
@@ -152,13 +153,15 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	}
 	maxAttempts := min(len(candidates), settings.MaxFailoverAttempts)
 	var (
-		last     attemptResult
-		attempts int
+		last          attemptResult
+		lastCandidate Candidate
+		attempts      int
 	)
 	for index := 0; index < maxAttempts; index++ {
 		outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings)
 		attempts += outcome.attempts
 		last = outcome.result
+		lastCandidate = outcome.candidate
 		if outcome.handled {
 			candidate := outcome.candidate
 			result := outcome.result
@@ -177,9 +180,13 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 			return nil
 		}
 	}
-	if last.status == 0 {
-		last.status = http.StatusBadGateway
-		last.body = openAIError("upstream_error", "All eligible channels failed")
+	if attempts > 0 {
+		last = failedAttemptResult(last, "All eligible channels failed")
+		if recordErr := s.record(ctx, requestID, key, lastCandidate, endpoint, requestedModel, isStream, attempts, startedAt, last); recordErr != nil {
+			g.Log().Errorf(ctx, "record failed request %s: %v", requestID, recordErr)
+		}
+	} else {
+		last = failedAttemptResult(last, "All eligible channels failed")
 	}
 	s.writeBufferedResponse(writer, last.status, last.body, http.Header{"Content-Type": []string{"application/json"}})
 	return nil

@@ -44,7 +44,7 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 			recordError = chargeErr.Error()
 		}
 	}
-	_ = s.usage.Record(ctx, usage.RecordInput{
+	if err := s.usage.Record(ctx, usage.RecordInput{
 		RequestID:           requestID,
 		UserID:              key.UserId,
 		APIKeyID:            key.Id,
@@ -63,7 +63,9 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		FirstTokenMs:        result.firstTokenMs,
 		Attempts:            attempts,
 		ErrorMessage:        recordError,
-	})
+	}); err != nil {
+		g.Log().Errorf(ctx, "record usage %s: %v", requestID, err)
+	}
 	return chargeErr
 }
 

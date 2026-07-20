@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -53,6 +54,32 @@ func TestRetryableStatus(t *testing.T) {
 		if retryableStatus(status) {
 			t.Fatalf("status %d should not retry", status)
 		}
+	}
+}
+
+func TestFailedAttemptResultKeepsUpstreamErrorReason(t *testing.T) {
+	result := failedAttemptResult(attemptResult{
+		status: http.StatusBadRequest,
+		body:   openAIError("invalid_request_error", "图片格式不受支持"),
+	}, "All eligible channels failed")
+	if result.errorMessage != "图片格式不受支持" {
+		t.Fatalf("error reason = %q", result.errorMessage)
+	}
+	if result.status != http.StatusBadRequest {
+		t.Fatalf("status = %d", result.status)
+	}
+}
+
+func TestFailedAttemptResultTurnsTransportFailureIntoGatewayError(t *testing.T) {
+	result := failedAttemptResult(attemptResult{}, "call upstream: context deadline exceeded")
+	if result.status != http.StatusBadGateway {
+		t.Fatalf("status = %d", result.status)
+	}
+	if result.errorMessage != "call upstream: context deadline exceeded" {
+		t.Fatalf("error reason = %q", result.errorMessage)
+	}
+	if upstreamError(result.body, "") != result.errorMessage {
+		t.Fatalf("response body did not retain error reason: %s", result.body)
 	}
 }
 
