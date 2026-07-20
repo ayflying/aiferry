@@ -8,7 +8,7 @@ import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
-import { formatCost, formatLatency, formatNumber, formatTokenSpeed, formatTime } from '../lib/format'
+import { formatCost, formatNumber, formatTokenSpeed, formatTime } from '../lib/format'
 
 const store = useAppStore()
 const auth = useAuthStore()
@@ -77,13 +77,17 @@ function currentModelPrice(row: UsageLog) {
   return { primary: `入 ${formatCost(model.inputPrice)} · 出 ${formatCost(model.outputPrice)}`, secondary: `每 1M Token${cache}` }
 }
 function latencyTone(value: number | undefined | null, fastMs: number, slowMs: number) {
-  if (value === undefined || value === null) return ''
+  if (value === undefined || value === null) return 'latency-unknown'
   if (value <= fastMs) return 'latency-fast'
   if (value >= slowMs) return 'latency-slow'
-  return ''
+  return 'latency-medium'
 }
-function firstTokenTone(row: UsageLog) { return latencyTone(row.firstTokenMs, 1_000, 5_000) }
-function totalLatencyTone(row: UsageLog) { return latencyTone(row.durationMs, row.isStream ? 5_000 : 2_000, row.isStream ? 20_000 : 10_000) }
+function firstTokenTone(row: UsageLog) { return latencyTone(row.firstTokenMs, 3_000, 10_000) }
+function totalLatencyTone(row: UsageLog) { return latencyTone(row.durationMs, 5_000, 15_000) }
+function formatElapsed(value?: number | null) {
+  if (value === undefined || value === null) return '—'
+  return `${(value / 1000).toFixed(1)}s`
+}
 async function openUsageDetail(row: UsageLog) {
   selectedUsage.value = row
   selectedModel.value = undefined
@@ -148,7 +152,7 @@ onMounted(load)
         <el-table-column label="流式" min-width="96"><template #default="{ row }"><div class="stream-cell"><strong>{{ row.isStream ? '流式' : '非流式' }}</strong><small>{{ formatTokenSpeed(row.outputTokens, row.durationMs, row.firstTokenMs) }}</small></div></template></el-table-column>
         <el-table-column label="Token" min-width="185"><template #default="{ row }"><div class="token-cell"><strong>入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</strong><small>缓存 {{ formatNumber(row.cachedInputTokens) }}</small></div></template></el-table-column>
         <el-table-column label="估算成本" min-width="125"><template #default="{ row }"><span :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</span></template></el-table-column>
-        <el-table-column label="性能" min-width="164"><template #default="{ row }"><div class="performance-cell"><template v-if="row.isStream"><strong :class="firstTokenTone(row)">首 token {{ formatLatency(row.firstTokenMs) }}</strong><small :class="totalLatencyTone(row)">总耗时 {{ formatLatency(row.durationMs) }}</small></template><strong v-else :class="totalLatencyTone(row)">总耗时 {{ formatLatency(row.durationMs) }}</strong></div></template></el-table-column>
+        <el-table-column label="耗时" min-width="116"><template #default="{ row }"><div class="latency-cell"><span class="latency-strip" :class="{ 'single-latency': !row.isStream }"><i :class="row.isStream ? firstTokenTone(row) : totalLatencyTone(row)" /><i v-if="row.isStream" :class="totalLatencyTone(row)" /></span><div class="latency-copy"><template v-if="row.isStream"><strong>首字 <span :class="firstTokenTone(row)">{{ formatElapsed(row.firstTokenMs) }}</span></strong><small>耗时 <span :class="totalLatencyTone(row)">{{ formatElapsed(row.durationMs) }}</span></small></template><template v-else><strong>响应 <span :class="totalLatencyTone(row)">{{ formatElapsed(row.durationMs) }}</span></strong><small>非流式响应</small></template></div></div></template></el-table-column>
         <el-table-column label="详情" min-width="165"><template #default="{ row }"><el-button v-if="isSuccessful(row)" text class="detail-trigger" @click="openUsageDetail(row)"><span class="price-cell"><strong>{{ currentModelPrice(row).primary }}</strong><small v-if="currentModelPrice(row).secondary">{{ currentModelPrice(row).secondary }}</small></span></el-button><span v-else class="danger-text">{{ row.errorMessage || '—' }}</span></template></el-table-column>
       </el-table>
       <div v-if="!loading && !usageItems.length" class="empty-state"><div><strong>暂无用量记录</strong><span>成功调用中转接口后会显示在这里</span></div></div>
@@ -159,7 +163,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-.time-cell, .request-cell, .token-cell, .stream-cell, .performance-cell, .protocol-cell, .price-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.time-cell strong, .time-cell small, .request-cell > span, .request-cell > strong, .protocol-cell strong, .price-cell strong, .price-cell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.time-cell small, .request-cell small, .token-cell small, .stream-cell small, .performance-cell small, .protocol-cell small, .price-cell small { color: #7b8792; font-size: 10px; }.protocol-cell.converted strong { color: #1677ff; }.time-cell strong, .token-cell strong, .stream-cell strong, .performance-cell strong, .protocol-cell strong, .price-cell strong, .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }.performance-cell .latency-fast { color: #16803c; }.performance-cell .latency-slow { color: #d14343; }.detail-trigger { height: auto; max-width: 100%; padding: 0; text-align: left; }.detail-trigger:hover .price-cell strong { text-decoration: underline; }
+.time-cell, .request-cell, .token-cell, .stream-cell, .protocol-cell, .price-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.time-cell strong, .time-cell small, .request-cell > span, .request-cell > strong, .protocol-cell strong, .price-cell strong, .price-cell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.time-cell small, .request-cell small, .token-cell small, .stream-cell small, .protocol-cell small, .price-cell small { color: #7b8792; font-size: 10px; }.protocol-cell.converted strong { color: #1677ff; }.time-cell strong, .token-cell strong, .stream-cell strong, .protocol-cell strong, .price-cell strong, .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }.latency-cell { display: flex; min-width: 0; align-items: stretch; gap: 8px; }.latency-strip { display: flex; width: 4px; min-width: 4px; flex-direction: column; overflow: hidden; }.latency-strip i { flex: 1; }.latency-strip.single-latency i { height: 100%; }.latency-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; color: #4d5c69; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.15; }.latency-copy strong, .latency-copy small { font: inherit; white-space: nowrap; }.latency-copy small { font-size: 10px; }.latency-fast { color: #14956a; }.latency-medium { color: #cf8916; }.latency-slow { color: #ef3f4d; }.latency-unknown { color: #7b8792; }.latency-strip .latency-fast { background: #14956a; }.latency-strip .latency-medium { background: #cf8916; }.latency-strip .latency-slow { background: #ef3f4d; }.latency-strip .latency-unknown { background: #b7c1ca; }.detail-trigger { height: auto; max-width: 100%; padding: 0; text-align: left; }.detail-trigger:hover .price-cell strong { text-decoration: underline; }
 .usage-filter-summary { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 2px; color: #6c7a88; border-top: 1px solid #e6ebf0; border-bottom: 1px solid #e6ebf0; font-size: 12px; }.usage-filter-summary time, .usage-filter-summary strong { color: #293643; font-variant-numeric: tabular-nums; }.usage-filter-summary i { width: 1px; height: 14px; margin: 0 4px; background: #d9e1e8; }
 @media (max-width: 720px) { .usage-filter-summary { align-items: flex-start; flex-wrap: wrap; gap: 5px 7px; padding: 7px 2px; }.usage-filter-summary i { display: none; }.usage-filter-summary time { white-space: nowrap; } }
 </style>
