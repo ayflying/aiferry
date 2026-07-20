@@ -44,6 +44,7 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 			recordError = chargeErr.Error()
 		}
 	}
+	recordError = detailedFailureLog(result, recordStatus, recordError, stream, attempts, time.Since(startedAt).Milliseconds())
 	if err := s.usage.Record(ctx, usage.RecordInput{
 		RequestID:           requestID,
 		UserID:              key.UserId,

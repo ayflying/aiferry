@@ -37,6 +37,12 @@ const billingModeLabel = computed(() => {
 	if (props.model?.billingMode === 'rules') return '高级规则'
 	return '按 Token'
 })
+const chargeStatus = computed(() => {
+  if (!props.usage) return '—'
+  if (props.usage.userId === 0) return '测试请求，不扣费'
+  if (!isSuccess.value) return '未扣费'
+  return props.usage.estimatedCost === undefined ? '无需扣费' : '已扣费'
+})
 const activePriceRules = computed(() => props.priceRules.filter((rule) => rule.status === 1))
 const configuredTokenPrices = computed(() => tokenPrices.filter(([, field]) => isConfiguredPrice(props.model?.[field])))
 
@@ -121,6 +127,16 @@ function isConfiguredPrice(value: unknown): value is number {
       </section>
 
       <section class="detail-section">
+        <h3>扣费明细</h3>
+        <el-descriptions :column="2" border size="small">
+          <el-descriptions-item label="扣费状态">{{ chargeStatus }}</el-descriptions-item>
+          <el-descriptions-item label="估算金额"><strong class="cost-value">{{ formatCost(usage.estimatedCost) }}</strong></el-descriptions-item>
+          <el-descriptions-item label="计价模型">{{ usage.requestedModel }}</el-descriptions-item>
+          <el-descriptions-item label="计费方式">{{ billingModeLabel }}</el-descriptions-item>
+        </el-descriptions>
+      </section>
+
+      <section class="detail-section">
         <h3>Token 使用</h3>
         <div class="token-metrics">
           <div><span>输入</span><strong>{{ formatNumber(usage.inputTokens) }}</strong></div>
@@ -131,8 +147,9 @@ function isConfiguredPrice(value: unknown): value is number {
       </section>
 
       <section class="detail-section result-section">
-        <h3>处理结果</h3>
-        <p class="result-message" :class="{ 'danger-result': !isSuccess }">{{ resultMessage }}</p>
+        <h3>{{ isSuccess ? '处理结果' : '失败日志' }}</h3>
+        <p v-if="isSuccess" class="result-message">{{ resultMessage }}</p>
+        <pre v-else class="failure-log">{{ resultMessage }}</pre>
         <span class="result-meta">首包 {{ usage.firstTokenMs ?? '—' }} ms · 上游尝试 {{ usage.attempts }} 次</span>
       </section>
     </template>
@@ -140,5 +157,5 @@ function isConfiguredPrice(value: unknown): value is number {
 </template>
 
 <style scoped>
-:deep(.usage-detail-dialog) { width: min(720px, calc(100vw - 32px)) !important; }.detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; border: 1px solid #dce2e7; }.detail-summary div { display: flex; min-height: 66px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 14px; border-right: 1px solid #dce2e7; }.detail-summary div:last-child { border-right: 0; }.detail-summary span, .result-meta, .price-metrics span { color: #66717d; font-size: 11px; }.detail-summary strong, .token-metrics strong, .price-metrics strong, .cost-value { color: #15202b; font-family: 'JetBrains Mono', monospace; font-size: 13px; }.detail-section { padding: 18px 0; border-top: 1px solid #dce2e7; }.detail-section h3 { margin: 0 0 12px; color: #15202b; font-size: 13px; }.mono { font-family: 'JetBrains Mono', monospace; }.detail-value { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }.token-metrics, .price-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #dce2e7; }.token-metrics div, .price-metrics div { display: flex; min-height: 64px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 12px; border-right: 1px solid #dce2e7; }.token-metrics div:last-child, .price-metrics div:last-child { border-right: 0; }.price-metrics div:nth-child(4n) { border-right: 0; }.price-metrics div:nth-child(-n + 4) { border-bottom: 1px solid #dce2e7; }.result-section { padding-bottom: 0; }.result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }.danger-result { color: #d14343; }.empty-price { margin: 0; color: #66717d; font-size: 13px; }@media (max-width: 720px) { .detail-summary { grid-template-columns: 1fr; }.detail-summary div { min-height: 58px; border-right: 0; border-bottom: 1px solid #dce2e7; }.detail-summary div:last-child { border-bottom: 0; }.token-metrics, .price-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.token-metrics div:nth-child(2), .price-metrics div:nth-child(2n) { border-right: 0; }.token-metrics div:nth-child(-n + 2), .price-metrics div:nth-child(-n + 6) { border-bottom: 1px solid #dce2e7; } }@media (max-width: 480px) { .token-metrics, .price-metrics { grid-template-columns: 1fr; }.token-metrics div, .price-metrics div { border-right: 0; border-bottom: 1px solid #dce2e7; }.token-metrics div:last-child, .price-metrics div:last-child { border-bottom: 0; } }
+:deep(.usage-detail-dialog) { width: min(720px, calc(100vw - 32px)) !important; }:deep(.usage-detail-dialog .el-dialog__body) { height: min(620px, calc(100vh - 168px)); overflow-y: auto; }.detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; border: 1px solid #dce2e7; }.detail-summary div { display: flex; min-height: 66px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 14px; border-right: 1px solid #dce2e7; }.detail-summary div:last-child { border-right: 0; }.detail-summary span, .result-meta, .price-metrics span { color: #66717d; font-size: 11px; }.detail-summary strong, .token-metrics strong, .price-metrics strong, .cost-value { color: #15202b; font-family: 'JetBrains Mono', monospace; font-size: 13px; }.detail-section { padding: 18px 0; border-top: 1px solid #dce2e7; }.detail-section h3 { margin: 0 0 12px; color: #15202b; font-size: 13px; }.mono { font-family: 'JetBrains Mono', monospace; }.detail-value { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }.token-metrics, .price-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #dce2e7; }.token-metrics div, .price-metrics div { display: flex; min-height: 64px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 12px; border-right: 1px solid #dce2e7; }.token-metrics div:last-child, .price-metrics div:last-child { border-right: 0; }.price-metrics div:nth-child(4n) { border-right: 0; }.price-metrics div:nth-child(-n + 4) { border-bottom: 1px solid #dce2e7; }.result-section { padding-bottom: 0; }.result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }.failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }.empty-price { margin: 0; color: #66717d; font-size: 13px; }@media (max-width: 720px) { :deep(.usage-detail-dialog .el-dialog__body) { height: min(560px, calc(100vh - 148px)); }.detail-summary { grid-template-columns: 1fr; }.detail-summary div { min-height: 58px; border-right: 0; border-bottom: 1px solid #dce2e7; }.detail-summary div:last-child { border-bottom: 0; }.token-metrics, .price-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.token-metrics div:nth-child(2), .price-metrics div:nth-child(2n) { border-right: 0; }.token-metrics div:nth-child(-n + 2), .price-metrics div:nth-child(-n + 6) { border-bottom: 1px solid #dce2e7; } }@media (max-width: 480px) { .token-metrics, .price-metrics { grid-template-columns: 1fr; }.token-metrics div, .price-metrics div { border-right: 0; border-bottom: 1px solid #dce2e7; }.token-metrics div:last-child, .price-metrics div:last-child { border-bottom: 0; } }
 </style>
