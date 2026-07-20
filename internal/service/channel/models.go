@@ -129,6 +129,7 @@ func (s *Service) SelectModels(ctx context.Context, channelID uint64, input admi
 	if err != nil {
 		return nil, err
 	}
+	s.InvalidateListCache(ctx)
 	if err = s.invalidateRoutes(ctx); err != nil {
 		return nil, err
 	}
@@ -163,6 +164,7 @@ func (s *Service) DeleteFailedModels(ctx context.Context, channelID uint64) (int
 	if err != nil {
 		return 0, gerror.Wrap(err, "delete failed channel models")
 	}
+	s.InvalidateListCache(ctx)
 	if err = s.invalidateRoutes(ctx); err != nil {
 		return 0, err
 	}
@@ -213,6 +215,7 @@ func (s *Service) UpdateModel(ctx context.Context, id uint64, input adminapi.Mod
 	if err != nil {
 		return err
 	}
+	s.InvalidateListCache(ctx)
 	if err = s.invalidateRoutes(ctx); err != nil {
 		return err
 	}

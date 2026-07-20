@@ -18,7 +18,7 @@ func (c *Controller) createChannelGroup(r *ghttp.Request) {
 		return
 	}
 	id, err := c.groups.Create(r.Context(), input)
-	respond(r, map[string]any{"id": id}, err)
+	c.respondAfterChannelListMutation(r, map[string]any{"id": id}, err)
 }
 
 func (c *Controller) updateChannelGroup(r *ghttp.Request) {
@@ -26,11 +26,11 @@ func (c *Controller) updateChannelGroup(r *ghttp.Request) {
 	if !parse(r, &input) {
 		return
 	}
-	respond(r, map[string]any{}, c.groups.Update(r.Context(), routeID(r), input))
+	c.respondAfterChannelListMutation(r, map[string]any{}, c.groups.Update(r.Context(), routeID(r), input))
 }
 
 func (c *Controller) deleteChannelGroup(r *ghttp.Request) {
-	respond(r, map[string]any{}, c.groups.Delete(r.Context(), routeID(r)))
+	c.respondAfterChannelListMutation(r, map[string]any{}, c.groups.Delete(r.Context(), routeID(r)))
 }
 
 func (c *Controller) listChannelTypes(r *ghttp.Request) {
@@ -48,7 +48,7 @@ func (c *Controller) createChannelType(r *ghttp.Request) {
 		return
 	}
 	id, err := c.types.Create(r.Context(), input)
-	respond(r, map[string]any{"id": id}, err)
+	c.respondAfterChannelListMutation(r, map[string]any{"id": id}, err)
 }
 
 func (c *Controller) updateChannelType(r *ghttp.Request) {
@@ -56,7 +56,7 @@ func (c *Controller) updateChannelType(r *ghttp.Request) {
 	if !parse(r, &input) {
 		return
 	}
-	respond(r, map[string]any{}, c.types.Update(r.Context(), routeID(r), input))
+	c.respondAfterChannelListMutation(r, map[string]any{}, c.types.Update(r.Context(), routeID(r), input))
 }
 
 func (c *Controller) updateChannelTypeStatus(r *ghttp.Request) {
@@ -64,9 +64,16 @@ func (c *Controller) updateChannelTypeStatus(r *ghttp.Request) {
 	if !parse(r, &input) {
 		return
 	}
-	respond(r, map[string]any{}, c.types.SetStatus(r.Context(), routeID(r), input.Status))
+	c.respondAfterChannelListMutation(r, map[string]any{}, c.types.SetStatus(r.Context(), routeID(r), input.Status))
 }
 
 func (c *Controller) deleteChannelType(r *ghttp.Request) {
-	respond(r, map[string]any{}, c.types.Delete(r.Context(), routeID(r)))
+	c.respondAfterChannelListMutation(r, map[string]any{}, c.types.Delete(r.Context(), routeID(r)))
+}
+
+func (c *Controller) respondAfterChannelListMutation(r *ghttp.Request, data any, err error) {
+	if err == nil {
+		c.channels.InvalidateListCache(r.Context())
+	}
+	respond(r, data, err)
 }

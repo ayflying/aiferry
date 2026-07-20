@@ -175,6 +175,9 @@ func (c *Controller) queryChannelCost(r *ghttp.Request) {
 		return
 	}
 	data, err := c.channels.QueryCost(r.Context(), routeID(r), input)
+	if err == nil {
+		c.channels.InvalidateListCache(r.Context())
+	}
 	respond(r, data, err)
 }
 

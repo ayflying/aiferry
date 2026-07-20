@@ -78,6 +78,7 @@ func (s *Service) CreateCredential(ctx context.Context, channelID uint64, input 
 	if err != nil {
 		return 0, gerror.Wrap(err, "create channel credential")
 	}
+	s.InvalidateListCache(ctx)
 	return uint64(id), s.invalidateRoutes(ctx)
 }
 
@@ -127,6 +128,7 @@ func (s *Service) SetCredentialStatus(ctx context.Context, channelID, credential
 		return gerror.Wrap(err, "update channel credential status")
 	}
 	s.clearCredentialTransient(ctx, credential.Id)
+	s.InvalidateListCache(ctx)
 	return s.invalidateRoutes(ctx)
 }
 
@@ -147,6 +149,7 @@ func (s *Service) DeleteCredential(ctx context.Context, channelID, credentialID 
 		return err
 	}
 	s.clearCredentialTransient(ctx, credential.Id)
+	s.InvalidateListCache(ctx)
 	return s.invalidateRoutes(ctx)
 }
 

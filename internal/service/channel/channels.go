@@ -15,6 +15,18 @@ import (
 )
 
 func (s *Service) List(ctx context.Context) ([]View, error) {
+	if cached, ok := s.readListCache(ctx); ok {
+		return cached, nil
+	}
+	views, err := s.listFromDatabase(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.writeListCache(ctx, views)
+	return views, nil
+}
+
+func (s *Service) listFromDatabase(ctx context.Context) ([]View, error) {
 	var rows []entity.Channels
 	if err := dao.Channels.Ctx(ctx).OrderDesc(dao.Channels.Columns().Priority).OrderDesc(dao.Channels.Columns().Id).Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list channels")
@@ -145,6 +157,7 @@ func (s *Service) Create(ctx context.Context, input adminapi.ChannelInput) (uint
 	if err != nil {
 		return 0, err
 	}
+	s.InvalidateListCache(ctx)
 	return id, nil
 }
 
@@ -221,6 +234,7 @@ func (s *Service) Update(ctx context.Context, id uint64, input adminapi.ChannelI
 			return err
 		}
 	}
+	s.InvalidateListCache(ctx)
 	return s.invalidateRoutes(ctx)
 }
 
@@ -234,6 +248,7 @@ func (s *Service) Delete(ctx context.Context, id uint64) error {
 	if _, err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().Id, id).Delete(); err != nil {
 		return gerror.Wrap(err, "delete channel")
 	}
+	s.InvalidateListCache(ctx)
 	return s.invalidateRoutes(ctx)
 }
 
