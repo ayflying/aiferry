@@ -4,6 +4,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: Asia/Shanghai
       WEB_ROOT: /app/web
     volumes:
       - aiferry-data:/app/data

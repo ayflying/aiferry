@@ -26,6 +26,7 @@ LABEL org.opencontainers.image.title="AiFerry" \
 COPY --from=backend-build /out/aiferry /app/aiferry
 COPY --from=backend-build /src/manifest /app/manifest
 COPY --from=frontend-build /src/frontend/dist /app/web
-ENV WEB_ROOT=/app/web
+ENV TZ=Asia/Shanghai \
+    WEB_ROOT=/app/web
 EXPOSE 8080
 ENTRYPOINT ["/app/aiferry"]

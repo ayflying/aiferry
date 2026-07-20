@@ -34,7 +34,7 @@ func ParseLogRange(startValue, endValue string) (time.Time, time.Time, error) {
 }
 
 func parseLogRange(now time.Time, startValue, endValue string) (time.Time, time.Time, error) {
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	start := startOfDay(now)
 	end := start.AddDate(0, 0, 1).Add(-time.Millisecond)
 	var err error
 	if strings.TrimSpace(startValue) != "" {
@@ -55,6 +55,10 @@ func parseLogRange(now time.Time, startValue, endValue string) (time.Time, time.
 	return start, end, nil
 }
 
+func startOfDay(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
+}
+
 func parseLogTime(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
@@ -68,7 +72,7 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 		days = 7
 	}
 	now := time.Now()
-	start := now.AddDate(0, 0, -days+1).Truncate(24 * time.Hour)
+	start := startOfDay(now).AddDate(0, 0, -days+1)
 	var result Dashboard
 	base := dao.UsageLogs.Ctx(ctx).WhereGTE(dao.UsageLogs.Columns().CreatedAt, start)
 	if err := base.Clone().Fields(`
@@ -185,7 +189,7 @@ func (s *Service) UserSummary(ctx context.Context, userID uint64, days int) (Use
 		days = 30
 	}
 	result := UserSummary{Days: days}
-	start := time.Now().AddDate(0, 0, -days+1).Truncate(24 * time.Hour)
+	start := startOfDay(time.Now()).AddDate(0, 0, -days+1)
 	err := dao.UsageLogs.Ctx(ctx).
 		Where(dao.UsageLogs.Columns().UserId, userID).
 		WhereGTE(dao.UsageLogs.Columns().CreatedAt, start).

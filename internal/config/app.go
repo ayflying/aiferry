@@ -6,11 +6,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
-const defaultSessionTTLHours = 24 * 7
+const (
+	defaultSessionTTLHours = 24 * 7
+	defaultTimezone        = "Asia/Shanghai"
+)
 
 type App struct {
 	MySQLHost              string
@@ -35,6 +39,9 @@ type App struct {
 }
 
 func Load() (App, error) {
+	if err := setDefaultTimezone(); err != nil {
+		return App{}, err
+	}
 	var (
 		mysqlPort, errPort = strconv.Atoi(env("MYSQL_PORT", "3306"))
 		redisDB, errRedis  = strconv.Atoi(env("REDIS_DB", "0"))
@@ -74,6 +81,15 @@ func Load() (App, error) {
 		return App{}, gerror.New("CASDOOR_ENDPOINT, CASDOOR_CLIENT_ID and CASDOOR_CLIENT_SECRET are required")
 	}
 	return app, nil
+}
+
+func setDefaultTimezone() error {
+	location, err := time.LoadLocation(defaultTimezone)
+	if err != nil {
+		return gerror.Wrap(err, "load default timezone")
+	}
+	time.Local = location
+	return nil
 }
 
 // IsAdminRole centralizes the role-to-permission mapping used by all console APIs.

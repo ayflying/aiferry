@@ -20,6 +20,16 @@ func TestParseLogRangeDefaultsToFullDay(t *testing.T) {
 	}
 }
 
+func TestStartOfDayUsesLocalCalendarBoundary(t *testing.T) {
+	location := time.FixedZone("CST", 8*60*60)
+	value := time.Date(2026, time.July, 20, 23, 30, 0, 0, location)
+	got := startOfDay(value)
+	want := time.Date(2026, time.July, 20, 0, 0, 0, 0, location)
+	if !got.Equal(want) {
+		t.Fatalf("startOfDay() = %s, want %s", got, want)
+	}
+}
+
 func TestParseLogRangeAcceptsISOTime(t *testing.T) {
 	start, end, err := parseLogRange(time.Now(), "2026-07-20T00:00:00+08:00", "2026-07-20T23:59:59.999+08:00")
 	if err != nil {
