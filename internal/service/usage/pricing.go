@@ -24,17 +24,30 @@ type publicModelPrice struct {
 }
 
 func EstimatePublicModelCost(ctx context.Context, modelName, endpoint string, tokens TokenUsage) *decimal.Decimal {
+	breakdown := EstimatePublicModelBreakdown(ctx, modelName, endpoint, tokens)
+	if breakdown == nil {
+		return nil
+	}
+	cost := breakdown.Cost()
+	return &cost
+}
+
+func EstimatePublicModelBreakdown(ctx context.Context, modelName, endpoint string, tokens TokenUsage) *BillingBreakdown {
 	var price publicModelPrice
 	if err := dao.ModelPrices.Ctx(ctx).Where(dao.ModelPrices.Columns().PublicName, modelName).Scan(&price); err != nil || price.PublicName == "" {
 		return nil
 	}
 	switch price.BillingMode {
 	case "rules":
-		return EstimateRuleCost(ctx, modelName, endpoint, tokens)
+		return EstimateRuleBreakdown(ctx, modelName, endpoint, tokens)
 	case "request":
-		return EstimateCost(tokens, PriceRates{Request: price.RequestPrice})
+		breakdown := EstimateBreakdown(tokens, PriceRates{Request: price.RequestPrice})
+		if breakdown != nil {
+			breakdown.BillingMode = "request"
+		}
+		return breakdown
 	default:
-		return EstimateCost(tokens, PriceRates{
+		return EstimateBreakdown(tokens, PriceRates{
 			Input:       price.InputPrice,
 			CachedInput: price.CachedInputPrice,
 			CacheWrite:  price.CacheWritePrice,
@@ -47,12 +60,26 @@ func EstimatePublicModelCost(ctx context.Context, modelName, endpoint string, to
 }
 
 func EstimateRuleCost(ctx context.Context, modelName, endpoint string, tokens TokenUsage) *decimal.Decimal {
+	breakdown := EstimateRuleBreakdown(ctx, modelName, endpoint, tokens)
+	if breakdown == nil {
+		return nil
+	}
+	cost := breakdown.Cost()
+	return &cost
+}
+
+func EstimateRuleBreakdown(ctx context.Context, modelName, endpoint string, tokens TokenUsage) *BillingBreakdown {
 	var rules []struct {
+		ID             uint64 `orm:"id"`
+		Name           string `orm:"name"`
+		Source         string `orm:"source"`
+		Priority       int    `orm:"priority"`
+		Currency       string `orm:"currency"`
 		ConditionsJSON string `orm:"conditions_json"`
 		RatesJSON      string `orm:"rates_json"`
 	}
 	err := dao.ModelPriceRules.Ctx(ctx).
-		Fields("conditions_json,rates_json").
+		Fields("id,name,source,priority,currency,conditions_json,rates_json").
 		Where("model_name", modelName).
 		Where("status", 1).
 		OrderDesc("priority").
@@ -63,8 +90,17 @@ func EstimateRuleCost(ctx context.Context, modelName, endpoint string, tokens To
 		return nil
 	}
 	for _, rule := range rules {
-		if cost, ok := RuleCost(rule.ConditionsJSON, rule.RatesJSON, endpoint, tokens); ok {
-			return cost
+		if breakdown, ok := RuleBreakdown(rule.ConditionsJSON, rule.RatesJSON, endpoint, tokens); ok {
+			currency := strings.ToUpper(strings.TrimSpace(rule.Currency))
+			if currency == "" {
+				currency = "USD"
+			}
+			breakdown.BillingMode = "rules"
+			breakdown.Currency = currency
+			breakdown.Rule = &BillingRuleSnapshot{
+				ID: rule.ID, Name: rule.Name, Source: rule.Source, Priority: rule.Priority, Conditions: rule.ConditionsJSON,
+			}
+			return breakdown
 		}
 	}
 	return nil

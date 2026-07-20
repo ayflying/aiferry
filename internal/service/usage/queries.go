@@ -155,6 +155,7 @@ func (s *Service) List(ctx context.Context, input LogFilter) (LogPage, error) {
 	for index := range items {
 		items[index].BillingDetails = ParseBillingBreakdown(items[index].BillingDetailsJSON)
 	}
+	s.reconstructLegacyBillingDetails(ctx, items)
 	s.populateIPLocations(items)
 	return LogPage{Items: items, Summary: summary, StartAt: input.StartAt, EndAt: input.EndAt, Total: int(summary.Requests), Page: input.Page, PageSize: input.PageSize}, nil
 }

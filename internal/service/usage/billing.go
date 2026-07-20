@@ -31,13 +31,14 @@ type BillingRuleSnapshot struct {
 }
 
 type BillingBreakdown struct {
-	BillingMode string               `json:"billingMode"`
-	Currency    string               `json:"currency"`
-	Charged     bool                 `json:"charged"`
-	Rule        *BillingRuleSnapshot `json:"rule,omitempty"`
-	Items       []BillingItem        `json:"items"`
-	Subtotal    string               `json:"subtotal"`
-	Total       string               `json:"total"`
+	BillingMode   string               `json:"billingMode"`
+	Currency      string               `json:"currency"`
+	Charged       bool                 `json:"charged"`
+	Reconstructed bool                 `json:"reconstructed,omitempty"`
+	Rule          *BillingRuleSnapshot `json:"rule,omitempty"`
+	Items         []BillingItem        `json:"items"`
+	Subtotal      string               `json:"subtotal"`
+	Total         string               `json:"total"`
 }
 
 func EstimateBreakdown(tokens TokenUsage, rates PriceRates) *BillingBreakdown {
@@ -47,9 +48,9 @@ func EstimateBreakdown(tokens TokenUsage, rates PriceRates) *BillingBreakdown {
 		Items:       make([]BillingItem, 0, 8),
 	}
 	var (
-		cost           = decimal.Zero
-		priced         bool
-		inputRemaining = remainingTokens(tokens.Input)
+		cost            = decimal.Zero
+		priced          bool
+		inputRemaining  = remainingTokens(tokens.Input)
 		outputRemaining = remainingTokens(tokens.Output)
 	)
 

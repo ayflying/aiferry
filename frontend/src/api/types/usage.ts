@@ -80,6 +80,7 @@ export interface BillingDetails {
   billingMode: 'token' | 'request' | 'rules'
   currency: string
   charged: boolean
+  reconstructed?: boolean
   rule?: BillingRuleSnapshot
   items: BillingItem[]
   subtotal: string

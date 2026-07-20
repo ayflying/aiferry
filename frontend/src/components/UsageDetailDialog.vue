@@ -55,6 +55,7 @@ const chargeStatus = computed(() => {
   return '未保存扣费状态'
 })
 const totalLabel = computed(() => billingDetails.value?.charged ? '实际扣费' : '应扣金额')
+const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '历史核验复原' : '调用时快照')
 
 function itemFormula(item: BillingItem) {
   const currency = billingDetails.value?.currency
@@ -74,7 +75,7 @@ function itemLabel(item: BillingItem) {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="调用详情" width="760px" class="usage-detail-dialog" destroy-on-close>
+  <el-dialog v-model="visible" title="调用详情" width="760px" class="usage-detail-dialog" :style="{ height: 'min(720px, calc(100vh - 32px))', maxHeight: 'calc(100vh - 32px)', margin: '16px auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }" destroy-on-close>
     <template v-if="usage">
       <div class="detail-summary">
         <div><span>扣费状态</span><strong>{{ chargeStatus }}</strong></div>
@@ -107,6 +108,7 @@ function itemLabel(item: BillingItem) {
           <el-descriptions :column="2" border size="small" class="billing-summary">
             <el-descriptions-item label="计费方式">{{ billingModeLabel }}</el-descriptions-item>
             <el-descriptions-item label="币种">{{ billingDetails.currency }}</el-descriptions-item>
+            <el-descriptions-item label="明细来源">{{ billingSourceLabel }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="命中规则">{{ billingDetails.rule.name || `规则 #${billingDetails.rule.id}` }} · P{{ billingDetails.rule.priority }} · {{ billingDetails.rule.source === 'sync' ? '上游同步' : '人工规则' }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="规则条件"><span class="detail-value mono">{{ billingDetails.rule.conditions }}</span></el-descriptions-item>
             <el-descriptions-item label="计算小计"><strong class="cost-value">{{ formatPreciseCost(billingDetails.subtotal, billingDetails.currency) }}</strong></el-descriptions-item>
@@ -142,9 +144,12 @@ function itemLabel(item: BillingItem) {
 </template>
 
 <style scoped>
-:deep(.usage-detail-dialog) { display: flex; width: min(760px, calc(100vw - 32px)) !important; height: min(720px, calc(100vh - 32px)); max-height: calc(100vh - 32px); margin: 16px auto !important; flex-direction: column; overflow: hidden; }
+:deep(.usage-detail-dialog) { display: flex; width: min(760px, calc(100vw - 32px)) !important; flex-direction: column; overflow: hidden; }
 :deep(.usage-detail-dialog .el-dialog__header), :deep(.usage-detail-dialog .el-dialog__footer) { flex: 0 0 auto; }
-:deep(.usage-detail-dialog .el-dialog__body) { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
+:deep(.usage-detail-dialog .el-dialog__body) { box-sizing: border-box; height: 0; min-height: 0; flex: 1 1 auto; overflow-y: scroll !important; overscroll-behavior: contain; scrollbar-gutter: stable; }
+:deep(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar) { width: 10px; }
+:deep(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar-thumb) { background: #aebac5; border: 3px solid transparent; background-clip: content-box; }
+:deep(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar-track) { background: #f4f6f8; }
 .detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; border: 1px solid #dce2e7; }
 .detail-summary div { display: flex; min-height: 66px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 14px; border-right: 1px solid #dce2e7; }
 .detail-summary div:last-child { border-right: 0; }
@@ -166,7 +171,7 @@ function itemLabel(item: BillingItem) {
 .result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }
 .failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
-  :deep(.usage-detail-dialog) { height: calc(100vh - 24px); max-height: calc(100vh - 24px); margin: 12px auto !important; }
+  :deep(.usage-detail-dialog) { height: calc(100vh - 24px) !important; max-height: calc(100vh - 24px) !important; margin: 12px auto !important; }
   .detail-summary { grid-template-columns: 1fr; }
   .detail-summary div { min-height: 58px; border-right: 0; border-bottom: 1px solid #dce2e7; }
   .detail-summary div:last-child { border-bottom: 0; }

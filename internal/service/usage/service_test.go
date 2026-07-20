@@ -110,3 +110,21 @@ func TestEstimateBreakdownKeepsFallbackAndSettlementRounding(t *testing.T) {
 		t.Fatalf("billing snapshot was not preserved: %+v", restored)
 	}
 }
+
+func TestVerifiedLegacyBillingDetailsRequiresRecordedTotalMatch(t *testing.T) {
+	input, cached := uint64(100), uint64(20)
+	inputPrice, cachedPrice := 2.0, 0.5
+	breakdown := EstimateBreakdown(TokenUsage{Input: &input, CachedInput: &cached}, PriceRates{Input: &inputPrice, CachedInput: &cachedPrice})
+	if breakdown == nil {
+		t.Fatal("expected billing breakdown")
+	}
+	recorded := breakdown.Cost().InexactFloat64()
+	verified := verifiedLegacyBillingDetails(LogView{UserId: 2, EstimatedCost: &recorded}, breakdown)
+	if verified == nil || !verified.Reconstructed || !verified.Charged {
+		t.Fatalf("legacy billing details were not verified: %+v", verified)
+	}
+	mismatched := recorded + 0.00000001
+	if verifiedLegacyBillingDetails(LogView{UserId: 2, EstimatedCost: &mismatched}, EstimateBreakdown(TokenUsage{Input: &input}, PriceRates{Input: &inputPrice})) != nil {
+		t.Fatal("mismatched stored cost must not create a billing breakdown")
+	}
+}
