@@ -23,6 +23,7 @@ import (
 	"github.com/yunloli/aiferry/internal/service/mail"
 	"github.com/yunloli/aiferry/internal/service/pricesource"
 	"github.com/yunloli/aiferry/internal/service/pricingcache"
+	"github.com/yunloli/aiferry/internal/service/redemption"
 	"github.com/yunloli/aiferry/internal/service/relay"
 	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
@@ -56,6 +57,7 @@ var (
 				authSvc         = auth.New(appSvc)
 				usageSvc        = usage.New(locationSvc)
 				userSvc         = user.New(appSvc, usageSvc)
+				redemptionSvc   = redemption.New(userSvc)
 				priceCache      = pricingcache.New()
 				channelGroupSvc = channelgroup.New()
 				channelTypeSvc  = channeltype.New(builtins)
@@ -64,7 +66,7 @@ var (
 				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc, priceCache, userSvc, mailSvc)
 				priceSourceSvc  = pricesource.New(channelSvc)
 				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc, channelSvc, locationSvc)
-				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc, authSvc, mailSvc)
+				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc, authSvc, mailSvc, redemptionSvc)
 				authCtrl        = authctrl.New(authSvc, userSvc)
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)
 				s               = g.Server()

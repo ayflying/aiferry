@@ -12,6 +12,7 @@ import {
   LogOut,
   Menu,
   Settings,
+  Ticket,
   UserRound,
   UsersRound,
 } from '@lucide/vue'
@@ -32,6 +33,7 @@ const adminItems = [
   { path: '/channels', label: '渠道', icon: Cable },
   { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
   { path: '/users', label: '用户管理', icon: UsersRound },
+  { path: '/redemption-codes', label: '兑换码', icon: Ticket },
   { path: '/settings', label: '系统设置', icon: Settings },
 ]
 const items = computed(() => auth.user?.isAdmin

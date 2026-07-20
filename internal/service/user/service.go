@@ -197,6 +197,25 @@ func (s *Service) Debit(ctx context.Context, id uint64, amount decimal.Decimal) 
 	return nil
 }
 
+func (s *Service) Credit(ctx context.Context, id uint64, amount decimal.Decimal) error {
+	amount = amount.Round(8)
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return gerror.New("充值金额必须大于零")
+	}
+	literal := amount.StringFixed(8)
+	result, err := dao.Users.Ctx(ctx).
+		Where(dao.Users.Columns().Id, id).
+		Data(do.Users{Balance: gdb.Raw("balance + " + literal)}).
+		Update()
+	if err != nil {
+		return gerror.Wrap(err, "credit user balance")
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return gerror.New("用户不存在")
+	}
+	return nil
+}
+
 func (s *Service) Delete(ctx context.Context, id, operatorID uint64) error {
 	if id == usage.SystemUserID {
 		return gerror.New("系统用户不能删除")

@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/usage', name: 'usage', component: () => import('../views/UsageView.vue'), meta: { title: '用量日志' } },
     { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: '系统设置', admin: true } },
     { path: '/users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: '用户管理', admin: true } },
+    { path: '/redemption-codes', name: 'redemption-codes', component: () => import('../views/RedemptionCodesView.vue'), meta: { title: '兑换码', admin: true } },
     { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: '个人中心' } },
   ],
 })

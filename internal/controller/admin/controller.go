@@ -14,26 +14,28 @@ import (
 	"github.com/yunloli/aiferry/internal/service/channeltype"
 	mailservice "github.com/yunloli/aiferry/internal/service/mail"
 	"github.com/yunloli/aiferry/internal/service/pricesource"
+	"github.com/yunloli/aiferry/internal/service/redemption"
 	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
 	"github.com/yunloli/aiferry/internal/service/user"
 )
 
 type Controller struct {
-	channels *channel.Service
-	types    *channeltype.Service
-	groups   *channelgroup.Service
-	prices   *pricesource.Service
-	apiKeys  *apikey.Service
-	settings *system.Service
-	usage    *usage.Service
-	users    *user.Service
-	auth     *auth.Service
-	mail     *mailservice.Service
+	channels    *channel.Service
+	types       *channeltype.Service
+	groups      *channelgroup.Service
+	prices      *pricesource.Service
+	apiKeys     *apikey.Service
+	settings    *system.Service
+	usage       *usage.Service
+	users       *user.Service
+	auth        *auth.Service
+	mail        *mailservice.Service
+	redemptions *redemption.Service
 }
 
-func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service, userSvc *user.Service, authSvc *auth.Service, mailSvc *mailservice.Service) *Controller {
-	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc, users: userSvc, auth: authSvc, mail: mailSvc}
+func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service, userSvc *user.Service, authSvc *auth.Service, mailSvc *mailservice.Service, redemptionSvc *redemption.Service) *Controller {
+	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc, users: userSvc, auth: authSvc, mail: mailSvc, redemptions: redemptionSvc}
 }
 
 func (c *Controller) Register(group *ghttp.RouterGroup) {
@@ -46,6 +48,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.PUT("/api-keys/{id}", c.updateAPIKey)
 	group.DELETE("/api-keys/{id}", c.deleteAPIKey)
 	group.GET("/usage", c.listUsage)
+	group.POST("/redemption-codes/redeem", c.redeemCode)
 
 	group.Group("", func(admin *ghttp.RouterGroup) {
 		admin.Middleware(c.auth.RequireCurrentAdmin)
@@ -83,6 +86,7 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.POST("/models/test", c.testModel)
 	group.GET("/dashboard", c.dashboard)
 	c.registerUserRoutes(group)
+	c.registerRedemptionCodeRoutes(group)
 	c.registerSystemRoutes(group)
 }
 

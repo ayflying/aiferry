@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Activity, CircleDollarSign, RefreshCw, Save, UserRound } from '@lucide/vue'
+import { Activity, CircleDollarSign, RefreshCw, Save, Ticket, UserRound } from '@lucide/vue'
 import { ElMessage } from 'element-plus'
 import { loadPersonalUsage, loadProfile, updateProfile } from '../api/auth'
-import type { AccountProfile, AccountUsageSummary } from '../api/types'
+import { apiPost } from '../api/client'
+import type { AccountProfile, AccountUsageSummary, RedemptionResult } from '../api/types'
 import { showError } from '../lib/error'
 import { formatCost, formatNumber } from '../lib/format'
 import { useAuthStore } from '../stores/auth'
@@ -11,6 +12,8 @@ import { useAuthStore } from '../stores/auth'
 const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
+const redeeming = ref(false)
+const redemptionCode = ref('')
 const profile = ref<AccountProfile>()
 const usage = ref<AccountUsageSummary>({ days: 30, requests: 0, successes: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, estimatedCost: 0 })
 const form = reactive({ nickname: '', email: '' })
@@ -34,6 +37,21 @@ async function save() {
     await auth.ensureUser(true)
     ElMessage.success('个人资料已保存')
   } catch (error) { showError(error, '保存个人资料失败') } finally { saving.value = false }
+}
+
+async function redeem() {
+  const code = redemptionCode.value.trim().toUpperCase()
+  if (!code) { showError('请填写兑换码', '无法兑换'); return }
+  redeeming.value = true
+  try {
+    const result = await apiPost<RedemptionResult>('/redemption-codes/redeem', { code })
+    const account = await loadProfile()
+    profile.value = account
+    Object.assign(form, { nickname: account.nickname, email: account.email })
+    redemptionCode.value = ''
+    await auth.ensureUser(true)
+    ElMessage.success(`兑换成功，已到账 ${formatCost(result.amount)}`)
+  } catch (error) { showError(error, '兑换失败') } finally { redeeming.value = false }
 }
 
 onMounted(load)
@@ -62,6 +80,15 @@ onMounted(load)
       </el-form>
     </section>
 
+    <section class="profile-section redemption-section">
+      <div class="section-heading"><div><h2>兑换码</h2><span>兑换成功后，额度会立即计入账户余额。</span></div></div>
+      <div class="redemption-box">
+        <span class="redemption-icon"><Ticket :size="18" /></span>
+        <el-input v-model="redemptionCode" maxlength="64" clearable placeholder="输入兑换码" @keyup.enter="redeem" />
+        <el-button type="primary" :loading="redeeming" :disabled="!redemptionCode.trim()" @click="redeem">立即兑换</el-button>
+      </div>
+    </section>
+
     <section class="profile-section usage-section">
       <div class="section-heading"><div><h2>个人用量</h2><span>仅统计当前账户最近 {{ usage.days }} 天的中转调用。</span></div></div>
       <div class="usage-breakdown"><div><span>成功请求</span><strong>{{ formatNumber(usage.successes) }}</strong></div><div><span>输入 Token</span><strong>{{ formatNumber(usage.inputTokens) }}</strong></div><div><span>输出 Token</span><strong>{{ formatNumber(usage.outputTokens) }}</strong></div><div><span>估算费用</span><strong>{{ formatCost(usage.estimatedCost) }}</strong></div></div>
@@ -70,5 +97,5 @@ onMounted(load)
 </template>
 
 <style scoped>
-.profile-identity { display: flex; min-width: 0; align-items: center; gap: 12px; }.profile-identity div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.profile-identity strong { color: #15202b; font-size: 15px; }.profile-identity span, .profile-section .section-heading span { color: #66717d; font-size: 12px; }.profile-section { padding: 4px 0 22px; border-top: 1px solid #dce2e7; }.profile-form { max-width: 720px; margin-top: 18px; }.usage-section { padding-bottom: 0; }.usage-breakdown { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 18px; border: 1px solid #dce2e7; }.usage-breakdown div { display: flex; min-height: 72px; flex-direction: column; justify-content: center; gap: 6px; padding: 0 14px; border-right: 1px solid #dce2e7; }.usage-breakdown div:last-child { border-right: 0; }.usage-breakdown span { color: #66717d; font-size: 11px; }.usage-breakdown strong { color: #15202b; font-family: 'JetBrains Mono', monospace; font-size: 13px; }@media (max-width: 720px) { .usage-breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); }.usage-breakdown div:nth-child(2) { border-right: 0; }.usage-breakdown div:nth-child(-n + 2) { border-bottom: 1px solid #dce2e7; } }@media (max-width: 480px) { .usage-breakdown { grid-template-columns: 1fr; }.usage-breakdown div { border-right: 0; border-bottom: 1px solid #dce2e7; }.usage-breakdown div:last-child { border-bottom: 0; } }
+.profile-identity { display: flex; min-width: 0; align-items: center; gap: 12px; }.profile-identity div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.profile-identity strong { color: #15202b; font-size: 15px; }.profile-identity span, .profile-section .section-heading span { color: #66717d; font-size: 12px; }.profile-section { padding: 4px 0 22px; border-top: 1px solid #dce2e7; }.profile-form { max-width: 720px; margin-top: 18px; }.redemption-section { padding-bottom: 22px; }.redemption-box { display: flex; width: min(100%, 720px); align-items: center; gap: 10px; margin-top: 18px; }.redemption-box .el-input { flex: 1; }.redemption-icon { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 1px solid #acd7cc; border-radius: 5px; color: #16866f; background: #e5f5f1; }.usage-section { padding-bottom: 0; }.usage-breakdown { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 18px; border: 1px solid #dce2e7; }.usage-breakdown div { display: flex; min-height: 72px; flex-direction: column; justify-content: center; gap: 6px; padding: 0 14px; border-right: 1px solid #dce2e7; }.usage-breakdown div:last-child { border-right: 0; }.usage-breakdown span { color: #66717d; font-size: 11px; }.usage-breakdown strong { color: #15202b; font-family: 'JetBrains Mono', monospace; font-size: 13px; }@media (max-width: 720px) { .usage-breakdown { grid-template-columns: repeat(2, minmax(0, 1fr)); }.usage-breakdown div:nth-child(2) { border-right: 0; }.usage-breakdown div:nth-child(-n + 2) { border-bottom: 1px solid #dce2e7; } }@media (max-width: 480px) { .redemption-box { align-items: stretch; flex-wrap: wrap; }.redemption-icon { display: none; }.redemption-box .el-input { width: 100%; flex-basis: 100%; }.redemption-box .el-button { width: 100%; }.usage-breakdown { grid-template-columns: 1fr; }.usage-breakdown div { border-right: 0; border-bottom: 1px solid #dce2e7; }.usage-breakdown div:last-child { border-bottom: 0; } }
 </style>
