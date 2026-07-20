@@ -87,6 +87,7 @@ type EndpointConfig struct {
 }
 
 type Config struct {
+	BaseURL   string                    `json:"baseUrl"`
 	Models    ModelConfig               `json:"models"`
 	Costs     CostConfig                `json:"costs"`
 	Pricing   PricingConfig             `json:"pricing"`
@@ -123,6 +124,7 @@ func ValidateBuiltins(builtins *config.BuiltinRegistry) error {
 
 func DefaultConfig() Config {
 	return Config{
+		BaseURL: "https://api.openai.com/v1",
 		Models: ModelConfig{
 			Method: "GET", Path: "/models", ListPath: "data", IDPath: "id",
 			AuthType: AuthChannelKey, HeaderName: "Authorization", HeaderPrefix: "Bearer ",

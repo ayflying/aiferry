@@ -3,6 +3,7 @@ package channeltype
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -18,6 +19,9 @@ func ParseConfig(raw []byte) (Config, error) {
 		if err := decoder.Decode(&config); err != nil {
 			return Config{}, gerror.Wrap(err, "invalid channel type JSON")
 		}
+	}
+	if err := normalizeBaseURL(&config.BaseURL); err != nil {
+		return Config{}, err
 	}
 	if err := normalizeModelConfig(&config.Models); err != nil {
 		return Config{}, err
@@ -37,6 +41,18 @@ func ParseConfig(raw []byte) (Config, error) {
 	}
 	config.Pricing = pricing
 	return config, nil
+}
+
+func normalizeBaseURL(value *string) error {
+	*value = strings.TrimRight(strings.TrimSpace(*value), "/")
+	if *value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(*value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return gerror.New("baseUrl must be an absolute HTTP(S) URL")
+	}
+	return nil
 }
 
 func normalizeEndpointConfigs(configs map[string]EndpointConfig) error {

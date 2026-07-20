@@ -1,4 +1,4 @@
-import type { ChannelAdvancedConfig, ChannelInput } from '../api/types'
+import type { ChannelAdvancedConfig, ChannelInput, ChannelType } from '../api/types'
 
 export function createDefaultChannelAdvancedConfig(): ChannelAdvancedConfig {
   return {
@@ -23,4 +23,8 @@ export function createEmptyChannelInput(): ChannelInput {
     organizationId: '', projectId: '', status: 1, priority: 0, weight: 1, healthCheckModelId: 0,
     autoDisableEnabled: true, advancedConfig: createDefaultChannelAdvancedConfig(), groupIds: [],
   }
+}
+
+export function channelTypeBaseURL(types: ChannelType[], code: string): string {
+  return types.find((item) => item.code === code)?.config.baseUrl || ''
 }

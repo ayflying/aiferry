@@ -26,8 +26,15 @@ func TestParseConfigNormalizesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Models.Method != "GET" || config.Models.AuthType != AuthChannelKey || config.Costs.Adapter != AdapterNone {
+	if config.BaseURL != "https://api.openai.com/v1" || config.Models.Method != "GET" || config.Models.AuthType != AuthChannelKey || config.Costs.Adapter != AdapterNone {
 		t.Fatalf("unexpected normalized config: %+v", config)
+	}
+}
+
+func TestParseConfigRejectsInvalidDefaultBaseURL(t *testing.T) {
+	_, err := ParseConfig([]byte(`{"baseUrl":"ftp://example.com","models":{"path":"/models","idPath":"id"},"costs":{"adapter":"none"}}`))
+	if err == nil {
+		t.Fatal("expected invalid base URL rejection")
 	}
 }
 

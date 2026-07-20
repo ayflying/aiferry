@@ -10,10 +10,15 @@ func TestLoadBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.ChannelTypes) != 7 {
+	if len(registry.ChannelTypes) != 10 {
 		t.Fatalf("unexpected built-in registry: %+v", registry)
 	}
-	if item, exists := registry.ChannelTypeByCode("openai"); !exists || item.ID != 9000000000000001 {
-		t.Fatalf("OpenAI channel type is missing: %+v", item)
+	for code, id := range map[string]uint64{
+		"openai": 9000000000000001, "anthropic": 9000000000000008,
+		"aws_bedrock": 9000000000000009, "gemini": 9000000000000010,
+	} {
+		if item, exists := registry.ChannelTypeByCode(code); !exists || item.ID != id {
+			t.Fatalf("built-in channel type is missing: %s %+v", code, item)
+		}
 	}
 }

@@ -80,6 +80,7 @@ export interface ChannelTypeEndpointConfig {
 }
 
 export interface ChannelTypeConfig {
+  baseUrl: string
   models: ChannelTypeModelConfig
   costs: ChannelTypeCostConfig
   pricing: ChannelTypePricingConfig
