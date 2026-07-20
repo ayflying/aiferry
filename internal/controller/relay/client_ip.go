@@ -10,10 +10,10 @@ import (
 )
 
 func clientIP(r *ghttp.Request) string {
-	return clientIPFromHeaders(r.Header, r.GetClientIp())
+	return clientIPFromHeaders(r.Header, r.GetClientIp(), r.GetRemoteIp(), r.RemoteAddr)
 }
 
-func clientIPFromHeaders(headers http.Header, fallback string) string {
+func clientIPFromHeaders(headers http.Header, fallbacks ...string) string {
 	for _, name := range []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"} {
 		for _, value := range headers.Values(name) {
 			for _, candidate := range strings.Split(value, ",") {
@@ -23,5 +23,10 @@ func clientIPFromHeaders(headers http.Header, fallback string) string {
 			}
 		}
 	}
-	return iplocation.NormalizeIP(fallback)
+	for _, fallback := range fallbacks {
+		if ip := iplocation.NormalizeIP(fallback); ip != "" {
+			return ip
+		}
+	}
+	return ""
 }

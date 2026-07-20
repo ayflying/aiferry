@@ -6,6 +6,12 @@ func TestNormalizeIP(t *testing.T) {
 	if actual := NormalizeIP("::ffff:203.0.113.8"); actual != "203.0.113.8" {
 		t.Fatalf("unexpected normalized IP: %s", actual)
 	}
+	if actual := NormalizeIP("203.0.113.8:443"); actual != "203.0.113.8" {
+		t.Fatalf("unexpected IPv4 connection address: %s", actual)
+	}
+	if actual := NormalizeIP("[2001:db8::8]:443"); actual != "2001:db8::8" {
+		t.Fatalf("unexpected IPv6 connection address: %s", actual)
+	}
 	if actual := NormalizeIP("not-an-ip"); actual != "" {
 		t.Fatalf("invalid IP should be blank: %s", actual)
 	}

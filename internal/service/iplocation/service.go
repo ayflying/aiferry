@@ -3,6 +3,7 @@ package iplocation
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -78,7 +79,15 @@ func (s *Service) Lookup(value string) string {
 }
 
 func NormalizeIP(value string) string {
-	address, err := netip.ParseAddr(strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
+	address, err := netip.ParseAddr(value)
+	if err != nil {
+		host, _, splitErr := net.SplitHostPort(value)
+		if splitErr != nil {
+			return ""
+		}
+		address, err = netip.ParseAddr(host)
+	}
 	if err != nil {
 		return ""
 	}
