@@ -77,7 +77,7 @@ function renderCostChart() {
   const area = costChartMode.value === 'area'
   costChart.setOption({
     animationDuration: 450,
-    color: ['#31bd7b', '#19a8d8', '#2563eb', '#f58a17', '#7c4dd8'],
+    color: ['#31bd7b', '#19a8d8', '#2563eb', '#f58a17', '#7c4dd8', '#8a94a6'],
     grid: { top: 28, right: 22, bottom: 56, left: 58 },
     tooltip: {
       trigger: 'axis',
