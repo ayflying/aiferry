@@ -59,10 +59,26 @@ func (s *Service) SendTest(ctx context.Context, recipient string) error {
 	if err != nil {
 		return err
 	}
-	if !settings.Enabled {
-		return gerror.New("请先启用邮件提醒")
+	if err = validateTestSettings(settings); err != nil {
+		return err
 	}
 	return send(settings, recipient, "AiFerry 邮件配置测试", "这是一封 AiFerry 发送的邮件配置测试。")
+}
+
+func validateTestSettings(settings system.MailDeliverySettings) error {
+	if strings.TrimSpace(settings.Host) == "" {
+		return gerror.New("请先保存 SMTP 主机")
+	}
+	if settings.Port < 1 || settings.Port > 65535 {
+		return gerror.New("请先保存有效的 SMTP 端口")
+	}
+	if !validRecipient(settings.From) {
+		return gerror.New("请先保存有效的发件人邮箱")
+	}
+	if settings.Username != "" && settings.Password == "" {
+		return gerror.New("SMTP 用户名已填写，请先保存密码")
+	}
+	return nil
 }
 
 func (s *Service) notifyLowBalance(ctx context.Context, userID uint64) {

@@ -31,6 +31,22 @@ func TestValidRecipient(t *testing.T) {
 	}
 }
 
+func TestValidateTestSettingsDoesNotRequireAlertsEnabled(t *testing.T) {
+	settings := system.MailDeliverySettings{MailSettings: system.MailSettings{
+		Enabled: false, Host: "smtp.example.com", Port: 587, From: "noreply@example.com",
+	}}
+	if err := validateTestSettings(settings); err != nil {
+		t.Fatalf("disabled alerts should still allow SMTP testing: %v", err)
+	}
+}
+
+func TestValidateTestSettingsReportsMissingSMTPConfiguration(t *testing.T) {
+	settings := system.MailDeliverySettings{MailSettings: system.MailSettings{Port: 587, From: "noreply@example.com"}}
+	if err := validateTestSettings(settings); err == nil || err.Error() != "请先保存 SMTP 主机" {
+		t.Fatalf("unexpected validation result: %v", err)
+	}
+}
+
 func TestChannelBalanceReminderKey(t *testing.T) {
 	key := channelBalanceReminderKey(42, 5)
 	if key != "aiferry:mail:channel-low-balance:42:5" {
