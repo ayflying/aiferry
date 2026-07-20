@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { AlertCircle, LogIn, ShieldCheck, ShipWheel } from '@lucide/vue'
+import { AlertCircle, LogIn, ShieldCheck } from '@lucide/vue'
 import { loadAuthConfig } from '../api/auth'
 import type { AuthConfig } from '../api/types'
 import { authErrorMessage, localReturnTo } from '../lib/auth'
@@ -38,7 +38,7 @@ onMounted(load)
 <template>
   <main class="login-page">
     <div class="login-masthead">
-      <span class="brand-mark"><ShipWheel :size="22" /></span>
+      <span class="brand-mark" role="img" aria-label="AiFerry"><img class="brand-logo" src="/aiferry-logo.png" alt="" /></span>
       <div class="brand-copy"><strong>AiFerry</strong><span>AI 摆渡</span></div>
     </div>
 
@@ -46,7 +46,7 @@ onMounted(load)
       <div class="login-route" aria-hidden="true">
         <span class="route-port casdoor-port"><ShieldCheck :size="17" /></span>
         <span class="route-line"><i /></span>
-        <span class="route-port ferry-port"><ShipWheel :size="17" /></span>
+        <span class="route-port ferry-port"><img class="route-logo" src="/aiferry-logo.png" alt="" /></span>
       </div>
       <div class="login-heading">
         <span class="mono-label">CONTROL DECK / SSO</span>

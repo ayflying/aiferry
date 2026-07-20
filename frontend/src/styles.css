@@ -48,7 +48,8 @@ button { color: inherit; }
 .sidebar.collapsed { flex-basis: 72px; width: 72px; }
 .brand { display: flex; min-height: 72px; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid rgb(255 255 255 / 10%); }
 .brand.compact { justify-content: center; padding-inline: 10px; }
-.brand-mark { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; color: white; border: 1px solid rgb(255 255 255 / 24%); border-radius: 6px; background: #1d6fc9; }
+.brand-mark { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; overflow: hidden; padding: 3px; border: 1px solid #9fc3ee; border-radius: 6px; background: #f8fbff; }
+.brand-logo { display: block; width: 100%; height: 100%; object-fit: contain; }
 .brand-copy { display: flex; min-width: 0; flex-direction: column; }
 .brand-copy strong { font-size: 17px; font-weight: 680; line-height: 1.2; }
 .brand-copy span { margin-top: 2px; color: var(--sidebar-muted); font-size: 11px; }
@@ -81,7 +82,8 @@ button { color: inherit; }
 .login-route { display: grid; grid-template-columns: 34px 1fr 34px; align-items: center; margin-bottom: 34px; }
 .route-port { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; }
 .casdoor-port { color: var(--healthy); border: 1px solid #9bcfc2; background: var(--healthy-soft); }
-.ferry-port { color: #fff; border: 1px solid #1668bd; background: var(--action); }
+.ferry-port { border: 1px solid #9fc3ee; background: #f8fbff; }
+.route-logo { display: block; width: 25px; height: 25px; object-fit: contain; }
 .route-line { position: relative; height: 1px; background: #b8c4cf; }
 .route-line::before, .route-line::after { position: absolute; top: -3px; width: 7px; height: 7px; border-radius: 50%; background: #b8c4cf; content: ''; }
 .route-line::before { left: 22%; }.route-line::after { right: 22%; }

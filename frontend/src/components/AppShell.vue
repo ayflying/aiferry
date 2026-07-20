@@ -12,7 +12,6 @@ import {
   LogOut,
   Menu,
   Settings,
-  ShipWheel,
   UserRound,
   UsersRound,
 } from '@lucide/vue'
@@ -86,7 +85,7 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
   <div class="app-shell">
     <aside v-if="!mobile" class="sidebar" :class="{ collapsed }">
       <div class="brand" :class="{ compact: collapsed }">
-        <span class="brand-mark"><ShipWheel :size="22" /></span>
+        <span class="brand-mark" role="img" aria-label="AiFerry"><img class="brand-logo" src="/aiferry-logo.png" alt="" /></span>
         <div v-if="!collapsed" class="brand-copy">
           <strong>AiFerry</strong>
           <span>AI 摆渡</span>
@@ -115,7 +114,7 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
 
     <el-drawer v-model="mobileOpen" direction="ltr" size="260px" :with-header="false" class="mobile-drawer">
       <div class="brand">
-        <span class="brand-mark"><ShipWheel :size="22" /></span>
+        <span class="brand-mark" role="img" aria-label="AiFerry"><img class="brand-logo" src="/aiferry-logo.png" alt="" /></span>
         <div class="brand-copy"><strong>AiFerry</strong><span>AI 摆渡</span></div>
       </div>
       <nav class="nav-list" aria-label="主导航">
