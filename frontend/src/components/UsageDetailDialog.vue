@@ -46,22 +46,19 @@ const billingModeLabel = computed(() => {
     default: return '未保存'
   }
 })
-const chargeStatus = computed(() => {
-  if (!props.usage) return '—'
-  if (!isSuccess.value) return '调用失败，未扣费'
-  if (billingDetails.value?.charged) return '已扣费'
-  if (billingDetails.value) return '未扣费'
-  if (props.usage.estimatedCost === undefined) return '无需扣费'
-  return '未保存扣费状态'
-})
-const totalLabel = computed(() => billingDetails.value?.charged ? '实际扣费' : '应扣金额')
-const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '历史核验复原' : '调用时快照')
+const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '历史价格快照复原' : '调用时价格快照')
 
-function itemFormula(item: BillingItem) {
+function itemUnitPrice(item: BillingItem) {
   const currency = billingDetails.value?.currency
-  if (item.unit === 'per_request') return `1 次 × ${formatPreciseCost(item.unitPrice, currency)}`
-  if (item.unit === 'settlement') return `小计结算调整 ${formatPreciseCost(item.amount, currency)}`
-  return `${formatNumber(item.quantity)} Token × ${formatPreciseCost(item.unitPrice, currency)} / 1M Token`
+  if (item.unit === 'per_request') return `${formatPreciseCost(item.unitPrice, currency)} / 次`
+  if (item.unit === 'settlement') return '结算精度调整'
+  return `${formatPreciseCost(item.unitPrice, currency)} / 1M Token`
+}
+
+function itemUsage(item: BillingItem) {
+  if (item.unit === 'per_request') return '1 次请求'
+  if (item.unit === 'settlement') return '结算差额'
+  return `${formatNumber(item.quantity)} Token`
 }
 
 function itemPriceSource(item: BillingItem) {
@@ -78,7 +75,7 @@ function itemLabel(item: BillingItem) {
   <el-dialog v-model="visible" title="调用详情" width="760px" class="usage-detail-dialog" :style="{ height: 'min(720px, calc(100vh - 32px))', maxHeight: 'calc(100vh - 32px)', margin: '16px auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }" destroy-on-close>
     <template v-if="usage">
       <div class="detail-summary">
-        <div><span>扣费状态</span><strong>{{ chargeStatus }}</strong></div>
+        <div><span>模型价格</span><strong>{{ billingDetails ? billingSourceLabel : '未保存价格快照' }}</strong></div>
         <div><span>总 Token</span><strong>{{ formatNumber(usage.totalTokens) }}</strong></div>
         <div><span>响应耗时</span><strong>{{ usage.durationMs }} ms</strong></div>
       </div>
@@ -103,24 +100,25 @@ function itemLabel(item: BillingItem) {
       </section>
 
       <section class="detail-section">
-        <h3>扣费明细</h3>
+        <h3>模型价格明细</h3>
         <template v-if="billingDetails">
           <el-descriptions :column="2" border size="small" class="billing-summary">
             <el-descriptions-item label="计费方式">{{ billingModeLabel }}</el-descriptions-item>
             <el-descriptions-item label="币种">{{ billingDetails.currency }}</el-descriptions-item>
-            <el-descriptions-item label="明细来源">{{ billingSourceLabel }}</el-descriptions-item>
+            <el-descriptions-item label="价格来源">{{ billingSourceLabel }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="命中规则">{{ billingDetails.rule.name || `规则 #${billingDetails.rule.id}` }} · P{{ billingDetails.rule.priority }} · {{ billingDetails.rule.source === 'sync' ? '上游同步' : '人工规则' }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="规则条件"><span class="detail-value mono">{{ billingDetails.rule.conditions }}</span></el-descriptions-item>
-            <el-descriptions-item label="计算小计"><strong class="cost-value">{{ formatPreciseCost(billingDetails.subtotal, billingDetails.currency) }}</strong></el-descriptions-item>
-            <el-descriptions-item :label="totalLabel"><strong class="cost-value">{{ formatPreciseCost(billingDetails.total, billingDetails.currency) }}</strong></el-descriptions-item>
+            <el-descriptions-item label="模型价格小计"><strong class="cost-value">{{ formatPreciseCost(billingDetails.subtotal, billingDetails.currency) }}</strong></el-descriptions-item>
+            <el-descriptions-item label="按价预计费用"><strong class="cost-value">{{ formatPreciseCost(billingDetails.total, billingDetails.currency) }}</strong></el-descriptions-item>
           </el-descriptions>
           <el-table :data="billingItems" border size="small" table-layout="fixed" class="billing-items">
-            <el-table-column label="扣费项" min-width="128"><template #default="{ row }"><div class="billing-item-name"><strong>{{ itemLabel(row) }}</strong><small v-if="itemPriceSource(row)">{{ itemPriceSource(row) }}</small></div></template></el-table-column>
-            <el-table-column label="计算公式" min-width="326"><template #default="{ row }"><span class="formula-value">{{ itemFormula(row) }}</span></template></el-table-column>
-            <el-table-column label="金额" width="138" align="right"><template #default="{ row }"><strong class="cost-value">{{ formatPreciseCost(row.amount, billingDetails.currency) }}</strong></template></el-table-column>
+            <el-table-column label="计价项" min-width="132"><template #default="{ row }"><div class="billing-item-name"><strong>{{ itemLabel(row) }}</strong><small v-if="itemPriceSource(row)">{{ itemPriceSource(row) }}</small></div></template></el-table-column>
+            <el-table-column label="模型单价" min-width="174"><template #default="{ row }"><span class="formula-value">{{ itemUnitPrice(row) }}</span></template></el-table-column>
+            <el-table-column label="用量" min-width="150"><template #default="{ row }"><span class="formula-value">{{ itemUsage(row) }}</span></template></el-table-column>
+            <el-table-column label="预计费用" width="138" align="right"><template #default="{ row }"><strong class="cost-value">{{ formatPreciseCost(row.amount, billingDetails.currency) }}</strong></template></el-table-column>
           </el-table>
         </template>
-        <p v-else class="empty-billing">该历史记录未保存分项扣费快照，无法按当前价格回算历史账单。</p>
+        <p v-else class="empty-billing">该历史记录未保存模型价格快照，无法展示当次调用的模型价格。</p>
       </section>
 
       <section class="detail-section">
@@ -144,12 +142,12 @@ function itemLabel(item: BillingItem) {
 </template>
 
 <style scoped>
-:deep(.usage-detail-dialog) { display: flex; width: min(760px, calc(100vw - 32px)) !important; flex-direction: column; overflow: hidden; }
-:deep(.usage-detail-dialog .el-dialog__header), :deep(.usage-detail-dialog .el-dialog__footer) { flex: 0 0 auto; }
-:deep(.usage-detail-dialog .el-dialog__body) { box-sizing: border-box; height: 0; min-height: 0; flex: 1 1 auto; overflow-y: scroll !important; overscroll-behavior: contain; scrollbar-gutter: stable; }
-:deep(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar) { width: 10px; }
-:deep(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar-thumb) { background: #aebac5; border: 3px solid transparent; background-clip: content-box; }
-:deep(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar-track) { background: #f4f6f8; }
+:global(.usage-detail-dialog) { display: flex; width: min(760px, calc(100vw - 32px)) !important; flex-direction: column; overflow: hidden; }
+:global(.usage-detail-dialog .el-dialog__header), :global(.usage-detail-dialog .el-dialog__footer) { flex: 0 0 auto; }
+:global(.usage-detail-dialog .el-dialog__body) { box-sizing: border-box; min-height: 0; flex: 1 1 auto; overflow-y: scroll !important; overscroll-behavior: contain; scrollbar-gutter: stable; }
+:global(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar) { width: 10px; }
+:global(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar-thumb) { background: #aebac5; border: 3px solid transparent; background-clip: content-box; }
+:global(.usage-detail-dialog .el-dialog__body::-webkit-scrollbar-track) { background: #f4f6f8; }
 .detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; border: 1px solid #dce2e7; }
 .detail-summary div { display: flex; min-height: 66px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 14px; border-right: 1px solid #dce2e7; }
 .detail-summary div:last-child { border-right: 0; }
@@ -171,7 +169,7 @@ function itemLabel(item: BillingItem) {
 .result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }
 .failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
-  :deep(.usage-detail-dialog) { height: calc(100vh - 24px) !important; max-height: calc(100vh - 24px) !important; margin: 12px auto !important; }
+  :global(.usage-detail-dialog) { height: calc(100vh - 24px) !important; max-height: calc(100vh - 24px) !important; margin: 12px auto !important; }
   .detail-summary { grid-template-columns: 1fr; }
   .detail-summary div { min-height: 58px; border-right: 0; border-bottom: 1px solid #dce2e7; }
   .detail-summary div:last-child { border-bottom: 0; }
