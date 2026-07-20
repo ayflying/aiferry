@@ -4,7 +4,6 @@ export function createDefaultChannelAdvancedConfig(): ChannelAdvancedConfig {
   return {
     forceOpenAIFormat: false,
     reasoningToContent: false,
-    enableProtocolConversion: true,
     passthroughRequestBody: false,
     skipAsyncPollingDelay: false,
     systemPrompt: '',

@@ -21,7 +21,7 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	}
 	primary := directProtocolPlan(endpoint)
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, primary)
-	if handled || attemptErr != nil || !advancedConfig.EnableProtocolConversion || !shouldFallbackWithProtocolConversion(result.status, result.body) {
+	if handled || attemptErr != nil || !shouldFallbackWithProtocolConversion(result.status, result.body) {
 		return result, handled, attemptErr
 	}
 	fallback, ok := fallbackProtocolPlan(endpoint)

@@ -11,7 +11,6 @@ export interface CostQueryConfig {
 export interface ChannelAdvancedConfig {
   forceOpenAIFormat: boolean
   reasoningToContent: boolean
-  enableProtocolConversion: boolean
   passthroughRequestBody: boolean
   skipAsyncPollingDelay: boolean
   systemPrompt: string
