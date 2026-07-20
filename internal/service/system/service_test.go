@@ -41,8 +41,23 @@ func TestAutoDisableSource(t *testing.T) {
 	if source := autoDisableSource(AutoDisableSourceModelTest); source != AutoDisableSourceModelTest {
 		t.Fatalf("unexpected model test source: %q", source)
 	}
+	if source := autoDisableSource(AutoDisableSourceCostQuery); source != AutoDisableSourceCostQuery {
+		t.Fatalf("unexpected cost query source: %q", source)
+	}
 	if source := autoDisableSource("manual"); source != autoDisableSourceUnknown {
 		t.Fatalf("unexpected unknown source: %q", source)
+	}
+}
+
+func TestAutoDisableReasonPreservesUpstreamDetails(t *testing.T) {
+	reason := autoDisableReason(AutoDisableInput{
+		Status:  429,
+		Latency: 2544 * time.Millisecond,
+		Message: `error: code=429 reason="DAILY_LIMIT_EXCEEDED" message="daily usage limit exceeded"`,
+	})
+	want := `status_code=429, latency=2.544s, error: code=429 reason="DAILY_LIMIT_EXCEEDED" message="daily usage limit exceeded"`
+	if reason != want {
+		t.Fatalf("autoDisableReason() = %q, want %q", reason, want)
 	}
 }
 

@@ -116,6 +116,12 @@ function statusText(item: ChannelCredential) {
   return item.status === 1 ? '启用' : '手动停用'
 }
 
+function autoDisabledDetail(item: ChannelCredential) {
+  const lines = [item.autoDisabledReason || '该密钥被系统自动禁用']
+  if (item.autoDisabledAt) lines.push(`禁用时间：${formatTime(item.autoDisabledAt)}`)
+  return lines.join('\n')
+}
+
 function costDetail(item: ChannelCredential) {
   return queryDetails.value.find((detail) => detail.credentialId === item.id)
 }
@@ -142,7 +148,7 @@ function costDetail(item: ChannelCredential) {
     <div v-loading="loading" class="credential-table">
       <el-table :data="rows" row-key="id" size="small">
         <el-table-column label="上游密钥" min-width="145"><template #default="{ row }"><span class="mono key-prefix"><KeyRound :size="14" />{{ row.keyPrefix }}</span></template></el-table-column>
-        <el-table-column label="状态" width="118"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="row.autoDisabledReason || '该密钥被系统自动禁用'"><span class="status-dot warning">自动禁用</span></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
+        <el-table-column label="状态" min-width="156"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="autoDisabledDetail(row)" placement="top-start"><div class="credential-status"><span class="status-dot warning">自动禁用</span><small v-if="row.autoDisabledAt">{{ formatTime(row.autoDisabledAt) }}</small></div></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
         <el-table-column label="费用与余额" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else><span v-if="row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="row.lastCostRemaining !== undefined">余额 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small><span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined" class="muted">尚未查询</span></template></div></template></el-table-column>
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
         <el-table-column label="操作" width="62" align="center"><template #default="{ row }"><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></template></el-table-column>
@@ -158,5 +164,5 @@ function costDetail(item: ChannelCredential) {
 </template>
 
 <style scoped>
-.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small { color: #7b8792; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }.shared-balance strong { color: #15202b; }@media (max-width: 600px) { .credential-toolbar { align-items: stretch; flex-direction: column; }.credential-add { width: 100%; }.credential-table { overflow-x: auto; }.credential-table :deep(.el-table) { min-width: 610px; } }
+.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }.shared-balance strong { color: #15202b; }@media (max-width: 600px) { .credential-toolbar { align-items: stretch; flex-direction: column; }.credential-add { width: 100%; }.credential-table { overflow-x: auto; }.credential-table :deep(.el-table) { min-width: 650px; } }
 </style>

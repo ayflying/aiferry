@@ -5,8 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tidwall/gjson"
-
+	"github.com/yunloli/aiferry/internal/service/upstreamerror"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
@@ -50,10 +49,7 @@ func openAIError(kind, message string) []byte {
 }
 
 func upstreamError(body []byte, fallback string) string {
-	if message := strings.TrimSpace(gjson.GetBytes(body, "error.message").String()); message != "" {
-		return message
-	}
-	return fallback
+	return upstreamerror.Message(body, fallback)
 }
 
 func newRequestID() string {

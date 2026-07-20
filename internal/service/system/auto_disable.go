@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
+	"github.com/yunloli/aiferry/internal/consts"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -53,17 +54,20 @@ func matchesAutoDisable(settings adminapi.SystemResilienceSettingsInput, input A
 }
 
 func autoDisableReason(input AutoDisableInput) string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if input.Status > 0 {
-		parts = append(parts, fmt.Sprintf("HTTP %d", input.Status))
+		parts = append(parts, fmt.Sprintf("status_code=%d", input.Status))
 	}
 	if input.Latency > 0 {
-		parts = append(parts, input.Latency.Round(time.Millisecond).String())
+		parts = append(parts, "latency="+input.Latency.Round(time.Millisecond).String())
+	}
+	if input.TimedOut {
+		parts = append(parts, "timed_out=true")
 	}
 	if message := strings.TrimSpace(input.Message); message != "" {
 		parts = append(parts, message)
 	}
-	return truncate(strings.Join(parts, " · "), 1024)
+	return truncate(strings.Join(parts, ", "), 1024)
 }
 
 func autoDisableSource(source string) string {
@@ -219,7 +223,7 @@ func (s *Service) RecoverCredentialIfAllowed(ctx context.Context, credentialID u
 }
 
 func (s *Service) clearTransient(ctx context.Context, channelID uint64) {
-	_ = s.app.Redis.Del(ctx, failureKey(channelID), cooldownKey(channelID)).Err()
+	_ = s.app.Redis.Del(ctx, failureKey(channelID), cooldownKey(channelID), consts.ChannelListCacheKey).Err()
 	_ = s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()
 }
 
@@ -227,6 +231,7 @@ func (s *Service) clearCredentialTransient(ctx context.Context, credentialID uin
 	_ = s.app.Redis.Del(ctx,
 		fmt.Sprintf("aiferry:credential:%d:failures", credentialID),
 		fmt.Sprintf("aiferry:credential:%d:cooldown", credentialID),
+		consts.ChannelListCacheKey,
 	).Err()
 	_ = s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()
 }

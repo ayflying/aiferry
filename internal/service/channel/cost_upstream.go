@@ -14,6 +14,7 @@ import (
 
 	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
+	"github.com/yunloli/aiferry/internal/service/upstreamerror"
 )
 
 func (s *Service) queryOpenAICosts(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, start, end time.Time, result *CostResult) error {
@@ -122,7 +123,7 @@ func (s *Service) getCostJSON(ctx context.Context, channel entity.Channels, cred
 		ReadError:    "read upstream cost response",
 		InvalidError: "upstream cost query returned invalid JSON",
 		StatusError: func(status int, body []byte) error {
-			return gerror.Newf("upstream cost query returned HTTP %d: %s", status, upstreamError(body, http.StatusText(status)))
+			return gerror.Newf("upstream cost query returned HTTP %d: %s", status, upstreamerror.Message(body, http.StatusText(status)))
 		},
 	})
 }

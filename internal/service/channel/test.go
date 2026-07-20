@@ -12,7 +12,6 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
-	"github.com/tidwall/gjson"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
@@ -20,6 +19,7 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/service/channeltype"
 	"github.com/yunloli/aiferry/internal/service/system"
+	"github.com/yunloli/aiferry/internal/service/upstreamerror"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
@@ -133,7 +133,7 @@ func (s *Service) testModelEndpoint(ctx context.Context, channel entity.Channels
 	if result.Success {
 		result.Message = "模型响应正常"
 	} else {
-		result.Message = upstreamError(responseBody, resp.Status)
+		result.Message = upstreamerror.Message(responseBody, resp.Status)
 	}
 	return result, path, tokens, nil
 }
@@ -292,15 +292,6 @@ func testTokenValue(value *uint64) uint64 {
 		return 0
 	}
 	return *value
-}
-
-func upstreamError(body []byte, fallback string) string {
-	for _, path := range []string{"error.message", "message", "error"} {
-		if value := strings.TrimSpace(gjson.GetBytes(body, path).String()); value != "" {
-			return value
-		}
-	}
-	return fallback
 }
 
 func truncate(value string, limit int) string {

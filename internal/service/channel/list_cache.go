@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/yunloli/aiferry/internal/consts"
 )
 
 const (
-	channelListCacheKey = "aiferry:channels:list:v1"
+	channelListCacheKey = consts.ChannelListCacheKey
 	channelListCacheTTL = 24 * time.Hour
 )
 
