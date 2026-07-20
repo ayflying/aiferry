@@ -34,6 +34,7 @@ type UsageLogsColumns struct {
 	IpLocation          string //
 	RequestedModel      string //
 	UpstreamModel       string //
+	ReasoningEffort     string //
 	HttpStatus          string //
 	IsStream            string //
 	InputTokens         string //
@@ -64,6 +65,7 @@ var usageLogsColumns = UsageLogsColumns{
 	IpLocation:          "ip_location",
 	RequestedModel:      "requested_model",
 	UpstreamModel:       "upstream_model",
+	ReasoningEffort:     "reasoning_effort",
 	HttpStatus:          "http_status",
 	IsStream:            "is_stream",
 	InputTokens:         "input_tokens",

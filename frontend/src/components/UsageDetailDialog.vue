@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BillingItem, UsageLog } from '../api/types'
-import { formatNumber, formatPreciseCost, formatTime } from '../lib/format'
+import { formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 
 const props = defineProps<{
@@ -93,6 +93,7 @@ function itemLabel(item: BillingItem) {
           <el-descriptions-item label="归属地"><span class="detail-value">{{ formatIPLocation(usage.ipLocation) }}</span></el-descriptions-item>
           <el-descriptions-item label="状态"><el-tag :type="isSuccess ? 'success' : 'danger'" effect="plain" size="small">{{ usage.httpStatus }}</el-tag></el-descriptions-item>
           <el-descriptions-item label="请求模型">{{ usage.requestedModel }}</el-descriptions-item>
+          <el-descriptions-item label="推理强度">{{ formatReasoningEffort(usage.reasoningEffort) }}</el-descriptions-item>
           <el-descriptions-item label="上游模型">{{ usage.upstreamModel || '—' }}</el-descriptions-item>
           <el-descriptions-item label="渠道">{{ usage.channelName || '—' }}</el-descriptions-item>
           <el-descriptions-item label="密钥">{{ usage.apiKeyName || '—' }}</el-descriptions-item>

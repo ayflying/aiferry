@@ -8,7 +8,7 @@ import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
-import { formatCost, formatNumber, formatPreciseCost, formatTokenSpeed, formatTime } from '../lib/format'
+import { formatCost, formatNumber, formatPreciseCost, formatReasoningEffort, formatTokenSpeed, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 
 const store = useAppStore()
@@ -120,7 +120,7 @@ onMounted(load)
     <div class="table-panel">
       <el-table v-loading="loading" :data="usageItems" row-key="id">
         <el-table-column label="时间" min-width="230"><template #default="{ row }"><div class="time-cell"><strong>{{ formatTime(row.createdAt) }}</strong><small>{{ formatIPLocation(row.ipLocation) }}</small></div></template></el-table-column>
-        <el-table-column label="模型" min-width="160"><template #default="{ row }"><div class="request-cell"><strong>{{ row.requestedModel }}</strong><small v-if="row.upstreamModel && row.upstreamModel !== row.requestedModel">→ {{ row.upstreamModel }}</small></div></template></el-table-column>
+        <el-table-column label="模型" min-width="160"><template #default="{ row }"><div class="request-cell"><strong>{{ row.requestedModel }}</strong><small>推理强度：{{ formatReasoningEffort(row.reasoningEffort) }}</small></div></template></el-table-column>
         <el-table-column v-if="isAdmin" label="用户" min-width="130"><template #default="{ row }">{{ row.userName || `#${row.userId}` }}</template></el-table-column>
         <el-table-column :label="isAdmin ? '渠道 / 密钥' : '访问密钥'" min-width="150"><template #default="{ row }"><div class="request-cell"><span v-if="isAdmin">{{ row.channelName || '—' }}</span><span v-else>{{ row.apiKeyName || '—' }}</span><small v-if="isAdmin">{{ row.apiKeyName || '—' }}</small></div></template></el-table-column>
         <el-table-column label="状态" width="86"><template #default="{ row }"><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag></template></el-table-column>

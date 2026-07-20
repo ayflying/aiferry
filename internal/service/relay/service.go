@@ -52,6 +52,7 @@ type Candidate struct {
 	PublicName          string `orm:"public_name"`
 	UpstreamName        string `orm:"upstream_name"`
 	GroupIDs            []uint64
+	ReasoningEffort     string `orm:"-"`
 }
 
 type Model struct {

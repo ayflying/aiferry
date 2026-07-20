@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCost, formatLatency, formatNumber, formatTokenSpeed, successRate } from './format'
+import { formatCost, formatLatency, formatNumber, formatReasoningEffort, formatTokenSpeed, successRate } from './format'
 
 describe('format helpers', () => {
   it('does not report missing prices as zero', () => {
@@ -28,5 +28,12 @@ describe('format helpers', () => {
     expect(formatTokenSpeed(102, 2500, 500)).toBe('51t/s')
     expect(formatTokenSpeed(102, 2500)).toBe('41t/s')
     expect(formatTokenSpeed(102, 500, 500)).toBe('—')
+  })
+
+  it('formats reasoning effort for compact usage rows', () => {
+    expect(formatReasoningEffort()).toBe('默认')
+    expect(formatReasoningEffort('high')).toBe('高')
+    expect(formatReasoningEffort('xhigh')).toBe('极高')
+    expect(formatReasoningEffort('custom')).toBe('custom')
   })
 })

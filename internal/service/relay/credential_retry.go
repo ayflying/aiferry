@@ -18,6 +18,7 @@ type channelAttempt struct {
 // attemptChannel keeps retries inside one channel until no usable upstream key
 // remains. Those retries do not consume the cross-channel failover budget.
 func (s *Service) attemptChannel(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, candidate Candidate, stream bool, startedAt time.Time, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput) channelAttempt {
+	candidate.ReasoningEffort = requestReasoningEffort(body)
 	excluded := make(map[uint64]struct{})
 	last := channelAttempt{candidate: candidate}
 	for {

@@ -51,6 +51,7 @@ type RecordInput struct {
 	IPLocation          string
 	RequestedModel      string
 	UpstreamModel       string
+	ReasoningEffort     string
 	HTTPStatus          int
 	Stream              bool
 	Tokens              TokenUsage
@@ -134,6 +135,7 @@ type LogView struct {
 	IPLocation         string            `json:"ipLocation" orm:"ip_location"`
 	RequestedModel     string            `json:"requestedModel" orm:"requested_model"`
 	UpstreamModel      string            `json:"upstreamModel" orm:"upstream_model"`
+	ReasoningEffort    string            `json:"reasoningEffort" orm:"reasoning_effort"`
 	HttpStatus         uint              `json:"httpStatus" orm:"http_status"`
 	IsStream           int               `json:"isStream" orm:"is_stream"`
 	InputTokens        *uint64           `json:"inputTokens" orm:"input_tokens"`
@@ -188,6 +190,9 @@ func (s *Service) Record(ctx context.Context, input RecordInput) error {
 		DurationMs:         input.DurationMs,
 		Attempts:           input.Attempts,
 		ErrorMessage:       truncate(input.ErrorMessage, 1024),
+	}
+	if input.ReasoningEffort != "" {
+		data.ReasoningEffort = input.ReasoningEffort
 	}
 	if input.ChannelCredentialID > 0 {
 		data.ChannelCredentialId = input.ChannelCredentialID

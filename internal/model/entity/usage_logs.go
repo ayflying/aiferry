@@ -23,6 +23,7 @@ type UsageLogs struct {
 	IpLocation          string    `json:"ipLocation"          orm:"ip_location"           description:""` //
 	RequestedModel      string    `json:"requestedModel"      orm:"requested_model"       description:""` //
 	UpstreamModel       string    `json:"upstreamModel"       orm:"upstream_model"        description:""` //
+	ReasoningEffort     string    `json:"reasoningEffort"     orm:"reasoning_effort"      description:""` //
 	HttpStatus          uint      `json:"httpStatus"          orm:"http_status"           description:""` //
 	IsStream            int       `json:"isStream"            orm:"is_stream"             description:""` //
 	InputTokens         uint64    `json:"inputTokens"         orm:"input_tokens"          description:""` //

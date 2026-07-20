@@ -24,6 +24,7 @@ type UsageLogs struct {
 	IpLocation          any //
 	RequestedModel      any //
 	UpstreamModel       any //
+	ReasoningEffort     any //
 	HttpStatus          any //
 	IsStream            any //
 	InputTokens         any //

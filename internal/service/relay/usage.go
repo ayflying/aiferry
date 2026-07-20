@@ -64,6 +64,7 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		IPLocation:          s.location(clientIP),
 		RequestedModel:      requestedModel,
 		UpstreamModel:       candidate.UpstreamName,
+		ReasoningEffort:     candidate.ReasoningEffort,
 		HTTPStatus:          recordStatus,
 		Stream:              stream,
 		Tokens:              result.tokens,

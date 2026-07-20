@@ -60,6 +60,7 @@ export interface UsageLog {
   ipLocation?: string
   requestedModel: string
   upstreamModel: string
+  reasoningEffort: string
   httpStatus: number
   isStream: number
   inputTokens?: number
