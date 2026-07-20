@@ -58,12 +58,14 @@ func (s *Service) QueryCost(ctx context.Context, channelID uint64, input adminap
 		return CostResult{}, gerror.New("cost query is not configured")
 	}
 	if config.Costs.AuthType == channeltype.AuthChannelKey {
+		// Cost queries are administrative read-only requests, not relay traffic.
+		// Include disabled credentials so their remaining balance can still be inspected.
 		rows := make([]credentialRow, 0)
-		if err = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channel.Id, Status: 1}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
+		if err = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channel.Id}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
 			return CostResult{}, gerror.Wrap(err, "list channel credentials for cost query")
 		}
 		if len(rows) == 0 {
-			return CostResult{}, gerror.New("channel has no enabled upstream credential")
+			return CostResult{}, gerror.New("channel has no upstream credential")
 		}
 		for _, credential := range rows {
 			if err = s.ensureCredentialMetadata(ctx, &credential); err != nil {
@@ -80,7 +82,7 @@ func (s *Service) QueryCost(ctx context.Context, channelID uint64, input adminap
 			}
 		}
 		if !hasSuccessfulCostResult(result.Credentials) {
-			return CostResult{}, gerror.New("all enabled upstream credential cost queries failed")
+			return CostResult{}, gerror.New("all upstream credential cost queries failed")
 		}
 		if err = s.refreshChannelCostSummary(ctx, channel.Id); err != nil {
 			return CostResult{}, err
