@@ -185,16 +185,17 @@ type SystemInformationInput struct {
 }
 
 type MailSettingsInput struct {
-	Enabled         bool    `json:"enabled"`
-	Host            string  `json:"host"`
-	Port            int     `json:"port"`
-	Username        string  `json:"username"`
-	Password        *string `json:"password"`
-	From            string  `json:"from"`
-	Security        string  `json:"security"`
-	Threshold       float64 `json:"threshold"`
-	SubjectTemplate string  `json:"subjectTemplate"`
-	BodyTemplate    string  `json:"bodyTemplate"`
+	Enabled             bool    `json:"enabled"`
+	ChannelAlertEnabled *bool   `json:"channelAlertEnabled"`
+	Host                string  `json:"host"`
+	Port                int     `json:"port"`
+	Username            string  `json:"username"`
+	Password            *string `json:"password"`
+	From                string  `json:"from"`
+	Security            string  `json:"security"`
+	Threshold           float64 `json:"threshold"`
+	SubjectTemplate     string  `json:"subjectTemplate"`
+	BodyTemplate        string  `json:"bodyTemplate"`
 }
 
 type MailTestInput struct {

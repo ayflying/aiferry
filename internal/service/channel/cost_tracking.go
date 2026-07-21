@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/shopspring/decimal"
 
 	"github.com/yunloli/aiferry/internal/dao"
@@ -36,6 +37,7 @@ type channelCostState struct {
 type trackedChannelCost struct {
 	Name      string   `orm:"name"`
 	Remaining *float64 `orm:"last_cost_remaining"`
+	Currency  string   `orm:"last_cost_currency"`
 }
 
 func (s *Service) currentChannelCost(ctx context.Context, channelID uint64) (channelCostState, error) {
@@ -95,15 +97,25 @@ func (s *Service) ApplyCredentialUsageCost(ctx context.Context, channelID, crede
 	if err = s.refreshChannelCostSummary(ctx, channelID); err != nil {
 		return err
 	}
+	if err = s.notifyChannelLowBalance(ctx, channelID); err != nil {
+		g.Log().Warningf(ctx, "notify channel %d low balance: %v", channelID, err)
+	}
+	return nil
+}
+
+func (s *Service) notifyChannelLowBalance(ctx context.Context, channelID uint64) error {
+	if s.mail == nil {
+		return nil
+	}
 	var state trackedChannelCost
-	if err = dao.Channels.Ctx(ctx).
-		Fields(dao.Channels.Columns().Name, dao.Channels.Columns().LastCostRemaining).
+	if err := dao.Channels.Ctx(ctx).
+		Fields(dao.Channels.Columns().Name, dao.Channels.Columns().LastCostRemaining, dao.Channels.Columns().LastCostCurrency).
 		Where(dao.Channels.Columns().Id, channelID).
 		Scan(&state); err != nil {
 		return gerror.Wrap(err, "load tracked channel cost")
 	}
-	if state.Remaining != nil && s.mail != nil {
-		s.mail.NotifyChannelLowBalance(ctx, channelID, state.Name, *state.Remaining)
+	if state.Remaining != nil {
+		s.mail.NotifyChannelLowBalance(ctx, channelID, state.Name, *state.Remaining, state.Currency)
 	}
 	return nil
 }

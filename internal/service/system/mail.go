@@ -18,16 +18,17 @@ import (
 const mailSettingsKey = "mail_delivery"
 
 type MailSettings struct {
-	Enabled            bool    `json:"enabled"`
-	Host               string  `json:"host"`
-	Port               int     `json:"port"`
-	Username           string  `json:"username"`
-	PasswordConfigured bool    `json:"passwordConfigured"`
-	From               string  `json:"from"`
-	Security           string  `json:"security"`
-	Threshold          float64 `json:"threshold"`
-	SubjectTemplate    string  `json:"subjectTemplate"`
-	BodyTemplate       string  `json:"bodyTemplate"`
+	Enabled             bool    `json:"enabled"`
+	ChannelAlertEnabled bool    `json:"channelAlertEnabled"`
+	Host                string  `json:"host"`
+	Port                int     `json:"port"`
+	Username            string  `json:"username"`
+	PasswordConfigured  bool    `json:"passwordConfigured"`
+	From                string  `json:"from"`
+	Security            string  `json:"security"`
+	Threshold           float64 `json:"threshold"`
+	SubjectTemplate     string  `json:"subjectTemplate"`
+	BodyTemplate        string  `json:"bodyTemplate"`
 }
 
 type MailDeliverySettings struct {
@@ -36,21 +37,22 @@ type MailDeliverySettings struct {
 }
 
 type storedMailSettings struct {
-	Enabled         bool    `json:"enabled"`
-	Host            string  `json:"host"`
-	Port            int     `json:"port"`
-	Username        string  `json:"username"`
-	PasswordCipher  string  `json:"passwordCipher"`
-	From            string  `json:"from"`
-	Security        string  `json:"security"`
-	Threshold       float64 `json:"threshold"`
-	SubjectTemplate string  `json:"subjectTemplate"`
-	BodyTemplate    string  `json:"bodyTemplate"`
+	Enabled             bool    `json:"enabled"`
+	ChannelAlertEnabled *bool   `json:"channelAlertEnabled"`
+	Host                string  `json:"host"`
+	Port                int     `json:"port"`
+	Username            string  `json:"username"`
+	PasswordCipher      string  `json:"passwordCipher"`
+	From                string  `json:"from"`
+	Security            string  `json:"security"`
+	Threshold           float64 `json:"threshold"`
+	SubjectTemplate     string  `json:"subjectTemplate"`
+	BodyTemplate        string  `json:"bodyTemplate"`
 }
 
 func DefaultMailSettings() MailSettings {
 	return MailSettings{
-		Enabled: false, Port: 587, Security: "starttls", Threshold: 5,
+		Enabled: false, ChannelAlertEnabled: true, Port: 587, Security: "starttls", Threshold: 5,
 		SubjectTemplate: "AiFerry 余额不足提醒",
 		BodyTemplate:    "您好，{nickname}：\n\n您的 AiFerry 余额为 ${balance}，已低于提醒阈值 ${threshold}。\n\n请及时充值以避免调用中断。",
 	}
@@ -142,10 +144,14 @@ func (s *Service) saveMailSettings(ctx context.Context, value string) error {
 }
 
 func normalizeMailSettings(input adminapi.MailSettingsInput, current storedMailSettings) (storedMailSettings, error) {
+	channelAlertEnabled := current.channelAlertEnabled()
+	if input.ChannelAlertEnabled != nil {
+		channelAlertEnabled = *input.ChannelAlertEnabled
+	}
 	settings := storedMailSettings{
-		Enabled: input.Enabled, Host: strings.TrimSpace(input.Host), Port: input.Port,
-		Username: strings.TrimSpace(input.Username), PasswordCipher: current.PasswordCipher,
-		From: strings.TrimSpace(input.From), Security: strings.TrimSpace(input.Security),
+		Enabled: input.Enabled, ChannelAlertEnabled: boolPointer(channelAlertEnabled),
+		Host: strings.TrimSpace(input.Host), Port: input.Port, Username: strings.TrimSpace(input.Username),
+		PasswordCipher: current.PasswordCipher, From: strings.TrimSpace(input.From), Security: strings.TrimSpace(input.Security),
 		Threshold: input.Threshold, SubjectTemplate: strings.TrimSpace(input.SubjectTemplate), BodyTemplate: strings.TrimSpace(input.BodyTemplate),
 	}
 	if settings.Security == "" {
@@ -157,7 +163,7 @@ func normalizeMailSettings(input adminapi.MailSettingsInput, current storedMailS
 	if math.IsNaN(settings.Threshold) || math.IsInf(settings.Threshold, 0) || settings.Threshold < 0 || settings.Threshold > 1_000_000 {
 		return settings, gerror.New("余额邮件提醒阈值必须介于 0 和 1000000 之间")
 	}
-	if !settings.Enabled {
+	if !settings.Enabled && !channelAlertEnabled {
 		return settings, nil
 	}
 	if settings.Host == "" || len(settings.Host) > 255 {
@@ -183,19 +189,30 @@ func normalizeMailSettings(input adminapi.MailSettingsInput, current storedMailS
 
 func mailSettingsView(stored storedMailSettings) MailSettings {
 	return MailSettings{
-		Enabled: stored.Enabled, Host: stored.Host, Port: stored.Port, Username: stored.Username,
-		PasswordConfigured: stored.PasswordCipher != "", From: stored.From, Security: stored.Security,
-		Threshold: stored.Threshold, SubjectTemplate: stored.SubjectTemplate, BodyTemplate: stored.BodyTemplate,
+		Enabled: stored.Enabled, ChannelAlertEnabled: stored.channelAlertEnabled(),
+		Host: stored.Host, Port: stored.Port, Username: stored.Username, PasswordConfigured: stored.PasswordCipher != "",
+		From: stored.From, Security: stored.Security, Threshold: stored.Threshold,
+		SubjectTemplate: stored.SubjectTemplate, BodyTemplate: stored.BodyTemplate,
 	}
 }
 
 func storedFromView(settings MailSettings) storedMailSettings {
 	return storedMailSettings{
-		Enabled: settings.Enabled, Host: settings.Host, Port: settings.Port, Username: settings.Username,
-		From: settings.From, Security: settings.Security, Threshold: settings.Threshold,
-		SubjectTemplate: settings.SubjectTemplate, BodyTemplate: settings.BodyTemplate,
+		Enabled: settings.Enabled, ChannelAlertEnabled: boolPointer(settings.ChannelAlertEnabled),
+		Host: settings.Host, Port: settings.Port, Username: settings.Username, From: settings.From,
+		Security: settings.Security, Threshold: settings.Threshold, SubjectTemplate: settings.SubjectTemplate,
+		BodyTemplate: settings.BodyTemplate,
 	}
 }
+
+func (s storedMailSettings) channelAlertEnabled() bool {
+	if s.ChannelAlertEnabled == nil {
+		return s.Enabled
+	}
+	return *s.ChannelAlertEnabled
+}
+
+func boolPointer(value bool) *bool { return &value }
 
 func validMailAddress(value string) bool {
 	address, err := stdmail.ParseAddress(value)

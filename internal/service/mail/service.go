@@ -38,16 +38,8 @@ func (s *Service) NotifyLowBalance(ctx context.Context, userID uint64) {
 	go s.notifyLowBalance(context.WithoutCancel(ctx), userID)
 }
 
-func (s *Service) NotifyChannelLowBalance(ctx context.Context, channelID uint64, channelName string, remaining float64) {
-	go s.notifyChannelLowBalance(context.WithoutCancel(ctx), channelID, channelName, remaining)
-}
-
-func (s *Service) ClearChannelLowBalanceAlerts(ctx context.Context, channelID uint64) error {
-	keys := make([]string, 0, len(channelBalanceThresholds))
-	for _, threshold := range channelBalanceThresholds {
-		keys = append(keys, channelBalanceReminderKey(channelID, threshold))
-	}
-	return gerror.Wrap(s.app.Redis.Del(ctx, keys...).Err(), "clear channel low balance mail alerts")
+func (s *Service) NotifyChannelLowBalance(ctx context.Context, channelID uint64, channelName string, remaining float64, currency string) {
+	go s.notifyChannelLowBalance(context.WithoutCancel(ctx), channelID, channelName, remaining, currency)
 }
 
 func (s *Service) SendTest(ctx context.Context, recipient string) error {
@@ -104,34 +96,38 @@ func (s *Service) notifyLowBalance(ctx context.Context, userID uint64) {
 
 var channelBalanceThresholds = []float64{10, 5, 1}
 
-func (s *Service) notifyChannelLowBalance(ctx context.Context, channelID uint64, channelName string, remaining float64) {
+func (s *Service) notifyChannelLowBalance(ctx context.Context, channelID uint64, channelName string, remaining float64, currency string) {
 	settings, err := s.settings.MailDeliverySettings(ctx)
-	if err != nil || !settings.Enabled {
+	if err != nil || !settings.ChannelAlertEnabled {
 		return
 	}
-	recipients, err := s.users.AdminEmails(ctx)
-	if err != nil || len(recipients) == 0 {
-		return
-	}
-	name := s.systemName(ctx)
 	for _, threshold := range channelBalanceThresholds {
+		key := channelBalanceReminderKey(channelID, threshold)
 		if remaining >= threshold {
+			_ = s.app.Redis.Del(ctx, key).Err()
 			continue
 		}
-		key := channelBalanceReminderKey(channelID, threshold)
+		recipients, err := s.users.AdminEmails(ctx)
+		if err != nil || len(recipients) == 0 {
+			return
+		}
 		created, err := s.app.Redis.SetNX(ctx, key, "1", 0).Result()
 		if err != nil || !created {
 			continue
 		}
-		if !sendChannelLowBalance(settings, recipients, name, channelID, channelName, remaining, threshold) {
+		if !sendChannelLowBalance(settings, recipients, s.systemName(ctx), channelID, channelName, remaining, threshold, currency) {
 			_ = s.app.Redis.Del(ctx, key).Err()
 		}
 	}
 }
 
-func sendChannelLowBalance(settings system.MailDeliverySettings, recipients []string, systemName string, channelID uint64, channelName string, remaining, threshold float64) bool {
-	subject := fmt.Sprintf("%s 渠道余额低于 $%.0f：%s", systemName, threshold, channelName)
-	body := fmt.Sprintf("渠道 %s（ID：%d）当前上游余额为 $%.6f，已低于 $%.0f。", channelName, channelID, remaining, threshold)
+func sendChannelLowBalance(settings system.MailDeliverySettings, recipients []string, systemName string, channelID uint64, channelName string, remaining, threshold float64, currency string) bool {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		currency = "USD"
+	}
+	subject := fmt.Sprintf("%s 渠道余额低于 %.0f %s：%s", systemName, threshold, currency, channelName)
+	body := fmt.Sprintf("渠道 %s（ID：%d）当前上游余额为 %.6f %s，已低于 %.0f %s。", channelName, channelID, remaining, currency, threshold, currency)
 	sent := false
 	for _, recipient := range recipients {
 		if err := send(settings, recipient, subject, body); err == nil {

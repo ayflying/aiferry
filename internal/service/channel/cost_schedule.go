@@ -53,11 +53,6 @@ func (s *Service) syncPlatformCosts(ctx context.Context) {
 			g.Log().Warningf(ctx, "scheduled cost sync for channel %d failed: %v", channel.Id, err)
 			continue
 		}
-		if s.mail != nil {
-			if err = s.mail.ClearChannelLowBalanceAlerts(ctx, channel.Id); err != nil {
-				g.Log().Warningf(ctx, "clear channel %d low balance mail alerts: %v", channel.Id, err)
-			}
-		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
@@ -92,6 +93,9 @@ func (s *Service) QueryCost(ctx context.Context, channelID uint64, input adminap
 			return CostResult{}, err
 		}
 		result.applySingleSummary()
+		if notifyErr := s.notifyChannelLowBalance(ctx, channel.Id); notifyErr != nil {
+			g.Log().Warningf(ctx, "notify channel %d low balance: %v", channel.Id, notifyErr)
+		}
 		return result, nil
 	}
 
@@ -105,6 +109,9 @@ func (s *Service) QueryCost(ctx context.Context, channelID uint64, input adminap
 	}
 	result.UsedAmount, result.RemainingAmount, result.Currency = cost.UsedAmount, cost.RemainingAmount, cost.Currency
 	result.Summaries = []CostSummary{{Currency: cost.Currency, UsedAmount: cost.UsedAmount, RemainingAmount: cost.RemainingAmount}}
+	if notifyErr := s.notifyChannelLowBalance(ctx, channel.Id); notifyErr != nil {
+		g.Log().Warningf(ctx, "notify channel %d low balance: %v", channel.Id, notifyErr)
+	}
 	return result, nil
 }
 
