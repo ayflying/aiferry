@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Channel } from '../api/types'
-import { displayedRoutes, isChannelRoutable, routeDisplayLimit } from './route-display'
+import { displayedRoutes, isChannelRoutable, isChannelRouteAlert, routeDisplayLimit } from './route-display'
 
 function channel(id: number, weight: number, overrides: Partial<Channel> = {}): Channel {
   return {
@@ -37,5 +37,18 @@ describe('航线展示', () => {
     expect(isChannelRoutable(channel(2, 1, { status: 0 }))).toBe(false)
     expect(isChannelRoutable(channel(3, 1, { autoDisabled: true }))).toBe(false)
     expect(isChannelRoutable(channel(4, 1, { credentialsUnavailable: true }))).toBe(false)
+  })
+
+  it('将标红的测试失败或不可用渠道排到末尾', () => {
+    const channels = [
+      channel(1, 100, { lastTestStatus: 'failed' }),
+      channel(2, 20),
+      channel(3, 80, { autoDisabled: true }),
+      channel(4, 50),
+    ]
+
+    expect(displayedRoutes(channels).map((item) => item.id)).toEqual([4, 2, 1, 3])
+    expect(isChannelRouteAlert(channels[0])).toBe(true)
+    expect(isChannelRouteAlert(channels[2])).toBe(true)
   })
 })

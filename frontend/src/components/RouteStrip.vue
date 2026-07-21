@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { Anchor, Radio, ShipWheel } from '@lucide/vue'
 import type { Channel } from '../api/types'
-import { displayedRoutes, isChannelRoutable } from '../lib/route-display'
+import { displayedRoutes, isChannelRoutable, isChannelRouteAlert } from '../lib/route-display'
 import { useSystemStore } from '../stores/system'
 
 const props = defineProps<{ channels: Channel[] }>()
@@ -20,7 +20,7 @@ const system = useSystemStore()
       <span class="route-pulse"><Radio :size="13" /></span>
     </div>
     <div v-if="visible.length" class="route-destinations">
-      <div v-for="channel in visible" :key="channel.id" class="route-node" :class="{ online: isChannelRoutable(channel), failed: channel.lastTestStatus === 'failed', unavailable: !isChannelRoutable(channel) }">
+      <div v-for="channel in visible" :key="channel.id" class="route-node" :class="{ online: isChannelRoutable(channel), failed: isChannelRouteAlert(channel), unavailable: !isChannelRoutable(channel) }">
         <Anchor :size="14" />
         <span>{{ channel.name }}</span>
         <small>P{{ channel.priority }}</small>
