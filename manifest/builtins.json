@@ -116,6 +116,15 @@
 		"models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
 		"costs": { "adapter": "sub2api_usage", "method": "GET", "path": "/usage", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "usedPath": "usage.total.actual_cost", "remainingPath": "balance", "currencyPath": "unit", "fixedCurrency": "USD" }
 	  }
+	},
+	{
+	  "id": 9000000000000012,
+	  "name": "NewAPI",
+	  "code": "newapi",
+	  "config": {
+		"models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+		"costs": { "adapter": "newapi_balance", "method": "GET", "path": "/api/user/self", "authType": "management_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "fixedCurrency": "USD" }
+	  }
 	}
   ]
 }

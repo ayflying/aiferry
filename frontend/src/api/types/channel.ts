@@ -33,7 +33,7 @@ export interface ChannelTypeModelConfig {
 }
 
 export interface ChannelTypeCostConfig {
-  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'custom_json'
+  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'newapi_balance' | 'custom_json'
   method: string
   path: string
   authType: 'none' | 'channel_key' | 'management_key'

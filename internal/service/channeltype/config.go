@@ -197,5 +197,5 @@ func validAuth(value string) bool {
 }
 
 func validCostAdapter(value string) bool {
-	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterCustomJSON
+	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterNewAPI || value == AdapterCustomJSON
 }

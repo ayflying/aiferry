@@ -130,6 +130,8 @@ func (s *Service) queryCredentialCost(ctx context.Context, channel entity.Channe
 		err = s.queryOpenAICosts(ctx, channel, credentialCipher, config, start, end, &result)
 	case channeltype.AdapterSub2API:
 		err = s.querySub2API(ctx, channel, credentialCipher, config, &result)
+	case channeltype.AdapterNewAPI:
+		err = s.queryNewAPI(ctx, channel, config, &result)
 	case channeltype.AdapterCustomJSON:
 		err = s.queryCustomJSON(ctx, channel, credentialCipher, config, &result)
 	default:

@@ -20,6 +20,7 @@ const (
 	AdapterNone        = "none"
 	AdapterOpenAICosts = "openai_costs"
 	AdapterSub2API     = "sub2api_usage"
+	AdapterNewAPI      = "newapi_balance"
 	AdapterCustomJSON  = "custom_json"
 	AdapterNewAPIRatio = "newapi_ratio"
 

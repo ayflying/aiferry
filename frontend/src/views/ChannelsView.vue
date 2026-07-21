@@ -142,7 +142,7 @@ async function openCreate() {
 }
 
 function applyDefaultBaseURL(type: string) {
-  if (!editingId.value) form.baseUrl = channelTypeBaseURL(store.channelTypes, type) || form.baseUrl
+  if (!editingId.value) form.baseUrl = channelTypeBaseURL(store.channelTypes, type)
 }
 async function openEdit(channel: Channel) {
   editingId.value = channel.id
