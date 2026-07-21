@@ -5,12 +5,12 @@ export interface APIKey {
   keyPrefix: string
   secretAvailable: boolean
   status: number
-  spendLimit?: number
+  spendLimit?: number | null
   spentAmount: number
-  availableAmount?: number
-  dailySpendLimit?: number
+  availableAmount?: number | null
+  dailySpendLimit?: number | null
   dailySpentAmount: number
-  dailyAvailableAmount?: number
+  dailyAvailableAmount?: number | null
   allowedModels: string[]
   channelGroupIds: number[]
   expiresAt?: string
