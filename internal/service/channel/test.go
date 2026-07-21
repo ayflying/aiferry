@@ -81,6 +81,7 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput, 
 	}
 	if result.Success {
 		s.clearCredentialTransient(ctx, credential.ID)
+		s.resilience.ClearAutoDisableFailures(ctx, credential.ID)
 		_, _ = s.resilience.RecoverCredentialIfAllowed(ctx, credential.ID)
 		_, _ = s.resilience.RecoverIfAllowed(ctx, channel.Id)
 	} else {

@@ -172,7 +172,7 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 			candidate := outcome.candidate
 			result := outcome.result
 			if result.status >= 200 && result.status < 300 {
-				s.markSuccess(ctx, candidate.ChannelCredentialID)
+				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
 			}
 			if recordErr := s.record(ctx, requestID, key, candidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, result); recordErr != nil {
 				if !isStream {

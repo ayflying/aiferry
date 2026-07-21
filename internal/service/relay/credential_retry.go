@@ -58,7 +58,6 @@ func (s *Service) attemptChannel(ctx context.Context, writer http.ResponseWriter
 			last.handled = true
 			return last
 		}
-		s.markFailure(ctx, current.ChannelCredentialID)
 		excluded[current.ChannelCredentialID] = struct{}{}
 	}
 }

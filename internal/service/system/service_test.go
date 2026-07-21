@@ -86,3 +86,47 @@ func TestNormalizeSettingsValidatesRelayTimeouts(t *testing.T) {
 		t.Fatalf("zero must disable stream idle timeout: %v", err)
 	}
 }
+
+func TestNormalizeSettingsValidatesAutoDisableFailureThreshold(t *testing.T) {
+	settings := DefaultResilienceSettings()
+	settings.AutoDisableFailureThreshold = 0
+	if _, err := normalizeSettings(settings); err == nil {
+		t.Fatal("zero auto-disable failure threshold must be rejected")
+	}
+
+	settings = DefaultResilienceSettings()
+	settings.AutoDisableFailureThreshold = 21
+	if _, err := normalizeSettings(settings); err == nil {
+		t.Fatal("auto-disable failure threshold above the limit must be rejected")
+	}
+}
+
+func TestRecoveryRetryInterval(t *testing.T) {
+	tests := []struct {
+		completedAttempts int
+		want              time.Duration
+	}{
+		{completedAttempts: 0, want: 30 * time.Second},
+		{completedAttempts: 1, want: time.Minute},
+		{completedAttempts: 2, want: 2 * time.Minute},
+		{completedAttempts: 3, want: 4 * time.Minute},
+		{completedAttempts: 4, want: 5 * time.Minute},
+		{completedAttempts: 12, want: 5 * time.Minute},
+	}
+	for _, test := range tests {
+		if got := RecoveryRetryInterval(test.completedAttempts); got != test.want {
+			t.Fatalf("RecoveryRetryInterval(%d) = %s, want %s", test.completedAttempts, got, test.want)
+		}
+	}
+}
+
+func TestAutoDisableFailureThreshold(t *testing.T) {
+	for count := int64(1); count <= 2; count++ {
+		if reachesAutoDisableFailureThreshold(count, 3) {
+			t.Fatalf("failure count %d must not reach threshold 3", count)
+		}
+	}
+	if !reachesAutoDisableFailureThreshold(3, 3) {
+		t.Fatal("third consecutive failure must reach threshold 3")
+	}
+}

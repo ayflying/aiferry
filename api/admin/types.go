@@ -157,6 +157,7 @@ type SystemResilienceSettingsInput struct {
 	HealthCheckIntervalMinutes    int      `json:"healthCheckIntervalMinutes"`
 	RecoveryEnabled               bool     `json:"recoveryEnabled"`
 	AutoDisableEnabled            bool     `json:"autoDisableEnabled"`
+	AutoDisableFailureThreshold   int      `json:"autoDisableFailureThreshold"`
 	DisableLatencySeconds         int      `json:"disableLatencySeconds"`
 	DisableStatusCodes            string   `json:"disableStatusCodes"`
 	FailureKeywords               []string `json:"failureKeywords"`

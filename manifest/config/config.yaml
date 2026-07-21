@@ -29,5 +29,4 @@ aiferry:
   webRoot: "${WEB_ROOT:./web}"
   masterKey: "${AIFERRY_MASTER_KEY:}"
   maxFailoverAttempts: 3
-  channelFailureThreshold: 3
   channelCooldownSeconds: 60

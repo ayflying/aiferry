@@ -53,6 +53,10 @@ func matchesAutoDisable(settings adminapi.SystemResilienceSettingsInput, input A
 	return false
 }
 
+func IsAutoDisableMatch(settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) bool {
+	return settings.AutoDisableEnabled && matchesAutoDisable(settings, input)
+}
+
 func autoDisableReason(input AutoDisableInput) string {
 	parts := make([]string, 0, 4)
 	if input.Status > 0 {
@@ -88,7 +92,7 @@ func (s *Service) DisableIfNeeded(ctx context.Context, input AutoDisableInput) (
 }
 
 func (s *Service) DisableIfNeededWithSettings(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) (bool, error) {
-	if !settings.AutoDisableEnabled || !matchesAutoDisable(settings, input) {
+	if !IsAutoDisableMatch(settings, input) {
 		return false, nil
 	}
 	var channel entity.Channels
@@ -102,7 +106,14 @@ func (s *Service) DisableIfNeededWithSettings(ctx context.Context, settings admi
 		return false, nil
 	}
 	if input.ChannelCredentialID > 0 {
-		return s.disableCredential(ctx, input)
+		return s.disableCredential(ctx, settings, input)
+	}
+	matched, err := s.recordAutoDisableFailure(ctx, input.ChannelID, 0, settings.AutoDisableFailureThreshold)
+	if err != nil {
+		return false, err
+	}
+	if !matched {
+		return false, nil
 	}
 
 	data := do.Channels{
@@ -122,16 +133,24 @@ func (s *Service) DisableIfNeededWithSettings(ctx context.Context, settings admi
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return false, nil
 	}
+	s.resetRecoverySchedule(ctx, RecoveryTargetChannel, input.ChannelID)
 	s.clearTransient(ctx, input.ChannelID)
 	return true, nil
 }
 
-func (s *Service) disableCredential(ctx context.Context, input AutoDisableInput) (bool, error) {
+func (s *Service) disableCredential(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) (bool, error) {
 	var credential entity.ChannelCredentials
 	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: input.ChannelCredentialID, ChannelId: input.ChannelID}).Scan(&credential); err != nil {
 		return false, gerror.Wrap(err, "load channel credential for automatic disable")
 	}
 	if credential.Id == 0 || credential.Status == 0 {
+		return false, nil
+	}
+	matched, err := s.recordAutoDisableFailure(ctx, input.ChannelID, credential.Id, settings.AutoDisableFailureThreshold)
+	if err != nil {
+		return false, err
+	}
+	if !matched {
 		return false, nil
 	}
 	data := do.ChannelCredentials{
@@ -151,6 +170,7 @@ func (s *Service) disableCredential(ctx context.Context, input AutoDisableInput)
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return false, nil
 	}
+	s.resetRecoverySchedule(ctx, RecoveryTargetCredential, credential.Id)
 	s.clearCredentialTransient(ctx, credential.Id)
 	return true, nil
 }
@@ -186,6 +206,7 @@ func (s *Service) RecoverIfAllowed(ctx context.Context, channelID uint64) (bool,
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return false, nil
 	}
+	s.clearRecoverySchedule(ctx, RecoveryTargetChannel, channelID)
 	s.clearTransient(ctx, channelID)
 	return true, nil
 }
@@ -218,6 +239,7 @@ func (s *Service) RecoverCredentialIfAllowed(ctx context.Context, credentialID u
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return false, nil
 	}
+	s.clearRecoverySchedule(ctx, RecoveryTargetCredential, credential.Id)
 	s.clearCredentialTransient(ctx, credential.Id)
 	return true, nil
 }
@@ -229,8 +251,8 @@ func (s *Service) clearTransient(ctx context.Context, channelID uint64) {
 
 func (s *Service) clearCredentialTransient(ctx context.Context, credentialID uint64) {
 	_ = s.app.Redis.Del(ctx,
-		fmt.Sprintf("aiferry:credential:%d:failures", credentialID),
-		fmt.Sprintf("aiferry:credential:%d:cooldown", credentialID),
+		CredentialFailureKey(credentialID),
+		CredentialCooldownKey(credentialID),
 		consts.ChannelListCacheKey,
 	).Err()
 	_ = s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()

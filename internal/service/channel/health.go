@@ -4,16 +4,20 @@ import (
 	"context"
 	"time"
 
+	"github.com/gogf/gf/v2/frame/g"
+
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
+const healthCheckTick = 10 * time.Second
+
 func (s *Service) StartHealthChecks(ctx context.Context) {
 	go func() {
-		var lastCheck time.Time
-		ticker := time.NewTicker(time.Minute)
+		lastRegularCheck := time.Now()
+		ticker := time.NewTicker(healthCheckTick)
 		defer ticker.Stop()
 		for {
 			select {
@@ -24,39 +28,35 @@ func (s *Service) StartHealthChecks(ctx context.Context) {
 				if err != nil || !settings.HealthCheckEnabled || !settings.RecoveryEnabled {
 					continue
 				}
+				s.runRecoveryChecks(ctx, settings.HealthCheckMode)
 				interval := time.Duration(settings.HealthCheckIntervalMinutes) * time.Minute
-				if !lastCheck.IsZero() && now.Sub(lastCheck) < interval {
+				if now.Sub(lastRegularCheck) < interval {
 					continue
 				}
-				lastCheck = now
-				s.runHealthChecks(ctx, settings.HealthCheckMode)
+				lastRegularCheck = now
+				s.runRegularHealthChecks(ctx, settings.HealthCheckMode)
 			}
 		}
 	}()
 }
 
-func (s *Service) runHealthChecks(ctx context.Context, mode string) {
+func (s *Service) runRegularHealthChecks(ctx context.Context, mode string) {
+	if mode != "all" {
+		return
+	}
 	type healthCheckModel struct {
-		ChannelID uint64 `orm:"channel_id"`
-		ModelID   uint64 `orm:"model_id"`
+		ModelID uint64 `orm:"model_id"`
 	}
 	rows := make([]healthCheckModel, 0)
-	model := dao.Channels.Ctx(ctx).As("c").
-		Fields("c.id AS channel_id,c.health_check_model_id AS model_id").
+	if err := dao.Channels.Ctx(ctx).As("c").
+		Fields("c.health_check_model_id AS model_id").
 		InnerJoin(dao.ChannelModels.Table()+" m", "m.id=c.health_check_model_id AND m.channel_id=c.id AND m.enabled=1 AND m.deleted_at IS NULL").
+		Where("c.status=1").
 		Where("c.health_check_model_id IS NOT NULL").
 		Where("c.auto_disable_enabled", 1).
-		OrderAsc("c.id")
-	if mode == "all" {
-		model = model.Where("c.status=1 OR (c.status=0 AND c.auto_disabled_at IS NOT NULL)")
-	} else {
-		model = model.Where(
-			"c.status=? AND c.auto_disabled_at IS NOT NULL AND c.auto_disabled_source=?",
-			0,
-			system.AutoDisableSourceRelayRequest,
-		)
-	}
-	if err := model.Scan(&rows); err != nil {
+		OrderAsc("c.id").
+		Scan(&rows); err != nil {
+		g.Log().Warningf(ctx, "load regular channel health checks: %v", err)
 		return
 	}
 	for _, row := range rows {
@@ -64,18 +64,63 @@ func (s *Service) runHealthChecks(ctx context.Context, mode string) {
 		_, _ = s.TestModel(testCtx, adminapi.ModelTestInput{ModelID: row.ModelID, Endpoint: "auto"}, usage.SystemUserID)
 		cancel()
 	}
-	s.runCredentialHealthChecks(ctx, mode)
 }
 
-func (s *Service) runCredentialHealthChecks(ctx context.Context, mode string) {
+func (s *Service) runRecoveryChecks(ctx context.Context, mode string) {
+	if err := s.reconcileCredentialAvailabilityFromStoredCost(ctx); err != nil {
+		g.Log().Warningf(ctx, "reconcile credential availability from stored cost: %v", err)
+	}
+	s.runChannelRecoveryChecks(ctx, mode)
+	s.runCredentialRecoveryChecks(ctx, mode)
+}
+
+func (s *Service) runChannelRecoveryChecks(ctx context.Context, mode string) {
 	type healthCheckModel struct {
-		ChannelID    uint64 `orm:"channel_id"`
-		ModelID      uint64 `orm:"model_id"`
-		CredentialID uint64 `orm:"credential_id"`
+		ChannelID      uint64    `orm:"channel_id"`
+		ModelID        uint64    `orm:"model_id"`
+		AutoDisabledAt time.Time `orm:"auto_disabled_at"`
+	}
+	rows := make([]healthCheckModel, 0)
+	model := dao.Channels.Ctx(ctx).As("c").
+		Fields("c.id AS channel_id,c.health_check_model_id AS model_id,c.auto_disabled_at").
+		InnerJoin(dao.ChannelModels.Table()+" m", "m.id=c.health_check_model_id AND m.channel_id=c.id AND m.enabled=1 AND m.deleted_at IS NULL").
+		Where("c.status=0 AND c.auto_disabled_at IS NOT NULL").
+		Where("c.health_check_model_id IS NOT NULL").
+		Where("c.auto_disable_enabled", 1).
+		OrderAsc("c.id")
+	if mode == "passive" {
+		model = model.Where("c.auto_disabled_source=?", system.AutoDisableSourceRelayRequest)
+	}
+	if err := model.Scan(&rows); err != nil {
+		g.Log().Warningf(ctx, "load channel recovery checks: %v", err)
+		return
+	}
+	for _, row := range rows {
+		started, err := s.resilience.BeginRecoveryAttempt(ctx, system.RecoveryTargetChannel, row.ChannelID, row.AutoDisabledAt)
+		if err != nil {
+			g.Log().Warningf(ctx, "schedule channel %d recovery: %v", row.ChannelID, err)
+			continue
+		}
+		if !started {
+			continue
+		}
+		testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		result, testErr := s.TestModel(testCtx, adminapi.ModelTestInput{ModelID: row.ModelID, Endpoint: "auto"}, usage.SystemUserID)
+		cancel()
+		s.resilience.FinishRecoveryAttempt(ctx, system.RecoveryTargetChannel, row.ChannelID, testErr == nil && result.Success)
+	}
+}
+
+func (s *Service) runCredentialRecoveryChecks(ctx context.Context, mode string) {
+	type healthCheckModel struct {
+		ChannelID      uint64    `orm:"channel_id"`
+		ModelID        uint64    `orm:"model_id"`
+		CredentialID   uint64    `orm:"credential_id"`
+		AutoDisabledAt time.Time `orm:"auto_disabled_at"`
 	}
 	rows := make([]healthCheckModel, 0)
 	model := dao.ChannelCredentials.Ctx(ctx).As("cc").
-		Fields("cc.channel_id,cc.id AS credential_id,c.health_check_model_id AS model_id").
+		Fields("cc.channel_id,cc.id AS credential_id,c.health_check_model_id AS model_id,cc.auto_disabled_at").
 		InnerJoin(dao.Channels.Table()+" c", "c.id=cc.channel_id AND c.status=1 AND c.auto_disable_enabled=1").
 		InnerJoin(dao.ChannelModels.Table()+" m", "m.id=c.health_check_model_id AND m.channel_id=c.id AND m.enabled=1 AND m.deleted_at IS NULL").
 		Where("cc.status=0 AND cc.auto_disabled_at IS NOT NULL").
@@ -84,13 +129,23 @@ func (s *Service) runCredentialHealthChecks(ctx context.Context, mode string) {
 		model = model.Where("cc.auto_disabled_source=?", system.AutoDisableSourceRelayRequest)
 	}
 	if err := model.Scan(&rows); err != nil {
+		g.Log().Warningf(ctx, "load credential recovery checks: %v", err)
 		return
 	}
 	for _, row := range rows {
+		started, err := s.resilience.BeginRecoveryAttempt(ctx, system.RecoveryTargetCredential, row.CredentialID, row.AutoDisabledAt)
+		if err != nil {
+			g.Log().Warningf(ctx, "schedule credential %d recovery: %v", row.CredentialID, err)
+			continue
+		}
+		if !started {
+			continue
+		}
 		testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		_, _ = s.TestModel(testCtx, adminapi.ModelTestInput{
+		result, testErr := s.TestModel(testCtx, adminapi.ModelTestInput{
 			ModelID: row.ModelID, ChannelCredentialID: row.CredentialID, Endpoint: "auto",
 		}, usage.SystemUserID)
 		cancel()
+		s.resilience.FinishRecoveryAttempt(ctx, system.RecoveryTargetCredential, row.CredentialID, testErr == nil && result.Success)
 	}
 }

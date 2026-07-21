@@ -4,14 +4,12 @@ import (
 	"context"
 	mathrand "math/rand/v2"
 	"sort"
-	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/service/apikey"
-	"github.com/yunloli/aiferry/internal/service/channel"
 	"github.com/yunloli/aiferry/internal/service/system"
 )
 
@@ -119,22 +117,6 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func (s *Service) markFailure(ctx context.Context, credentialID uint64) {
-	key := channel.CredentialFailureKey(credentialID)
-	count, err := s.app.Redis.Incr(ctx, key).Result()
-	if err != nil {
-		return
-	}
-	_ = s.app.Redis.Expire(ctx, key, 10*time.Minute).Err()
-	if count >= s.app.Config.FailureThreshold {
-		_ = s.app.Redis.Set(ctx, channel.CredentialCooldownKey(credentialID), "1", time.Duration(s.app.Config.ChannelCooldownSeconds)*time.Second).Err()
-	}
-}
-
-func (s *Service) markSuccess(ctx context.Context, credentialID uint64) {
-	_ = s.app.Redis.Del(ctx, channel.CredentialFailureKey(credentialID), channel.CredentialCooldownKey(credentialID)).Err()
 }
 
 func (s *Service) maybeAutoDisable(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, candidate Candidate, result attemptResult) {

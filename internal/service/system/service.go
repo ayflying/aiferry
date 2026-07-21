@@ -49,6 +49,7 @@ func DefaultResilienceSettings() adminapi.SystemResilienceSettingsInput {
 		HealthCheckIntervalMinutes:    5,
 		RecoveryEnabled:               true,
 		AutoDisableEnabled:            true,
+		AutoDisableFailureThreshold:   3,
 		DisableLatencySeconds:         120,
 		DisableStatusCodes:            "401,429",
 		FailureKeywords: []string{
@@ -154,6 +155,9 @@ func normalizeSettings(input adminapi.SystemResilienceSettingsInput) (adminapi.S
 	}
 	if input.HealthCheckIntervalMinutes < 1 || input.HealthCheckIntervalMinutes > 1440 {
 		return input, gerror.New("healthCheckIntervalMinutes must be between 1 and 1440")
+	}
+	if input.AutoDisableFailureThreshold < 1 || input.AutoDisableFailureThreshold > 20 {
+		return input, gerror.New("autoDisableFailureThreshold must be between 1 and 20")
 	}
 	if input.DisableLatencySeconds < 1 || input.DisableLatencySeconds > 3600 {
 		return input, gerror.New("disableLatencySeconds must be between 1 and 3600")

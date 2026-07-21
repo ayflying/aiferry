@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	mathrand "math/rand/v2"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
+	"github.com/yunloli/aiferry/internal/service/system"
 )
 
 type CredentialView struct {
@@ -117,17 +117,18 @@ func (s *Service) SetCredentialStatus(ctx context.Context, channelID, credential
 	if err != nil {
 		return err
 	}
-	data := do.ChannelCredentials{Status: boolStatus(input.Status)}
-	if input.Status == 1 {
-		data.AutoDisabledAt = gdb.Raw("NULL")
-		data.AutoDisabledReason = gdb.Raw("NULL")
-		data.AutoDisabledStatusCode = gdb.Raw("NULL")
-		data.AutoDisabledSource = gdb.Raw("NULL")
+	data := do.ChannelCredentials{
+		Status:                 boolStatus(input.Status),
+		AutoDisabledAt:         gdb.Raw("NULL"),
+		AutoDisabledReason:     gdb.Raw("NULL"),
+		AutoDisabledStatusCode: gdb.Raw("NULL"),
+		AutoDisabledSource:     gdb.Raw("NULL"),
 	}
 	if _, err = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: credential.Id}).Data(data).Update(); err != nil {
 		return gerror.Wrap(err, "update channel credential status")
 	}
 	s.clearCredentialTransient(ctx, credential.Id)
+	s.resilience.ResetCredentialRecoverySchedule(ctx, credential.Id)
 	s.InvalidateListCache(ctx)
 	return s.invalidateRoutes(ctx)
 }
@@ -211,15 +212,7 @@ func (s *Service) CredentialForTest(ctx context.Context, channelID, credentialID
 }
 
 func (s *Service) clearCredentialTransient(ctx context.Context, credentialID uint64) {
-	_ = s.app.Redis.Del(ctx, CredentialFailureKey(credentialID), CredentialCooldownKey(credentialID)).Err()
-}
-
-func CredentialFailureKey(credentialID uint64) string {
-	return fmt.Sprintf("aiferry:credential:%d:failures", credentialID)
-}
-
-func CredentialCooldownKey(credentialID uint64) string {
-	return fmt.Sprintf("aiferry:credential:%d:cooldown", credentialID)
+	_ = s.app.Redis.Del(ctx, system.CredentialFailureKey(credentialID), system.CredentialCooldownKey(credentialID)).Err()
 }
 
 func (s *Service) availableCredentials(ctx context.Context, channelID uint64, excluded map[uint64]struct{}) ([]credentialRow, error) {
@@ -232,7 +225,7 @@ func (s *Service) availableCredentials(ctx context.Context, channelID uint64, ex
 		if _, skip := excluded[row.Id]; skip {
 			continue
 		}
-		if cooling, _ := s.app.Redis.Exists(ctx, CredentialCooldownKey(row.Id)).Result(); cooling > 0 {
+		if cooling, _ := s.app.Redis.Exists(ctx, system.CredentialCooldownKey(row.Id)).Result(); cooling > 0 {
 			continue
 		}
 		available = append(available, row)

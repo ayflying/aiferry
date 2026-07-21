@@ -210,6 +210,7 @@ export interface SystemResilienceSettings {
   healthCheckIntervalMinutes: number
   recoveryEnabled: boolean
   autoDisableEnabled: boolean
+  autoDisableFailureThreshold: number
   disableLatencySeconds: number
   disableStatusCodes: string
   failureKeywords: string[]
