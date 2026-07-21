@@ -240,7 +240,6 @@ async function sendTestMail() {
 function saveActive() {
   if (activeTab.value === 'basic') return saveBasic()
   if (activeTab.value === 'information') return saveSystemInformation()
-  if (activeTab.value === 'basic') return saveBasic()
   if (activeTab.value === 'resilience') return saveReliability()
   if (activeTab.value === 'sensitive') return saveSensitiveWords()
   if (activeTab.value === 'mail') return saveMail()

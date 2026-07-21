@@ -62,7 +62,8 @@ func (s *Service) SendTest(ctx context.Context, recipient string) error {
 	if err = validateTestSettings(settings); err != nil {
 		return err
 	}
-	return send(settings, recipient, "AiFerry 邮件配置测试", "这是一封 AiFerry 发送的邮件配置测试。")
+	name := s.systemName(ctx)
+	return send(settings, recipient, name+" 邮件配置测试", "这是一封 "+name+" 发送的邮件配置测试。")
 }
 
 func validateTestSettings(settings system.MailDeliverySettings) error {
@@ -112,6 +113,7 @@ func (s *Service) notifyChannelLowBalance(ctx context.Context, channelID uint64,
 	if err != nil || len(recipients) == 0 {
 		return
 	}
+	name := s.systemName(ctx)
 	for _, threshold := range channelBalanceThresholds {
 		if remaining >= threshold {
 			continue
@@ -121,14 +123,14 @@ func (s *Service) notifyChannelLowBalance(ctx context.Context, channelID uint64,
 		if err != nil || !created {
 			continue
 		}
-		if !sendChannelLowBalance(settings, recipients, channelID, channelName, remaining, threshold) {
+		if !sendChannelLowBalance(settings, recipients, name, channelID, channelName, remaining, threshold) {
 			_ = s.app.Redis.Del(ctx, key).Err()
 		}
 	}
 }
 
-func sendChannelLowBalance(settings system.MailDeliverySettings, recipients []string, channelID uint64, channelName string, remaining, threshold float64) bool {
-	subject := fmt.Sprintf("AiFerry 渠道余额低于 $%.0f：%s", threshold, channelName)
+func sendChannelLowBalance(settings system.MailDeliverySettings, recipients []string, systemName string, channelID uint64, channelName string, remaining, threshold float64) bool {
+	subject := fmt.Sprintf("%s 渠道余额低于 $%.0f：%s", systemName, threshold, channelName)
 	body := fmt.Sprintf("渠道 %s（ID：%d）当前上游余额为 $%.6f，已低于 $%.0f。", channelName, channelID, remaining, threshold)
 	sent := false
 	for _, recipient := range recipients {
@@ -201,6 +203,14 @@ func renderTemplates(settings system.MailDeliverySettings, profile user.Profile)
 		"{threshold}", fmt.Sprintf("%.6f", settings.Threshold),
 	)
 	return replacer.Replace(settings.SubjectTemplate), replacer.Replace(settings.BodyTemplate)
+}
+
+func (s *Service) systemName(ctx context.Context) string {
+	information, err := s.settings.GetSystemInformation(ctx)
+	if err == nil && strings.TrimSpace(information.SystemName) != "" {
+		return information.SystemName
+	}
+	return system.DefaultSystemInformation().SystemName
 }
 
 func reminderKey(userID uint64, threshold float64) string {
