@@ -41,8 +41,8 @@ func TestAutoDisableSource(t *testing.T) {
 	if source := autoDisableSource(AutoDisableSourceModelTest); source != AutoDisableSourceModelTest {
 		t.Fatalf("unexpected model test source: %q", source)
 	}
-	if source := autoDisableSource(AutoDisableSourceCostQuery); source != AutoDisableSourceCostQuery {
-		t.Fatalf("unexpected cost query source: %q", source)
+	if source := autoDisableSource("cost_query"); source != autoDisableSourceUnknown {
+		t.Fatalf("cost query source must not be accepted: %q", source)
 	}
 	if source := autoDisableSource("manual"); source != autoDisableSourceUnknown {
 		t.Fatalf("unexpected unknown source: %q", source)

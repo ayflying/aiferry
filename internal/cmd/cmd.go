@@ -74,6 +74,9 @@ var (
 			if err = priceCache.Load(ctx); err != nil {
 				return err
 			}
+			if err = channelSvc.RestoreCostQueryDisabledCredentials(ctx); err != nil {
+				return err
+			}
 			channelSvc.StartHealthChecks(ctx)
 			channelSvc.StartCostSync(ctx)
 			s.SetAddr(":8080")

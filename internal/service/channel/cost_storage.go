@@ -44,7 +44,7 @@ func (s *Service) saveCredentialCostResult(ctx context.Context, credentialID uin
 	if _, err := dao.ChannelCredentials.Ctx(ctx).Where(dao.ChannelCredentials.Columns().Id, credentialID).Data(update).Update(); err != nil {
 		return gerror.Wrap(err, "update channel credential cost snapshot")
 	}
-	return s.syncCredentialAvailabilityFromCost(ctx, credentialID, result.RemainingAmount)
+	return nil
 }
 
 func (s *Service) saveChannelCostResult(ctx context.Context, channelID uint64, result CostResult) error {

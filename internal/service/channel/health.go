@@ -67,9 +67,6 @@ func (s *Service) runRegularHealthChecks(ctx context.Context, mode string) {
 }
 
 func (s *Service) runRecoveryChecks(ctx context.Context, mode string) {
-	if err := s.reconcileCredentialAvailabilityFromStoredCost(ctx); err != nil {
-		g.Log().Warningf(ctx, "reconcile credential availability from stored cost: %v", err)
-	}
 	s.runChannelRecoveryChecks(ctx, mode)
 	s.runCredentialRecoveryChecks(ctx, mode)
 }

@@ -20,7 +20,6 @@ import (
 const (
 	AutoDisableSourceRelayRequest = "relay_request"
 	AutoDisableSourceModelTest    = "model_test"
-	AutoDisableSourceCostQuery    = "cost_query"
 	autoDisableSourceUnknown      = "unknown"
 )
 
@@ -76,7 +75,7 @@ func autoDisableReason(input AutoDisableInput) string {
 
 func autoDisableSource(source string) string {
 	switch source {
-	case AutoDisableSourceRelayRequest, AutoDisableSourceModelTest, AutoDisableSourceCostQuery:
+	case AutoDisableSourceRelayRequest, AutoDisableSourceModelTest:
 		return source
 	default:
 		return autoDisableSourceUnknown
