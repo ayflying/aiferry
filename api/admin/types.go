@@ -162,6 +162,10 @@ type SystemResilienceSettingsInput struct {
 	FailureKeywords               []string `json:"failureKeywords"`
 }
 
+type BaseSettingsInput struct {
+	TimeZone string `json:"timeZone" v:"required|length:1,64"`
+}
+
 type MailSettingsInput struct {
 	Enabled         bool    `json:"enabled"`
 	Host            string  `json:"host"`

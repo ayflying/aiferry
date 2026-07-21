@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCost, formatLatency, formatNumber, formatReasoningEffort, formatTokenSpeed, successRate } from './format'
+import { formatCost, formatLatency, formatNumber, formatReasoningEffort, formatTime, formatTokenSpeed, setDisplayTimeZone, successRate } from './format'
 
 describe('format helpers', () => {
   it('does not report missing prices as zero', () => {
@@ -35,5 +35,12 @@ describe('format helpers', () => {
     expect(formatReasoningEffort('high')).toBe('高')
     expect(formatReasoningEffort('xhigh')).toBe('极高')
     expect(formatReasoningEffort('custom')).toBe('custom')
+  })
+
+  it('formats UTC timestamps in the configured display timezone', () => {
+    setDisplayTimeZone('UTC')
+    expect(formatTime('2026-07-21T02:22:47Z')).toBe('2026-07-21 02:22:47')
+    setDisplayTimeZone('Asia/Shanghai')
+    expect(formatTime('2026-07-21T02:22:47Z')).toBe('2026-07-21 10:22:47')
   })
 })

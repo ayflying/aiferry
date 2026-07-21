@@ -53,15 +53,15 @@ var (
 			}
 			locationSvc := iplocation.New(ctx, appSvc.HTTP, filepath.Join(filepath.Dir(cfg.WebRoot), "data"))
 			var (
+				systemSvc       = system.New(appSvc)
 				apiKeySvc       = apikey.New(appSvc)
-				authSvc         = auth.New(appSvc)
-				usageSvc        = usage.New(locationSvc)
+				authSvc         = auth.New(appSvc, systemSvc)
+				usageSvc        = usage.New(locationSvc, systemSvc)
 				userSvc         = user.New(appSvc, usageSvc)
 				redemptionSvc   = redemption.New(userSvc)
 				priceCache      = pricingcache.New()
 				channelGroupSvc = channelgroup.New()
 				channelTypeSvc  = channeltype.New(builtins)
-				systemSvc       = system.New(appSvc)
 				mailSvc         = mail.New(appSvc, systemSvc, userSvc)
 				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc, priceCache, userSvc, mailSvc)
 				priceSourceSvc  = pricesource.New(channelSvc)

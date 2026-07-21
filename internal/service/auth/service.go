@@ -13,6 +13,7 @@ import (
 
 	authapi "github.com/yunloli/aiferry/api/auth"
 	"github.com/yunloli/aiferry/internal/service/app"
+	"github.com/yunloli/aiferry/internal/service/system"
 )
 
 const (
@@ -33,7 +34,8 @@ type contextKey string
 const userContextKey contextKey = "aiferry.auth.user"
 
 type Service struct {
-	app *app.Service
+	app      *app.Service
+	settings *system.Service
 }
 
 type SessionUser struct {
@@ -80,12 +82,16 @@ type casdoorAccount struct {
 	DeletedTime   string   `json:"deletedTime"`
 }
 
-func New(appSvc *app.Service) *Service {
-	return &Service{app: appSvc}
+func New(appSvc *app.Service, settingsSvc *system.Service) *Service {
+	return &Service{app: appSvc, settings: settingsSvc}
 }
 
-func (s *Service) Config() authapi.ConfigView {
-	return authapi.ConfigView{Enabled: true, Provider: "Casdoor", LoginPath: "/api/auth/login"}
+func (s *Service) Config(ctx context.Context) (authapi.ConfigView, error) {
+	settings, err := s.settings.GetBase(ctx)
+	if err != nil {
+		return authapi.ConfigView{}, err
+	}
+	return authapi.ConfigView{Enabled: true, Provider: "Casdoor", LoginPath: "/api/auth/login", TimeZone: settings.TimeZone}, nil
 }
 
 func (s *Service) BeginLogin(ctx context.Context, callbackURL, returnTo string) (string, string, error) {

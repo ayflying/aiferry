@@ -1,4 +1,26 @@
 import dayjs from 'dayjs'
+import timezone from 'dayjs/plugin/timezone'
+import utc from 'dayjs/plugin/utc'
+import { ref } from 'vue'
+
+dayjs.extend(utc)
+dayjs.extend(timezone)
+
+const defaultTimeZone = 'Asia/Shanghai'
+export const displayTimeZone = ref(defaultTimeZone)
+
+export function setDisplayTimeZone(value?: string | null): void {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value || defaultTimeZone })
+    displayTimeZone.value = value || defaultTimeZone
+  } catch {
+    displayTimeZone.value = defaultTimeZone
+  }
+}
+
+export function currentTimeInDisplayZone() {
+  return dayjs().tz(displayTimeZone.value)
+}
 
 export function formatNumber(value?: number | null): string {
   if (value === undefined || value === null) return '—'
@@ -33,7 +55,7 @@ export function formatPreciseCost(value?: number | string | null, currency = 'US
 
 export function formatTime(value?: string | null): string {
   if (!value) return '—'
-  return dayjs(value).format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(value).tz(displayTimeZone.value).format('YYYY-MM-DD HH:mm:ss')
 }
 
 export function formatReasoningEffort(value?: string | null): string {

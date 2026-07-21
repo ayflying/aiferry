@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 )
@@ -27,7 +28,7 @@ func TestLoadUsesSevenDaySessionByDefault(t *testing.T) {
 	}
 }
 
-func TestLoadDefaultsToShanghaiTimezone(t *testing.T) {
+func TestLoadUsesUTCStorageTimezone(t *testing.T) {
 	t.Setenv("MYSQL_PASSWORD", "test-password")
 	t.Setenv("AIFERRY_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	t.Setenv("CASDOOR_ENDPOINT", "https://casdoor.example.test")
@@ -37,7 +38,18 @@ func TestLoadDefaultsToShanghaiTimezone(t *testing.T) {
 	if _, err := Load(); err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if time.Local.String() != defaultTimezone {
-		t.Fatalf("time.Local = %q, want %q", time.Local, defaultTimezone)
+	if time.Local.String() != storageTimezone {
+		t.Fatalf("time.Local = %q, want %q", time.Local, storageTimezone)
+	}
+}
+
+func TestMySQLDSNUsesUTCStorage(t *testing.T) {
+	app := App{MySQLHost: "db.example.test", MySQLPort: 3306, MySQLDatabase: "aiferry", MySQLUser: "user", MySQLPassword: "password"}
+	dsn := app.MySQLDSN()
+	if !strings.Contains(dsn, "loc=UTC") {
+		t.Fatalf("MySQLDSN() = %q, missing UTC storage location", dsn)
+	}
+	if strings.Contains(dsn, "time_zone=") {
+		t.Fatalf("MySQLDSN() = %q, must not change the database session timezone", dsn)
 	}
 }

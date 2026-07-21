@@ -1,20 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Activity, Database, Gauge, HardDrive, Mail, Route, Send, ShieldCheck } from '@lucide/vue'
+import { Activity, Clock3, Database, Gauge, HardDrive, Mail, Route, Send, ShieldCheck } from '@lucide/vue'
 import { ElMessage } from 'element-plus'
 import { apiGet, apiPost, apiPut } from '../api/client'
-import type { MailSettings, SystemResilienceSettings } from '../api/types'
+import type { BaseSettings, MailSettings, SystemResilienceSettings } from '../api/types'
 import { showError } from '../lib/error'
+import { setDisplayTimeZone } from '../lib/format'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
-type SettingsTab = 'overview' | 'resilience' | 'mail'
+type SettingsTab = 'overview' | 'basic' | 'resilience' | 'mail'
 
-const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, resilience: false, mail: false })
+const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, resilience: false, mail: false })
 const saving = ref(false)
 const mailSaving = ref(false)
 const testSending = ref(false)
 const activeTab = ref<SettingsTab>('overview')
 const info = ref<SystemInfo>()
+const basicForm = reactive({ timeZone: 'Asia/Shanghai' })
+const timeZoneOptions = [
+  { label: '中国标准时间 (UTC+08:00)', value: 'Asia/Shanghai' },
+  { label: '协调世界时 (UTC)', value: 'UTC' },
+  { label: '日本标准时间 (UTC+09:00)', value: 'Asia/Tokyo' },
+  { label: '欧洲中部时间', value: 'Europe/Berlin' },
+  { label: '英国时间', value: 'Europe/London' },
+  { label: '美国东部时间', value: 'America/New_York' },
+  { label: '美国西部时间', value: 'America/Los_Angeles' },
+]
 const form = reactive({
   maxFailoverAttempts: 3,
   retryStatusCodes: '401,403,404,408,429,500-599',
@@ -47,6 +58,7 @@ const testRecipient = ref('')
 
 const sectionMeta = computed(() => ({
   overview: { title: '运行概览', description: '实例与依赖状态' },
+  basic: { title: '基础设置', description: '全局时区与时间展示规则' },
   resilience: { title: '路由可靠性', description: '故障转移、健康检查与自动禁用' },
   mail: { title: '邮件提醒', description: '按模型使用触发的余额提醒与 SMTP 投递配置' },
 }[activeTab.value]))
@@ -71,6 +83,13 @@ async function loadOverview() {
   } catch (error) { showError(error, '加载运行概览失败') } finally { tabLoading.overview = false }
 }
 
+async function loadBasic() {
+  tabLoading.basic = true
+  try {
+    Object.assign(basicForm, await apiGet<BaseSettings>('/system/basic'))
+  } catch (error) { showError(error, '加载基础设置失败') } finally { tabLoading.basic = false }
+}
+
 async function loadResilience() {
   tabLoading.resilience = true
   try {
@@ -86,7 +105,7 @@ async function loadMail() {
 }
 
 function loadTab(tab: SettingsTab) {
-  return { overview: loadOverview, resilience: loadResilience, mail: loadMail }[tab]()
+  return { overview: loadOverview, basic: loadBasic, resilience: loadResilience, mail: loadMail }[tab]()
 }
 
 function handleTabChange(tab: string | number) {
@@ -114,6 +133,16 @@ async function saveReliability() {
     applySettings(settings)
     ElMessage.success('系统设置已保存')
   } catch (error) { showError(error, '保存系统设置失败') } finally { saving.value = false }
+}
+
+async function saveBasic() {
+  saving.value = true
+  try {
+    const settings = await apiPut<BaseSettings>('/system/basic', { timeZone: basicForm.timeZone })
+    Object.assign(basicForm, settings)
+    setDisplayTimeZone(settings.timeZone)
+    ElMessage.success('基础设置已保存')
+  } catch (error) { showError(error, '保存基础设置失败') } finally { saving.value = false }
 }
 
 async function saveMail() {
@@ -146,6 +175,7 @@ async function sendTestMail() {
 }
 
 function saveActive() {
+  if (activeTab.value === 'basic') return saveBasic()
   if (activeTab.value === 'resilience') return saveReliability()
   if (activeTab.value === 'mail') return saveMail()
 }
@@ -157,6 +187,7 @@ onMounted(loadOverview)
   <div v-loading="activeTabLoading" class="page-stack settings-page">
     <el-tabs v-model="activeTab" class="settings-tabs sticky-page-tabs" @tab-change="handleTabChange">
       <el-tab-pane name="overview"><template #label><span class="tab-label"><Activity :size="15" />概览</span></template></el-tab-pane>
+      <el-tab-pane name="basic"><template #label><span class="tab-label"><Clock3 :size="15" />基础设置</span></template></el-tab-pane>
       <el-tab-pane name="resilience"><template #label><span class="tab-label"><Route :size="15" />路由可靠性</span></template></el-tab-pane>
       <el-tab-pane name="mail"><template #label><span class="tab-label"><Mail :size="15" />邮件提醒</span></template></el-tab-pane>
     </el-tabs>
@@ -171,6 +202,10 @@ onMounted(loadOverview)
       <section class="settings-band"><Database :size="21" /><div class="settings-title"><strong>数据存储</strong><span>业务事实与用量账本</span></div><div class="settings-value"><span>{{ info?.database || '—' }}</span><small>已配置</small></div></section>
       <section class="settings-band"><HardDrive :size="21" /><div class="settings-title"><strong>缓存与临时状态</strong><span>密钥缓存、故障计数与短时冷却</span></div><div class="settings-value"><span>{{ info?.cache || '—' }}</span><small>已配置</small></div></section>
       <section class="settings-grid"><div><span>产品</span><strong>{{ info?.name || '—' }}</strong></div><div><span>管理模式</span><strong>{{ info?.adminMode || '—' }}</strong></div><div><span>中转 API</span><strong>{{ info?.apiVersion || '—' }}</strong></div><div><span>支持范围</span><strong>OpenAI 文本核心</strong></div></section>
+    </template>
+
+    <template v-else-if="activeTab === 'basic'">
+      <section class="settings-section"><div class="section-heading"><div><h2>系统时区</h2><span>时间统一以 UTC 保存；切换后按所选时区重新展示历史记录和统计，不会修改历史发生时间。</span></div><Clock3 :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="时区"><el-select v-model="basicForm.timeZone" filterable style="max-width: 420px"><el-option v-for="item in timeZoneOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item><p class="field-hint">保存后当前页面立即刷新时间格式；其他已打开的页面刷新后应用新时区。</p></el-form></section>
     </template>
 
     <template v-else-if="activeTab === 'resilience'">

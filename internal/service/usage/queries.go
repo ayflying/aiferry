@@ -2,9 +2,11 @@ package usage
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/yunloli/aiferry/internal/dao"
@@ -33,18 +35,23 @@ func ParseLogRange(startValue, endValue string) (time.Time, time.Time, error) {
 	return parseLogRange(time.Now(), startValue, endValue)
 }
 
+func (s *Service) ParseLogRange(ctx context.Context, startValue, endValue string) (time.Time, time.Time, error) {
+	start, end, err := parseLogRange(time.Now().In(s.timeLocation(ctx)), startValue, endValue)
+	return start.UTC(), end.UTC(), err
+}
+
 func parseLogRange(now time.Time, startValue, endValue string) (time.Time, time.Time, error) {
 	start := startOfDay(now)
 	end := start.AddDate(0, 0, 1).Add(-time.Millisecond)
 	var err error
 	if strings.TrimSpace(startValue) != "" {
-		start, err = parseLogTime(startValue)
+		start, err = parseLogTime(startValue, now.Location())
 		if err != nil {
 			return time.Time{}, time.Time{}, gerror.New("开始时间格式无效")
 		}
 	}
 	if strings.TrimSpace(endValue) != "" {
-		end, err = parseLogTime(endValue)
+		end, err = parseLogTime(endValue, now.Location())
 		if err != nil {
 			return time.Time{}, time.Time{}, gerror.New("结束时间格式无效")
 		}
@@ -59,20 +66,22 @@ func startOfDay(value time.Time) time.Time {
 	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
 }
 
-func parseLogTime(value string) (time.Time, error) {
+func parseLogTime(value string, location *time.Location) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
 		return parsed, nil
 	}
-	return time.ParseInLocation(logTimeLayout, value, time.Local)
+	return time.ParseInLocation(logTimeLayout, value, location)
 }
 
 func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 	if days <= 0 || days > 90 {
 		days = 7
 	}
-	now := time.Now()
-	start := startOfDay(now).AddDate(0, 0, -days+1)
+	location := s.timeLocation(ctx)
+	now := time.Now().In(location)
+	startLocal := startOfDay(now).AddDate(0, 0, -days+1)
+	start := startLocal.UTC()
 	var result Dashboard
 	base := dao.UsageLogs.Ctx(ctx).WhereGTE(dao.UsageLogs.Columns().CreatedAt, start)
 	if err := base.Clone().Fields(`
@@ -85,15 +94,11 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 		COALESCE(AVG(duration_ms),0) AS average_latency`).Scan(&result.Summary); err != nil {
 		return result, gerror.Wrap(err, "load dashboard summary")
 	}
-	if err := base.Clone().Fields(`
-		DATE_FORMAT(created_at,'%Y-%m-%d') AS bucket,
-		COUNT(*) AS requests,
-		COALESCE(SUM(input_tokens),0) AS input_tokens,
-		COALESCE(SUM(output_tokens),0) AS output_tokens,
-		COALESCE(SUM(estimated_cost),0) AS estimated_cost`).
-		Group("bucket").OrderAsc("bucket").Scan(&result.Trend); err != nil {
+	trend, err := s.dailyTrend(base, location)
+	if err != nil {
 		return result, gerror.Wrap(err, "load usage trend")
 	}
+	result.Trend = trend
 	if err := base.Clone().Fields(`requested_model AS name,COUNT(*) AS requests,COALESCE(SUM(total_tokens),0) AS total_tokens,COALESCE(SUM(estimated_cost),0) AS estimated_cost`).
 		Group(dao.UsageLogs.Columns().RequestedModel).OrderDesc("requests").Limit(8).Scan(&result.ByModel); err != nil {
 		return result, gerror.Wrap(err, "load model breakdown")
@@ -103,7 +108,7 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").Group("u.channel_id,c.name").OrderDesc("requests").Limit(8).Scan(&result.ByChannel); err != nil {
 		return result, gerror.Wrap(err, "load channel breakdown")
 	}
-	recentCost, err := s.recentCostDistribution(ctx, now)
+	recentCost, err := s.recentCostDistribution(ctx, now, location)
 	if err != nil {
 		return result, err
 	}
@@ -111,8 +116,46 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 	return result, nil
 }
 
-func (s *Service) recentCostDistribution(ctx context.Context, now time.Time) (RecentCostDistribution, error) {
-	start := now.Add(-time.Duration(recentCostHours-1) * time.Hour).Truncate(time.Hour)
+func (s *Service) dailyTrend(base *gdb.Model, location *time.Location) ([]TrendPoint, error) {
+	type row struct {
+		CreatedAt     time.Time `orm:"created_at"`
+		InputTokens   uint64    `orm:"input_tokens"`
+		OutputTokens  uint64    `orm:"output_tokens"`
+		EstimatedCost float64   `orm:"estimated_cost"`
+	}
+	rows := make([]row, 0)
+	if err := base.Clone().Fields("created_at,input_tokens,output_tokens,COALESCE(estimated_cost,0) AS estimated_cost").Scan(&rows); err != nil {
+		return nil, err
+	}
+	values := make(map[string]TrendPoint)
+	for _, row := range rows {
+		bucket := row.CreatedAt.In(location).Format("2006-01-02")
+		point := values[bucket]
+		point.Bucket = bucket
+		point.Requests++
+		point.InputTokens += row.InputTokens
+		point.OutputTokens += row.OutputTokens
+		if point.EstimatedCost == nil {
+			point.EstimatedCost = new(float64)
+		}
+		*point.EstimatedCost += row.EstimatedCost
+		values[bucket] = point
+	}
+	buckets := make([]string, 0, len(values))
+	for bucket := range values {
+		buckets = append(buckets, bucket)
+	}
+	sort.Strings(buckets)
+	result := make([]TrendPoint, 0, len(buckets))
+	for _, bucket := range buckets {
+		result = append(result, values[bucket])
+	}
+	return result, nil
+}
+
+func (s *Service) recentCostDistribution(ctx context.Context, now time.Time, location *time.Location) (RecentCostDistribution, error) {
+	startLocal := now.Add(-time.Duration(recentCostHours-1) * time.Hour).Truncate(time.Hour)
+	start := startLocal.UTC()
 	result := RecentCostDistribution{Models: make([]RecentCostModel, 0)}
 	base := dao.UsageLogs.Ctx(ctx).WhereGTE(dao.UsageLogs.Columns().CreatedAt, start)
 
@@ -142,13 +185,13 @@ func (s *Service) recentCostDistribution(ctx context.Context, now time.Time) (Re
 		selectedNames[model.Name] = struct{}{}
 	}
 	var rows []struct {
-		Bucket        string  `orm:"bucket"`
+		CreatedAt     time.Time `orm:"created_at"`
 		Name          string  `orm:"name"`
 		EstimatedCost float64 `orm:"estimated_cost"`
 	}
 	if err := base.Clone().
-		Fields("DATE_FORMAT(created_at,'%Y-%m-%d %H:00:00') AS bucket, requested_model AS name, COALESCE(SUM(estimated_cost),0) AS estimated_cost").
-		Group("bucket, requested_model").OrderAsc("bucket").Scan(&rows); err != nil {
+		Fields("created_at, requested_model AS name, COALESCE(estimated_cost,0) AS estimated_cost").
+		OrderAsc("created_at").Scan(&rows); err != nil {
 		return result, gerror.Wrap(err, "load hourly recent costs")
 	}
 
@@ -163,13 +206,14 @@ func (s *Service) recentCostDistribution(ctx context.Context, now time.Time) (Re
 		if costsByModel[name] == nil {
 			costsByModel[name] = make(map[string]float64)
 		}
-		costsByModel[name][row.Bucket] += row.EstimatedCost
+		bucket := row.CreatedAt.In(location).Truncate(time.Hour).Format(hourBucketLayout)
+		costsByModel[name][bucket] += row.EstimatedCost
 	}
 	for _, model := range models {
-		result.Models = append(result.Models, RecentCostModel{Name: model.Name, Points: hourlyCostPoints(start, costsByModel[model.Name])})
+		result.Models = append(result.Models, RecentCostModel{Name: model.Name, Points: hourlyCostPoints(startLocal, costsByModel[model.Name])})
 	}
 	if hasOtherModels {
-		result.Models = append(result.Models, RecentCostModel{Name: otherCostModelName, Points: hourlyCostPoints(start, costsByModel[otherCostModelName])})
+		result.Models = append(result.Models, RecentCostModel{Name: otherCostModelName, Points: hourlyCostPoints(startLocal, costsByModel[otherCostModelName])})
 	}
 	return result, nil
 }
@@ -189,7 +233,7 @@ func (s *Service) UserSummary(ctx context.Context, userID uint64, days int) (Use
 		days = 30
 	}
 	result := UserSummary{Days: days}
-	start := startOfDay(time.Now()).AddDate(0, 0, -days+1)
+	start := startOfDay(time.Now().In(s.timeLocation(ctx))).AddDate(0, 0, -days+1).UTC()
 	err := dao.UsageLogs.Ctx(ctx).
 		Where(dao.UsageLogs.Columns().UserId, userID).
 		WhereGTE(dao.UsageLogs.Columns().CreatedAt, start).

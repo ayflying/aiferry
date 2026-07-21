@@ -68,7 +68,8 @@ func (c *Controller) Callback(r *ghttp.Request) {
 }
 
 func (c *Controller) config(r *ghttp.Request) {
-	respond(r, c.auth.Config(), nil)
+	data, err := c.auth.Config(r.Context())
+	respond(r, data, err)
 }
 
 func (c *Controller) login(r *ghttp.Request) {

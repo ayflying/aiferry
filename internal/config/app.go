@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultSessionTTLHours = 24 * 7
-	defaultTimezone        = "Asia/Shanghai"
+	storageTimezone        = "UTC"
 )
 
 type App struct {
@@ -39,9 +39,7 @@ type App struct {
 }
 
 func Load() (App, error) {
-	if err := setDefaultTimezone(); err != nil {
-		return App{}, err
-	}
+	setStorageTimezone()
 	var (
 		mysqlPort, errPort = strconv.Atoi(env("MYSQL_PORT", "3306"))
 		redisDB, errRedis  = strconv.Atoi(env("REDIS_DB", "0"))
@@ -83,13 +81,8 @@ func Load() (App, error) {
 	return app, nil
 }
 
-func setDefaultTimezone() error {
-	location, err := time.LoadLocation(defaultTimezone)
-	if err != nil {
-		return gerror.Wrap(err, "load default timezone")
-	}
-	time.Local = location
-	return nil
+func setStorageTimezone() {
+	time.Local = time.UTC
 }
 
 // IsAdminRole centralizes the role-to-permission mapping used by all console APIs.
@@ -104,7 +97,7 @@ func (c App) IsAdminRole(role string) bool {
 }
 
 func (c App) MySQLDSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=true&loc=Local", c.MySQLUser, c.MySQLPassword, c.MySQLHost, c.MySQLPort, c.MySQLDatabase)
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=true&loc=UTC", c.MySQLUser, c.MySQLPassword, c.MySQLHost, c.MySQLPort, c.MySQLDatabase)
 }
 
 func (c App) GoFrameMySQLLink() string {

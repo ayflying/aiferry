@@ -40,6 +40,19 @@ func TestParseLogRangeAcceptsISOTime(t *testing.T) {
 	}
 }
 
+func TestParseLogRangeUsesConfiguredLocationForPlainTime(t *testing.T) {
+	location := time.FixedZone("JST", 9*60*60)
+	now := time.Date(2026, time.July, 20, 10, 30, 0, 0, location)
+	start, _, err := parseLogRange(now, "2026-07-20 00:00:00", "")
+	if err != nil {
+		t.Fatalf("parseLogRange() error = %v", err)
+	}
+	want := time.Date(2026, time.July, 20, 0, 0, 0, 0, location)
+	if !start.Equal(want) {
+		t.Fatalf("start = %s, want %s", start, want)
+	}
+}
+
 func TestParseLogRangeRejectsReverseRange(t *testing.T) {
 	_, _, err := parseLogRange(time.Now(), "2026-07-21T00:00:00Z", "2026-07-20T23:59:59Z")
 	if err == nil {

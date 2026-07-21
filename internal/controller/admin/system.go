@@ -8,6 +8,8 @@ import (
 
 func (c *Controller) registerSystemRoutes(group *ghttp.RouterGroup) {
 	group.GET("/system", c.systemInfo)
+	group.GET("/system/basic", c.getBaseSettings)
+	group.PUT("/system/basic", c.updateBaseSettings)
 	group.GET("/system/settings", c.getSystemSettings)
 	group.PUT("/system/settings", c.updateSystemSettings)
 	group.GET("/system/mail", c.getMailSettings)
@@ -23,6 +25,20 @@ func (c *Controller) systemInfo(r *ghttp.Request) {
 		"cache":      "redis",
 		"apiVersion": "v1",
 	}, nil)
+}
+
+func (c *Controller) getBaseSettings(r *ghttp.Request) {
+	data, err := c.settings.GetBase(r.Context())
+	respond(r, data, err)
+}
+
+func (c *Controller) updateBaseSettings(r *ghttp.Request) {
+	var input adminapi.BaseSettingsInput
+	if !parse(r, &input) {
+		return
+	}
+	data, err := c.settings.UpdateBase(r.Context(), input)
+	respond(r, data, err)
 }
 
 func (c *Controller) getSystemSettings(r *ghttp.Request) {

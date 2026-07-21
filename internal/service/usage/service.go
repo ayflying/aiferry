@@ -10,10 +10,12 @@ import (
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
+	"github.com/yunloli/aiferry/internal/service/system"
 )
 
 type Service struct {
 	location IPLocator
+	settings *system.Service
 }
 
 type TokenUsage struct {
@@ -167,8 +169,23 @@ type LogPage struct {
 	PageSize int        `json:"pageSize"`
 }
 
-func New(location IPLocator) *Service {
-	return &Service{location: location}
+func New(location IPLocator, settings ...*system.Service) *Service {
+	service := &Service{location: location}
+	if len(settings) > 0 {
+		service.settings = settings[0]
+	}
+	return service
+}
+
+func (s *Service) timeLocation(ctx context.Context) *time.Location {
+	if s.settings == nil {
+		return time.Local
+	}
+	location, err := time.LoadLocation(s.settings.TimeZone(ctx))
+	if err != nil {
+		return time.Local
+	}
+	return location
 }
 
 func (s *Service) Record(ctx context.Context, input RecordInput) error {

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import dayjs from 'dayjs'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
@@ -8,7 +7,7 @@ import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
-import { formatCost, formatNumber, formatPreciseCost, formatReasoningEffort, formatTokenSpeed, formatTime } from '../lib/format'
+import { currentTimeInDisplayZone, formatCost, formatNumber, formatPreciseCost, formatReasoningEffort, formatTokenSpeed, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 
 const store = useAppStore()
@@ -43,7 +42,7 @@ function search() { filters.page = 1; load() }
 function changePage(value: number) { filters.page = value; load() }
 function changePageSize(value: number) { filters.pageSize = value; filters.page = 1; load() }
 function todayRange(): [Date, Date] {
-  const now = dayjs()
+  const now = currentTimeInDisplayZone()
   return [now.startOf('day').toDate(), now.endOf('day').millisecond(0).toDate()]
 }
 function endOfSecond(value: Date) { return new Date(value.getTime() + 999) }

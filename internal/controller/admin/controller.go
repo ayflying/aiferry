@@ -260,7 +260,7 @@ func (c *Controller) listUsage(r *ghttp.Request) {
 	if !isAdmin {
 		userID = current.Id
 	}
-	startAt, endAt, err := usage.ParseLogRange(r.GetQuery("startAt").String(), r.GetQuery("endAt").String())
+	startAt, endAt, err := c.usage.ParseLogRange(r.Context(), r.GetQuery("startAt").String(), r.GetQuery("endAt").String())
 	if err != nil {
 		respond(r, nil, err)
 		return

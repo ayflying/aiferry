@@ -8,6 +8,7 @@ export interface AuthConfig {
   enabled: boolean
   provider: string
   loginPath: string
+  timeZone: string
 }
 
 export interface AuthUser {

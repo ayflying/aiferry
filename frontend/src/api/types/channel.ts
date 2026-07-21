@@ -215,6 +215,10 @@ export interface SystemResilienceSettings {
   failureKeywords: string[]
 }
 
+export interface BaseSettings {
+  timeZone: string
+}
+
 export interface MailSettings {
   enabled: boolean
   host: string
