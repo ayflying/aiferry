@@ -208,6 +208,8 @@ button { color: inherit; }
   .mobile-record__footer > :first-child { min-width: 0; }
   .mobile-record__actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .mobile-record__actions .el-button { margin: 0; }
+  .mobile-record__footer:has(.mobile-record__actions) { align-items: flex-start; flex-direction: column; }
+  .mobile-record__footer:has(.mobile-record__actions) .mobile-record__actions { width: 100%; justify-content: flex-start; }
   .mobile-record__code { display: flex; min-width: 0; align-items: center; gap: 8px; margin-top: 12px; padding: 9px 10px; border-radius: 5px; background: #f4f7f9; }
   .mobile-record__code code, .mobile-record__code .mono { min-width: 0; flex: 1; overflow-wrap: anywhere; color: #33414e; font-size: 11px; }
   .mobile-record__code .table-actions { flex: 0 0 auto; }
