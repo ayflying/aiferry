@@ -108,16 +108,64 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 	if !plan.converts() {
 		converter = nil
 	}
+	pending := make([][]byte, 0)
+	pendingSize := 0
+	committed := false
+	writeOutput := func(output []byte) error {
+		if !result.wroteBytes {
+			first := time.Since(startedAt).Milliseconds()
+			result.firstTokenMs = &first
+			copyResponseHeaders(writer.Header(), result.headers)
+			writer.WriteHeader(resp.StatusCode)
+		}
+		if _, err = writer.Write(output); err != nil {
+			return err
+		}
+		result.wroteBytes = true
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil
+	}
+	flushPending := func() error {
+		for _, output := range pending {
+			if err = writeOutput(output); err != nil {
+				return err
+			}
+		}
+		pending = nil
+		pendingSize = 0
+		return nil
+	}
 	firstByteTimeout := time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second - time.Since(requestStartedAt)
 	if firstByteTimeout <= 0 {
 		return result, false, upstreamTimeoutError{phase: "stream first-byte"}
 	}
 	scanner := bufio.NewScanner(newStreamTimeoutReader(resp.Body, firstByteTimeout, time.Duration(settings.StreamIdleTimeoutSeconds)*time.Second))
 	scanner.Buffer(make([]byte, 64*1024), 8<<20)
-	firstChunk := true
 	for scanner.Scan() {
 		line := append(append([]byte(nil), scanner.Bytes()...), '\n')
 		line = normalizeSSELine(plan.upstreamEndpoint, line, candidate.UpstreamName, advancedConfig)
+		if failure, failed := parseStreamFailure(line); failed {
+			result.status = failure.status
+			result.body = failure.body
+			result.errorMessage = failure.message
+			if !result.wroteBytes {
+				return result, false, nil
+			}
+			errorLines := [][]byte{line}
+			if converter != nil {
+				errorLines = converter.Transform(line)
+			}
+			for _, output := range errorLines {
+				output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
+				if err = writeOutput(output); err != nil {
+					result.errorMessage = err.Error()
+					return result, true, nil
+				}
+			}
+			return result, true, nil
+		}
 		parseSSEUsage(line, &result.tokens)
 		lines := [][]byte{line}
 		if converter != nil {
@@ -128,22 +176,29 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 				continue
 			}
 			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-			if firstChunk {
-				first := time.Since(startedAt).Milliseconds()
-				result.firstTokenMs = &first
-				firstChunk = false
+			if !committed && !streamPayloadHasVisibleOutput(line) {
+				pending = append(pending, output)
+				pendingSize += len(output)
+				if pendingSize <= maxPendingStreamBytes {
+					continue
+				}
+				committed = true
+				if err = flushPending(); err != nil {
+					result.errorMessage = err.Error()
+					return result, true, nil
+				}
+				continue
 			}
-			if !result.wroteBytes {
-				copyResponseHeaders(writer.Header(), result.headers)
-				writer.WriteHeader(resp.StatusCode)
+			if !committed {
+				committed = true
 			}
-			if _, err = writer.Write(output); err != nil {
+			if err = flushPending(); err != nil {
 				result.errorMessage = err.Error()
 				return result, true, nil
 			}
-			result.wroteBytes = true
-			if flusher != nil {
-				flusher.Flush()
+			if err = writeOutput(output); err != nil {
+				result.errorMessage = err.Error()
+				return result, true, nil
 			}
 		}
 	}
@@ -153,17 +208,16 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 				continue
 			}
 			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-			if !result.wroteBytes {
-				copyResponseHeaders(writer.Header(), result.headers)
-				writer.WriteHeader(resp.StatusCode)
+			if !committed {
+				committed = true
+				if err = flushPending(); err != nil {
+					result.errorMessage = err.Error()
+					return result, true, nil
+				}
 			}
-			if _, err = writer.Write(output); err != nil {
+			if err = writeOutput(output); err != nil {
 				result.errorMessage = err.Error()
 				return result, true, nil
-			}
-			result.wroteBytes = true
-			if flusher != nil {
-				flusher.Flush()
 			}
 		}
 	}
@@ -175,8 +229,14 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 		}
 	}
 	if !result.wroteBytes {
-		copyResponseHeaders(writer.Header(), resp.Header)
-		writer.WriteHeader(resp.StatusCode)
+		if err = flushPending(); err != nil {
+			result.errorMessage = err.Error()
+			return result, true, nil
+		}
+		if !result.wroteBytes {
+			copyResponseHeaders(writer.Header(), resp.Header)
+			writer.WriteHeader(resp.StatusCode)
+		}
 	}
 	return result, true, nil
 }

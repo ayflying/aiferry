@@ -43,6 +43,23 @@ func TestDetailedFailureLogIncludesSafeUpstreamErrorMetadata(t *testing.T) {
 	}
 }
 
+func TestDetailedFailureLogKeepsEmbeddedStreamPaymentFailure(t *testing.T) {
+	reason := `error: code=402 type="insufficient_quota" message="upstream balance is empty"`
+	detail := detailedFailureLog(attemptResult{
+		status:       402,
+		body:         []byte(`{"error":{"code":402,"type":"insufficient_quota","message":"upstream balance is empty"}}`),
+		errorMessage: reason,
+	}, 402, reason, true, 3, 49032)
+	for _, expected := range []string{"失败原因：" + reason, "上游错误类型：insufficient_quota", "上游错误信息：upstream balance is empty", "上游尝试：3 次"} {
+		if !strings.Contains(detail, expected) {
+			t.Fatalf("failure detail does not contain %q: %s", expected, detail)
+		}
+	}
+	if strings.Contains(detail, "上游状态：HTTP 200") {
+		t.Fatalf("embedded failure must not be recorded as an upstream 200: %s", detail)
+	}
+}
+
 func TestDetailedFailureLogKeepsStreamFailureAlongsideBillingFailure(t *testing.T) {
 	detail := detailedFailureLog(attemptResult{status: 200, errorMessage: "upstream stream idle timeout", timedOut: true}, 402, "上游响应未返回可计费的用量信息", true, 1, 9000)
 	for _, expected := range []string{"超时：是", "上游错误信息：upstream stream idle timeout"} {

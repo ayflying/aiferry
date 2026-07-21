@@ -46,7 +46,7 @@ func TestWeightedOrderKeepsPriorityGroups(t *testing.T) {
 }
 
 func TestRetryableStatus(t *testing.T) {
-	for _, status := range []int{401, 403, 404, 408, 429, 500, 503} {
+	for _, status := range []int{401, 402, 403, 404, 408, 429, 500, 503} {
 		if !retryableStatus(status) {
 			t.Fatalf("status %d should retry", status)
 		}

@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	mathrand "math/rand/v2"
+	"net/http"
 	"sort"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -135,5 +136,8 @@ func retryableStatus(status int) bool {
 }
 
 func retryableStatusForRules(status int, rules string) bool {
+	if status == http.StatusPaymentRequired {
+		return true
+	}
 	return system.MatchesStatusCodeRules(rules, status)
 }
