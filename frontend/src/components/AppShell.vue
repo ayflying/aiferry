@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Activity,
@@ -29,17 +29,33 @@ const collapsed = ref(localStorage.getItem('aiferry-sidebar') === 'collapsed')
 const mobile = ref(false)
 const mobileOpen = ref(false)
 
-const adminItems = [
+type NavigationItem = {
+  path: string
+  label: string
+  icon: Component
+  children?: Array<Pick<NavigationItem, 'path' | 'label'>>
+}
+
+const adminItems: NavigationItem[] = [
   { path: '/', label: '仪表盘', icon: Gauge },
   { path: '/api-keys', label: '访问密钥', icon: KeyRound },
   { path: '/usage', label: '用量日志', icon: Activity },
-  { path: '/channels', label: '渠道', icon: Cable },
+  {
+    path: '/channels',
+    label: '渠道管理',
+    icon: Cable,
+    children: [
+      { path: '/channels', label: '渠道' },
+      { path: '/channels/groups', label: '渠道分组' },
+      { path: '/channels/types', label: '渠道类型' },
+    ],
+  },
   { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
   { path: '/users', label: '用户管理', icon: UsersRound },
   { path: '/redemption-codes', label: '兑换码', icon: Ticket },
   { path: '/settings', label: '系统设置', icon: Settings },
 ]
-const items = computed(() => auth.user?.isAdmin
+const items = computed<NavigationItem[]>(() => auth.user?.isAdmin
   ? adminItems
   : [
       { path: '/profile', label: '个人中心', icon: UserRound },
@@ -49,6 +65,14 @@ const items = computed(() => auth.user?.isAdmin
     ])
 
 const pageTitle = computed(() => String(route.meta.title || system.systemName))
+
+function isActive(path: string) {
+  return route.path === path
+}
+
+function hasActiveChild(item: NavigationItem) {
+  return item.children?.some((child) => isActive(child.path)) === true
+}
 
 function toggleSidebar() {
   collapsed.value = !collapsed.value
@@ -102,17 +126,23 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
       </div>
 
       <nav class="nav-list" aria-label="主导航">
-        <el-tooltip v-for="item in items" :key="item.path" :disabled="!collapsed" :content="item.label" placement="right">
-          <button
-            class="nav-item"
-            :class="{ active: route.path === item.path }"
-            type="button"
-            @click="navigate(item.path)"
-          >
-            <component :is="item.icon" :size="19" />
-            <span v-if="!collapsed">{{ item.label }}</span>
-          </button>
-        </el-tooltip>
+        <template v-for="item in items" :key="item.path">
+          <el-tooltip v-if="!item.children || collapsed" :disabled="!collapsed" :content="item.label" placement="right">
+            <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
+              <component :is="item.icon" :size="19" />
+              <span v-if="!collapsed">{{ item.label }}</span>
+            </button>
+          </el-tooltip>
+          <div v-else class="nav-group">
+            <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
+              <component :is="item.icon" :size="19" />
+              <span>{{ item.label }}</span>
+            </button>
+            <div class="nav-sublist">
+              <button v-for="child in item.children" :key="child.path" class="nav-subitem" :class="{ active: isActive(child.path) }" type="button" @click="navigate(child.path)">{{ child.label }}</button>
+            </div>
+          </div>
+        </template>
       </nav>
 
       <button class="sidebar-toggle" type="button" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar">
@@ -127,10 +157,15 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
         <div class="brand-copy"><strong>{{ system.systemName }}</strong><span>AI 网关</span></div>
       </div>
       <nav class="nav-list" aria-label="主导航">
-        <button v-for="item in items" :key="item.path" class="nav-item" :class="{ active: route.path === item.path }" type="button" @click="navigate(item.path)">
-          <component :is="item.icon" :size="19" />
-          <span>{{ item.label }}</span>
-        </button>
+        <template v-for="item in items" :key="item.path">
+          <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
+            <component :is="item.icon" :size="19" />
+            <span>{{ item.label }}</span>
+          </button>
+          <div v-if="item.children" class="nav-sublist">
+            <button v-for="child in item.children" :key="child.path" class="nav-subitem" :class="{ active: isActive(child.path) }" type="button" @click="navigate(child.path)">{{ child.label }}</button>
+          </div>
+        </template>
       </nav>
     </el-drawer>
 

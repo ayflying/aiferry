@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { Braces, Coins, Eye, FlaskConical, KeyRound, LoaderCircle, Network, Pencil, Plus, RefreshCw, ScanSearch, Tags, Trash2 } from '@lucide/vue'
+import { computed, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { Coins, Eye, FlaskConical, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelInput, ChannelModel, DiscoveredModel } from '../api/types'
@@ -18,8 +19,12 @@ import { sortDiscoveredModels } from '../lib/models'
 import { type ChannelTab, useChannelConfiguration } from '../composables/useChannelConfiguration'
 
 const store = useAppStore()
+const route = useRoute()
 
-const activeTab = ref<ChannelTab>('channels')
+const activeTab = computed<ChannelTab>(() => {
+  const tab = route.meta.channelTab
+  return tab === 'groups' || tab === 'types' ? tab : 'channels'
+})
 const tabLoading = reactive<Record<ChannelTab, boolean>>({ channels: false, groups: false, types: false })
 const tabLoaded = reactive<Record<ChannelTab, boolean>>({ channels: false, groups: false, types: false })
 const saving = ref(false)
@@ -91,10 +96,6 @@ async function loadChannelTypes() {
 
 function loadTab(tab: ChannelTab) {
   return { channels: loadChannels, groups: loadChannelGroups, types: loadChannelTypes }[tab]()
-}
-
-function handleTabChange(tab: string | number) {
-  void loadTab(tab as ChannelTab)
 }
 
 async function ensureTabs(...tabs: ChannelTab[]) {
@@ -271,14 +272,14 @@ async function remove(channel: Channel) {
   }
 }
 
-onMounted(loadChannels)
+watch(activeTab, (tab) => {
+  void ensureTabs(tab === 'groups' ? 'channels' : tab, tab)
+}, { immediate: true })
 </script>
 
 <template>
   <div class="page-stack">
-    <el-tabs v-model="activeTab" class="channel-tabs sticky-page-tabs" @tab-change="handleTabChange">
-      <el-tab-pane name="channels">
-        <template #label><span class="tab-label"><Network :size="15" />渠道</span></template>
+    <section v-if="activeTab === 'channels'">
         <div class="page-toolbar">
           <div class="muted">管理上游、模型选择、路由顺序和费用查询</div>
           <div class="spacer" />
@@ -314,10 +315,9 @@ onMounted(loadChannels)
           </ResponsiveList>
           <div v-if="!tabLoading.channels && !store.channels.length" class="empty-state"><div><strong>还没有渠道</strong><span>先添加渠道类型，再接入第一个上游</span></div></div>
         </div>
-      </el-tab-pane>
+    </section>
 
-      <el-tab-pane name="groups">
-        <template #label><span class="tab-label"><Tags :size="15" />渠道分组</span></template>
+    <section v-else-if="activeTab === 'groups'">
         <div class="page-toolbar"><div class="muted">为密钥授权和路由策略维护渠道归属</div><div class="spacer" /><el-button :icon="RefreshCw" :loading="tabLoading.groups" @click="loadChannelGroups">刷新</el-button><el-button type="primary" :icon="Plus" @click="openCreateGroup">添加分组</el-button></div>
         <div class="table-panel">
           <ResponsiveList>
@@ -338,10 +338,9 @@ onMounted(loadChannels)
           </ResponsiveList>
           <div v-if="!tabLoading.groups && !store.channelGroups.length" class="empty-state"><div><strong>还没有渠道分组</strong><span>创建分组后可对访问密钥限定可用渠道</span></div></div>
         </div>
-      </el-tab-pane>
+    </section>
 
-      <el-tab-pane name="types">
-        <template #label><span class="tab-label"><Braces :size="15" />渠道类型</span></template>
+    <section v-else>
         <div class="page-toolbar">
           <div class="muted">JSON 定义模型发现、OpenAI 接口能力、鉴权和费用字段路径</div>
           <div class="spacer" />
@@ -368,8 +367,7 @@ onMounted(loadChannels)
           </ResponsiveList>
           <div v-if="!tabLoading.types && !store.channelTypes.length" class="empty-state"><div><strong>还没有渠道类型</strong><span>添加 JSON 配置后即可在渠道表单中选用</span></div></div>
         </div>
-      </el-tab-pane>
-    </el-tabs>
+    </section>
 
     <el-dialog v-model="discoveryOpen" :title="`选择模型 · ${discoveryChannel?.name || ''}`" width="min(640px, 94vw)"><div v-loading="discovering" class="model-selection"><template v-if="discoveryError"><div class="discovery-error" role="alert"><strong>模型发现失败</strong><span>{{ discoveryError }}</span><el-button :icon="RefreshCw" @click="discoveryChannel && discover(discoveryChannel)">重新尝试</el-button></div></template><template v-else><div class="selection-toolbar"><el-input v-model="discoveryKeyword" clearable placeholder="搜索模型" /><el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消当前结果' : '选择当前结果' }}</el-button></div><div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div><el-checkbox-group v-if="visibleDiscoveredModels.length" v-model="selectedModelNames" class="model-check-list"><el-checkbox v-for="item in visibleDiscoveredModels" :key="item.name" :value="item.name"><code>{{ item.name }}</code></el-checkbox></el-checkbox-group><div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div></template></div><template #footer><el-button @click="discoveryOpen = false">取消</el-button><el-button type="primary" :loading="applyingSelection" :disabled="discovering || Boolean(discoveryError)" @click="saveModelSelection">确认选择</el-button></template></el-dialog>
 
@@ -385,7 +383,7 @@ onMounted(loadChannels)
 </template>
 
 <style scoped>
-.channel-tabs :deep(.el-tabs__header) { margin: 0 0 18px; }.channel-tabs :deep(.el-tabs__nav-wrap::after) { background: #dce2e7; }.tab-label { display: inline-flex; align-items: center; gap: 7px; }.page-toolbar { display: flex; min-height: 36px; align-items: center; gap: 10px; margin-bottom: 18px; }.page-toolbar .spacer { flex: 1; }.channel-name, .type-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.channel-name strong, .type-cell strong { font-size: 13px; }.channel-name span, .type-cell code { overflow: hidden; color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.type-status-control { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }.type-status-control :deep(.el-switch) { flex: 0 0 auto; }.cost-cell { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.cost-cell small, .table-panel small { color: #7b8792; }.group-channel-tag { margin: 0 4px 4px 0; }.model-selection { min-height: 300px; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-check-list .el-checkbox { min-width: 0; height: 38px; margin: 0; padding: 0 10px; border-bottom: 1px solid #eef1f3; }.model-check-list .el-checkbox:last-child { border-bottom: 0; }.model-check-list code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; min-height: 220px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; padding: 20px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 14px; }.test-dialog { min-height: 180px; }.test-result { padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; }.test-result.success { border-color: #acd7cc; background: #f2faf8; }.test-result.failed { border-color: #e9abb2; background: #fff6f7; }.test-result span { display: block; margin-top: 5px; color: #66717d; font-size: 11px; }.test-result p { margin: 8px 0 0; font-size: 12px; }.model-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.model-option small { color: #7b8792; font-family: 'JetBrains Mono', monospace; font-size: 10px; }.config-editor :deep(textarea) { min-height: 440px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
+.page-toolbar { display: flex; min-height: 36px; align-items: center; gap: 10px; margin-bottom: 18px; }.page-toolbar .spacer { flex: 1; }.channel-name, .type-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.channel-name strong, .type-cell strong { font-size: 13px; }.channel-name span, .type-cell code { overflow: hidden; color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.type-status-control { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }.type-status-control :deep(.el-switch) { flex: 0 0 auto; }.cost-cell { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.cost-cell small, .table-panel small { color: #7b8792; }.group-channel-tag { margin: 0 4px 4px 0; }.model-selection { min-height: 300px; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-check-list .el-checkbox { min-width: 0; height: 38px; margin: 0; padding: 0 10px; border-bottom: 1px solid #eef1f3; }.model-check-list .el-checkbox:last-child { border-bottom: 0; }.model-check-list code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; min-height: 220px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; padding: 20px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 14px; }.test-dialog { min-height: 180px; }.test-result { padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; }.test-result.success { border-color: #acd7cc; background: #f2faf8; }.test-result.failed { border-color: #e9abb2; background: #fff6f7; }.test-result span { display: block; margin-top: 5px; color: #66717d; font-size: 11px; }.test-result p { margin: 8px 0 0; font-size: 12px; }.model-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.model-option small { color: #7b8792; font-family: 'JetBrains Mono', monospace; font-size: 10px; }.config-editor :deep(textarea) { min-height: 440px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
 .cost-link { display: block; width: 100%; border: 0; padding: 0; text-align: left; color: inherit; background: transparent; cursor: pointer; }.cost-link:hover span { color: #1677ff; }
 .cost-query-spinner { animation: cost-query-spin 0.9s linear infinite; }
 @keyframes cost-query-spin { to { transform: rotate(360deg); } }
