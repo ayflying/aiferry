@@ -205,7 +205,7 @@ onMounted(loadOverview)
     </template>
 
     <template v-else-if="activeTab === 'basic'">
-      <section class="settings-section"><div class="section-heading"><div><h2>系统时区</h2><span>时间统一以 UTC 保存；切换后按所选时区重新展示历史记录和统计，不会修改历史发生时间。</span></div><Clock3 :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="时区"><el-select v-model="basicForm.timeZone" filterable style="max-width: 420px"><el-option v-for="item in timeZoneOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item><p class="field-hint">保存后当前页面立即刷新时间格式；其他已打开的页面刷新后应用新时区。</p></el-form></section>
+      <section class="settings-section"><div class="section-heading"><div><h2>系统时区</h2><span>历史调用时间固定按北京时间解释；切换后按所选时区重新展示历史记录和统计，不会修改历史发生时间。</span></div><Clock3 :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="时区"><el-select v-model="basicForm.timeZone" filterable style="max-width: 420px"><el-option v-for="item in timeZoneOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item><p class="field-hint">保存后当前页面立即刷新时间格式；其他已打开的页面刷新后应用新时区。</p></el-form></section>
     </template>
 
     <template v-else-if="activeTab === 'resilience'">
