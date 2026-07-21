@@ -5,6 +5,7 @@ import {
   Activity,
   Cable,
   ChartNoAxesCombined,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Gauge,
@@ -28,6 +29,7 @@ const system = useSystemStore()
 const collapsed = ref(localStorage.getItem('aiferry-sidebar') === 'collapsed')
 const mobile = ref(false)
 const mobileOpen = ref(false)
+const expandedGroups = ref<Record<string, boolean>>(loadExpandedGroups())
 
 type NavigationItem = {
   path: string
@@ -53,7 +55,18 @@ const adminItems: NavigationItem[] = [
   { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
   { path: '/users', label: '用户管理', icon: UsersRound },
   { path: '/redemption-codes', label: '兑换码', icon: Ticket },
-  { path: '/settings', label: '系统设置', icon: Settings },
+  {
+    path: '/settings',
+    label: '系统设置',
+    icon: Settings,
+    children: [
+      { path: '/settings', label: '运行概览' },
+      { path: '/settings/basic', label: '基础设置' },
+      { path: '/settings/resilience', label: '路由可靠性' },
+      { path: '/settings/security', label: '安全与限制' },
+      { path: '/settings/mail', label: '邮件提醒' },
+    ],
+  },
 ]
 const items = computed<NavigationItem[]>(() => auth.user?.isAdmin
   ? adminItems
@@ -74,12 +87,36 @@ function hasActiveChild(item: NavigationItem) {
   return item.children?.some((child) => isActive(child.path)) === true
 }
 
+function loadExpandedGroups() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('aiferry-nav-groups') || '{}')
+    return typeof saved === 'object' && saved ? saved as Record<string, boolean> : {}
+  } catch {
+    return {}
+  }
+}
+
+function isGroupExpanded(item: NavigationItem) {
+  return item.children != null && (expandedGroups.value[item.path] ?? hasActiveChild(item))
+}
+
+function setGroupExpanded(item: NavigationItem, expanded: boolean) {
+  expandedGroups.value = { ...expandedGroups.value, [item.path]: expanded }
+  localStorage.setItem('aiferry-nav-groups', JSON.stringify(expandedGroups.value))
+}
+
+function toggleGroup(item: NavigationItem) {
+  setGroupExpanded(item, !isGroupExpanded(item))
+}
+
 function toggleSidebar() {
   collapsed.value = !collapsed.value
   localStorage.setItem('aiferry-sidebar', collapsed.value ? 'collapsed' : 'expanded')
 }
 
 function navigate(path: string) {
+  const parent = items.value.find((item) => item.path === path)
+  if (parent?.children) setGroupExpanded(parent, true)
   router.push(path)
   mobileOpen.value = false
 }
@@ -134,11 +171,17 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
             </button>
           </el-tooltip>
           <div v-else class="nav-group">
-            <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
-              <component :is="item.icon" :size="19" />
-              <span>{{ item.label }}</span>
-            </button>
-            <div class="nav-sublist">
+            <div class="nav-group__header">
+              <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
+                <component :is="item.icon" :size="19" />
+                <span>{{ item.label }}</span>
+              </button>
+              <button class="nav-group__toggle" :class="{ active: isGroupExpanded(item) }" type="button" :aria-label="`${isGroupExpanded(item) ? '收起' : '展开'}${item.label}`" :aria-expanded="isGroupExpanded(item)" @click="toggleGroup(item)">
+                <ChevronDown v-if="isGroupExpanded(item)" :size="17" />
+                <ChevronRight v-else :size="17" />
+              </button>
+            </div>
+            <div v-show="isGroupExpanded(item)" class="nav-sublist">
               <button v-for="child in item.children" :key="child.path" class="nav-subitem" :class="{ active: isActive(child.path) }" type="button" @click="navigate(child.path)">{{ child.label }}</button>
             </div>
           </div>
@@ -158,12 +201,24 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
       </div>
       <nav class="nav-list" aria-label="主导航">
         <template v-for="item in items" :key="item.path">
-          <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
+          <button v-if="!item.children" class="nav-item" :class="{ active: isActive(item.path) }" type="button" @click="navigate(item.path)">
             <component :is="item.icon" :size="19" />
             <span>{{ item.label }}</span>
           </button>
-          <div v-if="item.children" class="nav-sublist">
-            <button v-for="child in item.children" :key="child.path" class="nav-subitem" :class="{ active: isActive(child.path) }" type="button" @click="navigate(child.path)">{{ child.label }}</button>
+          <div v-else class="nav-group">
+            <div class="nav-group__header">
+              <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
+                <component :is="item.icon" :size="19" />
+                <span>{{ item.label }}</span>
+              </button>
+              <button class="nav-group__toggle" :class="{ active: isGroupExpanded(item) }" type="button" :aria-label="`${isGroupExpanded(item) ? '收起' : '展开'}${item.label}`" :aria-expanded="isGroupExpanded(item)" @click="toggleGroup(item)">
+                <ChevronDown v-if="isGroupExpanded(item)" :size="17" />
+                <ChevronRight v-else :size="17" />
+              </button>
+            </div>
+            <div v-show="isGroupExpanded(item)" class="nav-sublist">
+              <button v-for="child in item.children" :key="child.path" class="nav-subitem" :class="{ active: isActive(child.path) }" type="button" @click="navigate(child.path)">{{ child.label }}</button>
+            </div>
           </div>
         </template>
       </nav>
