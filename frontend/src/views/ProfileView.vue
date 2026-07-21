@@ -8,8 +8,10 @@ import type { AccountProfile, AccountUsageSummary, RedemptionResult } from '../a
 import { showError } from '../lib/error'
 import { formatCost, formatNumber } from '../lib/format'
 import { useAuthStore } from '../stores/auth'
+import { useSystemStore } from '../stores/system'
 
 const auth = useAuthStore()
+const system = useSystemStore()
 const loading = ref(false)
 const saving = ref(false)
 const redeeming = ref(false)
@@ -73,7 +75,7 @@ onMounted(load)
     </section>
 
     <section class="profile-section">
-      <div class="section-heading"><div><h2>个人资料</h2><span>昵称仅在 AiFerry 内显示，邮箱用于账户联系。</span></div></div>
+      <div class="section-heading"><div><h2>个人资料</h2><span>昵称仅在 {{ system.systemName }} 内显示，邮箱用于账户联系。</span></div></div>
       <el-form label-position="top" class="profile-form">
         <div class="form-grid"><el-form-item label="昵称"><el-input v-model="form.nickname" maxlength="64" show-word-limit /></el-form-item><el-form-item label="邮箱"><el-input v-model="form.email" clearable placeholder="name@example.com" /></el-form-item></div>
         <el-button type="primary" :icon="Save" :loading="saving" @click="save">保存资料</el-button>

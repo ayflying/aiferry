@@ -3,16 +3,18 @@ import { computed } from 'vue'
 import { Anchor, Radio, ShipWheel } from '@lucide/vue'
 import type { Channel } from '../api/types'
 import { displayedRoutes, isChannelRoutable } from '../lib/route-display'
+import { useSystemStore } from '../stores/system'
 
 const props = defineProps<{ channels: Channel[] }>()
 const visible = computed(() => displayedRoutes(props.channels))
+const system = useSystemStore()
 </script>
 
 <template>
   <div class="route-strip">
     <div class="route-origin">
       <span class="route-icon"><ShipWheel :size="20" /></span>
-      <div><strong>AiFerry</strong><small>中转入口</small></div>
+      <div><strong>{{ system.systemName }}</strong><small>中转入口</small></div>
     </div>
     <div class="route-track" :class="{ active: visible.some((item) => isChannelRoutable(item)) }">
       <span class="route-pulse"><Radio :size="13" /></span>

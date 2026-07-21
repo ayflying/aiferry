@@ -67,7 +67,7 @@ var (
 				priceSourceSvc  = pricesource.New(channelSvc)
 				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc, channelSvc, locationSvc)
 				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc, authSvc, mailSvc, redemptionSvc)
-				authCtrl        = authctrl.New(authSvc, userSvc)
+				authCtrl        = authctrl.New(authSvc, userSvc, systemSvc)
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)
 				s               = g.Server()
 			)

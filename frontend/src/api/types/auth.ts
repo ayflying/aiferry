@@ -1,3 +1,5 @@
+import type { SystemInformationSettings } from './system'
+
 export interface ApiEnvelope<T> {
   code: number
   message: string
@@ -9,6 +11,7 @@ export interface AuthConfig {
   provider: string
   loginPath: string
   timeZone: string
+  system: SystemInformationSettings
 }
 
 export interface AuthUser {

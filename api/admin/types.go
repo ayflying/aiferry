@@ -172,6 +172,17 @@ type SensitiveWordSettingsInput struct {
 	Keywords        []string `json:"keywords"`
 }
 
+type SystemInformationInput struct {
+	SystemName    string `json:"systemName"`
+	ServerURL     string `json:"serverUrl"`
+	LogoURL       string `json:"logoUrl"`
+	Footer        string `json:"footer"`
+	About         string `json:"about"`
+	HomeContent   string `json:"homeContent"`
+	UserAgreement string `json:"userAgreement"`
+	PrivacyPolicy string `json:"privacyPolicy"`
+}
+
 type MailSettingsInput struct {
 	Enabled         bool    `json:"enabled"`
 	Host            string  `json:"host"`

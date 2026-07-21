@@ -116,7 +116,7 @@ func (s *Service) BeginLogin(ctx context.Context, callbackURL, returnTo string) 
 	return s.app.Config.CasdoorEndpoint + "/login/oauth/authorize?" + values.Encode(), state, nil
 }
 
-func (s *Service) CompleteLogin(ctx context.Context, state, stateCookie, code, callbackURL string) (SessionUser, string, string, error) {
+func (s *Service) CompleteLogin(ctx context.Context, state, stateCookie, code string) (SessionUser, string, string, error) {
 	if state == "" || code == "" || stateCookie == "" || state != stateCookie {
 		return SessionUser{}, "", "", ErrInvalidState
 	}
@@ -128,10 +128,10 @@ func (s *Service) CompleteLogin(ctx context.Context, state, stateCookie, code, c
 		return SessionUser{}, "", "", gerror.Wrap(err, "read OAuth state")
 	}
 	var metadata oauthState
-	if err = json.Unmarshal(stored, &metadata); err != nil || metadata.CallbackURL != callbackURL {
+	if err = json.Unmarshal(stored, &metadata); err != nil || metadata.CallbackURL == "" {
 		return SessionUser{}, "", "", ErrInvalidState
 	}
-	accessToken, err := s.exchangeCode(ctx, code, callbackURL)
+	accessToken, err := s.exchangeCode(ctx, code, metadata.CallbackURL)
 	if err != nil {
 		return SessionUser{}, "", "", gerror.Wrap(err, "exchange Casdoor authorization code")
 	}

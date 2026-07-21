@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -11,16 +12,18 @@ import (
 
 	authapi "github.com/yunloli/aiferry/api/auth"
 	"github.com/yunloli/aiferry/internal/service/auth"
+	"github.com/yunloli/aiferry/internal/service/system"
 	"github.com/yunloli/aiferry/internal/service/user"
 )
 
 type Controller struct {
-	auth  *auth.Service
-	users *user.Service
+	auth     *auth.Service
+	users    *user.Service
+	settings *system.Service
 }
 
-func New(authSvc *auth.Service, userSvc *user.Service) *Controller {
-	return &Controller{auth: authSvc, users: userSvc}
+func New(authSvc *auth.Service, userSvc *user.Service, systemSvc *system.Service) *Controller {
+	return &Controller{auth: authSvc, users: userSvc, settings: systemSvc}
 }
 
 func (c *Controller) RegisterPublic(group *ghttp.RouterGroup) {
@@ -38,17 +41,11 @@ func (c *Controller) RegisterProtected(group *ghttp.RouterGroup) {
 }
 
 func (c *Controller) Callback(r *ghttp.Request) {
-	callbackURL, err := auth.CallbackURL(r)
-	if err != nil {
-		redirectLoginError(r, "auth_failed")
-		return
-	}
 	_, token, returnTo, err := c.auth.CompleteLogin(
 		r.Context(),
 		r.GetQuery("state").String(),
 		r.Cookie.Get(auth.StateCookieName()).String(),
 		r.GetQuery("code").String(),
-		callbackURL,
 	)
 	clearCookie(r, auth.StateCookieName())
 	if err != nil {
@@ -69,11 +66,16 @@ func (c *Controller) Callback(r *ghttp.Request) {
 
 func (c *Controller) config(r *ghttp.Request) {
 	data, err := c.auth.Config(r.Context())
-	respond(r, data, err)
+	if err != nil {
+		respond(r, nil, err)
+		return
+	}
+	data.System = c.publicSystemInformation(r)
+	respond(r, data, nil)
 }
 
 func (c *Controller) login(r *ghttp.Request) {
-	callbackURL, err := auth.CallbackURL(r)
+	callbackURL, err := c.callbackURL(r)
 	if err != nil {
 		respond(r, nil, err)
 		return
@@ -85,6 +87,40 @@ func (c *Controller) login(r *ghttp.Request) {
 	}
 	setCookie(r, auth.StateCookieName(), state, 10*time.Minute)
 	r.Response.RedirectTo(loginURL, http.StatusFound)
+}
+
+func (c *Controller) callbackURL(r *ghttp.Request) (string, error) {
+	information, err := c.settings.GetSystemInformation(r.Context())
+	if err == nil && information.ServerURL != "" {
+		return information.ServerURL + "/auth/casdoor/callback", nil
+	}
+	return auth.CallbackURL(r)
+}
+
+func (c *Controller) publicSystemInformation(r *ghttp.Request) authapi.SystemInformationView {
+	information := system.DefaultSystemInformation()
+	fallback, err := requestServerURL(r)
+	if err == nil {
+		if loaded, loadErr := c.settings.ResolveSystemInformation(r.Context(), fallback); loadErr == nil {
+			information = loaded
+		} else {
+			g.Log().Warningf(r.Context(), "load public system information: %v", loadErr)
+			information.ServerURL = fallback
+		}
+	}
+	return authapi.SystemInformationView{
+		SystemName: information.SystemName, ServerURL: information.ServerURL, LogoURL: information.LogoURL,
+		Footer: information.Footer, About: information.About, HomeContent: information.HomeContent,
+		UserAgreement: information.UserAgreement, PrivacyPolicy: information.PrivacyPolicy,
+	}
+}
+
+func requestServerURL(r *ghttp.Request) (string, error) {
+	callbackURL, err := auth.CallbackURL(r)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(callbackURL, "/auth/casdoor/callback"), nil
 }
 
 func (c *Controller) me(r *ghttp.Request) {

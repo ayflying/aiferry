@@ -61,7 +61,7 @@ button { color: inherit; }
 .sidebar-toggle { display: grid; width: 100%; height: 48px; place-items: center; border: 0; border-top: 1px solid rgb(255 255 255 / 10%); color: #b7c2cd; background: transparent; cursor: pointer; }
 .sidebar-toggle:hover { color: #fff; background: rgb(255 255 255 / 6%); }
 
-.main-area { min-width: 0; flex: 1; }
+.main-area { display: flex; min-width: 0; min-height: 100vh; flex: 1; flex-direction: column; }
 .topbar { position: sticky; top: 0; z-index: 15; display: flex; height: 64px; align-items: center; gap: 12px; padding: 0 24px; border-bottom: 1px solid var(--line); background: rgb(255 255 255 / 95%); backdrop-filter: blur(12px); }
 .topbar h1 { margin: 0; font-size: 18px; font-weight: 660; }
 .topbar-spacer { flex: 1; }
@@ -71,14 +71,14 @@ button { color: inherit; }
 .user-copy strong { max-width: 160px; overflow: hidden; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .user-copy small { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .el-dropdown-menu__item svg { margin-right: 8px; }
-.page-content { width: 100%; margin: 0; padding: 22px 24px 40px; }
+.page-content { width: 100%; flex: 1; margin: 0; padding: 22px 24px 40px; }
 
 .login-page { position: relative; display: grid; min-height: 100vh; grid-template-rows: auto 1fr auto; padding: 28px 36px 22px; overflow: hidden; background: var(--canvas); }
 .login-page::before { position: absolute; inset: 0 0 auto; height: 4px; background: linear-gradient(90deg, var(--action) 0 42%, var(--healthy) 42% 72%, var(--ink) 72%); content: ''; }
 .login-masthead { display: flex; align-items: center; gap: 12px; }
 .login-masthead .brand-copy strong { color: var(--ink); }
 .login-masthead .brand-copy span { color: var(--muted); }
-.login-tool { align-self: center; width: min(100%, 430px); margin: 36px auto; padding: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 14px 40px rgb(21 32 43 / 8%); }
+.login-center { align-self: center; width: min(100%, 760px); margin: 36px auto; }.login-tool { width: min(100%, 430px); margin: 0 auto; padding: 30px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 14px 40px rgb(21 32 43 / 8%); }.login-home-content { margin-top: 26px; padding: 24px 0 0; border-top: 1px solid var(--line); }.login-agreement { display: flex; margin-top: 20px; color: var(--muted); font-size: 11px; line-height: 1.5; }.login-agreement a { color: var(--action); text-decoration: none; }.login-site-footer { margin: 0 -36px -22px; }
 .login-route { display: grid; grid-template-columns: 34px 1fr 34px; align-items: center; margin-bottom: 34px; }
 .route-port { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; }
 .casdoor-port { color: var(--healthy); border: 1px solid #9bcfc2; background: var(--healthy-soft); }
@@ -169,7 +169,7 @@ button { color: inherit; }
 
 @media (max-width: 600px) {
   .login-page { padding: 22px 16px 18px; }
-  .login-tool { margin-block: 24px; padding: 24px 20px; box-shadow: 0 8px 24px rgb(21 32 43 / 7%); }
+  .login-center { margin-block: 24px; }.login-tool { padding: 24px 20px; box-shadow: 0 8px 24px rgb(21 32 43 / 7%); }.login-site-footer { margin-inline: -16px; margin-bottom: -18px; }
   .login-heading h1 { font-size: 23px; }
 }
 

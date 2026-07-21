@@ -6,6 +6,9 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', public: true } },
+    { path: '/about', name: 'about', component: () => import('../views/PublicDocumentView.vue'), meta: { title: '关于', public: true, document: 'about' } },
+    { path: '/terms', name: 'terms', component: () => import('../views/PublicDocumentView.vue'), meta: { title: '用户协议', public: true, document: 'terms' } },
+    { path: '/privacy', name: 'privacy', component: () => import('../views/PublicDocumentView.vue'), meta: { title: '隐私政策', public: true, document: 'privacy' } },
     { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '仪表盘', admin: true } },
     { path: '/channels', name: 'channels', component: () => import('../views/ChannelsView.vue'), meta: { title: '渠道', admin: true } },
     { path: '/models', name: 'models', component: () => import('../views/ModelsView.vue'), meta: { title: '模型与价格' } },
@@ -21,6 +24,7 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (to.meta.public) {
+    if (to.name !== 'login') return true
     try {
       if (await auth.ensureUser()) return localReturnTo(to.query.returnTo)
     } catch {
@@ -37,10 +41,6 @@ router.beforeEach(async (to) => {
     return { path: '/login', query: { error: 'auth_unavailable', returnTo: to.fullPath } }
   }
   return { path: '/login', query: { returnTo: to.fullPath } }
-})
-
-router.afterEach((to) => {
-  document.title = `${String(to.meta.title || '控制台')} - AiFerry`
 })
 
 export default router

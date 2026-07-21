@@ -1,5 +1,5 @@
 const authErrors: Record<string, string> = {
-  access_denied: '当前账号不具备 AiFerry 访问权限',
+  access_denied: '当前账号不具备系统访问权限',
   invalid_state: '登录请求已过期，请重新发起登录',
   auth_failed: 'Casdoor 认证失败，请稍后重试',
   auth_unavailable: '认证服务暂时不可用，请稍后重试',

@@ -18,10 +18,13 @@ import {
 } from '@lucide/vue'
 import { useAuthStore } from '../stores/auth'
 import { showError } from '../lib/error'
+import SiteFooter from './SiteFooter.vue'
+import { useSystemStore } from '../stores/system'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const system = useSystemStore()
 const collapsed = ref(localStorage.getItem('aiferry-sidebar') === 'collapsed')
 const mobile = ref(false)
 const mobileOpen = ref(false)
@@ -45,7 +48,7 @@ const items = computed(() => auth.user?.isAdmin
       { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
     ])
 
-const pageTitle = computed(() => String(route.meta.title || 'AiFerry'))
+const pageTitle = computed(() => String(route.meta.title || system.systemName))
 
 function toggleSidebar() {
   collapsed.value = !collapsed.value
@@ -60,6 +63,10 @@ function navigate(path: string) {
 function updateViewport() {
   mobile.value = window.innerWidth < 900
   if (!mobile.value) mobileOpen.value = false
+}
+
+function resetLogo(event: Event) {
+  ;(event.target as HTMLImageElement).src = '/aiferry-logo.png'
 }
 
 async function handleUserCommand(command: string) {
@@ -87,10 +94,10 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
   <div class="app-shell">
     <aside v-if="!mobile" class="sidebar" :class="{ collapsed }">
       <div class="brand" :class="{ compact: collapsed }">
-        <span class="brand-mark" role="img" aria-label="AiFerry"><img class="brand-logo" src="/aiferry-logo.png" alt="" /></span>
+        <span class="brand-mark" role="img" :aria-label="system.systemName"><img class="brand-logo" :src="system.logoUrl" alt="" @error="resetLogo" /></span>
         <div v-if="!collapsed" class="brand-copy">
-          <strong>AiFerry</strong>
-          <span>AI 摆渡</span>
+          <strong>{{ system.systemName }}</strong>
+          <span>AI 网关</span>
         </div>
       </div>
 
@@ -116,8 +123,8 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
 
     <el-drawer v-model="mobileOpen" direction="ltr" size="260px" :with-header="false" class="mobile-drawer">
       <div class="brand">
-        <span class="brand-mark" role="img" aria-label="AiFerry"><img class="brand-logo" src="/aiferry-logo.png" alt="" /></span>
-        <div class="brand-copy"><strong>AiFerry</strong><span>AI 摆渡</span></div>
+        <span class="brand-mark" role="img" :aria-label="system.systemName"><img class="brand-logo" :src="system.logoUrl" alt="" @error="resetLogo" /></span>
+        <div class="brand-copy"><strong>{{ system.systemName }}</strong><span>AI 网关</span></div>
       </div>
       <nav class="nav-list" aria-label="主导航">
         <button v-for="item in items" :key="item.path" class="nav-item" :class="{ active: route.path === item.path }" type="button" @click="navigate(item.path)">
@@ -152,6 +159,7 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
       <div class="page-content">
         <router-view />
       </div>
+      <SiteFooter />
     </main>
   </div>
 </template>

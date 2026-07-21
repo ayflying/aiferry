@@ -17,9 +17,11 @@
     "@lucide/vue": "^1.24.0",
     "axios": "^1.11.0",
     "dayjs": "^1.11.13",
+    "dompurify": "^3.2.6",
     "echarts": "^6.0.0",
     "element-plus": "^2.10.7",
     "pinia": "^3.0.3",
+    "marked": "^16.4.1",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1"
   },
