@@ -106,6 +106,16 @@
 		"costs": { "adapter": "none" },
 		"pricing": { "adapter": "none" }
 	  }
+	},
+	{
+	  "id": 9000000000000011,
+	  "name": "JiAPI",
+	  "code": "jiapi",
+	  "config": {
+		"baseUrl": "https://api.jiapi.com/v1",
+		"models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+		"costs": { "adapter": "sub2api_usage", "method": "GET", "path": "/usage", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "usedPath": "usage.total.actual_cost", "remainingPath": "balance", "currencyPath": "unit", "fixedCurrency": "USD" }
+	  }
 	}
   ]
 }
