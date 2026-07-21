@@ -76,13 +76,7 @@ docker compose --profile local up -d
 
 根目录 `VERSION` 是唯一版本来源，初始版本为 `0.1.2`。每次发布构建均递增补丁版本，先提交并推送 Git 源码，再由远程构建服务器构建、推送和部署镜像。
 
-首次发布前，在 `root@192.168.50.217` 上登录 GitHub Container Registry：
-
-```bash
-docker login ghcr.io -u ayflying
-```
-
-使用具有 `write:packages` 和 `read:packages` 权限的 GitHub PAT，令牌不得写入仓库或 `.env`。随后从 Windows PowerShell 在仓库根目录执行：
+镜像仓库认证、构建主机和部署路径属于维护者的 CI/CD 或私有运维环境配置，不是开源项目的初始化步骤。发布凭据必须由部署环境的凭据存储或密钥管理服务保管，不得写入仓库或 `.env`。随后从 Windows PowerShell 在仓库根目录执行：
 
 ```powershell
 .\hack\release.ps1
