@@ -30,7 +30,6 @@ type App struct {
 	MasterKey              []byte
 	WebRoot                string
 	MigrationsDir          string
-	MaxFailoverAttempts    int
 	ChannelCooldownSeconds int
 	CasdoorEndpoint        string
 	CasdoorClientID        string
@@ -66,7 +65,6 @@ func Load() (App, error) {
 		MasterKey:              masterKey,
 		WebRoot:                env("WEB_ROOT", "./web"),
 		MigrationsDir:          env("MIGRATIONS_DIR", "manifest/migrations"),
-		MaxFailoverAttempts:    envInt("MAX_FAILOVER_ATTEMPTS", 3),
 		ChannelCooldownSeconds: envInt("CHANNEL_COOLDOWN_SECONDS", 60),
 		CasdoorEndpoint:        strings.TrimRight(env("CASDOOR_ENDPOINT", ""), "/"),
 		CasdoorClientID:        strings.TrimSpace(os.Getenv("CASDOOR_CLIENT_ID")),

@@ -2,10 +2,12 @@ package relay
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/shopspring/decimal"
 	"github.com/yunloli/aiferry/internal/service/channel"
 	"github.com/yunloli/aiferry/internal/service/usage"
@@ -55,6 +57,25 @@ func TestRetryableStatus(t *testing.T) {
 		if retryableStatus(status) {
 			t.Fatalf("status %d should not retry", status)
 		}
+	}
+}
+
+func TestRetryableAvailabilityErrorsUseServerRetryResponse(t *testing.T) {
+	for _, sentinel := range []error{ErrNoAvailableChannel, ErrEligibleChannelsExhausted} {
+		err := gerror.Wrap(sentinel, "route unavailable")
+		if !IsRetryableAvailabilityError(err) {
+			t.Fatalf("error %v should be retryable", sentinel)
+		}
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("error %v must retain its sentinel", sentinel)
+		}
+	}
+	if IsRetryableAvailabilityError(gerror.New("invalid request")) {
+		t.Fatal("invalid request must not be treated as retryable")
+	}
+	response := RetryableAvailabilityClientError()
+	if response.Status != http.StatusServiceUnavailable || response.Type != "server_error" || response.RetryAfter != "2" {
+		t.Fatalf("unexpected retry response: %+v", response)
 	}
 }
 

@@ -143,7 +143,7 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 		return err
 	}
 	if len(candidates) == 0 {
-		return gerror.New("no available channel for model " + requestedModel)
+		return gerror.Wrapf(ErrNoAvailableChannel, "no available channel for model %s", requestedModel)
 	}
 	if !s.prices.IsPriced(requestedModel) {
 		return gerror.New("当前模型未配置可用价格，无法计费")
@@ -157,13 +157,12 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	if settingsErr != nil {
 		settings = system.DefaultResilienceSettings()
 	}
-	maxAttempts := min(len(candidates), settings.MaxFailoverAttempts)
 	var (
 		last          attemptResult
 		lastCandidate Candidate
 		attempts      int
 	)
-	for index := 0; index < maxAttempts; index++ {
+	for index := range candidates {
 		outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings)
 		attempts += outcome.attempts
 		last = outcome.result
@@ -194,6 +193,5 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 	} else {
 		last = failedAttemptResult(last, "All eligible channels failed")
 	}
-	s.writeBufferedResponse(writer, last.status, last.body, http.Header{"Content-Type": []string{"application/json"}})
-	return nil
+	return gerror.Wrap(ErrEligibleChannelsExhausted, "all eligible channels failed")
 }

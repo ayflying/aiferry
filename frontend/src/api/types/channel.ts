@@ -200,7 +200,6 @@ export interface ChannelCostResult {
 }
 
 export interface SystemResilienceSettings {
-  maxFailoverAttempts: number
   retryStatusCodes: string
   streamFirstByteTimeoutSeconds: number
   streamIdleTimeoutSeconds: number

@@ -39,7 +39,6 @@ func New(appSvc *app.Service) *Service {
 
 func DefaultResilienceSettings() adminapi.SystemResilienceSettingsInput {
 	return adminapi.SystemResilienceSettingsInput{
-		MaxFailoverAttempts:           3,
 		RetryStatusCodes:              "401,403,404,408,429,500-599",
 		StreamFirstByteTimeoutSeconds: 60,
 		StreamIdleTimeoutSeconds:      180,
@@ -131,9 +130,6 @@ func decodeSettings(value []byte) (adminapi.SystemResilienceSettingsInput, error
 }
 
 func normalizeSettings(input adminapi.SystemResilienceSettingsInput) (adminapi.SystemResilienceSettingsInput, error) {
-	if input.MaxFailoverAttempts < 1 || input.MaxFailoverAttempts > 10 {
-		return input, gerror.New("maxFailoverAttempts must be between 1 and 10")
-	}
 	var err error
 	if input.RetryStatusCodes, _, err = normalizeStatusCodeRules(input.RetryStatusCodes); err != nil {
 		return input, gerror.Wrap(err, "retryStatusCodes is invalid")

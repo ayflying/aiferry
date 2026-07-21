@@ -56,6 +56,10 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 			return
 		}
 		if err = c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, clientIP(r), endpoint, body, key); err != nil {
+			if relaysvc.IsRetryableAvailabilityError(err) {
+				writeRetryableAvailabilityError(r)
+				return
+			}
 			if system.IsSensitiveWordBlocked(err) {
 				writeError(r, http.StatusBadRequest, "sensitive_word_blocked", err.Error())
 				return
@@ -87,6 +91,14 @@ func (c *Controller) authenticate(r *ghttp.Request) (apikey.AuthKey, bool) {
 		return apikey.AuthKey{}, false
 	}
 	return key, true
+}
+
+func writeRetryableAvailabilityError(r *ghttp.Request) {
+	response := relaysvc.RetryableAvailabilityClientError()
+	if response.RetryAfter != "" {
+		r.Response.Header().Set("Retry-After", response.RetryAfter)
+	}
+	writeError(r, response.Status, response.Type, response.Message)
 }
 
 func writeError(r *ghttp.Request, status int, kind, message string) {

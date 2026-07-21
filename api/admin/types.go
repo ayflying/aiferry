@@ -147,7 +147,6 @@ type PriceSourceInput struct {
 }
 
 type SystemResilienceSettingsInput struct {
-	MaxFailoverAttempts           int      `json:"maxFailoverAttempts"`
 	RetryStatusCodes              string   `json:"retryStatusCodes"`
 	StreamFirstByteTimeoutSeconds int      `json:"streamFirstByteTimeoutSeconds"`
 	StreamIdleTimeoutSeconds      int      `json:"streamIdleTimeoutSeconds"`
