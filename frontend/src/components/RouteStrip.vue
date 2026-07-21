@@ -2,9 +2,10 @@
 import { computed } from 'vue'
 import { Anchor, Radio, ShipWheel } from '@lucide/vue'
 import type { Channel } from '../api/types'
+import { displayedRoutes, isChannelRoutable } from '../lib/route-display'
 
 const props = defineProps<{ channels: Channel[] }>()
-const visible = computed(() => props.channels.slice(0, 6))
+const visible = computed(() => displayedRoutes(props.channels))
 </script>
 
 <template>
@@ -13,11 +14,11 @@ const visible = computed(() => props.channels.slice(0, 6))
       <span class="route-icon"><ShipWheel :size="20" /></span>
       <div><strong>AiFerry</strong><small>中转入口</small></div>
     </div>
-    <div class="route-track" :class="{ active: visible.some((item) => item.status === 1) }">
+    <div class="route-track" :class="{ active: visible.some((item) => isChannelRoutable(item)) }">
       <span class="route-pulse"><Radio :size="13" /></span>
     </div>
     <div v-if="visible.length" class="route-destinations">
-      <div v-for="channel in visible" :key="channel.id" class="route-node" :class="{ online: channel.status === 1, failed: channel.lastTestStatus === 'failed' }">
+      <div v-for="channel in visible" :key="channel.id" class="route-node" :class="{ online: isChannelRoutable(channel), failed: channel.lastTestStatus === 'failed', unavailable: !isChannelRoutable(channel) }">
         <Anchor :size="14" />
         <span>{{ channel.name }}</span>
         <small>P{{ channel.priority }}</small>
@@ -47,6 +48,7 @@ const visible = computed(() => props.channels.slice(0, 6))
 .route-node small { font-family: 'JetBrains Mono', monospace; font-size: 10px; }
 .route-node.online { border-color: #acd7cc; color: #126c5b; background: #f2faf8; }
 .route-node.failed { border-color: #e9abb2; color: #a62f3d; background: #fff6f7; }
+.route-node.unavailable { border-color: #e9abb2; color: #a62f3d; background: #fff6f7; }
 .route-empty { color: #7b8792; font-size: 12px; text-align: center; }
 @keyframes transit { 0%, 100% { left: 8%; } 50% { left: calc(92% - 26px); } }
 @media (max-width: 780px) { .route-strip { grid-template-columns: 1fr; }.route-track { width: 100%; }.route-destinations { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

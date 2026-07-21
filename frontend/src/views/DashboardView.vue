@@ -11,6 +11,7 @@ import type { Dashboard } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { formatCost, formatNumber, successRate } from '../lib/format'
+import { isChannelRoutable } from '../lib/route-display'
 import RouteStrip from '../components/RouteStrip.vue'
 
 use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent])
@@ -30,6 +31,7 @@ let chart: EChartsType | undefined
 let costChart: EChartsType | undefined
 
 const success = computed(() => successRate(dashboard.value.summary.requests, dashboard.value.summary.successes))
+const availableChannelCount = computed(() => store.channels.filter(isChannelRoutable).length)
 
 async function load() {
   loading.value = true
@@ -148,7 +150,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dis
     </section>
 
     <section>
-      <div class="section-heading"><h2>航线状态</h2><span>{{ store.channels.filter((item) => item.status === 1).length }} 条可用渠道</span></div>
+      <div class="section-heading"><h2>航线状态</h2><span>{{ availableChannelCount }} 条可用渠道</span></div>
       <RouteStrip :channels="store.channels" />
     </section>
 
