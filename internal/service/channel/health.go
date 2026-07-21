@@ -44,15 +44,15 @@ func (s *Service) runRegularHealthChecks(ctx context.Context, mode string) {
 	if mode != "all" {
 		return
 	}
+	modelID := healthCheckModelIDExpression("c")
 	type healthCheckModel struct {
 		ModelID uint64 `orm:"model_id"`
 	}
 	rows := make([]healthCheckModel, 0)
 	if err := dao.Channels.Ctx(ctx).As("c").
-		Fields("c.health_check_model_id AS model_id").
-		InnerJoin(dao.ChannelModels.Table()+" m", "m.id=c.health_check_model_id AND m.channel_id=c.id AND m.enabled=1 AND m.deleted_at IS NULL").
+		Fields(modelID+" AS model_id").
+		InnerJoin(dao.ChannelModels.Table()+" m", healthCheckModelJoin("c", "m")).
 		Where("c.status=1").
-		Where("c.health_check_model_id IS NOT NULL").
 		Where("c.auto_disable_enabled", 1).
 		OrderAsc("c.id").
 		Scan(&rows); err != nil {
@@ -81,11 +81,11 @@ func (s *Service) runChannelRecoveryChecks(ctx context.Context, mode string) {
 		AutoDisabledAt time.Time `orm:"auto_disabled_at"`
 	}
 	rows := make([]healthCheckModel, 0)
+	modelID := healthCheckModelIDExpression("c")
 	model := dao.Channels.Ctx(ctx).As("c").
-		Fields("c.id AS channel_id,c.health_check_model_id AS model_id,c.auto_disabled_at").
-		InnerJoin(dao.ChannelModels.Table()+" m", "m.id=c.health_check_model_id AND m.channel_id=c.id AND m.enabled=1 AND m.deleted_at IS NULL").
+		Fields("c.id AS channel_id,"+modelID+" AS model_id,c.auto_disabled_at").
+		InnerJoin(dao.ChannelModels.Table()+" m", healthCheckModelJoin("c", "m")).
 		Where("c.status=0 AND c.auto_disabled_at IS NOT NULL").
-		Where("c.health_check_model_id IS NOT NULL").
 		Where("c.auto_disable_enabled", 1).
 		OrderAsc("c.id")
 	if mode == "passive" {
@@ -119,10 +119,11 @@ func (s *Service) runCredentialRecoveryChecks(ctx context.Context, mode string) 
 		AutoDisabledAt time.Time `orm:"auto_disabled_at"`
 	}
 	rows := make([]healthCheckModel, 0)
+	modelID := healthCheckModelIDExpression("c")
 	model := dao.ChannelCredentials.Ctx(ctx).As("cc").
-		Fields("cc.channel_id,cc.id AS credential_id,c.health_check_model_id AS model_id,cc.auto_disabled_at").
+		Fields("cc.channel_id,cc.id AS credential_id,"+modelID+" AS model_id,cc.auto_disabled_at").
 		InnerJoin(dao.Channels.Table()+" c", "c.id=cc.channel_id AND c.status=1 AND c.auto_disable_enabled=1").
-		InnerJoin(dao.ChannelModels.Table()+" m", "m.id=c.health_check_model_id AND m.channel_id=c.id AND m.enabled=1 AND m.deleted_at IS NULL").
+		InnerJoin(dao.ChannelModels.Table()+" m", healthCheckModelJoin("c", "m")).
 		Where("cc.status=0 AND cc.auto_disabled_at IS NOT NULL").
 		OrderAsc("cc.id")
 	if mode == "passive" {

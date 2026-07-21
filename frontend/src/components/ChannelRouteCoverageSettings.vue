@@ -40,7 +40,7 @@ const autoDisableEnabled = defineModel<boolean>('autoDisableEnabled', { required
         <el-select v-model="healthCheckModelId" clearable filterable :disabled="!editing || !models.length" :placeholder="editing ? '选择已启用模型' : '保存渠道并启用模型后选择'">
           <el-option v-for="model in models" :key="model.id" :label="model.publicName === model.upstreamName ? model.publicName : `${model.publicName} (${model.upstreamName})`" :value="model.id" />
         </el-select>
-        <span>系统后台探测使用此模型验证渠道可用性；未选择时跳过此渠道。</span>
+	        <span>系统后台探测优先使用此模型验证渠道可用性；未选择时自动使用该渠道首个启用模型。</span>
       </label>
       <div class="auto-disable-row">
         <div><strong>自动封禁</strong><span>重复失败时自动禁用此渠道，仍受系统全局规则约束。</span></div>
