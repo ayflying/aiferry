@@ -9,9 +9,9 @@ import { setDisplayTimeZone } from '../lib/format'
 import { useSystemStore } from '../stores/system'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
-type SettingsTab = 'overview' | 'basic' | 'information' | 'resilience' | 'sensitive' | 'mail'
+type SettingsTab = 'overview' | 'basic' | 'resilience' | 'sensitive' | 'mail'
 
-const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, information: false, resilience: false, sensitive: false, mail: false })
+const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, resilience: false, sensitive: false, mail: false })
 const saving = ref(false)
 const informationSaving = ref(false)
 const sensitiveSaving = ref(false)
@@ -71,8 +71,7 @@ const testRecipient = ref('')
 
 const sectionMeta = computed(() => ({
   overview: { title: '运行概览', description: '实例与依赖状态' },
-  basic: { title: '基础设置', description: '全局时区与时间展示规则' },
-  information: { title: '系统信息', description: '应用身份、公开地址与站点内容' },
+  basic: { title: '基础设置', description: '全局时区、应用身份与站点内容' },
   resilience: { title: '路由可靠性', description: '故障转移、健康检查与自动禁用' },
   sensitive: { title: '敏感词', description: '在请求到达上游模型前检查用户输入' },
   mail: { title: '邮件提醒', description: '按模型使用触发的余额提醒与 SMTP 投递配置' },
@@ -113,7 +112,12 @@ async function loadOverview() {
 async function loadBasic() {
   tabLoading.basic = true
   try {
-    Object.assign(basicForm, await apiGet<BaseSettings>('/system/basic'))
+    const [basicSettings, informationSettings] = await Promise.all([
+      apiGet<BaseSettings>('/system/basic'),
+      apiGet<SystemInformationSettings>('/system/information'),
+    ])
+    Object.assign(basicForm, basicSettings)
+    applySystemInformation(informationSettings)
   } catch (error) { showError(error, '加载基础设置失败') } finally { tabLoading.basic = false }
 }
 
@@ -122,13 +126,6 @@ async function loadResilience() {
   try {
     applySettings(await apiGet<SystemResilienceSettings>('/system/settings'))
   } catch (error) { showError(error, '加载路由可靠性设置失败') } finally { tabLoading.resilience = false }
-}
-
-async function loadSystemInformation() {
-  tabLoading.information = true
-  try {
-    applySystemInformation(await apiGet<SystemInformationSettings>('/system/information'))
-  } catch (error) { showError(error, '加载系统信息失败') } finally { tabLoading.information = false }
 }
 
 async function loadMail() {
@@ -146,7 +143,7 @@ async function loadSensitiveWords() {
 }
 
 function loadTab(tab: SettingsTab) {
-  return { overview: loadOverview, basic: loadBasic, information: loadSystemInformation, resilience: loadResilience, sensitive: loadSensitiveWords, mail: loadMail }[tab]()
+  return { overview: loadOverview, basic: loadBasic, resilience: loadResilience, sensitive: loadSensitiveWords, mail: loadMail }[tab]()
 }
 
 function handleTabChange(tab: string | number) {
@@ -179,22 +176,21 @@ async function saveReliability() {
 
 async function saveBasic() {
   saving.value = true
-  try {
-    const settings = await apiPut<BaseSettings>('/system/basic', { timeZone: basicForm.timeZone })
-    Object.assign(basicForm, settings)
-    setDisplayTimeZone(settings.timeZone)
-    ElMessage.success('基础设置已保存')
-  } catch (error) { showError(error, '保存基础设置失败') } finally { saving.value = false }
-}
-
-async function saveSystemInformation() {
   informationSaving.value = true
   try {
-    const settings = await apiPut<SystemInformationSettings>('/system/information', { ...informationForm })
-    applySystemInformation(settings)
-    system.apply(settings)
-    ElMessage.success('系统信息已保存')
-  } catch (error) { showError(error, '保存系统信息失败') } finally { informationSaving.value = false }
+    const [basicSettings, informationSettings] = await Promise.all([
+      apiPut<BaseSettings>('/system/basic', { timeZone: basicForm.timeZone }),
+      apiPut<SystemInformationSettings>('/system/information', { ...informationForm }),
+    ])
+    Object.assign(basicForm, basicSettings)
+    applySystemInformation(informationSettings)
+    system.apply(informationSettings)
+    setDisplayTimeZone(basicSettings.timeZone)
+    ElMessage.success('基础设置已保存')
+  } catch (error) { showError(error, '保存基础设置失败') } finally {
+    saving.value = false
+    informationSaving.value = false
+  }
 }
 
 async function saveMail() {
@@ -241,7 +237,6 @@ async function sendTestMail() {
 
 function saveActive() {
   if (activeTab.value === 'basic') return saveBasic()
-  if (activeTab.value === 'information') return saveSystemInformation()
   if (activeTab.value === 'resilience') return saveReliability()
   if (activeTab.value === 'sensitive') return saveSensitiveWords()
   if (activeTab.value === 'mail') return saveMail()
@@ -255,7 +250,6 @@ onMounted(loadOverview)
     <el-tabs v-model="activeTab" class="settings-tabs sticky-page-tabs" @tab-change="handleTabChange">
       <el-tab-pane name="overview"><template #label><span class="tab-label"><Activity :size="15" />概览</span></template></el-tab-pane>
       <el-tab-pane name="basic"><template #label><span class="tab-label"><Clock3 :size="15" />基础设置</span></template></el-tab-pane>
-      <el-tab-pane name="information"><template #label><span class="tab-label"><Info :size="15" />系统信息</span></template></el-tab-pane>
       <el-tab-pane name="resilience"><template #label><span class="tab-label"><Route :size="15" />路由可靠性</span></template></el-tab-pane>
       <el-tab-pane name="sensitive"><template #label><span class="tab-label"><ShieldAlert :size="15" />敏感词</span></template></el-tab-pane>
       <el-tab-pane name="mail"><template #label><span class="tab-label"><Mail :size="15" />邮件提醒</span></template></el-tab-pane>
@@ -275,9 +269,6 @@ onMounted(loadOverview)
 
     <template v-else-if="activeTab === 'basic'">
       <section class="settings-section"><div class="section-heading"><div><h2>系统时区</h2><span>历史调用时间固定按北京时间解释；切换后按所选时区重新展示历史记录和统计，不会修改历史发生时间。</span></div><Clock3 :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="时区"><el-select v-model="basicForm.timeZone" filterable style="max-width: 420px"><el-option v-for="item in timeZoneOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item><p class="field-hint">保存后当前页面立即刷新时间格式；其他已打开的页面刷新后应用新时区。</p></el-form></section>
-    </template>
-
-    <template v-else-if="activeTab === 'information'">
       <section class="settings-section"><div class="section-heading"><div><h2>应用身份</h2><span>系统名称和徽标会显示在登录页、导航和浏览器标题中。</span></div><Info :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="系统名称"><el-input v-model="informationForm.systemName" maxlength="96" show-word-limit /></el-form-item><p class="field-hint">在整个应用程序中显示的名称。</p><div class="form-grid"><el-form-item label="服务器地址"><el-input v-model="informationForm.serverUrl" placeholder="https://yourdomain.com" inputmode="url" /></el-form-item><el-form-item label="徽标 URL"><el-input v-model="informationForm.logoUrl" placeholder="https://example.com/logo.png" inputmode="url" /></el-form-item></div><p class="field-hint">服务器地址用于 Casdoor 回调和外部集成；徽标为空时使用内置图标。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>页面内容</h2><span>页脚按纯文本显示；其他内容支持 Markdown、HTML 或指定的完整 URL。</span></div></div><el-form label-position="top" class="settings-form"><el-form-item label="页脚"><el-input v-model="informationForm.footer" type="textarea" :rows="3" maxlength="4096" show-word-limit /></el-form-item><p class="field-hint">显示在页面底部的页脚文本。</p><el-form-item label="关于"><el-input v-model="informationForm.about" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">支持 Markdown 或 HTML；完整 HTTP(S) URL 会以受限页面嵌入。</p><el-form-item label="首页内容"><el-input v-model="informationForm.homeContent" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">显示在登录页下方，支持 Markdown。</p><el-form-item label="用户协议"><el-input v-model="informationForm.userAgreement" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">留空以不要求确认；可填写 Markdown、HTML 或完整 URL。</p><el-form-item label="隐私政策"><el-input v-model="informationForm.privacyPolicy" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">留空以不要求确认；可填写 Markdown、HTML 或完整 URL。</p></el-form></section>
     </template>
