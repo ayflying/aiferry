@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Activity, Clock3, Database, Gauge, HardDrive, Info, Mail, Route, Send, ShieldAlert, ShieldCheck } from '@lucide/vue'
+import { Activity, Clock3, Database, Gauge, HardDrive, Image as ImageIcon, Info, Mail, Route, Send, ShieldAlert, ShieldCheck } from '@lucide/vue'
 import { ElMessage } from 'element-plus'
 import { apiGet, apiPost, apiPut } from '../api/client'
 import type { BaseSettings, MailSettings, SensitiveWordSettings, SystemInformationSettings, SystemResilienceSettings } from '../api/types'
@@ -9,12 +9,12 @@ import { setDisplayTimeZone } from '../lib/format'
 import { useSystemStore } from '../stores/system'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
-type SettingsTab = 'overview' | 'basic' | 'resilience' | 'sensitive' | 'mail'
+type SettingsTab = 'overview' | 'basic' | 'resilience' | 'security' | 'mail'
 
-const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, resilience: false, sensitive: false, mail: false })
+const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, resilience: false, security: false, mail: false })
 const saving = ref(false)
 const informationSaving = ref(false)
-const sensitiveSaving = ref(false)
+const securitySaving = ref(false)
 const mailSaving = ref(false)
 const testSending = ref(false)
 const activeTab = ref<SettingsTab>('overview')
@@ -48,7 +48,8 @@ const form = reactive({
   disableStatusCodes: '401,429',
   failureKeywordsText: '',
 })
-const sensitiveForm = reactive({
+const securityForm = reactive({
+  imageEnabled: true,
   enabled: false,
   checkUserPrompt: false,
   keywordsText: '',
@@ -73,7 +74,7 @@ const sectionMeta = computed(() => ({
   overview: { title: '运行概览', description: '实例与依赖状态' },
   basic: { title: '基础设置', description: '全局时区、应用身份与站点内容' },
   resilience: { title: '路由可靠性', description: '故障转移、健康检查与自动禁用' },
-  sensitive: { title: '敏感词', description: '在请求到达上游模型前检查用户输入' },
+  security: { title: '安全与限制', description: '图片功能与请求内容过滤' },
   mail: { title: '邮件提醒', description: '按模型使用触发的余额提醒与 SMTP 投递配置' },
 }[activeTab.value]))
 const activeTabLoading = computed(() => tabLoading[activeTab.value])
@@ -94,8 +95,9 @@ function applyMailSettings(settings: MailSettings) {
   Object.assign(mailForm, { ...settings, password: '' })
 }
 
-function applySensitiveWordSettings(settings: SensitiveWordSettings) {
-  Object.assign(sensitiveForm, {
+function applySecuritySettings(settings: SensitiveWordSettings) {
+  Object.assign(securityForm, {
+    imageEnabled: settings.imageEnabled,
     enabled: settings.enabled,
     checkUserPrompt: settings.checkUserPrompt,
     keywordsText: settings.keywords.join('\n'),
@@ -135,15 +137,15 @@ async function loadMail() {
   } catch (error) { showError(error, '加载邮件提醒设置失败') } finally { tabLoading.mail = false }
 }
 
-async function loadSensitiveWords() {
-  tabLoading.sensitive = true
+async function loadSecuritySettings() {
+  tabLoading.security = true
   try {
-    applySensitiveWordSettings(await apiGet<SensitiveWordSettings>('/system/sensitive-words'))
-  } catch (error) { showError(error, '加载敏感词设置失败') } finally { tabLoading.sensitive = false }
+    applySecuritySettings(await apiGet<SensitiveWordSettings>('/system/sensitive-words'))
+  } catch (error) { showError(error, '加载安全与限制设置失败') } finally { tabLoading.security = false }
 }
 
 function loadTab(tab: SettingsTab) {
-  return { overview: loadOverview, basic: loadBasic, resilience: loadResilience, sensitive: loadSensitiveWords, mail: loadMail }[tab]()
+  return { overview: loadOverview, basic: loadBasic, resilience: loadResilience, security: loadSecuritySettings, mail: loadMail }[tab]()
 }
 
 function handleTabChange(tab: string | number) {
@@ -214,17 +216,18 @@ async function saveMail() {
   } catch (error) { showError(error, '保存邮件设置失败') } finally { mailSaving.value = false }
 }
 
-async function saveSensitiveWords() {
-  sensitiveSaving.value = true
+async function saveSecuritySettings() {
+  securitySaving.value = true
   try {
     const settings = await apiPut<SensitiveWordSettings>('/system/sensitive-words', {
-      enabled: sensitiveForm.enabled,
-      checkUserPrompt: sensitiveForm.checkUserPrompt,
-      keywords: sensitiveForm.keywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
+      imageEnabled: securityForm.imageEnabled,
+      enabled: securityForm.enabled,
+      checkUserPrompt: securityForm.checkUserPrompt,
+      keywords: securityForm.keywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
     })
-    applySensitiveWordSettings(settings)
-    ElMessage.success('敏感词设置已保存')
-  } catch (error) { showError(error, '保存敏感词设置失败') } finally { sensitiveSaving.value = false }
+    applySecuritySettings(settings)
+    ElMessage.success('安全与限制设置已保存')
+  } catch (error) { showError(error, '保存安全与限制设置失败') } finally { securitySaving.value = false }
 }
 
 async function sendTestMail() {
@@ -238,7 +241,7 @@ async function sendTestMail() {
 function saveActive() {
   if (activeTab.value === 'basic') return saveBasic()
   if (activeTab.value === 'resilience') return saveReliability()
-  if (activeTab.value === 'sensitive') return saveSensitiveWords()
+  if (activeTab.value === 'security') return saveSecuritySettings()
   if (activeTab.value === 'mail') return saveMail()
 }
 
@@ -251,7 +254,7 @@ onMounted(loadOverview)
       <el-tab-pane name="overview"><template #label><span class="tab-label"><Activity :size="15" />概览</span></template></el-tab-pane>
       <el-tab-pane name="basic"><template #label><span class="tab-label"><Clock3 :size="15" />基础设置</span></template></el-tab-pane>
       <el-tab-pane name="resilience"><template #label><span class="tab-label"><Route :size="15" />路由可靠性</span></template></el-tab-pane>
-      <el-tab-pane name="sensitive"><template #label><span class="tab-label"><ShieldAlert :size="15" />敏感词</span></template></el-tab-pane>
+      <el-tab-pane name="security"><template #label><span class="tab-label"><ShieldAlert :size="15" />安全与限制</span></template></el-tab-pane>
       <el-tab-pane name="mail"><template #label><span class="tab-label"><Mail :size="15" />邮件提醒</span></template></el-tab-pane>
     </el-tabs>
 
@@ -280,12 +283,16 @@ onMounted(loadOverview)
       <section class="settings-section"><div class="section-heading"><div><h2>上游异常自动下线</h2><span>同一上游密钥连续命中规则后才会停止参与路由，并保存触发原因。</span></div><el-switch v-model="form.autoDisableEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="连续失败阈值"><el-input-number v-model="form.autoDisableFailureThreshold" :disabled="!form.autoDisableEnabled" :min="1" :max="20" controls-position="right" /></el-form-item><el-form-item label="慢响应阈值（秒）"><el-input-number v-model="form.disableLatencySeconds" :disabled="!form.autoDisableEnabled" :min="1" :max="3600" controls-position="right" /></el-form-item><el-form-item label="自动禁用状态码"><el-input v-model="form.disableStatusCodes" :disabled="!form.autoDisableEnabled" placeholder="401,429" /></el-form-item></div><el-form-item label="失败关键词"><el-input v-model="form.failureKeywordsText" :disabled="!form.autoDisableEnabled" type="textarea" :rows="10" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">同一上游密钥连续命中任一禁用规则达到阈值才会自动下线；任意一次成功会清零。关键词不区分大小写；状态码支持逗号分隔和包含范围。</p></el-form></section>
     </template>
 
-    <template v-else-if="activeTab === 'sensitive'">
+    <template v-else-if="activeTab === 'security'">
+      <section class="settings-section">
+        <div class="section-heading"><div><h2>图片功能</h2><span>控制是否允许请求携带图片内容。</span></div><ImageIcon :size="19" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>允许图片输入</strong><span>关闭后，Chat Completions 与 Responses 的图片请求会在到达上游前被拒绝。</span></div><el-switch v-model="securityForm.imageEnabled" /></div>
+      </section>
       <section class="settings-section">
         <div class="section-heading"><div><h2>请求过滤</h2><span>按配置检查用户提交的文本内容。</span></div><ShieldAlert :size="19" /></div>
-        <div class="setting-switch sensitive-switch"><div><strong>启用过滤</strong><span>检测到敏感关键词时阻止消息。</span></div><el-switch v-model="sensitiveForm.enabled" /></div>
-        <div class="setting-switch sensitive-switch"><div><strong>检查用户提示</strong><span>启用后，提示将在到达上游模型之前被扫描。</span></div><el-switch v-model="sensitiveForm.checkUserPrompt" /></div>
-        <el-form label-position="top" class="settings-form"><el-form-item label="已阻止的关键词"><el-input v-model="sensitiveForm.keywordsText" type="textarea" :rows="12" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">每行代表一个关键词。留空以禁用列表，但保留开关状态。</p></el-form>
+        <div class="setting-switch sensitive-switch"><div><strong>启用过滤</strong><span>检测到敏感关键词时阻止消息。</span></div><el-switch v-model="securityForm.enabled" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>检查用户提示</strong><span>启用后，提示将在到达上游模型之前被扫描。</span></div><el-switch v-model="securityForm.checkUserPrompt" /></div>
+        <el-form label-position="top" class="settings-form"><el-form-item label="已阻止的关键词"><el-input v-model="securityForm.keywordsText" type="textarea" :rows="12" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">每行代表一个关键词。留空以禁用列表，但保留开关状态。</p></el-form>
       </section>
     </template>
 
@@ -295,7 +302,7 @@ onMounted(loadOverview)
       <section class="settings-section"><div class="section-heading"><div><h2>SMTP 服务配置</h2><span>密码只会加密保存，读取时不会返回原始内容。</span></div><Mail :size="19" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="SMTP 主机"><el-input v-model="mailForm.host" placeholder="smtp.example.com" /></el-form-item><el-form-item label="端口"><el-input-number v-model="mailForm.port" :min="1" :max="65535" controls-position="right" /></el-form-item></div><div class="form-grid"><el-form-item label="加密方式"><el-select v-model="mailForm.security"><el-option label="STARTTLS" value="starttls" /><el-option label="TLS" value="tls" /><el-option label="不加密" value="none" /></el-select></el-form-item><el-form-item label="用户名"><el-input v-model="mailForm.username" autocomplete="username" /></el-form-item></div><div class="form-grid"><el-form-item :label="mailForm.passwordConfigured ? '密码（留空不修改）' : '密码'"><el-input v-model="mailForm.password" type="password" show-password autocomplete="new-password" /></el-form-item><el-form-item label="发件人邮箱"><el-input v-model="mailForm.from" placeholder="noreply@example.com" /></el-form-item></div></el-form><div class="setting-switch smtp-test"><div><strong>发送测试邮件</strong><span>使用当前已保存的 SMTP 配置投递。</span></div><div class="mail-test-actions"><el-input v-model="testRecipient" type="email" placeholder="recipient@example.com" /><el-button type="primary" :icon="Send" :loading="testSending" :disabled="testSending" @click="sendTestMail">发送</el-button></div></div></section>
     </template>
 
-    <div v-if="activeTab !== 'overview'" class="settings-save-actions"><el-button type="primary" :loading="saving || informationSaving || sensitiveSaving || mailSaving" @click="saveActive">保存更改</el-button></div>
+    <div v-if="activeTab !== 'overview'" class="settings-save-actions"><el-button type="primary" :loading="saving || informationSaving || securitySaving || mailSaving" @click="saveActive">保存更改</el-button></div>
   </div>
 </template>
 

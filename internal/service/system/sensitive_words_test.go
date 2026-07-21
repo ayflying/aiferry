@@ -20,6 +20,58 @@ func TestNormalizeSensitiveWordSettings(t *testing.T) {
 	}
 }
 
+func TestDecodeSensitiveWordSettingsEnablesImagesForExistingSettings(t *testing.T) {
+	settings, err := decodeSensitiveWordSettings([]byte(`{"enabled":true,"checkUserPrompt":true,"keywords":["blocked"]}`))
+	if err != nil {
+		t.Fatalf("decodeSensitiveWordSettings() error = %v", err)
+	}
+	if !settings.ImageEnabled {
+		t.Fatal("ImageEnabled = false, want true for settings saved before the image switch was added")
+	}
+}
+
+func TestHasImageInput(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		body     string
+		want     bool
+	}{
+		{
+			name:     "chat image URL",
+			endpoint: "/chat/completions",
+			body:     `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`,
+			want:     true,
+		},
+		{
+			name:     "chat text only",
+			endpoint: "/chat/completions",
+			body:     `{"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`,
+			want:     false,
+		},
+		{
+			name:     "responses image input",
+			endpoint: "/responses",
+			body:     `{"input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.com/image.png"}]}]}`,
+			want:     true,
+		},
+		{
+			name:     "responses string input",
+			endpoint: "/responses",
+			body:     `{"input":"hello"}`,
+			want:     false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := hasImageInput(test.endpoint, []byte(test.body)); got != test.want {
+				t.Fatalf("hasImageInput() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestMatchesSensitivePrompt(t *testing.T) {
 	tests := []struct {
 		name     string

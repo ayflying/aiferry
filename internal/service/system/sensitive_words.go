@@ -21,7 +21,10 @@ const (
 	sensitiveWordCacheTTL    = 5 * time.Minute
 )
 
-var ErrSensitiveWordBlocked = gerror.New("请求包含敏感关键词，已被系统拦截")
+var (
+	ErrImageInputDisabled   = gerror.New("图片功能当前已关闭，请移除图片内容后重试")
+	ErrSensitiveWordBlocked = gerror.New("请求包含敏感关键词，已被系统拦截")
+)
 
 type promptMessage struct {
 	Role    string          `json:"role"`
@@ -35,6 +38,7 @@ type promptContentItem struct {
 
 func DefaultSensitiveWordSettings() adminapi.SensitiveWordSettingsInput {
 	return adminapi.SensitiveWordSettingsInput{
+		ImageEnabled:     true,
 		Enabled:         false,
 		CheckUserPrompt: false,
 		Keywords:        []string{},
@@ -93,6 +97,9 @@ func (s *Service) CheckSensitivePrompt(ctx context.Context, endpoint string, bod
 	if err != nil {
 		return err
 	}
+	if !settings.ImageEnabled && hasImageInput(endpoint, body) {
+		return ErrImageInputDisabled
+	}
 	if !settings.Enabled || !settings.CheckUserPrompt || len(settings.Keywords) == 0 {
 		return nil
 	}
@@ -104,6 +111,10 @@ func (s *Service) CheckSensitivePrompt(ctx context.Context, endpoint string, bod
 
 func IsSensitiveWordBlocked(err error) bool {
 	return errors.Is(err, ErrSensitiveWordBlocked)
+}
+
+func IsImageInputDisabled(err error) bool {
+	return errors.Is(err, ErrImageInputDisabled)
 }
 
 func (s *Service) cacheSensitiveWordSettings(ctx context.Context, settings adminapi.SensitiveWordSettingsInput) error {
@@ -165,6 +176,58 @@ func sensitivePromptTexts(endpoint string, body []byte) []string {
 	default:
 		return nil
 	}
+}
+
+func hasImageInput(endpoint string, body []byte) bool {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	switch endpoint {
+	case "/chat/completions":
+		return messageListHasImage(payload["messages"])
+	case "/responses":
+		return responseInputHasImage(payload["input"])
+	default:
+		return false
+	}
+}
+
+func messageListHasImage(raw json.RawMessage) bool {
+	var messages []promptMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &messages) != nil {
+		return false
+	}
+	for _, message := range messages {
+		if contentHasImage(message.Content) {
+			return true
+		}
+	}
+	return false
+}
+
+func responseInputHasImage(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	if contentHasImage(raw) {
+		return true
+	}
+	return messageListHasImage(raw)
+}
+
+func contentHasImage(raw json.RawMessage) bool {
+	var items []promptContentItem
+	if len(raw) == 0 || json.Unmarshal(raw, &items) != nil {
+		return false
+	}
+	for _, item := range items {
+		kind := strings.TrimSpace(item.Type)
+		if strings.EqualFold(kind, "image_url") || strings.EqualFold(kind, "input_image") {
+			return true
+		}
+	}
+	return false
 }
 
 func userMessageTexts(raw json.RawMessage) []string {

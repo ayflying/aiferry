@@ -35,11 +35,11 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 					g.Log().Warningf(ctx, "apply channel %d usage cost: %v", candidate.ChannelID, err)
 				}
 			}
-				if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
-					chargeErr = err
-				} else {
-					billingDetails.Charged = true
-					_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
+			if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
+				chargeErr = err
+			} else {
+				billingDetails.Charged = true
+				_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
 				if s.mail != nil {
 					s.mail.NotifyLowBalance(ctx, key.UserId)
 				}

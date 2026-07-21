@@ -167,6 +167,7 @@ type BaseSettingsInput struct {
 }
 
 type SensitiveWordSettingsInput struct {
+	ImageEnabled     bool     `json:"imageEnabled"`
 	Enabled         bool     `json:"enabled"`
 	CheckUserPrompt bool     `json:"checkUserPrompt"`
 	Keywords        []string `json:"keywords"`

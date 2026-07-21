@@ -1,4 +1,5 @@
 export interface SensitiveWordSettings {
+  imageEnabled: boolean
   enabled: boolean
   checkUserPrompt: boolean
   keywords: string[]

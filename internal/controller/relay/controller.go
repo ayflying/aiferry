@@ -60,6 +60,10 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 				writeRetryableAvailabilityError(r)
 				return
 			}
+			if system.IsImageInputDisabled(err) {
+				writeError(r, http.StatusBadRequest, "invalid_request_error", err.Error())
+				return
+			}
 			if system.IsSensitiveWordBlocked(err) {
 				writeError(r, http.StatusBadRequest, "sensitive_word_blocked", err.Error())
 				return
