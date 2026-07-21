@@ -10,6 +10,8 @@ import { useAuthStore } from '../stores/auth'
 import { compareModelNames } from '../lib/models'
 import TableActionButton from '../components/TableActionButton.vue'
 import PriceSourceManager from '../components/PriceSourceManager.vue'
+import MobileRecordList from '../components/MobileRecordList.vue'
+import ResponsiveList from '../components/ResponsiveList.vue'
 
 const store = useAppStore()
 const auth = useAuthStore()
@@ -175,11 +177,20 @@ onMounted(load)
     </div>
 
     <div class="table-panel">
-      <el-table v-loading="loading" :data="filtered" row-key="publicName">
+      <ResponsiveList>
+        <template #desktop><el-table v-loading="loading" :data="filtered" row-key="publicName">
         <el-table-column prop="publicName" label="公开模型" min-width="250"><template #default="{ row }"><span class="mono model-name">{{ row.publicName }}</span></template></el-table-column>
         <el-table-column label="计费方式" min-width="260"><template #default="{ row }"><div class="price-line"><template v-if="row.billingMode === 'request'"><span>按次 {{ row.requestPrice ?? '—' }}</span></template><template v-else-if="row.billingMode === 'rules'"><span>高级计费规则</span></template><template v-else><span>入 {{ row.inputPrice ?? '—' }}</span><span>缓存读 {{ row.cachedInputPrice ?? '—' }}</span><span>补全 {{ row.outputPrice ?? '—' }}</span></template></div></template></el-table-column>
         <el-table-column v-if="isAdmin" label="操作" width="86" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="Coins" :label="`设置 ${row.publicName} 的公共价格`" @click="openEdit(row)" /></div></template></el-table-column>
-      </el-table>
+        </el-table></template>
+        <template #mobile><MobileRecordList :loading="loading">
+          <article v-for="row in filtered" :key="row.publicName" class="mobile-record">
+            <div class="mobile-record__header"><div class="mobile-record__title"><code>{{ row.publicName }}</code><small>{{ row.billingMode === 'request' ? '按请求计费' : row.billingMode === 'rules' ? '高级计费规则' : '按 Token 计费' }}</small></div></div>
+            <dl class="mobile-record__facts"><div class="mobile-record__wide"><dt>计费方式</dt><dd><div class="price-line"><template v-if="row.billingMode === 'request'"><span>按次 {{ row.requestPrice ?? '—' }}</span></template><template v-else-if="row.billingMode === 'rules'"><span>高级计费规则</span></template><template v-else><span>入 {{ row.inputPrice ?? '—' }}</span><span>缓存读 {{ row.cachedInputPrice ?? '—' }}</span><span>补全 {{ row.outputPrice ?? '—' }}</span></template></div></dd></div></dl>
+            <div v-if="isAdmin" class="mobile-record__footer"><span class="muted">公共模型价格</span><el-button size="small" :icon="Coins" @click="openEdit(row)">设置价格</el-button></div>
+          </article>
+        </MobileRecordList></template>
+      </ResponsiveList>
       <div v-if="!loading && !filtered.length" class="empty-state"><div><strong>没有匹配模型</strong><span>先在渠道页发现并选择模型</span></div></div>
     </div>
 

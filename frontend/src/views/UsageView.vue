@@ -4,6 +4,8 @@ import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
 import type { BillingItem, ManagedUser, UsageLog, UsagePage } from '../api/types'
 import UsageDetailDialog from '../components/UsageDetailDialog.vue'
+import MobileRecordList from '../components/MobileRecordList.vue'
+import ResponsiveList from '../components/ResponsiveList.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
@@ -117,7 +119,8 @@ onMounted(load)
     </div>
 
     <div class="table-panel">
-      <el-table v-loading="loading" :data="usageItems" row-key="id">
+      <ResponsiveList>
+        <template #desktop><el-table v-loading="loading" :data="usageItems" row-key="id">
         <el-table-column label="时间" min-width="230"><template #default="{ row }"><div class="time-cell"><strong>{{ formatTime(row.createdAt) }}</strong><small>{{ formatIPLocation(row.ipLocation) }}</small></div></template></el-table-column>
         <el-table-column label="模型" min-width="160"><template #default="{ row }"><div class="request-cell"><strong>{{ row.requestedModel }}</strong><small>推理强度：{{ formatReasoningEffort(row.reasoningEffort) }}</small></div></template></el-table-column>
         <el-table-column v-if="isAdmin" label="用户" min-width="130"><template #default="{ row }">{{ row.userName || `#${row.userId}` }}</template></el-table-column>
@@ -128,7 +131,15 @@ onMounted(load)
         <el-table-column label="估算成本" min-width="125"><template #default="{ row }"><span :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</span></template></el-table-column>
         <el-table-column label="耗时" min-width="116"><template #default="{ row }"><div class="latency-cell"><span class="latency-strip" :class="{ 'single-latency': !row.isStream }"><i :class="row.isStream ? firstTokenTone(row) : totalLatencyTone(row)" /><i v-if="row.isStream" :class="totalLatencyTone(row)" /></span><div class="latency-copy"><template v-if="row.isStream"><strong>首字 <span :class="firstTokenTone(row)">{{ formatElapsed(row.firstTokenMs) }}</span></strong><small>耗时 <span :class="totalLatencyTone(row)">{{ formatElapsed(row.durationMs) }}</span></small></template><template v-else><strong>响应 <span :class="totalLatencyTone(row)">{{ formatElapsed(row.durationMs) }}</span></strong><small>非流式响应</small></template></div></div></template></el-table-column>
         <el-table-column label="详情" min-width="190"><template #default="{ row }"><el-button text class="detail-trigger" @click="openUsageDetail(row)"><span v-if="isSuccessful(row)" class="price-cell"><strong>{{ modelPriceSummary(row) }}</strong></span><span v-else class="failure-cell"><strong>{{ failurePreview(row) }}</strong><small>查看失败日志</small></span></el-button></template></el-table-column>
-      </el-table>
+        </el-table></template>
+        <template #mobile><MobileRecordList :loading="loading">
+          <article v-for="row in usageItems" :key="row.id" class="mobile-record">
+            <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.requestedModel }}</strong><small>{{ formatTime(row.createdAt) }} · {{ formatIPLocation(row.ipLocation) }}</small></div><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag></div>
+            <dl class="mobile-record__facts"><div><dt>{{ isAdmin ? '渠道 / 密钥' : '访问密钥' }}</dt><dd>{{ isAdmin ? (row.channelName || '—') : (row.apiKeyName || '—') }}<template v-if="isAdmin && row.apiKeyName"><br><span class="muted">{{ row.apiKeyName }}</span></template></dd></div><div v-if="isAdmin"><dt>用户</dt><dd>{{ row.userName || `#${row.userId}` }}</dd></div><div><dt>Token</dt><dd class="mono">入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</dd></div><div><dt>估算成本</dt><dd :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</dd></div><div><dt>{{ row.isStream ? '流式速度' : '响应耗时' }}</dt><dd>{{ row.isStream ? formatTokenSpeed(row.outputTokens, row.durationMs, row.firstTokenMs) : formatElapsed(row.durationMs) }}</dd></div><div><dt>推理强度</dt><dd>{{ formatReasoningEffort(row.reasoningEffort) }}</dd></div></dl>
+            <div class="mobile-record__footer"><span class="muted">{{ row.isStream ? '流式响应' : '非流式响应' }}</span><el-button size="small" @click="openUsageDetail(row)">{{ isSuccessful(row) ? '查看计费详情' : '查看失败日志' }}</el-button></div>
+          </article>
+        </MobileRecordList></template>
+      </ResponsiveList>
       <div v-if="!loading && !usageItems.length" class="empty-state"><div><strong>暂无用量记录</strong><span>成功调用中转接口后会显示在这里</span></div></div>
       <div class="pagination-row"><el-pagination :current-page="filters.page" :page-size="filters.pageSize" :page-sizes="[20, 50, 100]" :total="page.total" layout="total, sizes, prev, pager, next" @current-change="changePage" @size-change="changePageSize" /></div>
     </div>

@@ -10,6 +10,8 @@ import { useAuthStore } from '../stores/auth'
 import { copyText } from '../lib/clipboard'
 import { formatTime } from '../lib/format'
 import TableActionButton from '../components/TableActionButton.vue'
+import MobileRecordList from '../components/MobileRecordList.vue'
+import ResponsiveList from '../components/ResponsiveList.vue'
 
 const store = useAppStore()
 const auth = useAuthStore()
@@ -139,7 +141,8 @@ onMounted(load)
       <div v-if="loadError && !store.apiKeys.length" class="empty-state error-state">
         <div><strong>访问密钥加载失败</strong><span>{{ loadError }}</span><el-button :icon="RefreshCw" @click="load">重新加载</el-button></div>
       </div>
-      <el-table v-else-if="loading || store.apiKeys.length" v-loading="loading" :data="store.apiKeys" row-key="id">
+      <ResponsiveList v-else-if="loading || store.apiKeys.length">
+        <template #desktop><el-table v-loading="loading" :data="store.apiKeys" row-key="id">
         <el-table-column label="名称" min-width="170"><template #default="{ row }"><div class="key-name"><span class="key-icon"><KeyRound :size="15" /></span><strong>{{ row.name }}</strong></div></template></el-table-column>
         <el-table-column label="密钥" min-width="280"><template #default="{ row }"><div class="key-cell" :class="{ revealed: Boolean(revealedSecrets[row.id]) }"><span class="mono key-value">{{ secretLabel(row) }}</span><span class="table-actions"><TableActionButton :icon="Copy" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : '复制完整密钥')" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="copyListKey(row)" /><TableActionButton :icon="revealedSecrets[row.id] ? Eye : EyeOff" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : (revealedSecrets[row.id] ? '隐藏完整密钥' : '显示完整密钥'))" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="toggleSecret(row)" /></span></div></template></el-table-column>
         <el-table-column label="额度" min-width="180"><template #default="{ row }"><div class="amount-cell"><strong v-if="row.spendLimit !== undefined">总 {{ row.availableAmount?.toFixed(6) }} / {{ row.spentAmount.toFixed(6) }}</strong><strong v-else>总 不限额</strong><small v-if="row.dailySpendLimit !== undefined">每日 {{ row.dailyAvailableAmount?.toFixed(6) }} / {{ row.dailySpentAmount.toFixed(6) }}</small><small v-else>每日不限额</small></div></template></el-table-column>
@@ -149,7 +152,16 @@ onMounted(load)
         <el-table-column label="最后使用" min-width="160"><template #default="{ row }">{{ formatTime(row.lastUsedAt) }}</template></el-table-column>
         <el-table-column label="创建时间" min-width="160"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
         <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="Pencil" label="编辑密钥" @click="openEdit(row)" /><TableActionButton :icon="Trash2" label="删除密钥" danger @click="remove(row)" /></div></template></el-table-column>
-      </el-table>
+        </el-table></template>
+        <template #mobile><MobileRecordList :loading="loading">
+          <article v-for="row in store.apiKeys" :key="row.id" class="mobile-record">
+            <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.name }}</strong><small>{{ row.status === 1 ? '可用于中转调用' : '此密钥已停用' }}</small></div><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></div>
+            <div class="mobile-record__code"><code>{{ secretLabel(row) }}</code><div class="table-actions"><TableActionButton :icon="Copy" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : '复制完整密钥')" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="copyListKey(row)" /><TableActionButton :icon="revealedSecrets[row.id] ? Eye : EyeOff" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : (revealedSecrets[row.id] ? '隐藏完整密钥' : '显示完整密钥'))" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="toggleSecret(row)" /></div></div>
+            <dl class="mobile-record__facts"><div><dt>总额度</dt><dd class="mono">{{ row.spendLimit !== undefined ? `${row.availableAmount?.toFixed(6)} / ${row.spentAmount.toFixed(6)}` : '不限额' }}</dd></div><div><dt>每日额度</dt><dd class="mono">{{ row.dailySpendLimit !== undefined ? `${row.dailyAvailableAmount?.toFixed(6)} / ${row.dailySpentAmount.toFixed(6)}` : '不限额' }}</dd></div><div><dt>过期时间</dt><dd>{{ row.expiresAt ? formatTime(row.expiresAt) : '永不过期' }}</dd></div><div><dt>最后使用</dt><dd>{{ formatTime(row.lastUsedAt) }}</dd></div><div class="mobile-record__wide"><dt>权限</dt><dd>模型 {{ row.allowedModels?.length || '全部' }} · 分组 {{ row.channelGroupIds?.length || '全部' }}</dd></div></dl>
+            <div class="mobile-record__footer"><small class="muted">创建于 {{ formatTime(row.createdAt) }}</small><div class="mobile-record__actions"><el-button size="small" :icon="Pencil" @click="openEdit(row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="remove(row)">删除</el-button></div></div>
+          </article>
+        </MobileRecordList></template>
+      </ResponsiveList>
       <div v-if="!loadError && !loading && !store.apiKeys.length" class="empty-state"><div><strong>还没有访问密钥</strong><span>创建密钥后才能调用 /v1 接口</span><el-button type="primary" :icon="Plus" @click="openCreate">创建密钥</el-button></div></div>
     </div>
 

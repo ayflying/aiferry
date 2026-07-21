@@ -6,6 +6,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost } from '../api/client'
 import type { CreatedRedemptionCode, RedemptionCode, RedemptionCodeStatus } from '../api/types'
 import TableActionButton from '../components/TableActionButton.vue'
+import MobileRecordList from '../components/MobileRecordList.vue'
+import ResponsiveList from '../components/ResponsiveList.vue'
 import { copyText } from '../lib/clipboard'
 import { showError } from '../lib/error'
 import { formatCost, formatTime } from '../lib/format'
@@ -107,7 +109,8 @@ onMounted(load)
     </div>
 
     <div class="table-panel">
-      <el-table v-if="loading || codes.length" v-loading="loading" :data="codes" row-key="id">
+      <ResponsiveList v-if="loading || codes.length">
+        <template #desktop><el-table v-loading="loading" :data="codes" row-key="id">
         <el-table-column label="名称" min-width="160"><template #default="{ row }"><strong class="code-name">{{ row.name }}</strong></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="{ row }"><span class="status-dot" :class="statusClass(row.status)">{{ statusLabel(row.status) }}</span></template></el-table-column>
         <el-table-column label="代码" min-width="270"><template #default="{ row }"><div class="code-cell"><code>{{ row.code }}</code><TableActionButton :icon="Copy" label="复制兑换码" :size="15" @click="copyCode(row.code)" /></div></template></el-table-column>
@@ -115,7 +118,15 @@ onMounted(load)
         <el-table-column label="创建时间" min-width="170"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
         <el-table-column label="过期时间" min-width="170"><template #default="{ row }">{{ row.expiresAt ? formatTime(row.expiresAt) : '永不过期' }}</template></el-table-column>
         <el-table-column label="兑换人" min-width="170"><template #default="{ row }"><div class="redeemer"><span>{{ row.redeemedByName || '—' }}</span><small v-if="row.redeemedAt">{{ formatTime(row.redeemedAt) }}</small></div></template></el-table-column>
-      </el-table>
+        </el-table></template>
+        <template #mobile><MobileRecordList :loading="loading">
+          <article v-for="row in codes" :key="row.id" class="mobile-record">
+            <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.name }}</strong><small>创建于 {{ formatTime(row.createdAt) }}</small></div><span class="status-dot" :class="statusClass(row.status)">{{ statusLabel(row.status) }}</span></div>
+            <div class="mobile-record__code"><code>{{ row.code }}</code><TableActionButton :icon="Copy" label="复制兑换码" :size="15" @click="copyCode(row.code)" /></div>
+            <dl class="mobile-record__facts"><div><dt>兑换额度</dt><dd class="mono">{{ formatCost(row.amount) }}</dd></div><div><dt>过期时间</dt><dd>{{ row.expiresAt ? formatTime(row.expiresAt) : '永不过期' }}</dd></div><div class="mobile-record__wide"><dt>兑换人</dt><dd>{{ row.redeemedByName || '尚未兑换' }}<template v-if="row.redeemedAt"> · {{ formatTime(row.redeemedAt) }}</template></dd></div></dl>
+          </article>
+        </MobileRecordList></template>
+      </ResponsiveList>
       <div v-else class="empty-state">
         <div><Ticket :size="28" /><strong>{{ filters.keyword || filters.status !== 'all' ? '没有匹配的兑换码' : '还没有兑换码' }}</strong><span>{{ filters.keyword || filters.status !== 'all' ? '调整搜索条件后重新查询' : '创建后可将额度发放给用户' }}</span><el-button v-if="!filters.keyword && filters.status === 'all'" type="primary" :icon="Plus" @click="openCreate">创建兑换码</el-button></div>
       </div>

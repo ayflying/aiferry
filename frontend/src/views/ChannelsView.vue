@@ -8,6 +8,8 @@ import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
 import ChannelModelTestDialog from '../components/ChannelModelTestDialog.vue'
 import ChannelRouteCoverageSettings from '../components/ChannelRouteCoverageSettings.vue'
+import MobileRecordList from '../components/MobileRecordList.vue'
+import ResponsiveList from '../components/ResponsiveList.vue'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { formatCost, formatLatency, formatTime } from '../lib/format'
@@ -284,7 +286,8 @@ onMounted(loadChannels)
           <el-button type="primary" :icon="Plus" @click="openCreate">添加渠道</el-button>
         </div>
         <div class="table-panel">
-          <el-table v-loading="tabLoading.channels" :data="store.channels" row-key="id">
+          <ResponsiveList>
+            <template #desktop><el-table v-loading="tabLoading.channels" :data="store.channels" row-key="id">
             <el-table-column label="渠道" min-width="180"><template #default="{ row }"><div class="channel-name"><strong>{{ row.name }}</strong><span>{{ row.baseUrl }}</span></div></template></el-table-column>
             <el-table-column label="类型" min-width="120"><template #default="{ row }"><div class="type-cell"><strong>{{ row.typeName }}</strong><code>{{ row.type }}</code></div></template></el-table-column>
             <el-table-column label="状态" min-width="154"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="row.autoDisabledReason || '渠道被自动禁用'" placement="top"><span class="status-dot warning">渠道自动禁用</span></el-tooltip><el-tooltip v-else-if="row.credentialsUnavailable" content="该渠道当前不可路由：所有上游密钥均不可用，请在上游密钥中查看禁用详情。" placement="top"><span class="status-dot warning">所有密钥不可用</span></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '手动停用' }}</span></template></el-table-column>
@@ -300,7 +303,15 @@ onMounted(loadChannels)
               <el-tooltip content="编辑"><button class="icon-button" type="button" :aria-label="`编辑渠道 ${row.name}`" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip>
               <el-tooltip content="删除"><button class="icon-button danger" type="button" :aria-label="`删除渠道 ${row.name}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip>
             </div></template></el-table-column>
-          </el-table>
+            </el-table></template>
+            <template #mobile><MobileRecordList :loading="tabLoading.channels">
+              <article v-for="row in store.channels" :key="row.id" class="mobile-record">
+                <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.name }}</strong><small>{{ row.baseUrl }}</small></div><el-tooltip v-if="row.autoDisabled" :content="row.autoDisabledReason || '渠道被自动禁用'" placement="top"><span class="status-dot warning">自动禁用</span></el-tooltip><el-tooltip v-else-if="row.credentialsUnavailable" content="所有上游密钥均不可用" placement="top"><span class="status-dot warning">密钥不可用</span></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></div>
+                <dl class="mobile-record__facts"><div><dt>渠道类型</dt><dd>{{ row.typeName }} · <span class="mono">{{ row.type }}</span></dd></div><div><dt>路由</dt><dd class="mono">P{{ row.priority }} / W{{ row.weight }}</dd></div><div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}</dd></div><div><dt>最近测试</dt><dd>{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : row.lastTestStatus ? '失败' : '未测试' }}</dd></div><div class="mobile-record__wide"><dt>上游费用 / 余额</dt><dd><button class="cost-link" type="button" @click="openCredentials(row)"><span v-if="row.costSummaries?.length"><template v-for="summary in row.costSummaries" :key="summary.currency">{{ summary.currency }} 已用 {{ summary.usedAmount === undefined ? '—' : formatCost(summary.usedAmount, summary.currency) }} · 余额 {{ summary.remainingAmount === undefined ? '—' : formatCost(summary.remainingAmount, summary.currency) }} </template></span><span v-else class="muted">查看明细</span></button></dd></div></dl>
+                <div class="mobile-record__footer"><span class="muted">渠道操作</span><div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="openCredentials(row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="discover(row)">发现</el-button><el-button size="small" :icon="FlaskConical" @click="openTest(row)">测试</el-button><el-button size="small" :icon="Coins" :loading="queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || Boolean(queryingCostID)" @click="queryCost(row)">费用</el-button><el-button size="small" :icon="Pencil" @click="openEdit(row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="remove(row)">删除</el-button></div></div>
+              </article>
+            </MobileRecordList></template>
+          </ResponsiveList>
           <div v-if="!tabLoading.channels && !store.channels.length" class="empty-state"><div><strong>还没有渠道</strong><span>先添加渠道类型，再接入第一个上游</span></div></div>
         </div>
       </el-tab-pane>
@@ -309,13 +320,22 @@ onMounted(loadChannels)
         <template #label><span class="tab-label"><Tags :size="15" />渠道分组</span></template>
         <div class="page-toolbar"><div class="muted">为密钥授权和路由策略维护渠道归属</div><div class="spacer" /><el-button :icon="RefreshCw" :loading="tabLoading.groups" @click="loadChannelGroups">刷新</el-button><el-button type="primary" :icon="Plus" @click="openCreateGroup">添加分组</el-button></div>
         <div class="table-panel">
-          <el-table v-loading="tabLoading.groups" :data="store.channelGroups" row-key="id">
+          <ResponsiveList>
+            <template #desktop><el-table v-loading="tabLoading.groups" :data="store.channelGroups" row-key="id">
             <el-table-column label="分组" min-width="180"><template #default="{ row }"><div class="type-cell"><strong>{{ row.name }}</strong><code>{{ row.code }}</code></div></template></el-table-column>
             <el-table-column prop="description" label="说明" min-width="220" />
             <el-table-column label="渠道" min-width="180"><template #default="{ row }"><el-tag v-for="channelId in row.channelIds" :key="channelId" size="small" class="group-channel-tag">{{ store.channels.find(item => item.id === channelId)?.name || `#${channelId}` }}</el-tag><span v-if="!row.channelIds.length" class="muted">未分配</span></template></el-table-column>
             <el-table-column label="状态" width="96"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
             <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip content="编辑"><button class="icon-button" type="button" @click="openEditGroup(row)"><Pencil :size="16" /></button></el-tooltip><el-tooltip content="删除"><button class="icon-button danger" type="button" @click="removeGroup(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
-          </el-table>
+            </el-table></template>
+            <template #mobile><MobileRecordList :loading="tabLoading.groups">
+              <article v-for="row in store.channelGroups" :key="row.id" class="mobile-record">
+                <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.name }}</strong><small class="mono">{{ row.code }}</small></div><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></div>
+                <dl class="mobile-record__facts"><div class="mobile-record__wide"><dt>说明</dt><dd>{{ row.description || '未填写说明' }}</dd></div><div class="mobile-record__wide"><dt>包含渠道</dt><dd><el-tag v-for="channelId in row.channelIds" :key="channelId" size="small" class="group-channel-tag">{{ store.channels.find(item => item.id === channelId)?.name || `#${channelId}` }}</el-tag><span v-if="!row.channelIds.length" class="muted">未分配</span></dd></div></dl>
+                <div class="mobile-record__footer"><span class="muted">渠道分组</span><div class="mobile-record__actions"><el-button size="small" :icon="Pencil" @click="openEditGroup(row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="removeGroup(row)">删除</el-button></div></div>
+              </article>
+            </MobileRecordList></template>
+          </ResponsiveList>
           <div v-if="!tabLoading.groups && !store.channelGroups.length" class="empty-state"><div><strong>还没有渠道分组</strong><span>创建分组后可对访问密钥限定可用渠道</span></div></div>
         </div>
       </el-tab-pane>
@@ -329,14 +349,23 @@ onMounted(loadChannels)
           <el-button type="primary" :icon="Plus" @click="openCreateType">添加渠道类型</el-button>
         </div>
         <div class="table-panel">
-          <el-table v-loading="tabLoading.types" :data="store.channelTypes" row-key="id">
+          <ResponsiveList>
+            <template #desktop><el-table v-loading="tabLoading.types" :data="store.channelTypes" row-key="id">
             <el-table-column label="类型" min-width="170"><template #default="{ row }"><div class="type-cell"><strong>{{ row.name }}</strong><code>{{ row.code }}</code></div></template></el-table-column>
             <el-table-column label="模型接口" min-width="220"><template #default="{ row }"><span class="mono">{{ row.config.models.method }} {{ row.config.models.path }}</span></template></el-table-column>
             <el-table-column label="余额查询" min-width="160"><template #default="{ row }"><span>{{ costLabel(row) }}</span><small v-if="row.config.costs.path"> · {{ row.config.costs.path }}</small></template></el-table-column>
             <el-table-column label="状态" width="142"><template #default="{ row }"><div class="type-status-control"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span><el-switch :model-value="row.status === 1" :disabled="row.builtIn === 1 || typeStatusSaving[row.id]" :aria-label="`${row.name} ${row.status === 1 ? '已启用' : '已停用'}`" @update:model-value="setTypeStatus(row, $event)" /></div></template></el-table-column>
             <el-table-column label="来源" width="88"><template #default="{ row }"><span class="muted">{{ row.builtIn === 1 ? '内置' : '自定义' }}</span></template></el-table-column>
             <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip :content="row.builtIn === 1 ? '查看内置配置' : '编辑类型'"><button class="icon-button" type="button" :aria-label="`${row.builtIn === 1 ? '查看' : '编辑'}渠道类型 ${row.name}`" @click="openEditType(row)"><Eye v-if="row.builtIn === 1" :size="16" /><Pencil v-else :size="16" /></button></el-tooltip><el-tooltip v-if="row.builtIn === 0" content="删除类型"><button class="icon-button danger" type="button" :aria-label="`删除渠道类型 ${row.name}`" @click="removeType(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
-          </el-table>
+            </el-table></template>
+            <template #mobile><MobileRecordList :loading="tabLoading.types">
+              <article v-for="row in store.channelTypes" :key="row.id" class="mobile-record">
+                <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.name }}</strong><small class="mono">{{ row.code }} · {{ row.builtIn === 1 ? '内置类型' : '自定义类型' }}</small></div><div class="type-status-control"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span><el-switch :model-value="row.status === 1" :disabled="row.builtIn === 1 || typeStatusSaving[row.id]" :aria-label="`${row.name} ${row.status === 1 ? '已启用' : '已停用'}`" @update:model-value="setTypeStatus(row, $event)" /></div></div>
+                <dl class="mobile-record__facts"><div class="mobile-record__wide"><dt>模型接口</dt><dd class="mono">{{ row.config.models.method }} {{ row.config.models.path }}</dd></div><div><dt>余额查询</dt><dd>{{ costLabel(row) }}<span v-if="row.config.costs.path"> · {{ row.config.costs.path }}</span></dd></div><div><dt>来源</dt><dd>{{ row.builtIn === 1 ? '内置' : '自定义' }}</dd></div></dl>
+                <div class="mobile-record__footer"><span class="muted">渠道类型</span><div class="mobile-record__actions"><el-button size="small" :icon="row.builtIn === 1 ? Eye : Pencil" @click="openEditType(row)">{{ row.builtIn === 1 ? '查看' : '编辑' }}</el-button><el-button v-if="row.builtIn === 0" size="small" :icon="Trash2" type="danger" plain @click="removeType(row)">删除</el-button></div></div>
+              </article>
+            </MobileRecordList></template>
+          </ResponsiveList>
           <div v-if="!tabLoading.types && !store.channelTypes.length" class="empty-state"><div><strong>还没有渠道类型</strong><span>添加 JSON 配置后即可在渠道表单中选用</span></div></div>
         </div>
       </el-tab-pane>

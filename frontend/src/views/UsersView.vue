@@ -8,6 +8,8 @@ import { showError } from '../lib/error'
 import { formatCost, formatNumber, formatTime } from '../lib/format'
 import { useAuthStore } from '../stores/auth'
 import TableActionButton from '../components/TableActionButton.vue'
+import MobileRecordList from '../components/MobileRecordList.vue'
+import ResponsiveList from '../components/ResponsiveList.vue'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -55,7 +57,8 @@ onMounted(load)
   <div class="page-stack">
     <div class="page-toolbar"><div class="muted">管理 Casdoor 登录用户的账户余额与本地关联数据</div><div class="spacer" /><el-button :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button></div>
     <div class="table-panel">
-      <el-table v-loading="loading" :data="users" row-key="id">
+      <ResponsiveList>
+        <template #desktop><el-table v-loading="loading" :data="users" row-key="id">
         <el-table-column label="用户" min-width="190"><template #default="{ row }"><div class="user-cell"><el-avatar :size="30" :src="row.avatarUrl || undefined"><UserRound :size="15" /></el-avatar><div><strong>{{ row.nickname }}</strong><small>{{ row.role === 'admin' ? '管理员' : '用户' }}</small></div></div></template></el-table-column>
         <el-table-column label="邮箱" min-width="190"><template #default="{ row }">{{ row.email || '未绑定' }}</template></el-table-column>
         <el-table-column label="余额" min-width="132"><template #default="{ row }"><span class="mono">{{ formatCost(row.balance) }}</span></template></el-table-column>
@@ -63,7 +66,15 @@ onMounted(load)
         <el-table-column label="近 30 天调用" min-width="130" align="right"><template #default="{ row }"><div class="usage-cell"><strong>{{ formatNumber(row.usage.requests) }}</strong><small>{{ formatCost(row.usage.estimatedCost) }}</small></div></template></el-table-column>
         <el-table-column label="最近登录" min-width="170"><template #default="{ row }">{{ formatTime(row.lastLoginAt) }}</template></el-table-column>
         <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="CircleDollarSign" label="修改余额" @click="openBalance(row)" /><TableActionButton v-if="row.id !== auth.user?.id" :icon="Trash2" label="删除用户" danger @click="remove(row)" /></div></template></el-table-column>
-      </el-table>
+        </el-table></template>
+        <template #mobile><MobileRecordList :loading="loading">
+          <article v-for="row in users" :key="row.id" class="mobile-record">
+            <div class="mobile-record__header"><div class="user-cell"><el-avatar :size="34" :src="row.avatarUrl || undefined"><UserRound :size="16" /></el-avatar><div class="mobile-record__title"><strong>{{ row.nickname }}</strong><small>{{ row.role === 'admin' ? '管理员' : '用户' }} · {{ row.email || '未绑定邮箱' }}</small></div></div><span class="mono">{{ formatCost(row.balance) }}</span></div>
+            <dl class="mobile-record__facts"><div><dt>访问密钥</dt><dd>{{ formatNumber(row.apiKeyCount) }}</dd></div><div><dt>近 30 天调用</dt><dd>{{ formatNumber(row.usage.requests) }} · {{ formatCost(row.usage.estimatedCost) }}</dd></div><div class="mobile-record__wide"><dt>最近登录</dt><dd>{{ formatTime(row.lastLoginAt) }}</dd></div></dl>
+            <div class="mobile-record__footer"><span class="muted">账户余额</span><div class="mobile-record__actions"><el-button size="small" :icon="CircleDollarSign" @click="openBalance(row)">修改余额</el-button><el-button v-if="row.id !== auth.user?.id" size="small" :icon="Trash2" type="danger" plain @click="remove(row)">删除</el-button></div></div>
+          </article>
+        </MobileRecordList></template>
+      </ResponsiveList>
       <div v-if="!loading && !users.length" class="empty-state"><div><UsersRound :size="28" /><strong>尚无 Casdoor 登录用户</strong><span>用户首次完成 Casdoor 登录后会显示在这里</span></div></div>
     </div>
 
