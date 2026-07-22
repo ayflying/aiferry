@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, type Component } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Activity,
@@ -29,7 +29,6 @@ const system = useSystemStore()
 const collapsed = ref(localStorage.getItem('aiferry-sidebar') === 'collapsed')
 const mobile = ref(false)
 const mobileOpen = ref(false)
-const expandedGroups = ref<Record<string, boolean>>(loadExpandedGroups())
 
 type NavigationItem = {
   path: string
@@ -77,6 +76,8 @@ const items = computed<NavigationItem[]>(() => auth.user?.isAdmin
       { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
     ])
 
+const expandedGroupPath = ref(items.value.find((item) => hasActiveChild(item))?.path)
+
 const pageTitle = computed(() => String(route.meta.title || system.systemName))
 
 function isActive(path: string) {
@@ -87,27 +88,18 @@ function hasActiveChild(item: NavigationItem) {
   return item.children?.some((child) => isActive(child.path)) === true
 }
 
-function loadExpandedGroups() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('aiferry-nav-groups') || '{}')
-    return typeof saved === 'object' && saved ? saved as Record<string, boolean> : {}
-  } catch {
-    return {}
-  }
+function isExpanded(item: NavigationItem) {
+  return expandedGroupPath.value === item.path
 }
 
-function isGroupExpanded(item: NavigationItem) {
-  return item.children != null && (expandedGroups.value[item.path] ?? hasActiveChild(item))
+function toggleNavigationGroup(item: NavigationItem) {
+  expandedGroupPath.value = isExpanded(item) ? undefined : item.path
 }
 
-function setGroupExpanded(item: NavigationItem, expanded: boolean) {
-  expandedGroups.value = { ...expandedGroups.value, [item.path]: expanded }
-  localStorage.setItem('aiferry-nav-groups', JSON.stringify(expandedGroups.value))
-}
-
-function toggleGroup(item: NavigationItem) {
-  setGroupExpanded(item, !isGroupExpanded(item))
-}
+watch(() => route.path, () => {
+  const activeGroup = items.value.find((item) => hasActiveChild(item))
+  expandedGroupPath.value = activeGroup?.path
+})
 
 function toggleSidebar() {
   collapsed.value = !collapsed.value
@@ -115,8 +107,8 @@ function toggleSidebar() {
 }
 
 function navigate(path: string) {
-  const parent = items.value.find((item) => item.path === path)
-  if (parent?.children) setGroupExpanded(parent, true)
+  const parent = items.value.find((item) => item.children?.some((child) => child.path === path))
+  expandedGroupPath.value = parent?.path
   router.push(path)
   mobileOpen.value = false
 }
@@ -165,23 +157,18 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
       <nav class="nav-list" aria-label="主导航">
         <template v-for="item in items" :key="item.path">
           <el-tooltip v-if="!item.children || collapsed" :disabled="!collapsed" :content="item.label" placement="right">
-            <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
+            <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="item.children && !collapsed ? toggleNavigationGroup(item) : navigate(item.path)">
               <component :is="item.icon" :size="19" />
               <span v-if="!collapsed">{{ item.label }}</span>
             </button>
           </el-tooltip>
           <div v-else class="nav-group">
-            <div class="nav-group__header">
-              <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
-                <component :is="item.icon" :size="19" />
-                <span>{{ item.label }}</span>
-              </button>
-              <button class="nav-group__toggle" :class="{ active: isGroupExpanded(item) }" type="button" :aria-label="`${isGroupExpanded(item) ? '收起' : '展开'}${item.label}`" :aria-expanded="isGroupExpanded(item)" @click="toggleGroup(item)">
-                <ChevronDown v-if="isGroupExpanded(item)" :size="17" />
-                <ChevronRight v-else :size="17" />
-              </button>
-            </div>
-            <div v-show="isGroupExpanded(item)" class="nav-sublist">
+            <button class="nav-item nav-group-toggle" :class="{ 'active-branch': hasActiveChild(item), expanded: isExpanded(item) }" type="button" :aria-expanded="isExpanded(item)" @click="toggleNavigationGroup(item)">
+              <component :is="item.icon" :size="19" />
+              <span>{{ item.label }}</span>
+              <ChevronDown class="nav-group-arrow" :class="{ expanded: isExpanded(item) }" :size="16" />
+            </button>
+            <div v-show="isExpanded(item)" class="nav-sublist">
               <button v-for="child in item.children" :key="child.path" class="nav-subitem" :class="{ active: isActive(child.path) }" type="button" @click="navigate(child.path)">{{ child.label }}</button>
             </div>
           </div>
@@ -206,17 +193,12 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
             <span>{{ item.label }}</span>
           </button>
           <div v-else class="nav-group">
-            <div class="nav-group__header">
-              <button class="nav-item" :class="{ active: isActive(item.path), 'active-branch': hasActiveChild(item) && !isActive(item.path) }" type="button" @click="navigate(item.path)">
-                <component :is="item.icon" :size="19" />
-                <span>{{ item.label }}</span>
-              </button>
-              <button class="nav-group__toggle" :class="{ active: isGroupExpanded(item) }" type="button" :aria-label="`${isGroupExpanded(item) ? '收起' : '展开'}${item.label}`" :aria-expanded="isGroupExpanded(item)" @click="toggleGroup(item)">
-                <ChevronDown v-if="isGroupExpanded(item)" :size="17" />
-                <ChevronRight v-else :size="17" />
-              </button>
-            </div>
-            <div v-show="isGroupExpanded(item)" class="nav-sublist">
+            <button class="nav-item nav-group-toggle" :class="{ 'active-branch': hasActiveChild(item), expanded: isExpanded(item) }" type="button" :aria-expanded="isExpanded(item)" @click="toggleNavigationGroup(item)">
+              <component :is="item.icon" :size="19" />
+              <span>{{ item.label }}</span>
+              <ChevronDown class="nav-group-arrow" :class="{ expanded: isExpanded(item) }" :size="16" />
+            </button>
+            <div v-show="isExpanded(item)" class="nav-sublist">
               <button v-for="child in item.children" :key="child.path" class="nav-subitem" :class="{ active: isActive(child.path) }" type="button" @click="navigate(child.path)">{{ child.label }}</button>
             </div>
           </div>
