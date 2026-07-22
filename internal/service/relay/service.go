@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -158,27 +159,43 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 		settings = system.DefaultResilienceSettings()
 	}
 	var (
-		last          attemptResult
-		lastCandidate Candidate
-		attempts      int
+		last                attemptResult
+		lastCandidate       Candidate
+		attempts            int
+		excludedCredentials = make(map[uint64]struct{})
 	)
 	for index := range candidates {
-		outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings)
-		attempts += outcome.attempts
-		last = outcome.result
-		lastCandidate = outcome.candidate
-		if outcome.handled {
+		for {
+			outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings, excludedCredentials)
+			attempts += outcome.attempts
+			last = outcome.result
+			lastCandidate = outcome.candidate
+			if !outcome.handled {
+				break
+			}
 			candidate := outcome.candidate
 			result := outcome.result
-			if result.status >= 200 && result.status < 300 {
-				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
+			if !result.wroteBytes && s.missingBillableUsage(candidate, endpoint, result) {
+				last = failedAttemptResult(result, ErrUpstreamUsageNotBillable.Error())
+				lastCandidate = candidate
+				s.maybeAutoDisable(ctx, settings, candidate, last)
+				excludedCredentials[candidate.ChannelCredentialID] = struct{}{}
+				continue
 			}
 			if recordErr := s.record(ctx, requestID, key, candidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, result); recordErr != nil {
+				if !result.wroteBytes && errors.Is(recordErr, ErrUpstreamUsageNotBillable) {
+					last = failedAttemptResult(result, recordErr.Error())
+					lastCandidate = candidate
+					s.maybeAutoDisable(ctx, settings, candidate, last)
+					excludedCredentials[candidate.ChannelCredentialID] = struct{}{}
+					continue
+				}
 				if !isStream {
 					s.writeBufferedResponse(writer, http.StatusPaymentRequired, openAIError("insufficient_balance", recordErr.Error()), http.Header{"Content-Type": []string{"application/json"}})
 				}
 				return nil
 			}
+			s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
 			if !isStream {
 				s.writeBufferedResponse(writer, result.status, result.body, result.headers)
 			}

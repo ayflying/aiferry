@@ -90,13 +90,7 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 		if readErr != nil {
 			return result, false, gerror.Wrap(readErr, "read upstream response")
 		}
-		if retryableStatusForRules(resp.StatusCode, settings.RetryStatusCodes) {
-			return result, false, nil
-		}
-		if writer != nil {
-			s.writeBufferedResponse(writer, resp.StatusCode, result.body, result.headers)
-		}
-		return result, true, nil
+		return result, false, nil
 	}
 	defer resp.Body.Close()
 	flusher, _ := writer.(http.Flusher)
@@ -232,10 +226,6 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 		if err = flushPending(); err != nil {
 			result.errorMessage = err.Error()
 			return result, true, nil
-		}
-		if !result.wroteBytes {
-			copyResponseHeaders(writer.Header(), resp.Header)
-			writer.WriteHeader(resp.StatusCode)
 		}
 	}
 	return result, true, nil

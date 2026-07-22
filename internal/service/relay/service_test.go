@@ -60,6 +60,39 @@ func TestRetryableStatus(t *testing.T) {
 	}
 }
 
+func TestUncommittedFailuresStayInsideCandidateRetry(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     attemptResult
+		attemptErr error
+		complete   bool
+	}{
+		{name: "upstream 400", result: attemptResult{status: http.StatusBadRequest}},
+		{name: "upstream 401", result: attemptResult{status: http.StatusUnauthorized}},
+		{name: "transport error", attemptErr: gerror.New("call upstream")},
+		{name: "success", result: attemptResult{status: http.StatusOK}, complete: true},
+		{name: "stream already written", result: attemptResult{status: http.StatusBadGateway, wroteBytes: true}, complete: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			completed := attemptCompleted(test.result, test.attemptErr)
+			if completed != test.complete {
+				t.Fatalf("completed = %t, expected %t", completed, test.complete)
+			}
+		})
+	}
+}
+
+func TestMissingBillableUsageErrorIsDistinct(t *testing.T) {
+	err := gerror.Wrap(ErrUpstreamUsageNotBillable, "record relay usage")
+	if !errors.Is(err, ErrUpstreamUsageNotBillable) {
+		t.Fatal("missing billable usage must be identifiable for internal failover")
+	}
+	if errors.Is(gerror.New("账户余额不足"), ErrUpstreamUsageNotBillable) {
+		t.Fatal("balance errors must not be retried as upstream failures")
+	}
+}
+
 func TestRetryableAvailabilityErrorsUseServerRetryResponse(t *testing.T) {
 	for _, sentinel := range []error{ErrNoAvailableChannel, ErrEligibleChannelsExhausted} {
 		err := gerror.Wrap(sentinel, "route unavailable")

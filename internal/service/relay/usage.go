@@ -12,6 +12,8 @@ import (
 	"github.com/yunloli/aiferry/internal/service/usage"
 )
 
+var ErrUpstreamUsageNotBillable = gerror.New("上游响应未返回可计费的用量信息")
+
 func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, clientIP, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) error {
 	upstreamEndpoint := result.upstreamEndpoint
 	if upstreamEndpoint == "" {
@@ -28,7 +30,7 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 	var chargeErr error
 	if result.status >= 200 && result.status < 300 {
 		if cost == nil {
-			chargeErr = gerror.New("上游响应未返回可计费的用量信息")
+			chargeErr = ErrUpstreamUsageNotBillable
 		} else {
 			if s.channels != nil {
 				if err := s.channels.ApplyCredentialUsageCost(ctx, candidate.ChannelID, candidate.ChannelCredentialID, *cost); err != nil {
@@ -78,6 +80,17 @@ func (s *Service) record(ctx context.Context, requestID string, key apikey.AuthK
 		g.Log().Errorf(ctx, "record usage %s: %v", requestID, err)
 	}
 	return chargeErr
+}
+
+func (s *Service) missingBillableUsage(candidate Candidate, endpoint string, result attemptResult) bool {
+	if result.status < 200 || result.status >= 300 {
+		return false
+	}
+	upstreamEndpoint := result.upstreamEndpoint
+	if upstreamEndpoint == "" {
+		upstreamEndpoint = endpoint
+	}
+	return s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens) == nil
 }
 
 func (s *Service) location(clientIP string) string {
