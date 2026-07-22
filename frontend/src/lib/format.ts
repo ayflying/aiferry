@@ -74,11 +74,10 @@ export function formatLatency(value?: number | null): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(2)} 秒`
 }
 
-export function formatTokenSpeed(outputTokens?: number | null, durationMs?: number | null, firstTokenMs?: number | null): string {
-  if (outputTokens === undefined || outputTokens === null || durationMs === undefined || durationMs === null) return '—'
-  const generationMs = firstTokenMs === undefined || firstTokenMs === null ? durationMs : durationMs - firstTokenMs
-  if (generationMs <= 0) return '—'
-  return `${Math.round((outputTokens * 1000) / generationMs)}t/s`
+export function formatTokenSpeed(outputTokens?: number | null, durationMs?: number | null): string {
+	if (outputTokens === undefined || outputTokens === null || durationMs === undefined || durationMs === null) return '—'
+	if (durationMs <= 0) return '—'
+	return `${Math.round((outputTokens * 1000) / durationMs)}t/s`
 }
 
 export function successRate(requests: number, successes: number): string {

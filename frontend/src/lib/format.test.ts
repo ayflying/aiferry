@@ -24,11 +24,11 @@ describe('format helpers', () => {
     expect(formatLatency(2544)).toBe('2.54 秒')
   })
 
-  it('calculates Token speed after the first token arrives or from the total duration', () => {
-    expect(formatTokenSpeed(102, 2500, 500)).toBe('51t/s')
-    expect(formatTokenSpeed(102, 2500)).toBe('41t/s')
-    expect(formatTokenSpeed(102, 500, 500)).toBe('—')
-  })
+	it('calculates Token speed from the complete request duration', () => {
+		expect(formatTokenSpeed(102, 2500)).toBe('41t/s')
+		expect(formatTokenSpeed(511, 52900)).toBe('10t/s')
+		expect(formatTokenSpeed(102, 0)).toBe('—')
+	})
 
   it('formats reasoning effort for compact usage rows', () => {
     expect(formatReasoningEffort()).toBe('默认')
