@@ -100,8 +100,19 @@ func (s *Service) ClearAutoDisableFailures(ctx context.Context, credentialID uin
 	_ = s.app.Redis.Del(ctx, CredentialFailureKey(credentialID), CredentialCooldownKey(credentialID)).Err()
 }
 
+func (s *Service) ClearChannelAutoDisableFailures(ctx context.Context, channelID uint64) {
+	if channelID == 0 {
+		return
+	}
+	_ = s.app.Redis.Del(ctx, failureKey(channelID), cooldownKey(channelID)).Err()
+}
+
 func (s *Service) ResetCredentialRecoverySchedule(ctx context.Context, credentialID uint64) {
 	s.clearRecoverySchedule(ctx, RecoveryTargetCredential, credentialID)
+}
+
+func (s *Service) ResetChannelRecoverySchedule(ctx context.Context, channelID uint64) {
+	s.clearRecoverySchedule(ctx, RecoveryTargetChannel, channelID)
 }
 
 func (s *Service) BeginRecoveryAttempt(ctx context.Context, target RecoveryTarget, id uint64, autoDisabledAt time.Time) (bool, error) {

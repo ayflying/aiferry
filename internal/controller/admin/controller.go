@@ -60,6 +60,7 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.GET("/channels", c.listChannels)
 	group.POST("/channels", c.createChannel)
 	group.PUT("/channels/{id}", c.updateChannel)
+	group.PUT("/channels/{id}/status", c.updateChannelStatus)
 	group.DELETE("/channels/{id}", c.deleteChannel)
 	c.registerChannelCredentialRoutes(group)
 	group.GET("/channel-types", c.listChannelTypes)
@@ -111,6 +112,14 @@ func (c *Controller) updateChannel(r *ghttp.Request) {
 	}
 	err := c.channels.Update(r.Context(), routeID(r), input)
 	respond(r, map[string]any{}, err)
+}
+
+func (c *Controller) updateChannelStatus(r *ghttp.Request) {
+	var input adminapi.ChannelStatusInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, map[string]any{}, c.channels.SetStatus(r.Context(), routeID(r), input.Status))
 }
 
 func (c *Controller) deleteChannel(r *ghttp.Request) {

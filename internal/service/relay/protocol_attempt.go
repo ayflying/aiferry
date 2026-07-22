@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/tidwall/sjson"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/service/channel"
@@ -21,7 +22,8 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	}
 	primary := directProtocolPlan(endpoint)
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, primary)
-	if handled || attemptErr != nil || !shouldFallbackWithProtocolConversion(result.status, result.body) {
+	needsFallback := shouldFallbackWithProtocolConversion(result.status, result.body) || (!result.wroteBytes && s.missingBillableUsage(candidate, endpoint, result))
+	if attemptErr != nil || !needsFallback {
 		return result, handled, attemptErr
 	}
 	fallback, ok := fallbackProtocolPlan(endpoint)
@@ -39,6 +41,9 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 	body, err := prepareRequestBody(plan.upstreamEndpoint, convertedBody, candidate.UpstreamName, advancedConfig)
 	if err != nil {
 		return attemptResult{}, false, err
+	}
+	if stream && plan.upstreamEndpoint == chatCompletionsEndpoint {
+		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
 	apiKey, err := s.app.Secrets.Decrypt(candidate.APIKeyCipher)
 	if err != nil {
@@ -93,7 +98,6 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 		return result, false, nil
 	}
 	defer resp.Body.Close()
-	flusher, _ := writer.(http.Flusher)
 	result := attemptResult{status: resp.StatusCode, headers: responseHeaders(resp.Header, plan), upstreamEndpoint: plan.upstreamEndpoint, protocolConversion: plan.conversion}
 	if plan.converts() {
 		result.headers.Set("Content-Type", "text/event-stream")
@@ -104,31 +108,12 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 	}
 	pending := make([][]byte, 0)
 	pendingSize := 0
-	committed := false
-	writeOutput := func(output []byte) error {
-		if !result.wroteBytes {
-			first := time.Since(startedAt).Milliseconds()
-			result.firstTokenMs = &first
-			copyResponseHeaders(writer.Header(), result.headers)
-			writer.WriteHeader(resp.StatusCode)
+	appendOutput := func(output []byte) error {
+		pendingSize += len(output)
+		if pendingSize > maxPendingStreamBytes {
+			return gerror.New("upstream stream exceeds the internal failover buffer")
 		}
-		if _, err = writer.Write(output); err != nil {
-			return err
-		}
-		result.wroteBytes = true
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return nil
-	}
-	flushPending := func() error {
-		for _, output := range pending {
-			if err = writeOutput(output); err != nil {
-				return err
-			}
-		}
-		pending = nil
-		pendingSize = 0
+		pending = append(pending, output)
 		return nil
 	}
 	firstByteTimeout := time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second - time.Since(requestStartedAt)
@@ -144,21 +129,7 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 			result.status = failure.status
 			result.body = failure.body
 			result.errorMessage = failure.message
-			if !result.wroteBytes {
-				return result, false, nil
-			}
-			errorLines := [][]byte{line}
-			if converter != nil {
-				errorLines = converter.Transform(line)
-			}
-			for _, output := range errorLines {
-				output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-				if err = writeOutput(output); err != nil {
-					result.errorMessage = err.Error()
-					return result, true, nil
-				}
-			}
-			return result, true, nil
+			return result, false, nil
 		}
 		parseSSEUsage(line, &result.tokens)
 		lines := [][]byte{line}
@@ -170,29 +141,9 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 				continue
 			}
 			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-			if !committed && !streamPayloadHasVisibleOutput(line) {
-				pending = append(pending, output)
-				pendingSize += len(output)
-				if pendingSize <= maxPendingStreamBytes {
-					continue
-				}
-				committed = true
-				if err = flushPending(); err != nil {
-					result.errorMessage = err.Error()
-					return result, true, nil
-				}
-				continue
-			}
-			if !committed {
-				committed = true
-			}
-			if err = flushPending(); err != nil {
+			if err = appendOutput(output); err != nil {
 				result.errorMessage = err.Error()
-				return result, true, nil
-			}
-			if err = writeOutput(output); err != nil {
-				result.errorMessage = err.Error()
-				return result, true, nil
+				return result, false, err
 			}
 		}
 	}
@@ -202,32 +153,20 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 				continue
 			}
 			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-			if !committed {
-				committed = true
-				if err = flushPending(); err != nil {
-					result.errorMessage = err.Error()
-					return result, true, nil
-				}
-			}
-			if err = writeOutput(output); err != nil {
+			if err = appendOutput(output); err != nil {
 				result.errorMessage = err.Error()
-				return result, true, nil
+				return result, false, err
 			}
 		}
 	}
 	if err = scanner.Err(); err != nil {
 		result.errorMessage = err.Error()
 		result.timedOut = isUpstreamTimeout(err)
-		if !result.wroteBytes {
-			return result, false, gerror.Wrap(err, "read upstream stream")
-		}
+		return result, false, gerror.Wrap(err, "read upstream stream")
 	}
-	if !result.wroteBytes {
-		if err = flushPending(); err != nil {
-			result.errorMessage = err.Error()
-			return result, true, nil
-		}
-	}
+	result.streamOutput = pending
+	first := time.Since(startedAt).Milliseconds()
+	result.firstTokenMs = &first
 	return result, true, nil
 }
 

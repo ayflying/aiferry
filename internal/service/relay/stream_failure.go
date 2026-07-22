@@ -8,7 +8,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const maxPendingStreamBytes = 1 << 20
+const maxPendingStreamBytes = 64 << 20
 
 type streamFailure struct {
 	status  int
@@ -72,26 +72,4 @@ func statusCode(value gjson.Result) int {
 		return number
 	}
 	return 0
-}
-
-func streamPayloadHasVisibleOutput(line []byte) bool {
-	payload, done, valid := sseDataPayload(line)
-	if !valid || done {
-		return false
-	}
-	eventType := gjson.GetBytes(payload, "type").String()
-	switch eventType {
-	case "response.output_text.delta", "response.refusal.delta", "response.function_call_arguments.delta":
-		return strings.TrimSpace(gjson.GetBytes(payload, "delta").String()) != ""
-	case "response.output_item.added":
-		return gjson.GetBytes(payload, "item.type").String() == "function_call"
-	}
-	choice := gjson.GetBytes(payload, "choices.0")
-	if !choice.Exists() {
-		return false
-	}
-	delta := choice.Get("delta")
-	return strings.TrimSpace(delta.Get("content").String()) != "" ||
-		strings.TrimSpace(delta.Get("reasoning_content").String()) != "" ||
-		delta.Get("tool_calls.#").Int() > 0
 }
