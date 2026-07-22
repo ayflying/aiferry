@@ -168,8 +168,10 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 		for {
 			outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings, excludedCredentials)
 			attempts += outcome.attempts
-			last = outcome.result
-			lastCandidate = outcome.candidate
+			if outcome.attempts > 0 {
+				last = outcome.result
+				lastCandidate = outcome.candidate
+			}
 			if !outcome.handled {
 				break
 			}
