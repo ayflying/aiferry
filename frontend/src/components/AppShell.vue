@@ -38,7 +38,7 @@ type NavigationItem = {
 }
 
 const adminItems: NavigationItem[] = [
-  { path: '/', label: '仪表盘', icon: Gauge },
+  { path: '/dashboard', label: '仪表盘', icon: Gauge },
   { path: '/api-keys', label: '访问密钥', icon: KeyRound },
   { path: '/usage', label: '用量日志', icon: Activity },
   {

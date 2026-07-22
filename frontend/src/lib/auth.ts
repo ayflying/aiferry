@@ -6,7 +6,7 @@ const authErrors: Record<string, string> = {
 }
 
 export function localReturnTo(value: unknown): string {
-  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || /[\r\n]/.test(value)) return '/'
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || /[\r\n]/.test(value)) return '/dashboard'
   return value
 }
 
