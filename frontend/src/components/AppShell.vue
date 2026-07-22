@@ -162,7 +162,7 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
               <span v-if="!collapsed">{{ item.label }}</span>
             </button>
           </el-tooltip>
-          <div v-else class="nav-group">
+          <div v-else class="nav-group" :class="{ expanded: isExpanded(item), 'has-active-child': hasActiveChild(item) }">
             <button class="nav-item nav-group-toggle" :class="{ 'active-branch': hasActiveChild(item), expanded: isExpanded(item) }" type="button" :aria-expanded="isExpanded(item)" @click="toggleNavigationGroup(item)">
               <component :is="item.icon" :size="19" />
               <span>{{ item.label }}</span>
@@ -192,7 +192,7 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
             <component :is="item.icon" :size="19" />
             <span>{{ item.label }}</span>
           </button>
-          <div v-else class="nav-group">
+          <div v-else class="nav-group" :class="{ expanded: isExpanded(item), 'has-active-child': hasActiveChild(item) }">
             <button class="nav-item nav-group-toggle" :class="{ 'active-branch': hasActiveChild(item), expanded: isExpanded(item) }" type="button" :aria-expanded="isExpanded(item)" @click="toggleNavigationGroup(item)">
               <component :is="item.icon" :size="19" />
               <span>{{ item.label }}</span>
