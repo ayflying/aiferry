@@ -76,7 +76,6 @@ type attemptResult struct {
 	errorMessage       string
 	latency            time.Duration
 	headers            http.Header
-	streamOutput       [][]byte
 	wroteBytes         bool
 	timedOut           bool
 	upstreamEndpoint   string
@@ -198,12 +197,10 @@ func (s *Service) Handle(ctx context.Context, writer http.ResponseWriter, incomi
 				}
 				return nil
 			}
-			s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
-			if isStream {
-				if err := s.writeBufferedStreamResponse(writer, result); err != nil {
-					return err
-				}
-			} else {
+			if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut {
+				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
+			}
+			if !isStream {
 				s.writeBufferedResponse(writer, result.status, result.body, result.headers)
 			}
 			return nil

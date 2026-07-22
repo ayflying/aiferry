@@ -22,8 +22,8 @@ func (s *Service) attempt(ctx context.Context, writer http.ResponseWriter, incom
 	}
 	primary := directProtocolPlan(endpoint)
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, primary)
-	needsFallback := shouldFallbackWithProtocolConversion(result.status, result.body) || (!result.wroteBytes && s.missingBillableUsage(candidate, endpoint, result))
-	if attemptErr != nil || !needsFallback {
+	needsFallback := shouldFallbackWithProtocolConversion(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
+	if handled || attemptErr != nil || !needsFallback {
 		return result, handled, attemptErr
 	}
 	fallback, ok := fallbackProtocolPlan(endpoint)
@@ -98,6 +98,7 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 		return result, false, nil
 	}
 	defer resp.Body.Close()
+	flusher, _ := writer.(http.Flusher)
 	result := attemptResult{status: resp.StatusCode, headers: responseHeaders(resp.Header, plan), upstreamEndpoint: plan.upstreamEndpoint, protocolConversion: plan.conversion}
 	if plan.converts() {
 		result.headers.Set("Content-Type", "text/event-stream")
@@ -108,12 +109,31 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 	}
 	pending := make([][]byte, 0)
 	pendingSize := 0
-	appendOutput := func(output []byte) error {
-		pendingSize += len(output)
-		if pendingSize > maxPendingStreamBytes {
-			return gerror.New("upstream stream exceeds the internal failover buffer")
+	committed := false
+	writeOutput := func(output []byte) error {
+		if !result.wroteBytes {
+			first := time.Since(startedAt).Milliseconds()
+			result.firstTokenMs = &first
+			copyResponseHeaders(writer.Header(), result.headers)
+			writer.WriteHeader(resp.StatusCode)
 		}
-		pending = append(pending, output)
+		if _, err = writer.Write(output); err != nil {
+			return err
+		}
+		result.wroteBytes = true
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil
+	}
+	flushPending := func() error {
+		for _, output := range pending {
+			if err = writeOutput(output); err != nil {
+				return err
+			}
+		}
+		pending = nil
+		pendingSize = 0
 		return nil
 	}
 	firstByteTimeout := time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second - time.Since(requestStartedAt)
@@ -129,6 +149,11 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 			result.status = failure.status
 			result.body = failure.body
 			result.errorMessage = failure.message
+			// The client already received output; terminate this stream so it can retry.
+			// Sending an SSE error event here would stop Codex from retrying the request.
+			if result.wroteBytes {
+				return result, true, nil
+			}
 			return result, false, nil
 		}
 		parseSSEUsage(line, &result.tokens)
@@ -141,9 +166,29 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 				continue
 			}
 			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-			if err = appendOutput(output); err != nil {
+			if !committed && !streamPayloadHasVisibleOutput(line) {
+				pending = append(pending, output)
+				pendingSize += len(output)
+				if pendingSize <= maxPendingStreamBytes {
+					continue
+				}
+				committed = true
+				if err = flushPending(); err != nil {
+					result.errorMessage = err.Error()
+					return result, true, nil
+				}
+				continue
+			}
+			if !committed {
+				committed = true
+			}
+			if err = flushPending(); err != nil {
 				result.errorMessage = err.Error()
-				return result, false, err
+				return result, true, nil
+			}
+			if err = writeOutput(output); err != nil {
+				result.errorMessage = err.Error()
+				return result, true, nil
 			}
 		}
 	}
@@ -153,20 +198,32 @@ func (s *Service) attemptWithProtocol(ctx context.Context, writer http.ResponseW
 				continue
 			}
 			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-			if err = appendOutput(output); err != nil {
+			if !committed {
+				committed = true
+				if err = flushPending(); err != nil {
+					result.errorMessage = err.Error()
+					return result, true, nil
+				}
+			}
+			if err = writeOutput(output); err != nil {
 				result.errorMessage = err.Error()
-				return result, false, err
+				return result, true, nil
 			}
 		}
 	}
 	if err = scanner.Err(); err != nil {
 		result.errorMessage = err.Error()
 		result.timedOut = isUpstreamTimeout(err)
-		return result, false, gerror.Wrap(err, "read upstream stream")
+		if !result.wroteBytes {
+			return result, false, gerror.Wrap(err, "read upstream stream")
+		}
 	}
-	result.streamOutput = pending
-	first := time.Since(startedAt).Milliseconds()
-	result.firstTokenMs = &first
+	if !result.wroteBytes {
+		if err = flushPending(); err != nil {
+			result.errorMessage = err.Error()
+			return result, true, nil
+		}
+	}
 	return result, true, nil
 }
 

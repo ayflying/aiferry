@@ -20,3 +20,12 @@ func TestParseStreamFailurePreservesPaymentRequiredDetails(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamPayloadHasVisibleOutputSkipsPrelude(t *testing.T) {
+	if streamPayloadHasVisibleOutput([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n")) {
+		t.Fatal("response.created should remain retryable")
+	}
+	if !streamPayloadHasVisibleOutput([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n")) {
+		t.Fatal("output delta should commit the stream")
+	}
+}
