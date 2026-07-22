@@ -16,7 +16,7 @@ const healthCheckTick = 10 * time.Second
 
 func (s *Service) StartHealthChecks(ctx context.Context) {
 	go func() {
-		lastRegularCheck := time.Now()
+		lastHealthCheck := time.Now()
 		ticker := time.NewTicker(healthCheckTick)
 		defer ticker.Stop()
 		for {
@@ -28,16 +28,20 @@ func (s *Service) StartHealthChecks(ctx context.Context) {
 				if err != nil || !settings.HealthCheckEnabled || !settings.RecoveryEnabled {
 					continue
 				}
-				s.runRecoveryChecks(ctx, settings.HealthCheckMode)
 				interval := time.Duration(settings.HealthCheckIntervalMinutes) * time.Minute
-				if now.Sub(lastRegularCheck) < interval {
+				if !healthCheckDue(now, lastHealthCheck, interval) {
 					continue
 				}
-				lastRegularCheck = now
+				lastHealthCheck = now
+				s.runRecoveryChecks(ctx, settings.HealthCheckMode)
 				s.runRegularHealthChecks(ctx, settings.HealthCheckMode)
 			}
 		}
 	}()
+}
+
+func healthCheckDue(now, last time.Time, interval time.Duration) bool {
+	return interval > 0 && !now.Before(last.Add(interval))
 }
 
 func (s *Service) runRegularHealthChecks(ctx context.Context, mode string) {
