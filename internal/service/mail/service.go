@@ -21,7 +21,6 @@ import (
 
 const (
 	lowBalanceReminderTTL = 24 * time.Hour
-	channelBalancePrefix  = "aiferry:mail:channel-low-balance:"
 )
 
 type Service struct {
@@ -94,73 +93,6 @@ func (s *Service) notifyLowBalance(ctx context.Context, userID uint64) {
 	}
 }
 
-func (s *Service) notifyChannelLowBalance(ctx context.Context, channelID uint64, channelName string, remaining float64, currency string) {
-	settings, err := s.settings.MailDeliverySettings(ctx)
-	if err != nil || !settings.ChannelAlertEnabled {
-		return
-	}
-	thresholds, err := system.ParseChannelBalanceThresholds(settings.ChannelBalanceThresholds)
-	if err != nil {
-		return
-	}
-	for _, threshold := range thresholds {
-		key := channelBalanceReminderKey(channelID, threshold)
-		if remaining >= threshold {
-			_ = s.app.Redis.Del(ctx, key).Err()
-			continue
-		}
-		recipients, err := s.users.AdminEmails(ctx)
-		if err != nil || len(recipients) == 0 {
-			return
-		}
-		created, err := s.app.Redis.SetNX(ctx, key, "1", 0).Result()
-		if err != nil || !created {
-			continue
-		}
-		if !sendChannelLowBalance(settings, recipients, s.systemName(ctx), channelID, channelName, remaining, threshold, currency) {
-			_ = s.app.Redis.Del(ctx, key).Err()
-		}
-	}
-}
-
-func (s *Service) ClearChannelLowBalanceReminders(ctx context.Context, channelID uint64) error {
-	if channelID == 0 {
-		return nil
-	}
-	settings, err := s.settings.MailDeliverySettings(ctx)
-	if err != nil {
-		return err
-	}
-	thresholds, err := system.ParseChannelBalanceThresholds(settings.ChannelBalanceThresholds)
-	if err != nil {
-		return err
-	}
-	keys := make([]string, 0, len(thresholds))
-	for _, threshold := range thresholds {
-		keys = append(keys, channelBalanceReminderKey(channelID, threshold))
-	}
-	if len(keys) == 0 {
-		return nil
-	}
-	return gerror.Wrap(s.app.Redis.Del(ctx, keys...).Err(), "clear channel low-balance reminders")
-}
-
-func sendChannelLowBalance(settings system.MailDeliverySettings, recipients []string, systemName string, channelID uint64, channelName string, remaining, threshold float64, currency string) bool {
-	currency = strings.ToUpper(strings.TrimSpace(currency))
-	if currency == "" {
-		currency = "USD"
-	}
-	thresholdText := system.ChannelBalanceThresholdText(threshold)
-	subject := fmt.Sprintf("%s 渠道余额低于 %s %s：%s", systemName, thresholdText, currency, channelName)
-	body := fmt.Sprintf("渠道 %s（ID：%d）当前上游余额为 %.6f %s，已低于 %s %s。", channelName, channelID, remaining, currency, thresholdText, currency)
-	sent := false
-	for _, recipient := range recipients {
-		if err := send(settings, recipient, subject, body); err == nil {
-			sent = true
-		}
-	}
-	return sent
-}
 
 func send(settings system.MailDeliverySettings, recipient, subject, body string) error {
 	address := net.JoinHostPort(settings.Host, strconv.Itoa(settings.Port))
@@ -236,10 +168,6 @@ func (s *Service) systemName(ctx context.Context) string {
 
 func reminderKey(userID uint64, threshold float64) string {
 	return fmt.Sprintf("aiferry:mail:low-balance:%d:%.8f", userID, threshold)
-}
-
-func channelBalanceReminderKey(channelID uint64, threshold float64) string {
-	return fmt.Sprintf("%s%d:%s", channelBalancePrefix, channelID, system.ChannelBalanceThresholdText(threshold))
 }
 
 func validRecipient(value string) bool {
