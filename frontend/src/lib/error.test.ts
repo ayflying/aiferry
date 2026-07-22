@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ElMessageBox } from 'element-plus'
-import { errorMessage, showError } from './error'
+import { errorMessage, showError, showSuccess } from './error'
 
 vi.mock('element-plus', () => ({
   ElMessageBox: { alert: vi.fn(() => Promise.resolve()) },
@@ -26,6 +26,22 @@ describe('errorMessage', () => {
       '价格同步失败',
       expect.objectContaining({
         type: 'error',
+        confirmButtonText: '知道了',
+        closeOnClickModal: false,
+        closeOnPressEscape: false,
+        showClose: false,
+      }),
+    )
+  })
+
+  it('opens the shared success dialog with consistent options', () => {
+    showSuccess('系统设置已保存', '保存成功')
+
+    expect(ElMessageBox.alert).toHaveBeenCalledWith(
+      '系统设置已保存',
+      '保存成功',
+      expect.objectContaining({
+        type: 'success',
         confirmButtonText: '知道了',
         closeOnClickModal: false,
         closeOnPressEscape: false,

@@ -2,10 +2,9 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Clock3, Database, Gauge, HardDrive, Image as ImageIcon, Info, Mail, Send, ShieldAlert, ShieldCheck } from '@lucide/vue'
-import { ElMessage } from 'element-plus'
 import { apiGet, apiPost, apiPut } from '../api/client'
 import type { BaseSettings, MailSettings, SensitiveWordSettings, SystemInformationSettings, SystemResilienceSettings } from '../api/types'
-import { showError } from '../lib/error'
+import { showError, showSuccess } from '../lib/error'
 import { setDisplayTimeZone } from '../lib/format'
 import { useSystemStore } from '../stores/system'
 
@@ -172,7 +171,7 @@ async function saveReliability() {
       failureKeywords: form.failureKeywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
     })
     applySettings(settings)
-    ElMessage.success('系统设置已保存')
+    showSuccess('系统设置已保存', '保存成功')
   } catch (error) { showError(error, '保存系统设置失败') } finally { saving.value = false }
 }
 
@@ -188,7 +187,7 @@ async function saveBasic() {
     applySystemInformation(informationSettings)
     system.apply(informationSettings)
     setDisplayTimeZone(basicSettings.timeZone)
-    ElMessage.success('基础设置已保存')
+    showSuccess('基础设置已保存', '保存成功')
   } catch (error) { showError(error, '保存基础设置失败') } finally {
     saving.value = false
     informationSaving.value = false
@@ -213,7 +212,7 @@ async function saveMail() {
       bodyTemplate: mailForm.bodyTemplate,
     })
     applyMailSettings(settings)
-    ElMessage.success('邮件设置已保存')
+    showSuccess('邮件设置已保存', '保存成功')
   } catch (error) { showError(error, '保存邮件设置失败') } finally { mailSaving.value = false }
 }
 
@@ -227,7 +226,7 @@ async function saveSecuritySettings() {
       keywords: securityForm.keywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
     })
     applySecuritySettings(settings)
-    ElMessage.success('安全与限制设置已保存')
+    showSuccess('安全与限制设置已保存', '保存成功')
   } catch (error) { showError(error, '保存安全与限制设置失败') } finally { securitySaving.value = false }
 }
 
@@ -235,7 +234,7 @@ async function sendTestMail() {
   testSending.value = true
   try {
     await apiPost<Record<string, never>>('/system/mail/test', { recipient: testRecipient.value })
-    ElMessage.success('测试邮件已发送')
+    showSuccess('测试邮件已发送', '发送成功')
   } catch (error) { showError(error, '发送测试邮件失败') } finally { testSending.value = false }
 }
 
