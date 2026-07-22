@@ -1,22 +1,23 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Coins, Eye, FlaskConical, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from '@lucide/vue'
+import { RefreshCw } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelInput, ChannelModel, DiscoveredModel } from '../api/types'
 import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
+import ChannelGroupListPanel from '../components/ChannelGroupListPanel.vue'
+import ChannelListPanel from '../components/ChannelListPanel.vue'
 import ChannelModelTestDialog from '../components/ChannelModelTestDialog.vue'
 import ChannelRouteCoverageSettings from '../components/ChannelRouteCoverageSettings.vue'
-import MobileRecordList from '../components/MobileRecordList.vue'
-import ResponsiveList from '../components/ResponsiveList.vue'
-import { showError } from '../lib/error'
-import { useAppStore } from '../stores/app'
-import { formatCost, formatLatency, formatTime } from '../lib/format'
-import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput } from '../lib/channelForm'
-import { sortDiscoveredModels } from '../lib/models'
+import ChannelTypeListPanel from '../components/ChannelTypeListPanel.vue'
 import { type ChannelTab, useChannelConfiguration } from '../composables/useChannelConfiguration'
+import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput } from '../lib/channelForm'
+import { showError } from '../lib/error'
+import { sortDiscoveredModels } from '../lib/models'
+import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
 const route = useRoute()
@@ -49,17 +50,18 @@ const channelStatusSaving = ref<Record<number, boolean>>({})
 
 const drawerSize = window.innerWidth <= 600 ? '94%' : '620px'
 const typeDrawerSize = window.innerWidth <= 600 ? '94%' : '680px'
+const form = reactive<ChannelInput>(createEmptyChannelInput())
+const title = computed(() => editingId.value ? '编辑渠道' : '添加渠道')
+const editingChannel = computed(() => store.channels.find((item) => item.id === editingId.value))
 const activeTypes = computed(() => store.channelTypes.filter((item) => item.status === 1 || item.code === form.type))
 const selectedChannelType = computed(() => store.channelTypes.find((item) => item.code === form.type))
 const usesManagementKey = computed(() => {
   const config = selectedChannelType.value?.config
-  if (!config) return false
-  return [config.models.authType, config.costs.authType, config.pricing.authType].includes('management_key')
+  return Boolean(config && [config.models.authType, config.costs.authType, config.pricing.authType].includes('management_key'))
 })
 const visibleDiscoveredModels = computed(() => {
   const keyword = discoveryKeyword.value.trim().toLowerCase()
-  if (!keyword) return discoveredModels.value
-  return discoveredModels.value.filter((item) => item.name.toLowerCase().includes(keyword))
+  return keyword ? discoveredModels.value.filter((item) => item.name.toLowerCase().includes(keyword)) : discoveredModels.value
 })
 const allVisibleSelected = computed(() => visibleDiscoveredModels.value.length > 0
   && visibleDiscoveredModels.value.every((item) => selectedModelNames.value.includes(item.name)))
@@ -67,16 +69,16 @@ const healthCheckModelOptions = computed(() => [...healthCheckModels.value]
   .filter((item) => item.enabled === 1)
   .sort((left, right) => left.publicName.localeCompare(right.publicName) || left.upstreamName.localeCompare(right.upstreamName)))
 
-const form = reactive<ChannelInput>(createEmptyChannelInput())
-const title = computed(() => editingId.value ? '编辑渠道' : '添加渠道')
-const editingChannel = computed(() => store.channels.find((item) => item.id === editingId.value))
-
 async function loadChannels() {
   tabLoading.channels = true
   try {
     await store.loadChannels()
     tabLoaded.channels = true
-  } catch (error) { showError(error, '加载渠道失败') } finally { tabLoading.channels = false }
+  } catch (error) {
+    showError(error, '加载渠道失败')
+  } finally {
+    tabLoading.channels = false
+  }
 }
 
 async function loadChannelGroups() {
@@ -84,7 +86,11 @@ async function loadChannelGroups() {
   try {
     await store.loadChannelGroups()
     tabLoaded.groups = true
-  } catch (error) { showError(error, '加载渠道分组失败') } finally { tabLoading.groups = false }
+  } catch (error) {
+    showError(error, '加载渠道分组失败')
+  } finally {
+    tabLoading.groups = false
+  }
 }
 
 async function loadChannelTypes() {
@@ -92,7 +98,11 @@ async function loadChannelTypes() {
   try {
     await store.loadChannelTypes()
     tabLoaded.types = true
-  } catch (error) { showError(error, '加载渠道类型失败') } finally { tabLoading.types = false }
+  } catch (error) {
+    showError(error, '加载渠道类型失败')
+  } finally {
+    tabLoading.types = false
+  }
 }
 
 function loadTab(tab: ChannelTab) {
@@ -105,11 +115,14 @@ async function ensureTabs(...tabs: ChannelTab[]) {
 
 async function loadChannelFormOptions() {
   channelFormLoading.value = true
-  try { await ensureTabs('types', 'groups') } finally { channelFormLoading.value = false }
+  try {
+    await ensureTabs('types', 'groups')
+  } finally {
+    channelFormLoading.value = false
+  }
 }
 
 const {
-  costLabel,
   editingGroup,
   editingType,
   groupDrawerOpen,
@@ -133,8 +146,8 @@ const {
 } = useChannelConfiguration({ store, tabLoaded, ensureTabs, loadChannelGroups, loadChannelTypes })
 
 async function openCreate() {
-	editingId.value = undefined
-	healthCheckModels.value = []
+  editingId.value = undefined
+  healthCheckModels.value = []
   Object.assign(form, createEmptyChannelInput())
   drawerOpen.value = true
   await loadChannelFormOptions()
@@ -146,25 +159,38 @@ async function openCreate() {
 function applyDefaultBaseURL(type: string) {
   if (!editingId.value) form.baseUrl = channelTypeBaseURL(store.channelTypes, type)
 }
+
 async function openEdit(channel: Channel) {
   editingId.value = channel.id
   Object.assign(form, {
-    name: channel.name, type: channel.type, baseUrl: channel.baseUrl, apiKey: '', managementKey: undefined, proxyUrl: undefined,
-	organizationId: channel.organizationId, projectId: channel.projectId, status: channel.status,
-	priority: channel.priority, weight: channel.weight, healthCheckModelId: channel.healthCheckModelId, autoDisableEnabled: channel.autoDisableEnabled, advancedConfig: JSON.parse(JSON.stringify(channel.advancedConfig || createDefaultChannelAdvancedConfig())), groupIds: channel.groupIds || [],
-	})
-	drawerOpen.value = true
-	void loadHealthCheckModels(channel.id)
-	await loadChannelFormOptions()
+    name: channel.name,
+    type: channel.type,
+    baseUrl: channel.baseUrl,
+    apiKey: '',
+    managementKey: undefined,
+    proxyUrl: undefined,
+    organizationId: channel.organizationId,
+    projectId: channel.projectId,
+    status: channel.status,
+    priority: channel.priority,
+    weight: channel.weight,
+    healthCheckModelId: channel.healthCheckModelId,
+    autoDisableEnabled: channel.autoDisableEnabled,
+    advancedConfig: JSON.parse(JSON.stringify(channel.advancedConfig || createDefaultChannelAdvancedConfig())),
+    groupIds: channel.groupIds || [],
+  })
+  drawerOpen.value = true
+  void loadHealthCheckModels(channel.id)
+  await loadChannelFormOptions()
 }
 
 async function loadHealthCheckModels(channelID: number) {
-	healthCheckModels.value = []
-	try {
-		healthCheckModels.value = await apiGet<ChannelModel[]>(`/channels/${channelID}/models`)
-	} catch (error) {
-		showError(error, '加载测试模型失败')
-	}
+  healthCheckModels.value = []
+  try {
+    healthCheckModels.value = await apiGet<ChannelModel[]>(`/channels/${channelID}/models`)
+  } catch (error) {
+    showError(error, '加载测试模型失败')
+  }
 }
 
 function clearProxy() {
@@ -187,7 +213,11 @@ async function save() {
     drawerOpen.value = false
     tabLoaded.groups = false
     await loadChannels()
-  } catch (error) { showError(error, '保存渠道失败') } finally { saving.value = false }
+  } catch (error) {
+    showError(error, '保存渠道失败')
+  } finally {
+    saving.value = false
+  }
 }
 
 async function discover(channel: Channel) {
@@ -204,15 +234,15 @@ async function discover(channel: Channel) {
     selectedModelNames.value = discoveredModels.value.filter((item) => item.selected).map((item) => item.name)
   } catch (error) {
     discoveryError.value = describeDiscoveryError(error)
-  } finally { discovering.value = false }
+  } finally {
+    discovering.value = false
+  }
 }
 
 function describeDiscoveryError(error: unknown) {
   const message = error instanceof Error ? error.message : '网络请求失败'
   if (message.startsWith('上游每日用量额度已用尽')) return message
-  if (message.includes('HTTP 429')) {
-    return '上游返回 HTTP 429，当前请求受到限流或该密钥的可用配额不足。请稍后重试，或在上游确认配额和请求限制。'
-  }
+  if (message.includes('HTTP 429')) return '上游返回 HTTP 429，当前请求受到限流或该密钥的可用配额不足。请稍后重试，或在上游确认配额和请求限制。'
   return `上游模型接口调用失败：${message}`
 }
 
@@ -233,10 +263,14 @@ async function saveModelSelection() {
     ElMessage.success(`已启用 ${selectedModelNames.value.length} 个模型`)
     discoveryOpen.value = false
     await loadChannels()
-  } catch (error) { showError(error, '保存模型选择失败') } finally { applyingSelection.value = false }
+  } catch (error) {
+    showError(error, '保存模型选择失败')
+  } finally {
+    applyingSelection.value = false
+  }
 }
 
-async function openTest(channel: Channel) {
+function openTest(channel: Channel) {
   testChannel.value = channel
   testOpen.value = true
 }
@@ -259,17 +293,6 @@ async function queryCost(channel: Channel) {
   } finally {
     queryingCostID.value = undefined
   }
-}
-
-function channelEnabled(channel: Channel) {
-  return channel.status === 1 && !channel.autoDisabled && !channel.credentialsUnavailable
-}
-
-function channelStatusLabel(channel: Channel) {
-  if (channel.autoDisabled) return '渠道自动禁用'
-  if (channel.status !== 1) return '手动停用'
-  if (channel.credentialsUnavailable) return '所有密钥不可用'
-  return '启用'
 }
 
 async function setChannelStatus(channel: Channel, enabled: boolean) {
@@ -305,95 +328,9 @@ watch(activeTab, (tab) => {
 
 <template>
   <div class="page-stack">
-    <section v-if="activeTab === 'channels'">
-        <div class="page-toolbar">
-          <div class="muted">管理上游、模型选择、路由顺序和费用查询</div>
-          <div class="spacer" />
-          <el-button :icon="RefreshCw" :loading="tabLoading.channels" @click="loadChannels">刷新</el-button>
-          <el-button type="primary" :icon="Plus" @click="openCreate">添加渠道</el-button>
-        </div>
-        <div class="table-panel">
-          <ResponsiveList>
-            <template #desktop><el-table v-loading="tabLoading.channels" :data="store.channels" row-key="id">
-            <el-table-column label="渠道" min-width="180"><template #default="{ row }"><div class="channel-name"><strong>{{ row.name }}</strong><span>{{ row.baseUrl }}</span></div></template></el-table-column>
-            <el-table-column label="类型" min-width="120"><template #default="{ row }"><div class="type-cell"><strong>{{ row.typeName }}</strong><code>{{ row.type }}</code></div></template></el-table-column>
-            <el-table-column label="状态" min-width="214"><template #default="{ row }"><div class="channel-status-control"><el-tooltip v-if="row.autoDisabled" :content="row.autoDisabledReason || '渠道被自动禁用'" placement="top"><span class="status-dot warning">{{ channelStatusLabel(row) }}</span></el-tooltip><el-tooltip v-else-if="row.credentialsUnavailable && row.status === 1" content="该渠道当前不可路由：所有上游密钥均不可用。开启渠道会恢复全部上游密钥。" placement="top"><span class="status-dot warning">{{ channelStatusLabel(row) }}</span></el-tooltip><span v-else class="status-dot" :class="channelEnabled(row) ? 'success' : ''">{{ channelStatusLabel(row) }}</span><el-switch :model-value="channelEnabled(row)" :loading="channelStatusSaving[row.id]" :disabled="channelStatusSaving[row.id]" :aria-label="`${row.name} ${channelEnabled(row) ? '已启用' : '已停用'}`" @update:model-value="setChannelStatus(row, $event)" /></div></template></el-table-column>
-            <el-table-column label="路由" width="108"><template #default="{ row }"><span class="mono">P{{ row.priority }} / W{{ row.weight }}</span></template></el-table-column>
-            <el-table-column label="模型" width="100"><template #default="{ row }">{{ row.enabledModelCount }} / {{ row.discoveredModels }}</template></el-table-column>
-            <el-table-column label="最近测试" min-width="130"><template #default="{ row }"><span v-if="row.lastTestStatus" class="status-dot" :class="row.lastTestStatus">{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : '失败' }}</span><span v-else class="muted">未测试</span></template></el-table-column>
-            <el-table-column label="上游费用 / 余额" min-width="168"><template #default="{ row }"><button class="cost-link" type="button" @click="openCredentials(row)"><div v-if="row.costSummaries?.length" class="cost-cell"><template v-for="summary in row.costSummaries" :key="summary.currency"><span v-if="summary.usedAmount !== undefined">{{ summary.currency }} 已用 {{ formatCost(summary.usedAmount, summary.currency) }}</span><span v-if="summary.remainingAmount !== undefined">{{ summary.currency }} 余额 {{ formatCost(summary.remainingAmount, summary.currency) }}</span></template><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small></div><span v-else class="muted">查看明细</span></button></template></el-table-column>
-            <el-table-column label="操作" width="260" fixed="right" align="right"><template #default="{ row }"><div class="table-actions">
-              <el-tooltip content="管理上游密钥"><button class="icon-button" type="button" :aria-label="`管理 ${row.name} 的上游密钥`" @click="openCredentials(row)"><KeyRound :size="16" /></button></el-tooltip>
-              <el-tooltip content="发现模型"><button class="icon-button" type="button" :aria-label="`发现 ${row.name} 的模型`" @click="discover(row)"><ScanSearch :size="16" /></button></el-tooltip>
-              <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="openTest(row)"><FlaskConical :size="16" /></button></el-tooltip>
-              <el-tooltip :content="queryingCostID === row.id ? '正在查询费用' : '查询费用'"><button class="icon-button" type="button" :aria-label="`${queryingCostID === row.id ? '正在查询' : '查询'} ${row.name} 的费用`" :disabled="row.costQueryMode === 'none' || Boolean(queryingCostID)" @click="queryCost(row)"><LoaderCircle v-if="queryingCostID === row.id" :size="16" class="cost-query-spinner" /><Coins v-else :size="16" /></button></el-tooltip>
-              <el-tooltip content="编辑"><button class="icon-button" type="button" :aria-label="`编辑渠道 ${row.name}`" @click="openEdit(row)"><Pencil :size="16" /></button></el-tooltip>
-              <el-tooltip content="删除"><button class="icon-button danger" type="button" :aria-label="`删除渠道 ${row.name}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip>
-            </div></template></el-table-column>
-            </el-table></template>
-            <template #mobile><MobileRecordList :loading="tabLoading.channels">
-              <article v-for="row in store.channels" :key="row.id" class="mobile-record">
-                <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.name }}</strong><small>{{ row.baseUrl }}</small></div><div class="channel-status-control"><el-tooltip v-if="row.autoDisabled" :content="row.autoDisabledReason || '渠道被自动禁用'" placement="top"><span class="status-dot warning">{{ channelStatusLabel(row) }}</span></el-tooltip><el-tooltip v-else-if="row.credentialsUnavailable && row.status === 1" content="所有上游密钥均不可用。开启渠道会恢复全部上游密钥。" placement="top"><span class="status-dot warning">{{ channelStatusLabel(row) }}</span></el-tooltip><span v-else class="status-dot" :class="channelEnabled(row) ? 'success' : ''">{{ channelStatusLabel(row) }}</span><el-switch :model-value="channelEnabled(row)" :loading="channelStatusSaving[row.id]" :disabled="channelStatusSaving[row.id]" :aria-label="`${row.name} ${channelEnabled(row) ? '已启用' : '已停用'}`" @update:model-value="setChannelStatus(row, $event)" /></div></div>
-                <dl class="mobile-record__facts"><div><dt>渠道类型</dt><dd>{{ row.typeName }} · <span class="mono">{{ row.type }}</span></dd></div><div><dt>路由</dt><dd class="mono">P{{ row.priority }} / W{{ row.weight }}</dd></div><div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}</dd></div><div><dt>最近测试</dt><dd>{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : row.lastTestStatus ? '失败' : '未测试' }}</dd></div><div class="mobile-record__wide"><dt>上游费用 / 余额</dt><dd><button class="cost-link" type="button" @click="openCredentials(row)"><span v-if="row.costSummaries?.length"><template v-for="summary in row.costSummaries" :key="summary.currency">{{ summary.currency }} 已用 {{ summary.usedAmount === undefined ? '—' : formatCost(summary.usedAmount, summary.currency) }} · 余额 {{ summary.remainingAmount === undefined ? '—' : formatCost(summary.remainingAmount, summary.currency) }} </template></span><span v-else class="muted">查看明细</span></button></dd></div></dl>
-                <div class="mobile-record__footer"><span class="muted">渠道操作</span><div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="openCredentials(row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="discover(row)">发现</el-button><el-button size="small" :icon="FlaskConical" @click="openTest(row)">测试</el-button><el-button size="small" :icon="Coins" :loading="queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || Boolean(queryingCostID)" @click="queryCost(row)">费用</el-button><el-button size="small" :icon="Pencil" @click="openEdit(row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="remove(row)">删除</el-button></div></div>
-              </article>
-            </MobileRecordList></template>
-          </ResponsiveList>
-          <div v-if="!tabLoading.channels && !store.channels.length" class="empty-state"><div><strong>还没有渠道</strong><span>先添加渠道类型，再接入第一个上游</span></div></div>
-        </div>
-    </section>
-
-    <section v-else-if="activeTab === 'groups'">
-        <div class="page-toolbar"><div class="muted">为密钥授权和路由策略维护渠道归属</div><div class="spacer" /><el-button :icon="RefreshCw" :loading="tabLoading.groups" @click="loadChannelGroups">刷新</el-button><el-button type="primary" :icon="Plus" @click="openCreateGroup">添加分组</el-button></div>
-        <div class="table-panel">
-          <ResponsiveList>
-            <template #desktop><el-table v-loading="tabLoading.groups" :data="store.channelGroups" row-key="id">
-            <el-table-column label="分组" min-width="180"><template #default="{ row }"><div class="type-cell"><strong>{{ row.name }}</strong><code>{{ row.code }}</code></div></template></el-table-column>
-            <el-table-column prop="description" label="说明" min-width="220" />
-            <el-table-column label="渠道" min-width="180"><template #default="{ row }"><el-tag v-for="channelId in row.channelIds" :key="channelId" size="small" class="group-channel-tag">{{ store.channels.find(item => item.id === channelId)?.name || `#${channelId}` }}</el-tag><span v-if="!row.channelIds.length" class="muted">未分配</span></template></el-table-column>
-            <el-table-column label="状态" width="96"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
-            <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip content="编辑"><button class="icon-button" type="button" @click="openEditGroup(row)"><Pencil :size="16" /></button></el-tooltip><el-tooltip content="删除"><button class="icon-button danger" type="button" @click="removeGroup(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
-            </el-table></template>
-            <template #mobile><MobileRecordList :loading="tabLoading.groups">
-              <article v-for="row in store.channelGroups" :key="row.id" class="mobile-record">
-                <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.name }}</strong><small class="mono">{{ row.code }}</small></div><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></div>
-                <dl class="mobile-record__facts"><div class="mobile-record__wide"><dt>说明</dt><dd>{{ row.description || '未填写说明' }}</dd></div><div class="mobile-record__wide"><dt>包含渠道</dt><dd><el-tag v-for="channelId in row.channelIds" :key="channelId" size="small" class="group-channel-tag">{{ store.channels.find(item => item.id === channelId)?.name || `#${channelId}` }}</el-tag><span v-if="!row.channelIds.length" class="muted">未分配</span></dd></div></dl>
-                <div class="mobile-record__footer"><span class="muted">渠道分组</span><div class="mobile-record__actions"><el-button size="small" :icon="Pencil" @click="openEditGroup(row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="removeGroup(row)">删除</el-button></div></div>
-              </article>
-            </MobileRecordList></template>
-          </ResponsiveList>
-          <div v-if="!tabLoading.groups && !store.channelGroups.length" class="empty-state"><div><strong>还没有渠道分组</strong><span>创建分组后可对访问密钥限定可用渠道</span></div></div>
-        </div>
-    </section>
-
-    <section v-else>
-        <div class="page-toolbar">
-          <div class="muted">JSON 定义模型发现、OpenAI 接口能力、鉴权和费用字段路径</div>
-          <div class="spacer" />
-          <el-button :icon="RefreshCw" :loading="tabLoading.types" @click="loadChannelTypes">刷新</el-button>
-          <el-button type="primary" :icon="Plus" @click="openCreateType">添加渠道类型</el-button>
-        </div>
-        <div class="table-panel">
-          <ResponsiveList>
-            <template #desktop><el-table v-loading="tabLoading.types" :data="store.channelTypes" row-key="id">
-            <el-table-column label="类型" min-width="170"><template #default="{ row }"><div class="type-cell"><strong>{{ row.name }}</strong><code>{{ row.code }}</code></div></template></el-table-column>
-            <el-table-column label="模型接口" min-width="220"><template #default="{ row }"><span class="mono">{{ row.config.models.method }} {{ row.config.models.path }}</span></template></el-table-column>
-            <el-table-column label="余额查询" min-width="160"><template #default="{ row }"><span>{{ costLabel(row) }}</span><small v-if="row.config.costs.path"> · {{ row.config.costs.path }}</small></template></el-table-column>
-            <el-table-column label="状态" width="142"><template #default="{ row }"><div class="type-status-control"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span><el-switch :model-value="row.status === 1" :disabled="row.builtIn === 1 || typeStatusSaving[row.id]" :aria-label="`${row.name} ${row.status === 1 ? '已启用' : '已停用'}`" @update:model-value="setTypeStatus(row, $event)" /></div></template></el-table-column>
-            <el-table-column label="来源" width="88"><template #default="{ row }"><span class="muted">{{ row.builtIn === 1 ? '内置' : '自定义' }}</span></template></el-table-column>
-            <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><el-tooltip :content="row.builtIn === 1 ? '查看内置配置' : '编辑类型'"><button class="icon-button" type="button" :aria-label="`${row.builtIn === 1 ? '查看' : '编辑'}渠道类型 ${row.name}`" @click="openEditType(row)"><Eye v-if="row.builtIn === 1" :size="16" /><Pencil v-else :size="16" /></button></el-tooltip><el-tooltip v-if="row.builtIn === 0" content="删除类型"><button class="icon-button danger" type="button" :aria-label="`删除渠道类型 ${row.name}`" @click="removeType(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
-            </el-table></template>
-            <template #mobile><MobileRecordList :loading="tabLoading.types">
-              <article v-for="row in store.channelTypes" :key="row.id" class="mobile-record">
-                <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.name }}</strong><small class="mono">{{ row.code }} · {{ row.builtIn === 1 ? '内置类型' : '自定义类型' }}</small></div><div class="type-status-control"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span><el-switch :model-value="row.status === 1" :disabled="row.builtIn === 1 || typeStatusSaving[row.id]" :aria-label="`${row.name} ${row.status === 1 ? '已启用' : '已停用'}`" @update:model-value="setTypeStatus(row, $event)" /></div></div>
-                <dl class="mobile-record__facts"><div class="mobile-record__wide"><dt>模型接口</dt><dd class="mono">{{ row.config.models.method }} {{ row.config.models.path }}</dd></div><div><dt>余额查询</dt><dd>{{ costLabel(row) }}<span v-if="row.config.costs.path"> · {{ row.config.costs.path }}</span></dd></div><div><dt>来源</dt><dd>{{ row.builtIn === 1 ? '内置' : '自定义' }}</dd></div></dl>
-                <div class="mobile-record__footer"><span class="muted">渠道类型</span><div class="mobile-record__actions"><el-button size="small" :icon="row.builtIn === 1 ? Eye : Pencil" @click="openEditType(row)">{{ row.builtIn === 1 ? '查看' : '编辑' }}</el-button><el-button v-if="row.builtIn === 0" size="small" :icon="Trash2" type="danger" plain @click="removeType(row)">删除</el-button></div></div>
-              </article>
-            </MobileRecordList></template>
-          </ResponsiveList>
-          <div v-if="!tabLoading.types && !store.channelTypes.length" class="empty-state"><div><strong>还没有渠道类型</strong><span>添加 JSON 配置后即可在渠道表单中选用</span></div></div>
-        </div>
-    </section>
+    <section v-if="activeTab === 'channels'"><ChannelListPanel :channels="store.channels" :loading="tabLoading.channels" :querying-cost-i-d="queryingCostID" :status-saving="channelStatusSaving" @create="openCreate" @discover="discover" @edit="openEdit" @open-credentials="openCredentials" @query-cost="queryCost" @refresh="loadChannels" @remove="remove" @set-status="setChannelStatus" @test="openTest" /></section>
+    <section v-else-if="activeTab === 'groups'"><ChannelGroupListPanel :channels="store.channels" :groups="store.channelGroups" :loading="tabLoading.groups" @create="openCreateGroup" @edit="openEditGroup" @refresh="loadChannelGroups" @remove="removeGroup" /></section>
+    <section v-else><ChannelTypeListPanel :loading="tabLoading.types" :status-saving="typeStatusSaving" :types="store.channelTypes" @create="openCreateType" @edit="openEditType" @refresh="loadChannelTypes" @remove="removeType" @set-status="setTypeStatus" /></section>
 
     <el-dialog v-model="discoveryOpen" :title="`选择模型 · ${discoveryChannel?.name || ''}`" width="min(640px, 94vw)"><div v-loading="discovering" class="model-selection"><template v-if="discoveryError"><div class="discovery-error" role="alert"><strong>模型发现失败</strong><span>{{ discoveryError }}</span><el-button :icon="RefreshCw" @click="discoveryChannel && discover(discoveryChannel)">重新尝试</el-button></div></template><template v-else><div class="selection-toolbar"><el-input v-model="discoveryKeyword" clearable placeholder="搜索模型" /><el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消当前结果' : '选择当前结果' }}</el-button></div><div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div><el-checkbox-group v-if="visibleDiscoveredModels.length" v-model="selectedModelNames" class="model-check-list"><el-checkbox v-for="item in visibleDiscoveredModels" :key="item.name" :value="item.name"><code>{{ item.name }}</code></el-checkbox></el-checkbox-group><div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div></template></div><template #footer><el-button @click="discoveryOpen = false">取消</el-button><el-button type="primary" :loading="applyingSelection" :disabled="discovering || Boolean(discoveryError)" @click="saveModelSelection">确认选择</el-button></template></el-dialog>
 
@@ -409,10 +346,6 @@ watch(activeTab, (tab) => {
 </template>
 
 <style scoped>
-.page-toolbar { display: flex; min-height: 36px; align-items: center; gap: 10px; margin-bottom: 18px; }.page-toolbar .spacer { flex: 1; }.channel-name, .type-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.channel-name strong, .type-cell strong { font-size: 13px; }.channel-name span, .type-cell code { overflow: hidden; color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.channel-status-control, .type-status-control { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }.channel-status-control :deep(.el-switch), .type-status-control :deep(.el-switch) { flex: 0 0 auto; }.cost-cell { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.cost-cell small, .table-panel small { color: #7b8792; }.group-channel-tag { margin: 0 4px 4px 0; }.model-selection { min-height: 300px; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-check-list .el-checkbox { min-width: 0; height: 38px; margin: 0; padding: 0 10px; border-bottom: 1px solid #eef1f3; }.model-check-list .el-checkbox:last-child { border-bottom: 0; }.model-check-list code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; min-height: 220px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; padding: 20px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 14px; }.test-dialog { min-height: 180px; }.test-result { padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; }.test-result.success { border-color: #acd7cc; background: #f2faf8; }.test-result.failed { border-color: #e9abb2; background: #fff6f7; }.test-result span { display: block; margin-top: 5px; color: #66717d; font-size: 11px; }.test-result p { margin: 8px 0 0; font-size: 12px; }.model-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.model-option small { color: #7b8792; font-family: 'JetBrains Mono', monospace; font-size: 10px; }.config-editor :deep(textarea) { min-height: 440px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
-.cost-link { display: block; width: 100%; border: 0; padding: 0; text-align: left; color: inherit; background: transparent; cursor: pointer; }.cost-link:hover span { color: #1677ff; }
-.cost-query-spinner { animation: cost-query-spin 0.9s linear infinite; }
-@keyframes cost-query-spin { to { transform: rotate(360deg); } }
-@media (max-width: 600px) { .page-toolbar { align-items: flex-start; flex-wrap: wrap; }.page-toolbar .spacer { display: none; }.selection-toolbar { grid-template-columns: 1fr; }.model-option small { display: none; } }
-@media (prefers-reduced-motion: reduce) { .cost-query-spinner { animation: none; } }
+.model-selection { min-height: 300px; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-check-list .el-checkbox { min-width: 0; height: 38px; margin: 0; padding: 0 10px; border-bottom: 1px solid #eef1f3; }.model-check-list .el-checkbox:last-child { border-bottom: 0; }.model-check-list code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; min-height: 220px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; padding: 20px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 14px; }.config-editor :deep(textarea) { min-height: 440px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
+@media (max-width: 600px) { .selection-toolbar { grid-template-columns: 1fr; } }
 </style>
