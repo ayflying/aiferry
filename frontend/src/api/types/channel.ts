@@ -222,6 +222,7 @@ export interface BaseSettings {
 export interface MailSettings {
   enabled: boolean
   channelAlertEnabled: boolean
+  channelBalanceThresholds: string
   host: string
   port: number
   username: string

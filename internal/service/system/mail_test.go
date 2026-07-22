@@ -73,3 +73,24 @@ func TestNormalizeMailSettingsUsesExplicitChannelAlertSetting(t *testing.T) {
 		t.Fatal("explicit channel alert setting should be retained")
 	}
 }
+
+func TestNormalizeMailSettingsNormalizesChannelBalanceThresholds(t *testing.T) {
+	value := "1， 10,5,10"
+	settings, err := normalizeMailSettings(adminapi.MailSettingsInput{
+		ChannelBalanceThresholds: &value,
+	}, storedMailSettings{})
+	if err != nil {
+		t.Fatalf("normalize channel balance thresholds: %v", err)
+	}
+	if settings.ChannelBalanceThresholds != "10,5,1" {
+		t.Fatalf("unexpected normalized thresholds: %q", settings.ChannelBalanceThresholds)
+	}
+}
+
+func TestNormalizeChannelBalanceThresholdsRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"", "10,,5", "10,0", "10,nope"} {
+		if _, err := NormalizeChannelBalanceThresholds(value); err == nil {
+			t.Fatalf("expected invalid thresholds %q to be rejected", value)
+		}
+	}
+}

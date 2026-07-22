@@ -61,6 +61,7 @@ const securityForm = reactive({
 const mailForm = reactive({
   enabled: false,
   channelAlertEnabled: true,
+  channelBalanceThresholds: '10,5,1',
   host: '',
   port: 587,
   username: '',
@@ -201,6 +202,7 @@ async function saveMail() {
     const settings = await apiPut<MailSettings>('/system/mail', {
       enabled: mailForm.enabled,
       channelAlertEnabled: mailForm.channelAlertEnabled,
+      channelBalanceThresholds: mailForm.channelBalanceThresholds,
       host: mailForm.host,
       port: mailForm.port,
       username: mailForm.username,
@@ -292,7 +294,7 @@ watch(activeTab, (tab) => {
 
     <template v-else>
       <section class="settings-section"><div class="section-heading balance-reminder-heading"><div class="balance-reminder-title"><h2>用户余额提醒</h2><span>用户在 24 小时内有模型使用且余额低于阈值时，最多发送一次提醒；没有使用不发送。</span></div><el-switch v-model="mailForm.enabled" /></div><el-form label-position="top" class="settings-form"><el-form-item label="提醒阈值（美元）"><el-input-number v-model="mailForm.threshold" :min="0" :max="1000000" :precision="6" controls-position="right" /></el-form-item><div class="form-subsection"><strong>提醒模板</strong><span>可使用 {nickname}、{balance} 和 {threshold} 作为变量。</span></div><el-form-item label="邮件主题"><el-input v-model="mailForm.subjectTemplate" /></el-form-item><el-form-item label="邮件正文"><el-input v-model="mailForm.bodyTemplate" type="textarea" :rows="8" spellcheck="false" /></el-form-item></el-form></section>
-      <section class="settings-section"><div class="section-heading"><div><h2>渠道余额提醒</h2><span>渠道费用查询或扣费后，余额低于预设值时向所有管理员邮箱发送通知。</span></div><el-switch v-model="mailForm.channelAlertEnabled" /></div><p class="field-hint channel-alert-hint">通知级别为 10、5、1，与渠道返回币种一致；同一渠道仅在首次跨过每个级别时提醒，余额恢复后可再次提醒。</p></section>
+      <section class="settings-section"><div class="section-heading"><div><h2>渠道余额提醒</h2><span>渠道费用查询或扣费后，余额低于设定档位时向所有管理员邮箱发送通知。</span></div><el-switch v-model="mailForm.channelAlertEnabled" /></div><el-form label-position="top" class="settings-form"><el-form-item label="提醒档位（美元）"><el-input v-model="mailForm.channelBalanceThresholds" placeholder="10,5,1" /></el-form-item><p class="field-hint">使用逗号分隔，例如 10,5,1。同一渠道每个档位每天最多提醒一次；每日费用同步成功后会清除提醒标记。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>SMTP 服务配置</h2><span>密码只会加密保存，读取时不会返回原始内容。</span></div><Mail :size="19" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="SMTP 主机"><el-input v-model="mailForm.host" placeholder="smtp.example.com" /></el-form-item><el-form-item label="端口"><el-input-number v-model="mailForm.port" :min="1" :max="65535" controls-position="right" /></el-form-item></div><div class="form-grid"><el-form-item label="加密方式"><el-select v-model="mailForm.security"><el-option label="STARTTLS" value="starttls" /><el-option label="TLS" value="tls" /><el-option label="不加密" value="none" /></el-select></el-form-item><el-form-item label="用户名"><el-input v-model="mailForm.username" autocomplete="username" /></el-form-item></div><div class="form-grid"><el-form-item :label="mailForm.passwordConfigured ? '密码（留空不修改）' : '密码'"><el-input v-model="mailForm.password" type="password" show-password autocomplete="new-password" /></el-form-item><el-form-item label="发件人邮箱"><el-input v-model="mailForm.from" placeholder="noreply@example.com" /></el-form-item></div></el-form><div class="setting-switch smtp-test"><div><strong>发送测试邮件</strong><span>使用当前已保存的 SMTP 配置投递。</span></div><div class="mail-test-actions"><el-input v-model="testRecipient" type="email" placeholder="recipient@example.com" /><el-button type="primary" :icon="Send" :loading="testSending" :disabled="testSending" @click="sendTestMail">发送</el-button></div></div></section>
     </template>
 

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"math"
 	stdmail "net/mail"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -17,18 +19,21 @@ import (
 
 const mailSettingsKey = "mail_delivery"
 
+const defaultChannelBalanceThresholds = "10,5,1"
+
 type MailSettings struct {
-	Enabled             bool    `json:"enabled"`
-	ChannelAlertEnabled bool    `json:"channelAlertEnabled"`
-	Host                string  `json:"host"`
-	Port                int     `json:"port"`
-	Username            string  `json:"username"`
-	PasswordConfigured  bool    `json:"passwordConfigured"`
-	From                string  `json:"from"`
-	Security            string  `json:"security"`
-	Threshold           float64 `json:"threshold"`
-	SubjectTemplate     string  `json:"subjectTemplate"`
-	BodyTemplate        string  `json:"bodyTemplate"`
+	Enabled                  bool    `json:"enabled"`
+	ChannelAlertEnabled      bool    `json:"channelAlertEnabled"`
+	ChannelBalanceThresholds string  `json:"channelBalanceThresholds"`
+	Host                     string  `json:"host"`
+	Port                     int     `json:"port"`
+	Username                 string  `json:"username"`
+	PasswordConfigured       bool    `json:"passwordConfigured"`
+	From                     string  `json:"from"`
+	Security                 string  `json:"security"`
+	Threshold                float64 `json:"threshold"`
+	SubjectTemplate          string  `json:"subjectTemplate"`
+	BodyTemplate             string  `json:"bodyTemplate"`
 }
 
 type MailDeliverySettings struct {
@@ -37,22 +42,24 @@ type MailDeliverySettings struct {
 }
 
 type storedMailSettings struct {
-	Enabled             bool    `json:"enabled"`
-	ChannelAlertEnabled *bool   `json:"channelAlertEnabled"`
-	Host                string  `json:"host"`
-	Port                int     `json:"port"`
-	Username            string  `json:"username"`
-	PasswordCipher      string  `json:"passwordCipher"`
-	From                string  `json:"from"`
-	Security            string  `json:"security"`
-	Threshold           float64 `json:"threshold"`
-	SubjectTemplate     string  `json:"subjectTemplate"`
-	BodyTemplate        string  `json:"bodyTemplate"`
+	Enabled                  bool    `json:"enabled"`
+	ChannelAlertEnabled      *bool   `json:"channelAlertEnabled"`
+	ChannelBalanceThresholds string  `json:"channelBalanceThresholds"`
+	Host                     string  `json:"host"`
+	Port                     int     `json:"port"`
+	Username                 string  `json:"username"`
+	PasswordCipher           string  `json:"passwordCipher"`
+	From                     string  `json:"from"`
+	Security                 string  `json:"security"`
+	Threshold                float64 `json:"threshold"`
+	SubjectTemplate          string  `json:"subjectTemplate"`
+	BodyTemplate             string  `json:"bodyTemplate"`
 }
 
 func DefaultMailSettings() MailSettings {
 	return MailSettings{
-		Enabled: false, ChannelAlertEnabled: true, Port: 587, Security: "starttls", Threshold: 5,
+		Enabled: false, ChannelAlertEnabled: true, ChannelBalanceThresholds: defaultChannelBalanceThresholds,
+		Port: 587, Security: "starttls", Threshold: 5,
 		SubjectTemplate: "AiFerry 余额不足提醒",
 		BodyTemplate:    "您好，{nickname}：\n\n您的 AiFerry 余额为 ${balance}，已低于提醒阈值 ${threshold}。\n\n请及时充值以避免调用中断。",
 	}
@@ -148,8 +155,16 @@ func normalizeMailSettings(input adminapi.MailSettingsInput, current storedMailS
 	if input.ChannelAlertEnabled != nil {
 		channelAlertEnabled = *input.ChannelAlertEnabled
 	}
+	channelBalanceThresholds := current.channelBalanceThresholds()
+	if input.ChannelBalanceThresholds != nil {
+		channelBalanceThresholds = *input.ChannelBalanceThresholds
+	}
+	channelBalanceThresholds, err := NormalizeChannelBalanceThresholds(channelBalanceThresholds)
+	if err != nil {
+		return storedMailSettings{}, err
+	}
 	settings := storedMailSettings{
-		Enabled: input.Enabled, ChannelAlertEnabled: boolPointer(channelAlertEnabled),
+		Enabled: input.Enabled, ChannelAlertEnabled: boolPointer(channelAlertEnabled), ChannelBalanceThresholds: channelBalanceThresholds,
 		Host: strings.TrimSpace(input.Host), Port: input.Port, Username: strings.TrimSpace(input.Username),
 		PasswordCipher: current.PasswordCipher, From: strings.TrimSpace(input.From), Security: strings.TrimSpace(input.Security),
 		Threshold: input.Threshold, SubjectTemplate: strings.TrimSpace(input.SubjectTemplate), BodyTemplate: strings.TrimSpace(input.BodyTemplate),
@@ -189,7 +204,7 @@ func normalizeMailSettings(input adminapi.MailSettingsInput, current storedMailS
 
 func mailSettingsView(stored storedMailSettings) MailSettings {
 	return MailSettings{
-		Enabled: stored.Enabled, ChannelAlertEnabled: stored.channelAlertEnabled(),
+		Enabled: stored.Enabled, ChannelAlertEnabled: stored.channelAlertEnabled(), ChannelBalanceThresholds: stored.channelBalanceThresholds(),
 		Host: stored.Host, Port: stored.Port, Username: stored.Username, PasswordConfigured: stored.PasswordCipher != "",
 		From: stored.From, Security: stored.Security, Threshold: stored.Threshold,
 		SubjectTemplate: stored.SubjectTemplate, BodyTemplate: stored.BodyTemplate,
@@ -198,7 +213,7 @@ func mailSettingsView(stored storedMailSettings) MailSettings {
 
 func storedFromView(settings MailSettings) storedMailSettings {
 	return storedMailSettings{
-		Enabled: settings.Enabled, ChannelAlertEnabled: boolPointer(settings.ChannelAlertEnabled),
+		Enabled: settings.Enabled, ChannelAlertEnabled: boolPointer(settings.ChannelAlertEnabled), ChannelBalanceThresholds: settings.ChannelBalanceThresholds,
 		Host: settings.Host, Port: settings.Port, Username: settings.Username, From: settings.From,
 		Security: settings.Security, Threshold: settings.Threshold, SubjectTemplate: settings.SubjectTemplate,
 		BodyTemplate: settings.BodyTemplate,
@@ -210,6 +225,52 @@ func (s storedMailSettings) channelAlertEnabled() bool {
 		return s.Enabled
 	}
 	return *s.ChannelAlertEnabled
+}
+
+func (s storedMailSettings) channelBalanceThresholds() string {
+	normalized, err := NormalizeChannelBalanceThresholds(s.ChannelBalanceThresholds)
+	if err != nil {
+		return defaultChannelBalanceThresholds
+	}
+	return normalized
+}
+
+func NormalizeChannelBalanceThresholds(value string) (string, error) {
+	thresholds, err := ParseChannelBalanceThresholds(value)
+	if err != nil {
+		return "", err
+	}
+	values := make([]string, 0, len(thresholds))
+	for _, threshold := range thresholds {
+		values = append(values, ChannelBalanceThresholdText(threshold))
+	}
+	return strings.Join(values, ","), nil
+}
+
+func ParseChannelBalanceThresholds(value string) ([]float64, error) {
+	value = strings.ReplaceAll(strings.TrimSpace(value), "，", ",")
+	if value == "" {
+		return nil, gerror.New("渠道余额提醒档位不能为空，请使用逗号分隔的正数")
+	}
+	seen := make(map[float64]struct{})
+	thresholds := make([]float64, 0)
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		threshold, err := strconv.ParseFloat(item, 64)
+		if err != nil || math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold <= 0 || threshold > 1_000_000 {
+			return nil, gerror.New("渠道余额提醒档位必须是 0 到 1000000 之间的正数，并使用逗号分隔")
+		}
+		if _, exists := seen[threshold]; !exists {
+			seen[threshold] = struct{}{}
+			thresholds = append(thresholds, threshold)
+		}
+	}
+	sort.Slice(thresholds, func(i, j int) bool { return thresholds[i] > thresholds[j] })
+	return thresholds, nil
+}
+
+func ChannelBalanceThresholdText(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func boolPointer(value bool) *bool { return &value }

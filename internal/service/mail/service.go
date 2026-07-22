@@ -94,14 +94,16 @@ func (s *Service) notifyLowBalance(ctx context.Context, userID uint64) {
 	}
 }
 
-var channelBalanceThresholds = []float64{10, 5, 1}
-
 func (s *Service) notifyChannelLowBalance(ctx context.Context, channelID uint64, channelName string, remaining float64, currency string) {
 	settings, err := s.settings.MailDeliverySettings(ctx)
 	if err != nil || !settings.ChannelAlertEnabled {
 		return
 	}
-	for _, threshold := range channelBalanceThresholds {
+	thresholds, err := system.ParseChannelBalanceThresholds(settings.ChannelBalanceThresholds)
+	if err != nil {
+		return
+	}
+	for _, threshold := range thresholds {
 		key := channelBalanceReminderKey(channelID, threshold)
 		if remaining >= threshold {
 			_ = s.app.Redis.Del(ctx, key).Err()
@@ -121,13 +123,36 @@ func (s *Service) notifyChannelLowBalance(ctx context.Context, channelID uint64,
 	}
 }
 
+func (s *Service) ClearChannelLowBalanceReminders(ctx context.Context, channelID uint64) error {
+	if channelID == 0 {
+		return nil
+	}
+	settings, err := s.settings.MailDeliverySettings(ctx)
+	if err != nil {
+		return err
+	}
+	thresholds, err := system.ParseChannelBalanceThresholds(settings.ChannelBalanceThresholds)
+	if err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(thresholds))
+	for _, threshold := range thresholds {
+		keys = append(keys, channelBalanceReminderKey(channelID, threshold))
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return gerror.Wrap(s.app.Redis.Del(ctx, keys...).Err(), "clear channel low-balance reminders")
+}
+
 func sendChannelLowBalance(settings system.MailDeliverySettings, recipients []string, systemName string, channelID uint64, channelName string, remaining, threshold float64, currency string) bool {
 	currency = strings.ToUpper(strings.TrimSpace(currency))
 	if currency == "" {
 		currency = "USD"
 	}
-	subject := fmt.Sprintf("%s 渠道余额低于 %.0f %s：%s", systemName, threshold, currency, channelName)
-	body := fmt.Sprintf("渠道 %s（ID：%d）当前上游余额为 %.6f %s，已低于 %.0f %s。", channelName, channelID, remaining, currency, threshold, currency)
+	thresholdText := system.ChannelBalanceThresholdText(threshold)
+	subject := fmt.Sprintf("%s 渠道余额低于 %s %s：%s", systemName, thresholdText, currency, channelName)
+	body := fmt.Sprintf("渠道 %s（ID：%d）当前上游余额为 %.6f %s，已低于 %s %s。", channelName, channelID, remaining, currency, thresholdText, currency)
 	sent := false
 	for _, recipient := range recipients {
 		if err := send(settings, recipient, subject, body); err == nil {
@@ -214,7 +239,7 @@ func reminderKey(userID uint64, threshold float64) string {
 }
 
 func channelBalanceReminderKey(channelID uint64, threshold float64) string {
-	return fmt.Sprintf("%s%d:%.0f", channelBalancePrefix, channelID, threshold)
+	return fmt.Sprintf("%s%d:%s", channelBalancePrefix, channelID, system.ChannelBalanceThresholdText(threshold))
 }
 
 func validRecipient(value string) bool {

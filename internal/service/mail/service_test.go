@@ -53,3 +53,10 @@ func TestChannelBalanceReminderKey(t *testing.T) {
 		t.Fatalf("unexpected channel balance reminder key: %q", key)
 	}
 }
+
+func TestChannelBalanceReminderKeyPreservesDecimalThreshold(t *testing.T) {
+	key := channelBalanceReminderKey(42, 0.5)
+	if key != "aiferry:mail:channel-low-balance:42:0.5" {
+		t.Fatalf("unexpected channel balance reminder key: %q", key)
+	}
+}
