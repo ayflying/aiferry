@@ -253,8 +253,12 @@ func (c *Controller) deleteAPIKey(r *ghttp.Request) {
 }
 
 func (c *Controller) dashboard(r *ghttp.Request) {
-	days := r.GetQuery("days", 7).Int()
-	data, err := c.usage.Dashboard(r.Context(), days)
+	dateRange, err := c.usage.ParseDashboardRange(r.Context(), r.GetQuery("startAt").String(), r.GetQuery("endAt").String(), r.GetQuery("days", 7).Int())
+	if err != nil {
+		respond(r, nil, err)
+		return
+	}
+	data, err := c.usage.Dashboard(r.Context(), dateRange)
 	respond(r, data, err)
 }
 

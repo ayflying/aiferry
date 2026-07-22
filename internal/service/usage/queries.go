@@ -74,16 +74,13 @@ func parseLogTime(value string, location *time.Location) (time.Time, error) {
 	return time.ParseInLocation(logTimeLayout, value, location)
 }
 
-func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
-	if days <= 0 || days > 90 {
-		days = 7
-	}
+func (s *Service) Dashboard(ctx context.Context, dateRange DashboardRange) (Dashboard, error) {
 	location := s.timeLocation(ctx)
 	now := time.Now().In(location)
-	startLocal := startOfDay(now).AddDate(0, 0, -days+1)
-	start := startLocal.UTC()
 	var result Dashboard
-	base := dao.UsageLogs.Ctx(ctx).WhereGTE(dao.UsageLogs.Columns().CreatedAt, start)
+	base := dao.UsageLogs.Ctx(ctx).
+		WhereGTE(dao.UsageLogs.Columns().CreatedAt, dateRange.StartAt).
+		WhereLT(dao.UsageLogs.Columns().CreatedAt, dateRange.EndAt)
 	if err := base.Clone().Fields(`
 		COUNT(*) AS requests,
 		COALESCE(SUM(CASE WHEN http_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0) AS successes,
@@ -103,7 +100,9 @@ func (s *Service) Dashboard(ctx context.Context, days int) (Dashboard, error) {
 		Group(dao.UsageLogs.Columns().RequestedModel).OrderDesc("requests").Limit(8).Scan(&result.ByModel); err != nil {
 		return result, gerror.Wrap(err, "load model breakdown")
 	}
-	if err := dao.UsageLogs.Ctx(ctx).As("u").WhereGTE("u."+dao.UsageLogs.Columns().CreatedAt, start).
+	if err := dao.UsageLogs.Ctx(ctx).As("u").
+		WhereGTE("u."+dao.UsageLogs.Columns().CreatedAt, dateRange.StartAt).
+		WhereLT("u."+dao.UsageLogs.Columns().CreatedAt, dateRange.EndAt).
 		Fields(`COALESCE(c.name,'不可用渠道') AS name,COUNT(*) AS requests,COALESCE(SUM(u.total_tokens),0) AS total_tokens,COALESCE(SUM(u.estimated_cost),0) AS estimated_cost`).
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").Group("u.channel_id,c.name").OrderDesc("requests").Limit(8).Scan(&result.ByChannel); err != nil {
 		return result, gerror.Wrap(err, "load channel breakdown")

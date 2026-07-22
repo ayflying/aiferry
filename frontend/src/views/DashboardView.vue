@@ -10,15 +10,17 @@ import { apiGet } from '../api/client'
 import type { Dashboard } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
+import { dashboardPeriodQuery, type DashboardPeriod } from '../lib/dashboard-range'
 import { formatCost, formatNumber, successRate } from '../lib/format'
 import { isChannelRoutable } from '../lib/route-display'
+import DashboardPeriodControl from '../components/DashboardPeriodControl.vue'
 import RouteStrip from '../components/RouteStrip.vue'
 
 use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent])
 
 const store = useAppStore()
 const loading = ref(false)
-const days = ref(7)
+const period = ref<DashboardPeriod>({ kind: 'preset', days: 7 })
 const dashboard = ref<Dashboard>({
   summary: { requests: 0, successes: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, averageLatency: 0 },
   trend: [], byModel: [], byChannel: [], recentCost: { totalEstimatedCost: 0, models: [] },
@@ -38,7 +40,7 @@ async function load() {
   try {
     await Promise.all([
       store.loadChannels(),
-      apiGet<Dashboard>('/dashboard', { days: days.value }).then((value) => { dashboard.value = value }),
+      apiGet<Dashboard>('/dashboard', dashboardPeriodQuery(period.value)).then((value) => { dashboard.value = value }),
     ])
     await nextTick()
     renderChart()
@@ -116,7 +118,8 @@ function renderCostChart() {
 }
 
 function resize() { chart?.resize(); costChart?.resize() }
-watch(days, load)
+function showPeriodError(message: string) { showError(message, '时间范围无效') }
+watch(period, load)
 watch(costChartMode, renderCostChart)
 onMounted(() => { load(); window.addEventListener('resize', resize) })
 onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dispose(); costChart?.dispose() })
@@ -125,7 +128,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dis
 <template>
   <div v-loading="loading" class="page-stack">
     <div class="page-toolbar">
-      <el-segmented v-model="days" :options="[{ label: '7 天', value: 7 }, { label: '30 天', value: 30 }, { label: '90 天', value: 90 }]" />
+      <DashboardPeriodControl v-model="period" @invalid="showPeriodError" />
       <div class="spacer" />
       <el-button :icon="RefreshCw" @click="load">刷新</el-button>
     </div>
