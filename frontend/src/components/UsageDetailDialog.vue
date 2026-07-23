@@ -55,6 +55,12 @@ function itemUnitPrice(item: BillingItem) {
   return `${formatPreciseCost(item.unitPrice, currency)} / 1M Token`
 }
 
+function itemUsage(item: BillingItem) {
+  if (item.unit === 'per_request') return '1 次请求'
+  if (item.unit === 'settlement') return '结算差额'
+  return `${formatNumber(item.quantity)} Token`
+}
+
 function itemPriceSource(item: BillingItem) {
   const source = priceSourceLabels[item.priceSource || '']
   return source && item.priceSource !== item.type ? `采用${source}` : ''
@@ -66,7 +72,7 @@ function itemLabel(item: BillingItem) {
 
 function billingSummary() {
   const details = billingDetails.value
-  return ['总计', '', details ? formatPreciseCost(details.total, details.currency) : '']
+  return ['总计', '', '', details ? formatPreciseCost(details.total, details.currency) : '']
 }
 </script>
 
@@ -113,6 +119,7 @@ function billingSummary() {
           <el-table :data="billingItems" border size="small" table-layout="fixed" class="billing-items" show-summary :summary-method="billingSummary">
             <el-table-column label="计价项" min-width="132"><template #default="{ row }"><div class="billing-item-name"><strong>{{ itemLabel(row) }}</strong><small v-if="itemPriceSource(row)">{{ itemPriceSource(row) }}</small></div></template></el-table-column>
             <el-table-column label="模型单价" min-width="174"><template #default="{ row }"><span class="formula-value">{{ itemUnitPrice(row) }}</span></template></el-table-column>
+            <el-table-column label="用量" min-width="150"><template #default="{ row }"><span class="formula-value">{{ itemUsage(row) }}</span></template></el-table-column>
             <el-table-column label="预计费用" width="138" align="right"><template #default="{ row }"><strong class="cost-value">{{ formatPreciseCost(row.amount, billingDetails.currency) }}</strong></template></el-table-column>
           </el-table>
         </template>
