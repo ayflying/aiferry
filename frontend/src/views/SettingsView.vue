@@ -6,6 +6,7 @@ import { apiGet, apiPost, apiPut } from '../api/client'
 import type { BaseSettings, MailSettings, SensitiveWordSettings, SystemInformationSettings, SystemResilienceSettings } from '../api/types'
 import { showError, showSuccess } from '../lib/error'
 import { setDisplayTimeZone } from '../lib/format'
+import { timeZoneOptionGroups } from '../lib/time-zones'
 import { useSystemStore } from '../stores/system'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
@@ -24,15 +25,6 @@ const activeTab = computed<SettingsTab>(() => {
 })
 const info = ref<SystemInfo>()
 const basicForm = reactive({ timeZone: 'Asia/Shanghai' })
-const timeZoneOptions = [
-  { label: '中国标准时间 (UTC+08:00)', value: 'Asia/Shanghai' },
-  { label: '协调世界时 (UTC)', value: 'UTC' },
-  { label: '日本标准时间 (UTC+09:00)', value: 'Asia/Tokyo' },
-  { label: '欧洲中部时间', value: 'Europe/Berlin' },
-  { label: '英国时间', value: 'Europe/London' },
-  { label: '美国东部时间', value: 'America/New_York' },
-  { label: '美国西部时间', value: 'America/Los_Angeles' },
-]
 const system = useSystemStore()
 const informationForm = reactive<SystemInformationSettings>({
   systemName: 'AiFerry', serverUrl: '', logoUrl: '', footer: '', about: '', homeContent: '', userAgreement: '', privacyPolicy: '',
@@ -267,7 +259,7 @@ watch(activeTab, (tab) => {
     </template>
 
     <template v-else-if="activeTab === 'basic'">
-      <section class="settings-section"><div class="section-heading"><div><h2>系统时区</h2><span>历史调用时间固定按北京时间解释；切换后按所选时区重新展示历史记录和统计，不会修改历史发生时间。</span></div><Clock3 :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="时区"><el-select v-model="basicForm.timeZone" filterable style="max-width: 420px"><el-option v-for="item in timeZoneOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item><p class="field-hint">保存后当前页面立即刷新时间格式；其他已打开的页面刷新后应用新时区。</p></el-form></section>
+      <section class="settings-section"><div class="section-heading"><div><h2>系统时区</h2><span>历史调用时间固定按北京时间解释；切换后按所选时区重新展示历史记录和统计，不会修改历史发生时间。</span></div><Clock3 :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="时区"><el-select v-model="basicForm.timeZone" filterable style="max-width: 420px"><el-option-group v-for="group in timeZoneOptionGroups" :key="group.label" :label="group.label"><el-option v-for="item in group.options" :key="item.value" :label="item.label" :value="item.value" /></el-option-group></el-select></el-form-item><p class="field-hint">支持按城市或地区搜索。保存后当前页面立即刷新时间格式；其他已打开的页面刷新后应用新时区。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>应用身份</h2><span>系统名称和徽标会显示在登录页、导航和浏览器标题中。</span></div><Info :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="系统名称"><el-input v-model="informationForm.systemName" maxlength="96" show-word-limit /></el-form-item><p class="field-hint">在整个应用程序中显示的名称。</p><div class="form-grid"><el-form-item label="服务器地址"><el-input v-model="informationForm.serverUrl" placeholder="https://yourdomain.com" inputmode="url" /></el-form-item><el-form-item label="徽标 URL"><el-input v-model="informationForm.logoUrl" placeholder="https://example.com/logo.png" inputmode="url" /></el-form-item></div><p class="field-hint">服务器地址用于 Casdoor 回调和外部集成；徽标为空时使用内置图标。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>页面内容</h2><span>页脚按纯文本显示；其他内容支持 Markdown、HTML 或指定的完整 URL。</span></div></div><el-form label-position="top" class="settings-form"><el-form-item label="页脚"><el-input v-model="informationForm.footer" type="textarea" :rows="3" maxlength="4096" show-word-limit /></el-form-item><p class="field-hint">显示在页面底部的页脚文本。</p><el-form-item label="关于"><el-input v-model="informationForm.about" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">支持 Markdown 或 HTML；完整 HTTP(S) URL 会以受限页面嵌入。</p><el-form-item label="首页内容"><el-input v-model="informationForm.homeContent" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">显示在登录页下方，支持 Markdown。</p><el-form-item label="用户协议"><el-input v-model="informationForm.userAgreement" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">留空以不要求确认；可填写 Markdown、HTML 或完整 URL。</p><el-form-item label="隐私政策"><el-input v-model="informationForm.privacyPolicy" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">留空以不要求确认；可填写 Markdown、HTML 或完整 URL。</p></el-form></section>
     </template>
