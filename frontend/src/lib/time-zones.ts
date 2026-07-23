@@ -8,35 +8,47 @@ export type TimeZoneOptionGroup = {
   options: TimeZoneOption[]
 }
 
-export const timeZoneOptionGroups: TimeZoneOptionGroup[] = [
+export function formatTimeZoneUTCOffset(timeZone: string, date = new Date()): string {
+  const offset = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
+    .formatToParts(date)
+    .find((part) => part.type === 'timeZoneName')
+    ?.value
+  if (!offset || offset === 'GMT') return 'UTC+00:00'
+
+  const match = /^GMT([+-])(\d{1,2})(?::(\d{2}))?$/.exec(offset)
+  if (!match) return offset.replace('GMT', 'UTC')
+  return `UTC${match[1]}${match[2].padStart(2, '0')}:${match[3] ?? '00'}`
+}
+
+const rawTimeZoneOptionGroups: TimeZoneOptionGroup[] = [
   {
     label: '协调世界时',
     options: [
-      { label: '协调世界时 (UTC)', value: 'UTC' },
+      { label: '协调世界时', value: 'UTC' },
     ],
   },
   {
     label: '东亚、东南亚与南亚',
     options: [
-      { label: '中国标准时间 (UTC+08:00)', value: 'Asia/Shanghai' },
+      { label: '中国标准时间', value: 'Asia/Shanghai' },
       { label: '香港时间', value: 'Asia/Hong_Kong' },
       { label: '台北时间', value: 'Asia/Taipei' },
-      { label: '日本标准时间 (UTC+09:00)', value: 'Asia/Tokyo' },
+      { label: '日本标准时间', value: 'Asia/Tokyo' },
       { label: '韩国标准时间 (首尔)', value: 'Asia/Seoul' },
       { label: '乌兰巴托时间', value: 'Asia/Ulaanbaatar' },
       { label: '新加坡时间', value: 'Asia/Singapore' },
       { label: '吉隆坡时间', value: 'Asia/Kuala_Lumpur' },
       { label: '曼谷时间', value: 'Asia/Bangkok' },
-      { label: '雅加达时间 (UTC+07:00)', value: 'Asia/Jakarta' },
-      { label: '望加锡时间 (UTC+08:00)', value: 'Asia/Makassar' },
-      { label: '查亚普拉时间 (UTC+09:00)', value: 'Asia/Jayapura' },
+      { label: '雅加达时间', value: 'Asia/Jakarta' },
+      { label: '望加锡时间', value: 'Asia/Makassar' },
+      { label: '查亚普拉时间', value: 'Asia/Jayapura' },
       { label: '马尼拉时间', value: 'Asia/Manila' },
       { label: '胡志明市时间', value: 'Asia/Ho_Chi_Minh' },
       { label: '金边时间', value: 'Asia/Phnom_Penh' },
-      { label: '仰光时间 (UTC+06:30)', value: 'Asia/Yangon' },
+      { label: '仰光时间', value: 'Asia/Yangon' },
       { label: '达卡时间', value: 'Asia/Dhaka' },
-      { label: '印度标准时间 (加尔各答，UTC+05:30)', value: 'Asia/Kolkata' },
-      { label: '加德满都时间 (UTC+05:45)', value: 'Asia/Kathmandu' },
+      { label: '印度标准时间 (加尔各答)', value: 'Asia/Kolkata' },
+      { label: '加德满都时间', value: 'Asia/Kathmandu' },
       { label: '科伦坡时间', value: 'Asia/Colombo' },
       { label: '卡拉奇时间', value: 'Asia/Karachi' },
     ],
@@ -119,7 +131,7 @@ export const timeZoneOptionGroups: TimeZoneOptionGroup[] = [
     label: '大洋洲',
     options: [
       { label: '珀斯时间', value: 'Australia/Perth' },
-      { label: '达尔文时间 (UTC+09:30)', value: 'Australia/Darwin' },
+      { label: '达尔文时间', value: 'Australia/Darwin' },
       { label: '阿德莱德时间', value: 'Australia/Adelaide' },
       { label: '布里斯班时间', value: 'Australia/Brisbane' },
       { label: '悉尼时间', value: 'Australia/Sydney' },
@@ -132,3 +144,11 @@ export const timeZoneOptionGroups: TimeZoneOptionGroup[] = [
     ],
   },
 ]
+
+export const timeZoneOptionGroups: TimeZoneOptionGroup[] = rawTimeZoneOptionGroups.map((group) => ({
+  ...group,
+  options: group.options.map((option) => ({
+    ...option,
+    label: `${option.label} (${formatTimeZoneUTCOffset(option.value)})`,
+  })),
+}))
