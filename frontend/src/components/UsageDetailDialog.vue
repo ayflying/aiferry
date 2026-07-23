@@ -55,12 +55,6 @@ function itemUnitPrice(item: BillingItem) {
   return `${formatPreciseCost(item.unitPrice, currency)} / 1M Token`
 }
 
-function itemUsage(item: BillingItem) {
-  if (item.unit === 'per_request') return '1 次请求'
-  if (item.unit === 'settlement') return '结算差额'
-  return `${formatNumber(item.quantity)} Token`
-}
-
 function itemPriceSource(item: BillingItem) {
   const source = priceSourceLabels[item.priceSource || '']
   return source && item.priceSource !== item.type ? `采用${source}` : ''
@@ -68,6 +62,11 @@ function itemPriceSource(item: BillingItem) {
 
 function itemLabel(item: BillingItem) {
   return itemLabels[item.type] || item.type
+}
+
+function billingSummary() {
+  const details = billingDetails.value
+  return ['总计', '', details ? formatPreciseCost(details.total, details.currency) : '']
 }
 </script>
 
@@ -110,26 +109,14 @@ function itemLabel(item: BillingItem) {
             <el-descriptions-item v-if="billingDetails.rule" label="命中规则">{{ billingDetails.rule.name || `规则 #${billingDetails.rule.id}` }} · P{{ billingDetails.rule.priority }} · {{ billingDetails.rule.source === 'sync' ? '上游同步' : '人工规则' }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="规则条件"><span class="detail-value mono">{{ billingDetails.rule.conditions }}</span></el-descriptions-item>
             <el-descriptions-item label="模型价格小计"><strong class="cost-value">{{ formatPreciseCost(billingDetails.subtotal, billingDetails.currency) }}</strong></el-descriptions-item>
-            <el-descriptions-item label="按价预计费用"><strong class="cost-value">{{ formatPreciseCost(billingDetails.total, billingDetails.currency) }}</strong></el-descriptions-item>
           </el-descriptions>
-          <el-table :data="billingItems" border size="small" table-layout="fixed" class="billing-items">
+          <el-table :data="billingItems" border size="small" table-layout="fixed" class="billing-items" show-summary :summary-method="billingSummary">
             <el-table-column label="计价项" min-width="132"><template #default="{ row }"><div class="billing-item-name"><strong>{{ itemLabel(row) }}</strong><small v-if="itemPriceSource(row)">{{ itemPriceSource(row) }}</small></div></template></el-table-column>
             <el-table-column label="模型单价" min-width="174"><template #default="{ row }"><span class="formula-value">{{ itemUnitPrice(row) }}</span></template></el-table-column>
-            <el-table-column label="用量" min-width="150"><template #default="{ row }"><span class="formula-value">{{ itemUsage(row) }}</span></template></el-table-column>
             <el-table-column label="预计费用" width="138" align="right"><template #default="{ row }"><strong class="cost-value">{{ formatPreciseCost(row.amount, billingDetails.currency) }}</strong></template></el-table-column>
           </el-table>
         </template>
         <p v-else class="empty-billing">该历史记录未保存模型价格快照，无法展示当次调用的模型价格。</p>
-      </section>
-
-      <section class="detail-section">
-        <h3>Token 使用</h3>
-        <div class="token-metrics">
-          <div><span>输入</span><strong>{{ formatNumber(usage.inputTokens) }}</strong></div>
-          <div><span>缓存读取</span><strong>{{ formatNumber(usage.cachedInputTokens) }}</strong></div>
-          <div><span>输出</span><strong>{{ formatNumber(usage.outputTokens) }}</strong></div>
-          <div><span>总计</span><strong>{{ formatNumber(usage.totalTokens) }}</strong></div>
-        </div>
       </section>
 
       <section class="detail-section result-section">
@@ -152,20 +139,18 @@ function itemLabel(item: BillingItem) {
 .detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; border: 1px solid #dce2e7; }
 .detail-summary div { display: flex; min-height: 66px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 14px; border-right: 1px solid #dce2e7; }
 .detail-summary div:last-child { border-right: 0; }
-.detail-summary span, .result-meta, .token-metrics span, .billing-item-name small { color: #66717d; font-size: 11px; }
-.detail-summary strong, .token-metrics strong, .cost-value, .formula-value { color: #15202b; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.detail-summary span, .result-meta, .billing-item-name small { color: #66717d; font-size: 11px; }
+.detail-summary strong, .cost-value, .formula-value { color: #15202b; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
 .detail-section { padding: 18px 0; border-top: 1px solid #dce2e7; }
 .detail-section h3 { margin: 0 0 12px; color: #15202b; font-size: 13px; }
 .mono { font-family: 'JetBrains Mono', monospace; }
 .detail-value { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 .billing-summary { margin-bottom: 12px; }
 .billing-items { width: 100%; }
+.billing-items :deep(.el-table__footer-wrapper td:last-child) { color: #15202b; font-family: 'JetBrains Mono', monospace; font-weight: 700; }
 .billing-item-name { display: flex; flex-direction: column; gap: 3px; }
 .formula-value { display: inline-block; color: #40505f; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .empty-billing { margin: 0; color: #66717d; font-size: 13px; }
-.token-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #dce2e7; }
-.token-metrics div { display: flex; min-height: 64px; flex-direction: column; justify-content: center; gap: 5px; padding: 0 12px; border-right: 1px solid #dce2e7; }
-.token-metrics div:last-child { border-right: 0; }
 .result-section { padding-bottom: 0; }
 .result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }
 .failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -174,13 +159,5 @@ function itemLabel(item: BillingItem) {
   .detail-summary { grid-template-columns: 1fr; }
   .detail-summary div { min-height: 58px; border-right: 0; border-bottom: 1px solid #dce2e7; }
   .detail-summary div:last-child { border-bottom: 0; }
-  .token-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .token-metrics div:nth-child(2n) { border-right: 0; }
-  .token-metrics div:nth-child(-n + 2) { border-bottom: 1px solid #dce2e7; }
-}
-@media (max-width: 480px) {
-  .token-metrics { grid-template-columns: 1fr; }
-  .token-metrics div { border-right: 0; border-bottom: 1px solid #dce2e7; }
-  .token-metrics div:last-child { border-bottom: 0; }
 }
 </style>
