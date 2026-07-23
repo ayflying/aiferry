@@ -38,15 +38,17 @@ docker push "$image:$version"
 docker push "$image:latest"
 
 install -d "$deploy_dir"
-cp docker-compose.yml "$deploy_dir/docker-compose.yml"
+compose_file="$deploy_dir/docker-compose.yml"
+cp docker-compose.yml "$compose_file"
+sed -i "s|\${AIFERRY_IMAGE_TAG:?set AIFERRY_IMAGE_TAG before deploying}|$version|" "$compose_file"
 
 echo "Pulling the published image through Docker Compose"
-docker compose --project-name "$compose_project" -f "$deploy_dir/docker-compose.yml" config --quiet
-docker compose --project-name "$compose_project" -f "$deploy_dir/docker-compose.yml" pull aiferry
-docker compose --project-name "$compose_project" -f "$deploy_dir/docker-compose.yml" up -d --no-deps --force-recreate aiferry
+docker compose --project-name "$compose_project" -f "$compose_file" config --quiet
+docker compose --project-name "$compose_project" -f "$compose_file" pull aiferry
+docker compose --project-name "$compose_project" -f "$compose_file" up -d --no-deps --force-recreate aiferry
 
 for attempt in $(seq 1 24); do
-  container_id="$(docker compose --project-name "$compose_project" -f "$deploy_dir/docker-compose.yml" ps -q aiferry)"
+  container_id="$(docker compose --project-name "$compose_project" -f "$compose_file" ps -q aiferry)"
   if [ -n "$container_id" ]; then
     health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")"
     if [ "$health" = "healthy" ]; then

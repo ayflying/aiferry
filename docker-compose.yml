@@ -1,6 +1,6 @@
 services:
   aiferry:
-    image: ghcr.io/ayflying/aiferry:latest
+    image: ghcr.io/ayflying/aiferry:${AIFERRY_IMAGE_TAG:?set AIFERRY_IMAGE_TAG before deploying}
     env_file:
       - .env
     environment:
