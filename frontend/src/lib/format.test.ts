@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCost, formatLatency, formatNumber, formatReasoningEffort, formatTime, formatTokenSpeed, setDisplayTimeZone, successRate } from './format'
+import { formatCost, formatLatency, formatNumber, formatReasoningEffort, formatTime, formatTokenSpeed, formatUsageDuration, setDisplayTimeZone, successRate } from './format'
 
 describe('format helpers', () => {
   it('does not report missing prices as zero', () => {
@@ -42,5 +42,12 @@ describe('format helpers', () => {
     expect(formatTime('2026-07-21T02:22:47Z')).toBe('2026-07-21 02:22:47')
     setDisplayTimeZone('Asia/Shanghai')
     expect(formatTime('2026-07-21T02:22:47Z')).toBe('2026-07-21 10:22:47')
+  })
+
+  it('formats long usage durations in minutes', () => {
+    expect(formatUsageDuration()).toBe('—')
+    expect(formatUsageDuration(60_000)).toBe('60.0s')
+    expect(formatUsageDuration(60_001)).toBe('1.0 分钟')
+    expect(formatUsageDuration(90_000)).toBe('1.5 分钟')
   })
 })
