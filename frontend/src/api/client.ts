@@ -1,4 +1,4 @@
-import axios, { type AxiosResponse } from 'axios'
+import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
 import type { ApiEnvelope } from './types'
 
 const client = axios.create({
@@ -22,8 +22,8 @@ export async function apiGet<T>(url: string, params?: Record<string, unknown>): 
   return unwrap(client.get<ApiEnvelope<T>>(url, { params }))
 }
 
-export async function apiPost<T>(url: string, data?: unknown): Promise<T> {
-  return unwrap(client.post<ApiEnvelope<T>>(url, data))
+export async function apiPost<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  return unwrap(client.post<ApiEnvelope<T>>(url, data, config))
 }
 
 export async function apiPut<T>(url: string, data?: unknown): Promise<T> {

@@ -30,6 +30,7 @@ const keyword = ref('')
 const selectedModelID = ref<number>()
 const page = ref(1)
 const pageSize = ref(30)
+const modelTestTimeout = 120_000
 
 const endpointOptions = [
   { label: '自动检测（默认）', value: 'auto' },
@@ -92,8 +93,9 @@ function messageOf(model: ChannelModel) {
   if (isTesting(model)) return '测试中...'
   const result = latestResults.value[model.id]
   const message = result?.message || model.lastTestError || ''
-  if (!result?.httpStatus) return message
-  return `HTTP ${result.httpStatus} · ${message}`
+  const formattedMessage = formatTestMessage(message)
+  if (!result?.httpStatus) return formattedMessage
+  return `HTTP ${result.httpStatus} · ${formattedMessage}`
 }
 
 function endpointOf(model: ChannelModel) {
@@ -126,7 +128,7 @@ async function runTest(model: ChannelModel, quiet = false) {
       modelId: model.id,
       endpoint: endpoint.value,
       stream: stream.value,
-    })
+    }, { timeout: modelTestTimeout })
     latestResults.value = { ...latestResults.value, [model.id]: result }
     models.value = models.value.map((item) => item.id === model.id ? {
       ...item,
@@ -141,6 +143,7 @@ async function runTest(model: ChannelModel, quiet = false) {
       emit('changed')
     }
   } catch (error) {
+    const message = testRequestFailureMessage(error)
     const failedEndpoint = endpoint.value === 'auto' ? 'chat' : endpoint.value
     latestResults.value = {
       ...latestResults.value,
@@ -153,10 +156,10 @@ async function runTest(model: ChannelModel, quiet = false) {
         httpStatus: 0,
         inputTokens: 0,
         outputTokens: 0,
-        message: error instanceof Error ? error.message : '测试请求失败',
+        message,
       },
     }
-    if (!quiet) showError(error, `${model.publicName} 测试失败`)
+    if (!quiet) showError(message, `${model.publicName} 测试失败`)
   } finally {
     finishTesting(model)
   }
@@ -196,7 +199,22 @@ async function testAll() {
 
 function testFailureMessage(result: ModelTestResult) {
   const status = result.httpStatus ? `HTTP ${result.httpStatus}` : '未收到 HTTP 响应'
-  return `${status} · ${result.endpoint} · ${result.message || '上游未通过测试'}`
+  return `${status} · ${result.endpoint} · ${formatTestMessage(result.message)}`
+}
+
+function testRequestFailureMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '测试请求失败'
+  if (message.toLowerCase().includes('timeout') && message.toLowerCase().includes('exceeded')) {
+    return '模型测试在 120 秒内未获得渠道响应，请检查上游服务、网络连接或图像生成队列后重试'
+  }
+  return formatTestMessage(message)
+}
+
+function formatTestMessage(message: string) {
+  if (message.toLowerCase().includes('image generation is not enabled for this group')) {
+    return '上游用户组未开通图像生成功能，请在渠道侧开通图像生成权限后重试'
+  }
+  return message || '上游未通过测试'
 }
 
 async function deleteFailedModels() {
