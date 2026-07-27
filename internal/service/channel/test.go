@@ -275,12 +275,14 @@ func (s *Service) saveTestResult(ctx context.Context, channelID, modelID uint64,
 		LastTestError:     message,
 		LastTestAt:        time.Now(),
 	}).Update()
-	_, _ = dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().Id, channelID).Data(do.Channels{
+	if _, err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().Id, channelID).Data(do.Channels{
 		LastTestStatus:    status,
 		LastTestLatencyMs: result.LatencyMs,
 		LastTestError:     message,
 		LastTestAt:        time.Now(),
-	}).Update()
+	}).Update(); err == nil {
+		s.InvalidateListCache(ctx)
+	}
 }
 
 func testTokenValue(value *uint64) uint64 {
