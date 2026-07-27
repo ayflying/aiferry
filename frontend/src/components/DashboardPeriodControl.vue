@@ -22,6 +22,7 @@ const customDates = ref<DateRange>()
 const presetOptions = [
   { label: '今天', value: dashboardQuickPeriods[0] },
   { label: '昨天', value: dashboardQuickPeriods[1] },
+  { label: '24 小时', value: dashboardQuickPeriods[2] },
   ...dashboardPresetDays.map((days) => ({ label: `${days} 天`, value: days })),
 ]
 const selectedPreset = computed(() => props.modelValue.kind === 'quick' ? props.modelValue.value : props.modelValue.kind === 'preset' ? props.modelValue.days : undefined)
@@ -35,7 +36,7 @@ watch(() => props.modelValue, (period) => {
 
 function selectPreset(value: number | string) {
   customOpen.value = false
-  if (value === 'today' || value === 'yesterday') {
+  if (value === 'today' || value === 'yesterday' || value === 'last24Hours') {
     emit('update:modelValue', { kind: 'quick', value })
     return
   }

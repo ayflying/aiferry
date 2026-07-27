@@ -1,7 +1,7 @@
 import dayjs from 'dayjs'
 
 export const dashboardPresetDays = [7, 30, 90] as const
-export const dashboardQuickPeriods = ['today', 'yesterday'] as const
+export const dashboardQuickPeriods = ['today', 'yesterday', 'last24Hours'] as const
 export const maxDashboardRangeDays = 90
 
 export type DashboardPeriod =
@@ -11,6 +11,7 @@ export type DashboardPeriod =
 
 export function dashboardPeriodQuery(period: DashboardPeriod, now = dayjs()): Record<string, string | number> {
   if (period.kind === 'preset') return { days: period.days }
+  if (period.kind === 'quick' && period.value === 'last24Hours') return { hours: 24 }
   const [startAt, endAt] = dashboardDatesForPeriod(period, now)
   return { startAt, endAt }
 }
@@ -19,6 +20,7 @@ export function dashboardDatesForPeriod(period: DashboardPeriod, now = dayjs()):
   if (period.kind === 'custom') return [period.startAt, period.endAt]
   const end = now.startOf('day')
   if (period.kind === 'quick') {
+    if (period.value === 'last24Hours') return [end.format('YYYY-MM-DD'), end.format('YYYY-MM-DD')]
     const date = end.subtract(period.value === 'yesterday' ? 1 : 0, 'day').format('YYYY-MM-DD')
     return [date, date]
   }

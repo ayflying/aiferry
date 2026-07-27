@@ -8,7 +8,7 @@ import (
 func TestParseDashboardRangeUsesPresetDays(t *testing.T) {
 	location := time.FixedZone("CST", 8*60*60)
 	now := time.Date(2026, time.July, 20, 15, 30, 0, 0, location)
-	dateRange, err := parseDashboardRange(now, "", "", 30)
+	dateRange, err := parseDashboardRange(now, "", "", 30, 0)
 	if err != nil {
 		t.Fatalf("parseDashboardRange() error = %v", err)
 	}
@@ -23,7 +23,7 @@ func TestParseDashboardRangeUsesPresetDays(t *testing.T) {
 func TestParseDashboardRangeAcceptsCompleteCustomDays(t *testing.T) {
 	location := time.FixedZone("CST", 8*60*60)
 	now := time.Date(2026, time.July, 20, 15, 30, 0, 0, location)
-	dateRange, err := parseDashboardRange(now, "2026-07-01", "2026-07-20", 7)
+	dateRange, err := parseDashboardRange(now, "2026-07-01", "2026-07-20", 7, 0)
 	if err != nil {
 		t.Fatalf("parseDashboardRange() error = %v", err)
 	}
@@ -37,10 +37,25 @@ func TestParseDashboardRangeAcceptsCompleteCustomDays(t *testing.T) {
 
 func TestParseDashboardRangeRejectsIncompleteOrOversizedCustomRange(t *testing.T) {
 	now := time.Date(2026, time.July, 20, 15, 30, 0, 0, time.Local)
-	if _, err := parseDashboardRange(now, "2026-07-01", "", 7); err == nil {
+	if _, err := parseDashboardRange(now, "2026-07-01", "", 7, 0); err == nil {
 		t.Fatal("expected incomplete range to be rejected")
 	}
-	if _, err := parseDashboardRange(now, "2026-04-21", "2026-07-20", 7); err == nil {
+	if _, err := parseDashboardRange(now, "2026-04-21", "2026-07-20", 7, 0); err == nil {
 		t.Fatal("expected range longer than 90 days to be rejected")
+	}
+}
+
+func TestParseDashboardRangeUsesRolling24Hours(t *testing.T) {
+	location := time.FixedZone("CST", 8*60*60)
+	now := time.Date(2026, time.July, 20, 15, 30, 0, 0, location)
+	dateRange, err := parseDashboardRange(now, "", "", 7, 24)
+	if err != nil {
+		t.Fatalf("parseDashboardRange() error = %v", err)
+	}
+	if got, want := dateRange.StartAt.In(location), time.Date(2026, time.July, 19, 15, 30, 0, 0, location); !got.Equal(want) {
+		t.Fatalf("start = %s, want %s", got, want)
+	}
+	if got, want := dateRange.EndAt.In(location), now; !got.Equal(want) {
+		t.Fatalf("end = %s, want %s", got, want)
 	}
 }

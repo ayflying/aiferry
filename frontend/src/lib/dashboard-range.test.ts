@@ -13,6 +13,10 @@ describe('dashboard date range', () => {
     expect(dashboardPeriodQuery({ kind: 'quick', value: 'yesterday' }, now)).toEqual({ startAt: '2026-07-19', endAt: '2026-07-19' })
   })
 
+  it('serializes the rolling 24-hour shortcut separately from calendar dates', () => {
+    expect(dashboardPeriodQuery({ kind: 'quick', value: 'last24Hours' })).toEqual({ hours: 24 })
+  })
+
   it('serializes custom ranges without a days parameter', () => {
     const period = customDashboardPeriod(['2026-07-01', '2026-07-20'])
     expect(period).toEqual({ kind: 'custom', startAt: '2026-07-01', endAt: '2026-07-20' })
