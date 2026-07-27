@@ -16,8 +16,9 @@ const (
 	costBucketDay  costBucketUnit = "day"
 	costBucketWeek costBucketUnit = "week"
 
-	hourBucketLayout = "2006-01-02 15:00:00"
-	dayBucketLayout  = "2006-01-02"
+	maxDailyCostDistributionDays = 31
+	hourBucketLayout             = "2006-01-02 15:00:00"
+	dayBucketLayout              = "2006-01-02"
 )
 
 func (s *Service) costDistribution(ctx context.Context, dateRange DashboardRange, now time.Time, location *time.Location) (RecentCostDistribution, error) {
@@ -109,7 +110,7 @@ func costDistributionBucketUnit(start, end time.Time) costBucketUnit {
 	if end.Sub(start) <= 48*time.Hour {
 		return costBucketHour
 	}
-	if end.Sub(start) <= 14*24*time.Hour {
+	if end.Sub(start) <= maxDailyCostDistributionDays*24*time.Hour {
 		return costBucketDay
 	}
 	return costBucketWeek
