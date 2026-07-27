@@ -43,10 +43,7 @@ func (s *Service) TestModel(ctx context.Context, input adminapi.ModelTestInput, 
 	if model.Id == 0 {
 		return TestResult{}, gerror.New("model not found")
 	}
-	if userID != usage.SystemUserID {
-		if !s.prices.IsPriced(model.PublicName) {
-			return TestResult{}, gerror.New("当前模型未配置可用价格，无法测试计费")
-		}
+	if userID != usage.SystemUserID && s.prices.IsPriced(model.PublicName) {
 		if err := s.users.CheckBalance(ctx, userID); err != nil {
 			return TestResult{}, err
 		}
@@ -148,9 +145,7 @@ func (s *Service) recordTestUsage(ctx context.Context, userID uint64, channel en
 	recordMessage := result.Message
 	var chargeErr error
 	if result.Success {
-		if cost == nil && userID != usage.SystemUserID {
-			chargeErr = gerror.New("上游响应未返回可计费的用量信息")
-		} else if cost != nil {
+		if cost != nil {
 			if applyErr := s.ApplyCredentialUsageCost(ctx, channel.Id, credentialID, *cost); applyErr != nil {
 				g.Log().Warningf(ctx, "apply channel %d test usage cost: %v", channel.Id, applyErr)
 			}
