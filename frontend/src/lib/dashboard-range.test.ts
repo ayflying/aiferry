@@ -7,6 +7,12 @@ describe('dashboard date range', () => {
     expect(dashboardDatesForPeriod({ kind: 'preset', days: 7 }, dayjs('2026-07-20T15:30:00+08:00'))).toEqual(['2026-07-14', '2026-07-20'])
   })
 
+  it('converts today and yesterday into complete single-day ranges', () => {
+    const now = dayjs('2026-07-20T15:30:00+08:00')
+    expect(dashboardDatesForPeriod({ kind: 'quick', value: 'today' }, now)).toEqual(['2026-07-20', '2026-07-20'])
+    expect(dashboardPeriodQuery({ kind: 'quick', value: 'yesterday' }, now)).toEqual({ startAt: '2026-07-19', endAt: '2026-07-19' })
+  })
+
   it('serializes custom ranges without a days parameter', () => {
     const period = customDashboardPeriod(['2026-07-01', '2026-07-20'])
     expect(period).toEqual({ kind: 'custom', startAt: '2026-07-01', endAt: '2026-07-20' })

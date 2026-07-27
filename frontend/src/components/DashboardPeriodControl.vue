@@ -5,6 +5,7 @@ import {
   customDashboardPeriod,
   dashboardDatesForPeriod,
   dashboardPresetDays,
+  dashboardQuickPeriods,
   type DashboardPeriod,
 } from '../lib/dashboard-range'
 
@@ -18,8 +19,12 @@ const emit = defineEmits<{
 
 const customOpen = ref(false)
 const customDates = ref<DateRange>()
-const presetOptions = dashboardPresetDays.map((days) => ({ label: `${days} 天`, value: days }))
-const selectedPreset = computed(() => props.modelValue.kind === 'preset' ? props.modelValue.days : undefined)
+const presetOptions = [
+  { label: '今天', value: dashboardQuickPeriods[0] },
+  { label: '昨天', value: dashboardQuickPeriods[1] },
+  ...dashboardPresetDays.map((days) => ({ label: `${days} 天`, value: days })),
+]
+const selectedPreset = computed(() => props.modelValue.kind === 'quick' ? props.modelValue.value : props.modelValue.kind === 'preset' ? props.modelValue.days : undefined)
 
 watch(() => props.modelValue, (period) => {
   if (period.kind === 'custom') {
@@ -28,9 +33,13 @@ watch(() => props.modelValue, (period) => {
   }
 }, { immediate: true })
 
-function selectPreset(days: number) {
+function selectPreset(value: number | string) {
   customOpen.value = false
-  emit('update:modelValue', { kind: 'preset', days: days as typeof dashboardPresetDays[number] })
+  if (value === 'today' || value === 'yesterday') {
+    emit('update:modelValue', { kind: 'quick', value })
+    return
+  }
+  emit('update:modelValue', { kind: 'preset', days: value as typeof dashboardPresetDays[number] })
 }
 
 function openCustom() {
@@ -55,7 +64,7 @@ function disableFutureDate(value: Date) {
 
 <template>
   <div class="dashboard-period-control">
-    <el-segmented :model-value="selectedPreset" :options="presetOptions" aria-label="预设时间范围" @change="selectPreset(Number($event))" />
+    <el-segmented :model-value="selectedPreset" :options="presetOptions" aria-label="预设时间范围" @change="selectPreset($event)" />
     <el-button :type="customOpen ? 'primary' : 'default'" :icon="CalendarRange" @click="openCustom">自定义</el-button>
     <el-date-picker
       v-if="customOpen"
