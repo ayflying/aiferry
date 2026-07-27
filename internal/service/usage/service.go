@@ -90,18 +90,19 @@ type Breakdown struct {
 	EstimatedCost *float64 `json:"estimatedCost" orm:"estimated_cost"`
 }
 
-type HourlyCostPoint struct {
+type CostDistributionPoint struct {
 	Bucket        string  `json:"bucket" orm:"bucket"`
 	EstimatedCost float64 `json:"estimatedCost" orm:"estimated_cost"`
 }
 
 type RecentCostModel struct {
-	Name   string            `json:"name"`
-	Points []HourlyCostPoint `json:"points"`
+	Name   string                  `json:"name"`
+	Points []CostDistributionPoint `json:"points"`
 }
 
 type RecentCostDistribution struct {
 	TotalEstimatedCost float64           `json:"totalEstimatedCost"`
+	BucketUnit         string            `json:"bucketUnit"`
 	Models             []RecentCostModel `json:"models"`
 }
 

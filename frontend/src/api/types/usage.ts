@@ -23,18 +23,19 @@ export interface Breakdown {
   estimatedCost?: number
 }
 
-export interface HourlyCostPoint {
+export interface CostDistributionPoint {
   bucket: string
   estimatedCost: number
 }
 
 export interface RecentCostModel {
   name: string
-  points: HourlyCostPoint[]
+  points: CostDistributionPoint[]
 }
 
 export interface RecentCostDistribution {
   totalEstimatedCost: number
+  bucketUnit: 'hour' | 'day' | 'week'
   models: RecentCostModel[]
 }
 

@@ -20,10 +20,10 @@ use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, Toolti
 
 const store = useAppStore()
 const loading = ref(false)
-const period = ref<DashboardPeriod>({ kind: 'preset', days: 7 })
+const period = ref<DashboardPeriod>({ kind: 'quick', value: 'last24Hours' })
 const dashboard = ref<Dashboard>({
   summary: { requests: 0, successes: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, averageLatency: 0 },
-  trend: [], byModel: [], byChannel: [], recentCost: { totalEstimatedCost: 0, models: [] },
+  trend: [], byModel: [], byChannel: [], recentCost: { totalEstimatedCost: 0, bucketUnit: 'hour', models: [] },
 })
 const chartElement = ref<HTMLDivElement>()
 const costChartElement = ref<HTMLDivElement>()
@@ -34,6 +34,11 @@ let costChart: EChartsType | undefined
 
 const success = computed(() => successRate(dashboard.value.summary.requests, dashboard.value.summary.successes))
 const availableChannelCount = computed(() => store.channels.filter(isChannelRoutable).length)
+const costBucketLabel = computed(() => ({
+  hour: '按小时聚合',
+  day: '按天聚合',
+  week: '每 7 天聚合',
+}[dashboard.value.recentCost.bucketUnit]))
 
 async function load() {
   loading.value = true
@@ -74,10 +79,16 @@ function renderChart() {
 }
 
 function renderCostChart() {
-  if (!costChartElement.value || !dashboard.value.recentCost.models.length) return
+  if (!dashboard.value.recentCost.models.length) {
+    costChart?.dispose()
+    costChart = undefined
+    return
+  }
+  if (!costChartElement.value) return
   costChart ||= init(costChartElement.value)
   const models = dashboard.value.recentCost.models
-  const buckets = models[0]?.points.map((point) => point.bucket.slice(5, 16)) || []
+  const bucketUnit = dashboard.value.recentCost.bucketUnit
+  const buckets = models[0]?.points.map((point) => formatCostBucket(point.bucket, bucketUnit)) || []
   const area = costChartMode.value === 'area'
   costChart.setOption({
     animationDuration: 450,
@@ -92,7 +103,7 @@ function renderCostChart() {
       type: 'category',
       data: buckets,
       axisLine: { lineStyle: { color: '#dce2e7' } },
-      axisLabel: { color: '#7b8792', hideOverlap: true, interval: 2 },
+      axisLabel: { color: '#7b8792', hideOverlap: true, interval: bucketUnit === 'hour' ? 2 : 'auto' },
       axisTick: { show: false },
     },
     yAxis: {
@@ -115,6 +126,10 @@ function renderCostChart() {
       emphasis: { focus: 'series' },
     })),
   }, true)
+}
+
+function formatCostBucket(bucket: string, unit: Dashboard['recentCost']['bucketUnit']) {
+  return unit === 'hour' ? bucket.slice(5, 16) : bucket.slice(5)
 }
 
 function resize() { chart?.resize(); costChart?.resize() }
@@ -140,16 +155,16 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dis
       <article class="metric-card"><div class="label"><Clock3 :size="15" />平均耗时</div><div class="value">{{ Math.round(dashboard.summary.averageLatency) }} ms</div><div class="detail">包含上游响应时间</div></article>
     </section>
 
-    <section class="recent-cost-panel panel" aria-label="近 24 小时消费分布">
+    <section class="recent-cost-panel panel" aria-label="消费分布">
       <div class="recent-cost-header">
         <div class="recent-cost-title">
           <span class="recent-cost-icon"><CircleDollarSign :size="17" /></span>
-          <div><h2>消费分布</h2><span>近 24 小时 · 总计 {{ formatCost(dashboard.recentCost.totalEstimatedCost) }}</span></div>
+          <div><h2>消费分布</h2><span>{{ costBucketLabel }} · 总计 {{ formatCost(dashboard.recentCost.totalEstimatedCost) }}</span></div>
         </div>
         <el-segmented v-model="costChartMode" :options="costChartModes" size="small" aria-label="消费图表类型" />
       </div>
       <div v-if="dashboard.recentCost.models.length" ref="costChartElement" class="recent-cost-chart" />
-      <div v-else class="recent-cost-empty">近 24 小时暂无消费数据</div>
+      <div v-else class="recent-cost-empty">当前时间范围暂无消费数据</div>
     </section>
 
     <section>
