@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Braces, Coins, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
@@ -20,6 +20,8 @@ const sources = ref<PriceSource[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const keyword = ref('')
+const page = ref(1)
+const pageSize = 100
 const priceSyncTarget = ref('')
 const editOpen = ref(false)
 const sourceOpen = ref(false)
@@ -44,6 +46,10 @@ const isAdmin = computed(() => auth.user?.isAdmin === true)
 const filtered = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return models.value.filter((item) => !query || item.publicName.toLowerCase().includes(query)).sort((left, right) => compareModelNames(left.publicName, right.publicName))
+})
+const pagedModels = computed(() => {
+  const start = (page.value - 1) * pageSize
+  return filtered.value.slice(start, start + pageSize)
 })
 const enabledSources = computed(() => sources.value.filter((item) => item.status === 1))
 const channelPriceSources = computed(() => {
@@ -156,11 +162,13 @@ function formatSyncFailures(failures: Array<{ sourceName?: string; channelName?:
   return `${visible.join('；')}${remaining > 0 ? `；另有 ${remaining} 个价格源失败` : ''}`
 }
 
+watch([keyword, models], () => { page.value = 1 })
+
 onMounted(load)
 </script>
 
 <template>
-  <div class="page-stack">
+  <div class="page-stack models-page">
     <div class="page-toolbar">
       <div class="toolbar-group"><el-input v-model="keyword" clearable placeholder="搜索公开模型" style="width: 240px" /></div>
       <div class="spacer" />
@@ -178,19 +186,23 @@ onMounted(load)
 
     <div class="table-panel">
       <ResponsiveList>
-        <template #desktop><el-table v-loading="loading" :data="filtered" row-key="publicName">
+        <template #desktop><el-table v-loading="loading" :data="pagedModels" row-key="publicName" class="models-table">
         <el-table-column prop="publicName" label="公开模型" min-width="250"><template #default="{ row }"><span class="mono model-name">{{ row.publicName }}</span></template></el-table-column>
         <el-table-column label="计费方式" min-width="260"><template #default="{ row }"><div class="price-line"><template v-if="row.billingMode === 'request'"><span>按次 {{ row.requestPrice ?? '—' }}</span></template><template v-else-if="row.billingMode === 'rules'"><span>高级计费规则</span></template><template v-else><span>入 {{ row.inputPrice ?? '—' }}</span><span>缓存读 {{ row.cachedInputPrice ?? '—' }}</span><span>补全 {{ row.outputPrice ?? '—' }}</span></template></div></template></el-table-column>
         <el-table-column v-if="isAdmin" label="操作" width="86" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="Coins" :label="`设置 ${row.publicName} 的公共价格`" @click="openEdit(row)" /></div></template></el-table-column>
         </el-table></template>
         <template #mobile><MobileRecordList :loading="loading">
-          <article v-for="row in filtered" :key="row.publicName" class="mobile-record">
+          <article v-for="row in pagedModels" :key="row.publicName" class="mobile-record">
             <div class="mobile-record__header"><div class="mobile-record__title"><code>{{ row.publicName }}</code><small>{{ row.billingMode === 'request' ? '按请求计费' : row.billingMode === 'rules' ? '高级计费规则' : '按 Token 计费' }}</small></div></div>
             <dl class="mobile-record__facts"><div class="mobile-record__wide"><dt>计费方式</dt><dd><div class="price-line"><template v-if="row.billingMode === 'request'"><span>按次 {{ row.requestPrice ?? '—' }}</span></template><template v-else-if="row.billingMode === 'rules'"><span>高级计费规则</span></template><template v-else><span>入 {{ row.inputPrice ?? '—' }}</span><span>缓存读 {{ row.cachedInputPrice ?? '—' }}</span><span>补全 {{ row.outputPrice ?? '—' }}</span></template></div></dd></div></dl>
             <div v-if="isAdmin" class="mobile-record__footer"><span class="muted">公共模型价格</span><el-button size="small" :icon="Coins" @click="openEdit(row)">设置价格</el-button></div>
           </article>
         </MobileRecordList></template>
       </ResponsiveList>
+      <div v-if="filtered.length" class="models-pagination">
+        <span>每页 {{ pageSize }} 条</span>
+        <el-pagination v-model:current-page="page" background layout="total, prev, pager, next" :page-size="pageSize" :total="filtered.length" />
+      </div>
       <div v-if="!loading && !filtered.length" class="empty-state"><div><strong>没有匹配模型</strong><span>先在渠道页发现并选择模型</span></div></div>
     </div>
 
@@ -220,5 +232,5 @@ onMounted(load)
 </template>
 
 <style scoped>
-.model-name { color: #15202b; font-weight: 600; }.price-line { display: flex; gap: 12px; color: #4b5763; font-family: 'JetBrains Mono', monospace; font-size: 10px; }.price-target { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; background: #f7f9fa; }.price-target div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.price-target span { color: #66717d; font-size: 11px; }.price-target code, .price-target strong { overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.pricing-tabs { margin-top: 18px; }.pricing-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }.pricing-tabs :deep(.el-input-number) { width: 100%; }.price-heading { margin-top: 4px; padding-top: 0; border-top: 0; }.rules-list { display: grid; gap: 7px; margin: 10px 0; }.rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; padding: 8px; border: 1px solid #dce2e7; border-radius: 6px; }.rule-row div { display: flex; flex-direction: column; gap: 2px; }.rule-row span { color: #66717d; font-size: 10px; }.rule-row code { overflow: hidden; color: #4b5763; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.rule-editor { display: grid; gap: 9px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #dce2e7; }.rule-editor :deep(textarea) { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+.models-page :deep(.el-input__inner), .models-page :deep(.el-select__placeholder), .models-page :deep(.el-table th.el-table__cell .cell), .models-page :deep(.el-table td.el-table__cell .cell) { font-size: 14px; }.models-page :deep(.el-table th.el-table__cell .cell) { color: #33404c; font-weight: 600; }.models-page :deep(.el-table td.el-table__cell .cell) { line-height: 1.5; }.model-name { color: #15202b; font-size: 14px; font-weight: 600; }.price-line { display: flex; flex-wrap: wrap; gap: 6px 14px; color: #4b5763; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.5; }.models-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 56px; color: #66717d; font-size: 13px; }.mobile-record__title code { font-size: 14px; font-weight: 600; }.price-target { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; background: #f7f9fa; }.price-target div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.price-target span { color: #66717d; font-size: 11px; }.price-target code, .price-target strong { overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.pricing-tabs { margin-top: 18px; }.pricing-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }.pricing-tabs :deep(.el-input-number) { width: 100%; }.price-heading { margin-top: 4px; padding-top: 0; border-top: 0; }.rules-list { display: grid; gap: 7px; margin: 10px 0; }.rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; padding: 8px; border: 1px solid #dce2e7; border-radius: 6px; }.rule-row div { display: flex; flex-direction: column; gap: 2px; }.rule-row span { color: #66717d; font-size: 10px; }.rule-row code { overflow: hidden; color: #4b5763; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.rule-editor { display: grid; gap: 9px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #dce2e7; }.rule-editor :deep(textarea) { font-family: 'JetBrains Mono', monospace; font-size: 11px; }@media (max-width: 720px) { .models-pagination { justify-content: space-between; flex-wrap: wrap; gap: 8px; } }
 </style>
