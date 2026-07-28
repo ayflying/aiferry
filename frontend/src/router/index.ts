@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { localReturnTo } from '../lib/auth'
+import { useSystemStore } from '../stores/system'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -31,6 +32,15 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
+  if (to.name === 'home') {
+    const system = useSystemStore()
+    try {
+      await system.load()
+    } catch {
+      return { name: 'login' }
+    }
+    if (!system.information.publicHomepageEnabled) return { name: 'login' }
+  }
   if (to.meta.public) {
     if (to.name !== 'login') return true
     try {

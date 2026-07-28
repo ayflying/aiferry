@@ -112,6 +112,7 @@ func (c *Controller) publicSystemInformation(r *ghttp.Request) authapi.SystemInf
 		SystemName: information.SystemName, ServerURL: information.ServerURL, LogoURL: information.LogoURL,
 		Footer: information.Footer, About: information.About, HomeContent: information.HomeContent,
 		UserAgreement: information.UserAgreement, PrivacyPolicy: information.PrivacyPolicy,
+		PublicHomepageEnabled: information.PublicHomepageEnabled,
 	}
 }
 

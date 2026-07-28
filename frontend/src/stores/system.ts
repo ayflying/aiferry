@@ -12,6 +12,7 @@ export const defaultSystemInformation: SystemInformationSettings = {
   homeContent: '',
   userAgreement: '',
   privacyPolicy: '',
+  publicHomepageEnabled: false,
 }
 
 function normalize(value?: Partial<SystemInformationSettings>): SystemInformationSettings {

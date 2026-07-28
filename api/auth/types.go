@@ -9,14 +9,15 @@ type ConfigView struct {
 }
 
 type SystemInformationView struct {
-	SystemName    string `json:"systemName"`
-	ServerURL     string `json:"serverUrl"`
-	LogoURL       string `json:"logoUrl"`
-	Footer        string `json:"footer"`
-	About         string `json:"about"`
-	HomeContent   string `json:"homeContent"`
-	UserAgreement string `json:"userAgreement"`
-	PrivacyPolicy string `json:"privacyPolicy"`
+	SystemName            string `json:"systemName"`
+	ServerURL             string `json:"serverUrl"`
+	LogoURL               string `json:"logoUrl"`
+	Footer                string `json:"footer"`
+	About                 string `json:"about"`
+	HomeContent           string `json:"homeContent"`
+	UserAgreement         string `json:"userAgreement"`
+	PrivacyPolicy         string `json:"privacyPolicy"`
+	PublicHomepageEnabled bool   `json:"publicHomepageEnabled"`
 }
 
 type UserView struct {

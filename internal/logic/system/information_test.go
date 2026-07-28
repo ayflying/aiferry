@@ -43,3 +43,17 @@ func TestResolveSystemInformationFallbackURL(t *testing.T) {
 		t.Fatalf("normalizeRootHTTPURL() = %q, %v", url, err)
 	}
 }
+
+func TestSystemInformationDefaultsToPrivateHomepage(t *testing.T) {
+	if DefaultSystemInformation().PublicHomepageEnabled {
+		t.Fatal("public homepage must be disabled by default")
+	}
+
+	settings, err := decodeSystemInformation([]byte(`{"systemName":"Existing Gateway"}`))
+	if err != nil {
+		t.Fatalf("decodeSystemInformation() error = %v", err)
+	}
+	if settings.PublicHomepageEnabled {
+		t.Fatal("existing settings without the flag must keep the homepage disabled")
+	}
+}

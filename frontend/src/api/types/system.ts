@@ -14,6 +14,7 @@ export interface SystemInformationSettings {
   homeContent: string
   userAgreement: string
   privacyPolicy: string
+  publicHomepageEnabled: boolean
 }
 
 export interface ModelQualitySettings {

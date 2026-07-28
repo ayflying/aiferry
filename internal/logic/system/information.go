@@ -28,7 +28,7 @@ const (
 )
 
 func DefaultSystemInformation() adminapi.SystemInformationInput {
-	return adminapi.SystemInformationInput{SystemName: "AiFerry"}
+	return adminapi.SystemInformationInput{SystemName: "AiFerry", PublicHomepageEnabled: false}
 }
 
 func (s *sSystem) GetSystemInformation(ctx context.Context) (adminapi.SystemInformationInput, error) {
