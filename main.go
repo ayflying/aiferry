@@ -3,6 +3,8 @@ package main
 import (
 	_ "github.com/yunloli/aiferry/internal/packed"
 
+	_ "github.com/yunloli/aiferry/internal/logic"
+
 	"github.com/gogf/gf/v2/os/gctx"
 
 	"github.com/yunloli/aiferry/internal/cmd"

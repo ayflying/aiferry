@@ -11,9 +11,9 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	authapi "github.com/yunloli/aiferry/api/auth"
-	"github.com/yunloli/aiferry/internal/service/auth"
-	"github.com/yunloli/aiferry/internal/service/system"
-	"github.com/yunloli/aiferry/internal/service/user"
+	"github.com/yunloli/aiferry/internal/logic/auth"
+	"github.com/yunloli/aiferry/internal/logic/system"
+	"github.com/yunloli/aiferry/internal/logic/user"
 )
 
 type Controller struct {

@@ -4,7 +4,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
-	"github.com/yunloli/aiferry/internal/service/channel"
+	"github.com/yunloli/aiferry/internal/logic/channel"
 )
 
 func (c *Controller) registerPriceRoutes(group *ghttp.RouterGroup) {

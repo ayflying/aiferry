@@ -4,7 +4,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
-	"github.com/yunloli/aiferry/internal/service/auth"
+	"github.com/yunloli/aiferry/internal/logic/auth"
 )
 
 func (c *Controller) registerUserRoutes(group *ghttp.RouterGroup) {

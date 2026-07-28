@@ -25,6 +25,11 @@ if [ ! -f "$HOME/.docker/config.json" ] || \
   exit 3
 fi
 
+echo "Generating GoFrame service interfaces"
+gf gen service
+go run ./hack/patch-generated-service.go
+go test ./...
+
 echo "Building $image:$version on the remote build server"
 docker build \
   --build-arg "VERSION=$version" \

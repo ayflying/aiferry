@@ -7,17 +7,17 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
-	"github.com/yunloli/aiferry/internal/service/apikey"
-	"github.com/yunloli/aiferry/internal/service/auth"
-	"github.com/yunloli/aiferry/internal/service/channel"
-	"github.com/yunloli/aiferry/internal/service/channelgroup"
-	"github.com/yunloli/aiferry/internal/service/channeltype"
-	mailservice "github.com/yunloli/aiferry/internal/service/mail"
-	"github.com/yunloli/aiferry/internal/service/pricesource"
-	"github.com/yunloli/aiferry/internal/service/redemption"
-	"github.com/yunloli/aiferry/internal/service/system"
-	"github.com/yunloli/aiferry/internal/service/usage"
-	"github.com/yunloli/aiferry/internal/service/user"
+	"github.com/yunloli/aiferry/internal/logic/apikey"
+	"github.com/yunloli/aiferry/internal/logic/auth"
+	"github.com/yunloli/aiferry/internal/logic/channel"
+	"github.com/yunloli/aiferry/internal/logic/channelgroup"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
+	mailservice "github.com/yunloli/aiferry/internal/logic/mail"
+	"github.com/yunloli/aiferry/internal/logic/pricesource"
+	"github.com/yunloli/aiferry/internal/logic/redemption"
+	"github.com/yunloli/aiferry/internal/logic/system"
+	"github.com/yunloli/aiferry/internal/logic/usage"
+	"github.com/yunloli/aiferry/internal/logic/user"
 )
 
 type Controller struct {

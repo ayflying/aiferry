@@ -7,10 +7,10 @@ import (
 
 	"github.com/gogf/gf/v2/net/ghttp"
 
-	"github.com/yunloli/aiferry/internal/service/apikey"
-	relaysvc "github.com/yunloli/aiferry/internal/service/relay"
-	"github.com/yunloli/aiferry/internal/service/system"
-	"github.com/yunloli/aiferry/internal/service/user"
+	"github.com/yunloli/aiferry/internal/logic/apikey"
+	relaysvc "github.com/yunloli/aiferry/internal/logic/relay"
+	"github.com/yunloli/aiferry/internal/logic/system"
+	"github.com/yunloli/aiferry/internal/logic/user"
 )
 
 type Controller struct {

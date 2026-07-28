@@ -3,7 +3,7 @@
 ## 开发与安全
 
 - 默认使用中文沟通；Git 提交标题和正文必须使用中文，并具体说明改动、原因与验证结果。
-- 后端使用 GoFrame v2：接口在 `api`，控制器只处理输入输出，业务逻辑在 `internal/service`；DAO、DO、entity 只能通过远程 `gf gen dao` 生成，禁止手工修改。
+- 后端使用 GoFrame v2：接口在 `api`，控制器只处理输入输出，业务逻辑在 `internal/logic`；`internal/service` 仅保留通过远程 `gf gen service` 生成的服务接口。DAO、DO、entity 只能通过远程 `gf gen dao` 生成，禁止手工修改。
 - 前端使用 Vue 3、Element Plus、Pinia 和 Vue Router，管理端保持高密度、全宽布局；模型价格按公开模型维护，渠道只作为同步来源。
 - `.env` 包含数据库、Redis、Casdoor、主密钥和渠道密钥，严禁读取输出、提交或复制到源码归档。`.env.example` 只保留脱敏示例。
 - 管理端由 Casdoor 保护，只允许管理员和 `AI用户组` 用户登录；登录页不展示准入用户组说明。

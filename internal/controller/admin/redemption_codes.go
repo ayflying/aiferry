@@ -4,8 +4,8 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
-	"github.com/yunloli/aiferry/internal/service/auth"
-	"github.com/yunloli/aiferry/internal/service/redemption"
+	"github.com/yunloli/aiferry/internal/logic/auth"
+	"github.com/yunloli/aiferry/internal/logic/redemption"
 )
 
 func (c *Controller) registerRedemptionCodeRoutes(group *ghttp.RouterGroup) {

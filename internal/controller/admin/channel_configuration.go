@@ -4,7 +4,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
-	"github.com/yunloli/aiferry/internal/service/channeltype"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
 
 func (c *Controller) listChannelGroups(r *ghttp.Request) {

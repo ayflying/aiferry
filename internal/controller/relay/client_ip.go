@@ -6,7 +6,7 @@ import (
 
 	"github.com/gogf/gf/v2/net/ghttp"
 
-	"github.com/yunloli/aiferry/internal/service/iplocation"
+	"github.com/yunloli/aiferry/internal/logic/iplocation"
 )
 
 func clientIP(r *ghttp.Request) string {
