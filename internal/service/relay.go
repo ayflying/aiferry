@@ -16,7 +16,7 @@ import (
 type (
 	IRelay interface {
 		Models(ctx context.Context, key apikey.AuthKey) (ModelList, error)
-		Handle(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, clientIP string, endpoint string, body []byte, key apikey.AuthKey) error
+		Handle(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, clientIP string, gatewayHost string, endpoint string, body []byte, key apikey.AuthKey) error
 	}
 )
 

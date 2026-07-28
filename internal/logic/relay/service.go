@@ -121,13 +121,14 @@ func (s *sRelay) Models(ctx context.Context, key apikey.AuthKey) (ModelList, err
 	return ModelList{Object: "list", Data: models}, nil
 }
 
-func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, clientIP, endpoint string, body []byte, key apikey.AuthKey) error {
+func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, clientIP, gatewayHost, endpoint string, body []byte, key apikey.AuthKey) error {
 	if len(body) > maxRequestBody {
 		return gerror.New("request body exceeds 16 MiB")
 	}
 	if !gjson.ValidBytes(body) {
 		return gerror.New("request body must be valid JSON")
 	}
+	body, incomingHeaders = redactGatewayRequest(body, incomingHeaders, gatewayHost)
 	if err := s.resilience.CheckSensitivePrompt(ctx, endpoint, body); err != nil {
 		return err
 	}

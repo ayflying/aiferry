@@ -29,6 +29,10 @@ type (
 		GetMailSettings(ctx context.Context) (MailSettings, error)
 		UpdateMailSettings(ctx context.Context, input adminapi.MailSettingsInput) (MailSettings, error)
 		MailDeliverySettings(ctx context.Context) (MailDeliverySettings, error)
+		GetModelQualitySettings(ctx context.Context) (adminapi.ModelQualitySettingsInput, error)
+		UpdateModelQualitySettings(ctx context.Context, input adminapi.ModelQualitySettingsInput) (adminapi.ModelQualitySettingsInput, error)
+		RecordModelQualityEvent(ctx context.Context, input ModelQualityEventInput) error
+		ListModelQualityEvents(ctx context.Context, input adminapi.ModelQualityEventsInput) (adminapi.ModelQualityEventList, error)
 		ClearAutoDisableFailures(ctx context.Context, credentialID uint64)
 		ClearChannelAutoDisableFailures(ctx context.Context, channelID uint64)
 		ResetCredentialRecoverySchedule(ctx context.Context, credentialID uint64)

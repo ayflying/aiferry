@@ -55,7 +55,7 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
 			return
 		}
-		if err = c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, clientIP(r), endpoint, body, key); err != nil {
+		if err = c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, clientIP(r), r.Host, endpoint, body, key); err != nil {
 			if relaysvc.IsRetryableAvailabilityError(err) {
 				writeRetryableAvailabilityError(r)
 				return
