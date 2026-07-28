@@ -40,7 +40,14 @@ docker push "$image:latest"
 install -d "$deploy_dir"
 compose_file="$deploy_dir/docker-compose.yml"
 cp docker-compose.yml "$compose_file"
-sed -i "s|\${AIFERRY_IMAGE_TAG:?set AIFERRY_IMAGE_TAG before deploying}|$version|" "$compose_file"
+if grep -Fq '${AIFERRY_IMAGE_TAG:?set AIFERRY_IMAGE_TAG before deploying}' "$compose_file"; then
+  sed -i "s|\${AIFERRY_IMAGE_TAG:?set AIFERRY_IMAGE_TAG before deploying}|$version|" "$compose_file"
+elif grep -Eq "^[[:space:]]*image:[[:space:]]*$image[[:space:]]*$" "$compose_file"; then
+  sed -i "s|^\([[:space:]]*image:[[:space:]]*$image\)[[:space:]]*$|\1:$version|" "$compose_file"
+else
+  echo "deployment compose does not reference $image" >&2
+  exit 2
+fi
 
 echo "Pulling the published image through Docker Compose"
 docker compose --project-name "$compose_project" -f "$compose_file" config --quiet

@@ -12,14 +12,19 @@ func TestNextCostSync(t *testing.T) {
 		want time.Duration
 	}{
 		{
-			name: "one minute after midnight",
-			now:  time.Date(2026, time.July, 17, 0, 0, 30, 0, shanghaiLocation),
-			want: 30 * time.Second,
+			name: "before daily sync",
+			now:  time.Date(2026, time.July, 28, 0, 0, 0, 0, shanghaiLocation),
+			want: time.Minute,
 		},
 		{
-			name: "after scheduled time uses next day",
-			now:  time.Date(2026, time.July, 17, 0, 1, 0, 0, shanghaiLocation),
+			name: "at daily sync",
+			now:  time.Date(2026, time.July, 28, 0, 1, 0, 0, shanghaiLocation),
 			want: 24 * time.Hour,
+		},
+		{
+			name: "during the day",
+			now:  time.Date(2026, time.July, 28, 11, 9, 16, 0, shanghaiLocation),
+			want: 12*time.Hour + 52*time.Minute - 16*time.Second,
 		},
 	}
 	for _, test := range tests {
@@ -28,5 +33,17 @@ func TestNextCostSync(t *testing.T) {
 				t.Fatalf("nextCostSync() = %s, want %s", got, test.want)
 			}
 		})
+	}
+}
+
+func TestCostSyncRetryDelays(t *testing.T) {
+	want := []time.Duration{0, 5 * time.Minute, 10 * time.Minute}
+	if len(costSyncRetryDelays) != len(want) {
+		t.Fatalf("retry delay count = %d, want %d", len(costSyncRetryDelays), len(want))
+	}
+	for index, value := range want {
+		if costSyncRetryDelays[index] != value {
+			t.Fatalf("retry delay %d = %s, want %s", index, costSyncRetryDelays[index], value)
+		}
 	}
 }

@@ -1,13 +1,13 @@
 services:
   aiferry:
-    image: ghcr.io/ayflying/aiferry:${AIFERRY_IMAGE_TAG:?set AIFERRY_IMAGE_TAG before deploying}
+    image: ghcr.io/ayflying/aiferry
     env_file:
       - .env
     environment:
       TZ: Asia/Shanghai
       WEB_ROOT: /app/web
     volumes:
-      - aiferry-data:/app/data
+      - data:/app/data
     ports:
       - "38517:8080"
     healthcheck:
@@ -17,4 +17,4 @@ services:
       retries: 12
 
 volumes:
-  aiferry-data:
+  data:
