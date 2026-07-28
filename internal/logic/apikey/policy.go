@@ -65,9 +65,19 @@ func (s *sAPIKey) populateAuthPolicy(ctx context.Context, key *AuthKey) error {
 }
 
 func listModels(ctx context.Context, keyID uint64) ([]string, error) {
-	models := make([]string, 0)
-	err := dao.ApiKeyModels.Ctx(ctx).Fields(dao.ApiKeyModels.Columns().ModelName).Where(dao.ApiKeyModels.Columns().ApiKeyId, keyID).OrderAsc(dao.ApiKeyModels.Columns().ModelName).Scan(&models)
-	return models, gerror.Wrap(err, "list key model policy")
+	type modelRow struct {
+		ModelName string `orm:"model_name"`
+	}
+	rows := make([]modelRow, 0)
+	err := dao.ApiKeyModels.Ctx(ctx).Fields(dao.ApiKeyModels.Columns().ModelName).Where(dao.ApiKeyModels.Columns().ApiKeyId, keyID).OrderAsc(dao.ApiKeyModels.Columns().ModelName).Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "list key model policy")
+	}
+	models := make([]string, 0, len(rows))
+	for _, row := range rows {
+		models = append(models, row.ModelName)
+	}
+	return models, nil
 }
 
 func listGroupIDs(ctx context.Context, keyID uint64) ([]uint64, error) {
