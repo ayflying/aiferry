@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
-	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 const (
@@ -28,6 +28,20 @@ type ModelQualityEventInput struct {
 	Reasons        []string
 	QuestionChars  uint
 	AnswerChars    uint
+}
+
+type modelQualityEventRow struct {
+	Id             uint64    `orm:"id"`
+	ChannelId      uint64    `orm:"channel_id"`
+	ChannelName    string    `orm:"channel_name"`
+	CredentialId   uint64    `orm:"credential_id"`
+	RequestedModel string    `orm:"requested_model"`
+	ExpectedModel  string    `orm:"expected_model"`
+	ObservedModel  string    `orm:"observed_model"`
+	ReasonsJson    string    `orm:"reasons_json"`
+	QuestionChars  uint      `orm:"question_chars"`
+	AnswerChars    uint      `orm:"answer_chars"`
+	CreatedAt      time.Time `orm:"created_at"`
 }
 
 func (s *sSystem) GetModelQualitySettings(ctx context.Context) (adminapi.ModelQualitySettingsInput, error) {
@@ -75,13 +89,15 @@ func (s *sSystem) RecordModelQualityEvent(ctx context.Context, input ModelQualit
 
 func (s *sSystem) ListModelQualityEvents(ctx context.Context, input adminapi.ModelQualityEventsInput) (adminapi.ModelQualityEventList, error) {
 	page, pageSize := normalizeModelQualityEventsPage(input)
-	model := dao.ModelQualityEvents.Ctx(ctx).OrderDesc(dao.ModelQualityEvents.Columns().Id)
+	model := dao.ModelQualityEvents.Ctx(ctx).As("e")
 	total, err := model.Count()
 	if err != nil {
 		return adminapi.ModelQualityEventList{}, gerror.Wrap(err, "count model quality events")
 	}
-	rows := make([]entity.ModelQualityEvents, 0)
-	if err = model.Page(page, pageSize).Scan(&rows); err != nil {
+	rows := make([]modelQualityEventRow, 0)
+	if err = model.Fields("e.*,COALESCE(c.name,'已删除渠道') AS channel_name").
+		LeftJoin(dao.Channels.Table()+" c", "c.id=e.channel_id").
+		OrderDesc("e.id").Page(page, pageSize).Scan(&rows); err != nil {
 		return adminapi.ModelQualityEventList{}, gerror.Wrap(err, "list model quality events")
 	}
 	items := make([]adminapi.ModelQualityEventView, 0, len(rows))
@@ -106,11 +122,11 @@ func normalizeModelQualityEventsPage(input adminapi.ModelQualityEventsInput) (in
 	return page, pageSize
 }
 
-func modelQualityEventView(row entity.ModelQualityEvents) adminapi.ModelQualityEventView {
+func modelQualityEventView(row modelQualityEventRow) adminapi.ModelQualityEventView {
 	reasons := make([]string, 0)
 	_ = json.Unmarshal([]byte(row.ReasonsJson), &reasons)
 	return adminapi.ModelQualityEventView{
-		Id: row.Id, ChannelId: row.ChannelId, CredentialId: row.CredentialId,
+		Id: row.Id, ChannelId: row.ChannelId, ChannelName: row.ChannelName, CredentialId: row.CredentialId,
 		RequestedModel: row.RequestedModel, ExpectedModel: row.ExpectedModel, ObservedModel: row.ObservedModel,
 		Reasons: uniqueModelQualityReasons(reasons), QuestionChars: row.QuestionChars, AnswerChars: row.AnswerChars, CreatedAt: row.CreatedAt,
 	}

@@ -54,6 +54,7 @@ export interface UsageLog {
   userName: string
   apiKeyName: string
   channelName: string
+  channelCredentialIndex: number
   endpoint: string
   upstreamEndpoint: string
   protocolConversion: string

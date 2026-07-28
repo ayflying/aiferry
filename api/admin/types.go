@@ -179,6 +179,7 @@ type ModelQualityEventsInput struct {
 type ModelQualityEventView struct {
 	Id             uint64    `json:"id"`
 	ChannelId      uint64    `json:"channelId"`
+	ChannelName    string    `json:"channelName"`
 	CredentialId   uint64    `json:"credentialId"`
 	RequestedModel string    `json:"requestedModel"`
 	ExpectedModel  string    `json:"expectedModel"`

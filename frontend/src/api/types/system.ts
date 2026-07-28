@@ -24,6 +24,7 @@ export interface ModelQualitySettings {
 export interface ModelQualityEvent {
   id: number
   channelId: number
+  channelName: string
   credentialId: number
   requestedModel: string
   expectedModel: string

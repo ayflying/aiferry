@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { BillingItem, UsageLog } from '../api/types'
 import { formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
+import { channelCredentialLabel } from '../lib/usage'
 
 const props = defineProps<{
   modelValue: boolean
@@ -100,8 +101,9 @@ function billingSummary() {
           <el-descriptions-item label="请求模型">{{ usage.requestedModel }}</el-descriptions-item>
           <el-descriptions-item label="推理强度">{{ formatReasoningEffort(usage.reasoningEffort) }}</el-descriptions-item>
           <el-descriptions-item label="上游模型">{{ usage.upstreamModel || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="渠道">{{ usage.channelName || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="密钥">{{ usage.apiKeyName || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="渠道">{{ usage.channelName || '已删除渠道' }}</el-descriptions-item>
+          <el-descriptions-item label="渠道密钥">{{ channelCredentialLabel(usage.channelCredentialIndex) }}</el-descriptions-item>
+          <el-descriptions-item label="访问密钥" :span="2">{{ usage.apiKeyName || '—' }}</el-descriptions-item>
         </el-descriptions>
       </section>
 
