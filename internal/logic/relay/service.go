@@ -80,6 +80,9 @@ type attemptResult struct {
 	timedOut           bool
 	upstreamEndpoint   string
 	protocolConversion string
+	responseText       string
+	responseModel      string
+	streamCompleted    bool
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, locationSvc *iplocation.Service) *sRelay {
@@ -203,6 +206,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			if !isStream {
 				s.writeBufferedResponse(writer, result.status, result.body, result.headers)
 			}
+			s.scheduleModelQualityAnalysis(ctx, requestID, candidate, requestedModel, endpoint, body, isStream, result)
 			return nil
 		}
 	}

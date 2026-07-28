@@ -89,6 +89,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		result := attemptResult{status: resp.StatusCode, body: plan.convertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
 		result.upstreamEndpoint = plan.upstreamEndpoint
 		result.protocolConversion = plan.conversion
+		result.responseText, result.responseModel = captureBufferedResponse(plan.upstreamEndpoint, responseBody)
 		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 			result.errorMessage = upstreamError(responseBody, resp.Status)
 		}
@@ -107,6 +108,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if !plan.converts() {
 		converter = nil
 	}
+	capture := newStreamResponseCapture(plan.upstreamEndpoint)
 	pending := make([][]byte, 0)
 	pendingSize := 0
 	committed := false
@@ -145,6 +147,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	for scanner.Scan() {
 		line := append(append([]byte(nil), scanner.Bytes()...), '\n')
 		line = normalizeSSELine(plan.upstreamEndpoint, line, candidate.UpstreamName, advancedConfig)
+		capture.Observe(line)
 		if failure, failed := parseStreamFailure(line); failed {
 			result.status = failure.status
 			result.body = failure.body
@@ -224,6 +227,9 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			return result, true, nil
 		}
 	}
+	result.responseText = capture.Text()
+	result.responseModel = capture.Model()
+	result.streamCompleted = capture.Completed()
 	return result, true, nil
 }
 
