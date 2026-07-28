@@ -20,6 +20,7 @@ const router = createRouter({
     { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: '运行概览', admin: true, settingsTab: 'overview' } },
     { path: '/settings/basic', name: 'settings-basic', component: () => import('../views/SettingsView.vue'), meta: { title: '基础设置', admin: true, settingsTab: 'basic' } },
     { path: '/settings/resilience', name: 'settings-resilience', component: () => import('../views/SettingsView.vue'), meta: { title: '路由可靠性', admin: true, settingsTab: 'resilience' } },
+    { path: '/settings/model-quality', name: 'settings-model-quality', component: () => import('../views/SettingsView.vue'), meta: { title: '模型质量观测', admin: true, settingsTab: 'quality' } },
     { path: '/settings/security', name: 'settings-security', component: () => import('../views/SettingsView.vue'), meta: { title: '安全与限制', admin: true, settingsTab: 'security' } },
     { path: '/settings/mail', name: 'settings-mail', component: () => import('../views/SettingsView.vue'), meta: { title: '邮件提醒', admin: true, settingsTab: 'mail' } },
     { path: '/users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: '用户管理', admin: true } },

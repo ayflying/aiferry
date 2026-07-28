@@ -7,6 +7,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/tidwall/gjson"
+
+	"github.com/yunloli/aiferry/internal/logic/system"
 )
 
 const maxQualityTextRunes = 12000
@@ -111,8 +113,8 @@ func responseContentText(content gjson.Result) string {
 	return text.String()
 }
 
-func (s *sRelay) scheduleModelQualityAnalysis(ctx context.Context, requestID string, candidate Candidate, requestedModel, endpoint string, body []byte, stream bool, result attemptResult) {
-	if !isNormalModelQualityResult(stream, result) {
+func (s *sRelay) scheduleModelQualityAnalysis(ctx context.Context, requestID string, candidate Candidate, requestedModel, endpoint string, body []byte, stream, enabled bool, result attemptResult) {
+	if !enabled || !isNormalModelQualityResult(stream, result) {
 		return
 	}
 	question := requestQuestionText(endpoint, body)
@@ -138,6 +140,14 @@ func (s *sRelay) scheduleModelQualityAnalysis(ctx context.Context, requestID str
 		reasons := make([]string, 0, len(signals))
 		for _, signal := range signals {
 			reasons = append(reasons, signal.reason)
+		}
+		if err := s.resilience.RecordModelQualityEvent(context.Background(), system.ModelQualityEventInput{
+			RequestID: input.requestID, ChannelID: input.channelID, CredentialID: input.credentialID,
+			RequestedModel: input.requestedModel, ExpectedModel: input.expectedModel, ObservedModel: input.observedModel,
+			Reasons: reasons, QuestionChars: uint(utf8.RuneCountInString(input.question)), AnswerChars: uint(utf8.RuneCountInString(input.answer)),
+		}); err != nil {
+			g.Log().Errorf(context.WithoutCancel(ctx), "record model quality event request_id=%s: %v", input.requestID, err)
+			return
 		}
 		g.Log().Warningf(context.WithoutCancel(ctx), "model quality suspicion request_id=%s channel_id=%d credential_id=%d requested_model=%q expected_model=%q observed_model=%q reasons=%s question_chars=%d answer_chars=%d", input.requestID, input.channelID, input.credentialID, input.requestedModel, input.expectedModel, input.observedModel, strings.Join(reasons, ","), utf8.RuneCountInString(input.question), utf8.RuneCountInString(input.answer))
 	}()

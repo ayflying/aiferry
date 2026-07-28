@@ -62,6 +62,7 @@ const adminItems: NavigationItem[] = [
       { path: '/settings', label: '运行概览' },
       { path: '/settings/basic', label: '基础设置' },
       { path: '/settings/resilience', label: '路由可靠性' },
+      { path: '/settings/model-quality', label: '模型质量观测' },
       { path: '/settings/security', label: '安全与限制' },
       { path: '/settings/mail', label: '邮件提醒' },
     ],

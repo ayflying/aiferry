@@ -15,6 +15,9 @@ func (c *Controller) registerSystemRoutes(group *ghttp.RouterGroup) {
 	group.PUT("/system/information", c.updateSystemInformation)
 	group.GET("/system/settings", c.getSystemSettings)
 	group.PUT("/system/settings", c.updateSystemSettings)
+	group.GET("/system/model-quality", c.getModelQualitySettings)
+	group.PUT("/system/model-quality", c.updateModelQualitySettings)
+	group.GET("/system/model-quality/events", c.listModelQualityEvents)
 	group.GET("/system/sensitive-words", c.getSensitiveWordSettings)
 	group.PUT("/system/sensitive-words", c.updateSensitiveWordSettings)
 	group.GET("/system/mail", c.getMailSettings)
@@ -75,6 +78,27 @@ func (c *Controller) updateSystemSettings(r *ghttp.Request) {
 		return
 	}
 	data, err := c.settings.Update(r.Context(), input)
+	respond(r, data, err)
+}
+
+func (c *Controller) getModelQualitySettings(r *ghttp.Request) {
+	data, err := c.settings.GetModelQualitySettings(r.Context())
+	respond(r, data, err)
+}
+
+func (c *Controller) updateModelQualitySettings(r *ghttp.Request) {
+	var input adminapi.ModelQualitySettingsInput
+	if !parse(r, &input) {
+		return
+	}
+	data, err := c.settings.UpdateModelQualitySettings(r.Context(), input)
+	respond(r, data, err)
+}
+
+func (c *Controller) listModelQualityEvents(r *ghttp.Request) {
+	data, err := c.settings.ListModelQualityEvents(r.Context(), adminapi.ModelQualityEventsInput{
+		Page: r.GetQuery("page", 1).Int(), PageSize: r.GetQuery("pageSize", 50).Int(),
+	})
 	respond(r, data, err)
 }
 

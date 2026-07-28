@@ -164,6 +164,34 @@ type SystemResilienceSettingsInput struct {
 	DisableLatencySeconds         int      `json:"disableLatencySeconds"`
 	DisableStatusCodes            string   `json:"disableStatusCodes"`
 	FailureKeywords               []string `json:"failureKeywords"`
+	ModelQualityDetectionEnabled  bool     `json:"modelQualityDetectionEnabled"`
+}
+
+type ModelQualitySettingsInput struct {
+	Enabled bool `json:"enabled"`
+}
+
+type ModelQualityEventsInput struct {
+	Page     int `json:"page"`
+	PageSize int `json:"pageSize"`
+}
+
+type ModelQualityEventView struct {
+	Id             uint64    `json:"id"`
+	ChannelId      uint64    `json:"channelId"`
+	CredentialId   uint64    `json:"credentialId"`
+	RequestedModel string    `json:"requestedModel"`
+	ExpectedModel  string    `json:"expectedModel"`
+	ObservedModel  string    `json:"observedModel"`
+	Reasons        []string  `json:"reasons"`
+	QuestionChars  uint      `json:"questionChars"`
+	AnswerChars    uint      `json:"answerChars"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+type ModelQualityEventList struct {
+	Items []ModelQualityEventView `json:"items"`
+	Total int                    `json:"total"`
 }
 
 type BaseSettingsInput struct {

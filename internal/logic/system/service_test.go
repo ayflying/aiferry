@@ -3,6 +3,8 @@ package system
 import (
 	"testing"
 	"time"
+
+	adminapi "github.com/yunloli/aiferry/api/admin"
 )
 
 func TestNormalizeStatusCodeRules(t *testing.T) {
@@ -128,5 +130,23 @@ func TestAutoDisableFailureThreshold(t *testing.T) {
 	}
 	if !reachesAutoDisableFailureThreshold(3, 3) {
 		t.Fatal("third consecutive failure must reach threshold 3")
+	}
+}
+
+func TestNormalizeModelQualityEventsPage(t *testing.T) {
+	page, pageSize := normalizeModelQualityEventsPage(adminapi.ModelQualityEventsInput{Page: 0, PageSize: 0})
+	if page != 1 || pageSize != defaultModelQualityEventsPageSize {
+		t.Fatalf("unexpected default page: %d %d", page, pageSize)
+	}
+	page, pageSize = normalizeModelQualityEventsPage(adminapi.ModelQualityEventsInput{Page: 2, PageSize: 999})
+	if page != 2 || pageSize != maxModelQualityEventsPageSize {
+		t.Fatalf("unexpected bounded page: %d %d", page, pageSize)
+	}
+}
+
+func TestUniqueModelQualityReasons(t *testing.T) {
+	reasons := uniqueModelQualityReasons([]string{" answer_too_short_for_prompt ", "", "answer_too_short_for_prompt", "upstream_model_tier_lower"})
+	if len(reasons) != 2 || reasons[0] != "answer_too_short_for_prompt" || reasons[1] != "upstream_model_tier_lower" {
+		t.Fatalf("unexpected reasons: %#v", reasons)
 	}
 }

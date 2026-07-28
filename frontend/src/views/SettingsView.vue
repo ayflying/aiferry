@@ -4,15 +4,17 @@ import { useRoute } from 'vue-router'
 import { Clock3, Database, Gauge, HardDrive, Image as ImageIcon, Info, Mail, Send, ShieldAlert, ShieldCheck } from '@lucide/vue'
 import { apiGet, apiPost, apiPut } from '../api/client'
 import type { BaseSettings, MailSettings, SensitiveWordSettings, SystemInformationSettings, SystemResilienceSettings } from '../api/types'
+import ModelQualityObservationPanel from '../components/ModelQualityObservationPanel.vue'
 import { showError, showSuccess } from '../lib/error'
 import { setDisplayTimeZone } from '../lib/format'
 import { timeZoneOptionGroups } from '../lib/time-zones'
 import { useSystemStore } from '../stores/system'
+import { useModelQualityObservation } from '../composables/useModelQualityObservation'
 
 interface SystemInfo { name: string; adminMode: string; database: string; cache: string; apiVersion: string }
-type SettingsTab = 'overview' | 'basic' | 'resilience' | 'security' | 'mail'
+type SettingsTab = 'overview' | 'basic' | 'resilience' | 'quality' | 'security' | 'mail'
 
-const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, resilience: false, security: false, mail: false })
+const tabLoading = reactive<Record<SettingsTab, boolean>>({ overview: false, basic: false, resilience: false, quality: false, security: false, mail: false })
 const route = useRoute()
 const saving = ref(false)
 const informationSaving = ref(false)
@@ -21,7 +23,7 @@ const mailSaving = ref(false)
 const testSending = ref(false)
 const activeTab = computed<SettingsTab>(() => {
   const tab = route.meta.settingsTab
-  return tab === 'basic' || tab === 'resilience' || tab === 'security' || tab === 'mail' ? tab : 'overview'
+  return tab === 'basic' || tab === 'resilience' || tab === 'quality' || tab === 'security' || tab === 'mail' ? tab : 'overview'
 })
 const info = ref<SystemInfo>()
 const basicForm = reactive({ timeZone: 'Asia/Shanghai' })
@@ -43,7 +45,18 @@ const form = reactive({
   disableLatencySeconds: 120,
   disableStatusCodes: '401,429',
   failureKeywordsText: '',
+  modelQualityDetectionEnabled: false,
 })
+const {
+  eventsLoading: qualityEventsLoading,
+  events: modelQualityEvents,
+  filters: modelQualityFilters,
+  load: loadModelQualityData,
+  refresh: refreshModelQualityEvents,
+  saving: qualitySaving,
+  settings: modelQualitySettings,
+  updateEnabled: updateModelQualityEnabled,
+} = useModelQualityObservation((enabled) => { form.modelQualityDetectionEnabled = enabled })
 const securityForm = reactive({
   imageEnabled: true,
   enabled: false,
@@ -71,6 +84,7 @@ const sectionMeta = computed(() => ({
   overview: { title: '运行概览', description: '实例与依赖状态' },
   basic: { title: '基础设置', description: '全局时区、应用身份与站点内容' },
   resilience: { title: '路由可靠性', description: '故障转移、健康检查与自动禁用' },
+  quality: { title: '模型质量观测', description: '检测开关与已发现的可疑上游响应' },
   security: { title: '安全与限制', description: '图片功能与请求内容过滤' },
   mail: { title: '邮件提醒', description: '按模型使用触发的余额提醒与 SMTP 投递配置' },
 }[activeTab.value]))
@@ -141,8 +155,13 @@ async function loadSecuritySettings() {
   } catch (error) { showError(error, '加载安全与限制设置失败') } finally { tabLoading.security = false }
 }
 
+async function loadModelQuality() {
+  tabLoading.quality = true
+  try { await loadModelQualityData() } finally { tabLoading.quality = false }
+}
+
 function loadTab(tab: SettingsTab) {
-  return { overview: loadOverview, basic: loadBasic, resilience: loadResilience, security: loadSecuritySettings, mail: loadMail }[tab]()
+  return { overview: loadOverview, basic: loadBasic, resilience: loadResilience, quality: loadModelQuality, security: loadSecuritySettings, mail: loadMail }[tab]()
 }
 
 async function saveReliability() {
@@ -162,6 +181,7 @@ async function saveReliability() {
       disableLatencySeconds: form.disableLatencySeconds,
       disableStatusCodes: form.disableStatusCodes,
       failureKeywords: form.failureKeywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
+      modelQualityDetectionEnabled: form.modelQualityDetectionEnabled,
     })
     applySettings(settings)
     showSuccess('系统设置已保存', '保存成功')
@@ -224,6 +244,17 @@ async function saveSecuritySettings() {
   } catch (error) { showError(error, '保存安全与限制设置失败') } finally { securitySaving.value = false }
 }
 
+function changeModelQualityPage(page: number) {
+  modelQualityFilters.page = page
+  void refreshModelQualityEvents()
+}
+
+function changeModelQualityPageSize(pageSize: number) {
+  modelQualityFilters.pageSize = pageSize
+  modelQualityFilters.page = 1
+  void refreshModelQualityEvents()
+}
+
 async function sendTestMail() {
   testSending.value = true
   try {
@@ -271,6 +302,20 @@ watch(activeTab, (tab) => {
       <section class="settings-section"><div class="section-heading"><div><h2>上游异常自动下线</h2><span>同一上游密钥连续命中规则后才会停止参与路由，并保存触发原因。</span></div><el-switch v-model="form.autoDisableEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="连续失败阈值"><el-input-number v-model="form.autoDisableFailureThreshold" :disabled="!form.autoDisableEnabled" :min="1" :max="20" controls-position="right" /></el-form-item><el-form-item label="慢响应阈值（秒）"><el-input-number v-model="form.disableLatencySeconds" :disabled="!form.autoDisableEnabled" :min="1" :max="3600" controls-position="right" /></el-form-item><el-form-item label="自动禁用状态码"><el-input v-model="form.disableStatusCodes" :disabled="!form.autoDisableEnabled" placeholder="401,429" /></el-form-item></div><el-form-item label="失败关键词"><el-input v-model="form.failureKeywordsText" :disabled="!form.autoDisableEnabled" type="textarea" :rows="10" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">同一上游密钥连续命中任一禁用规则达到阈值才会自动下线；任意一次成功会清零。关键词不区分大小写；状态码支持逗号分隔和包含范围。</p></el-form></section>
     </template>
 
+    <ModelQualityObservationPanel
+      v-else-if="activeTab === 'quality'"
+      :settings="modelQualitySettings"
+      :events="modelQualityEvents"
+      :loading="qualityEventsLoading"
+      :saving="qualitySaving"
+      :page="modelQualityFilters.page"
+      :page-size="modelQualityFilters.pageSize"
+      @update:enabled="updateModelQualityEnabled"
+      @refresh="refreshModelQualityEvents"
+      @page-change="changeModelQualityPage"
+      @page-size-change="changeModelQualityPageSize"
+    />
+
     <template v-else-if="activeTab === 'security'">
       <section class="settings-section">
         <div class="section-heading"><div><h2>图片功能</h2><span>控制是否允许请求携带图片内容。</span></div><ImageIcon :size="19" /></div>
@@ -290,7 +335,7 @@ watch(activeTab, (tab) => {
       <section class="settings-section"><div class="section-heading"><div><h2>SMTP 服务配置</h2><span>密码只会加密保存，读取时不会返回原始内容。</span></div><Mail :size="19" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="SMTP 主机"><el-input v-model="mailForm.host" placeholder="smtp.example.com" /></el-form-item><el-form-item label="端口"><el-input-number v-model="mailForm.port" :min="1" :max="65535" controls-position="right" /></el-form-item></div><div class="form-grid"><el-form-item label="加密方式"><el-select v-model="mailForm.security"><el-option label="STARTTLS" value="starttls" /><el-option label="TLS" value="tls" /><el-option label="不加密" value="none" /></el-select></el-form-item><el-form-item label="用户名"><el-input v-model="mailForm.username" autocomplete="username" /></el-form-item></div><div class="form-grid"><el-form-item :label="mailForm.passwordConfigured ? '密码（留空不修改）' : '密码'"><el-input v-model="mailForm.password" type="password" show-password autocomplete="new-password" /></el-form-item><el-form-item label="发件人邮箱"><el-input v-model="mailForm.from" placeholder="noreply@example.com" /></el-form-item></div></el-form><div class="setting-switch smtp-test"><div><strong>发送测试邮件</strong><span>使用当前已保存的 SMTP 配置投递。</span></div><div class="mail-test-actions"><el-input v-model="testRecipient" type="email" placeholder="recipient@example.com" /><el-button type="primary" :icon="Send" :loading="testSending" :disabled="testSending" @click="sendTestMail">发送</el-button></div></div></section>
     </template>
 
-    <div v-if="activeTab !== 'overview'" class="settings-save-actions"><el-button type="primary" :loading="saving || informationSaving || securitySaving || mailSaving" @click="saveActive">保存更改</el-button></div>
+    <div v-if="activeTab !== 'overview' && activeTab !== 'quality'" class="settings-save-actions"><el-button type="primary" :loading="saving || informationSaving || securitySaving || mailSaving" @click="saveActive">保存更改</el-button></div>
   </div>
 </template>
 

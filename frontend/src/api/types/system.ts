@@ -15,3 +15,25 @@ export interface SystemInformationSettings {
   userAgreement: string
   privacyPolicy: string
 }
+
+export interface ModelQualitySettings {
+  enabled: boolean
+}
+
+export interface ModelQualityEvent {
+  id: number
+  channelId: number
+  credentialId: number
+  requestedModel: string
+  expectedModel: string
+  observedModel: string
+  reasons: string[]
+  questionChars: number
+  answerChars: number
+  createdAt: string
+}
+
+export interface ModelQualityEventPage {
+  items: ModelQualityEvent[]
+  total: number
+}

@@ -206,7 +206,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			if !isStream {
 				s.writeBufferedResponse(writer, result.status, result.body, result.headers)
 			}
-			s.scheduleModelQualityAnalysis(ctx, requestID, candidate, requestedModel, endpoint, body, isStream, result)
+			s.scheduleModelQualityAnalysis(ctx, requestID, candidate, requestedModel, endpoint, body, isStream, settings.ModelQualityDetectionEnabled, result)
 			return nil
 		}
 	}

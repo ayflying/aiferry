@@ -213,6 +213,7 @@ export interface SystemResilienceSettings {
   disableLatencySeconds: number
   disableStatusCodes: string
   failureKeywords: string[]
+  modelQualityDetectionEnabled: boolean
 }
 
 export interface BaseSettings {
