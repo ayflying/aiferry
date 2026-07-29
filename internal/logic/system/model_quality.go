@@ -11,6 +11,7 @@ import (
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 const (
@@ -33,6 +34,7 @@ type ModelQualityEventInput struct {
 
 type modelQualityEventRow struct {
 	Id              uint64    `orm:"id"`
+	RequestId       string    `orm:"request_id"`
 	ChannelId       uint64    `orm:"channel_id"`
 	ChannelName     string    `orm:"channel_name"`
 	CredentialId    uint64    `orm:"credential_id"`
@@ -45,6 +47,13 @@ type modelQualityEventRow struct {
 	QuestionChars   uint      `orm:"question_chars"`
 	AnswerChars     uint      `orm:"answer_chars"`
 	CreatedAt       time.Time `orm:"created_at"`
+}
+
+type modelQualityEventReferences struct {
+	channelNames      map[uint64]string
+	credentialIndexes map[uint64]uint
+	requestAPIKeyIDs  map[string]uint64
+	apiKeyNames       map[uint64]string
 }
 
 func (s *sSystem) GetModelQualitySettings(ctx context.Context) (adminapi.ModelQualitySettingsInput, error) {
@@ -112,25 +121,171 @@ func (s *sSystem) trimModelQualityEvents(ctx context.Context) error {
 
 func (s *sSystem) ListModelQualityEvents(ctx context.Context, input adminapi.ModelQualityEventsInput) (adminapi.ModelQualityEventList, error) {
 	page, pageSize := normalizeModelQualityEventsPage(input)
-	model := dao.ModelQualityEvents.Ctx(ctx).As("e")
-	total, err := model.Count()
+	eventColumns := dao.ModelQualityEvents.Columns()
+	total, err := dao.ModelQualityEvents.Ctx(ctx).Count()
 	if err != nil {
 		return adminapi.ModelQualityEventList{}, gerror.Wrap(err, "count model quality events")
 	}
-	credentialIndexField := "(SELECT COUNT(*) FROM " + dao.ChannelCredentials.Table() + " cc WHERE cc.channel_id=e.channel_id AND cc.id<=e.credential_id) AS credential_index"
 	rows := make([]modelQualityEventRow, 0)
-	if err = model.Fields("e.*,COALESCE(c.name,'已删除渠道') AS channel_name,COALESCE(api_key.name,'未记录访问密钥') AS api_key_name,"+credentialIndexField).
-		LeftJoin(dao.Channels.Table()+" c", "c.id=e.channel_id").
-		LeftJoin(dao.UsageLogs.Table()+" u", "u.request_id=e.request_id").
-		LeftJoin(dao.ApiKeys.Table()+" api_key", "api_key.id=u.api_key_id").
-		OrderDesc("e.id").Page(page, pageSize).Scan(&rows); err != nil {
+	if err = dao.ModelQualityEvents.Ctx(ctx).
+		OrderDesc(eventColumns.Id).Page(page, pageSize).Scan(&rows); err != nil {
 		return adminapi.ModelQualityEventList{}, gerror.Wrap(err, "list model quality events")
+	}
+	if err = s.populateModelQualityEventReferences(ctx, rows); err != nil {
+		return adminapi.ModelQualityEventList{}, err
 	}
 	items := make([]adminapi.ModelQualityEventView, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, modelQualityEventView(row))
 	}
 	return adminapi.ModelQualityEventList{Items: items, Total: total}, nil
+}
+
+func (s *sSystem) populateModelQualityEventReferences(ctx context.Context, rows []modelQualityEventRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	references := modelQualityEventReferences{
+		channelNames:      make(map[uint64]string),
+		credentialIndexes: make(map[uint64]uint),
+		requestAPIKeyIDs:  make(map[string]uint64),
+		apiKeyNames:       make(map[uint64]string),
+	}
+	channelIDSet := make(map[uint64]struct{})
+	requestIDSet := make(map[string]struct{})
+	for _, row := range rows {
+		if row.ChannelId > 0 {
+			channelIDSet[row.ChannelId] = struct{}{}
+		}
+		if row.RequestId != "" {
+			requestIDSet[row.RequestId] = struct{}{}
+		}
+	}
+	channelIDs := modelQualityReferenceIDs(channelIDSet)
+	requestIDs := modelQualityReferenceStrings(requestIDSet)
+	if err := s.loadModelQualityChannels(ctx, channelIDs, &references); err != nil {
+		return err
+	}
+	if err := s.loadModelQualityCredentialIndexes(ctx, channelIDs, &references); err != nil {
+		return err
+	}
+	if err := s.loadModelQualityAPIKeyNames(ctx, requestIDs, &references); err != nil {
+		return err
+	}
+	applyModelQualityEventReferences(rows, references)
+	return nil
+}
+
+func (s *sSystem) loadModelQualityChannels(ctx context.Context, channelIDs []uint64, references *modelQualityEventReferences) error {
+	if len(channelIDs) == 0 {
+		return nil
+	}
+	columns := dao.Channels.Columns()
+	channels := make([]entity.Channels, 0, len(channelIDs))
+	if err := dao.Channels.Ctx(ctx).
+		Fields(columns.Id, columns.Name).
+		WhereIn(columns.Id, channelIDs).
+		Scan(&channels); err != nil {
+		return gerror.Wrap(err, "load model quality channels")
+	}
+	for _, channel := range channels {
+		references.channelNames[channel.Id] = channel.Name
+	}
+	return nil
+}
+
+func (s *sSystem) loadModelQualityCredentialIndexes(ctx context.Context, channelIDs []uint64, references *modelQualityEventReferences) error {
+	if len(channelIDs) == 0 {
+		return nil
+	}
+	columns := dao.ChannelCredentials.Columns()
+	credentials := make([]entity.ChannelCredentials, 0)
+	if err := dao.ChannelCredentials.Ctx(ctx).Unscoped().
+		Fields(columns.Id, columns.ChannelId).
+		WhereIn(columns.ChannelId, channelIDs).
+		OrderAsc(columns.ChannelId).
+		OrderAsc(columns.Id).
+		Scan(&credentials); err != nil {
+		return gerror.Wrap(err, "load model quality credential indexes")
+	}
+	indexes := make(map[uint64]uint)
+	for _, credential := range credentials {
+		indexes[credential.ChannelId]++
+		references.credentialIndexes[credential.Id] = indexes[credential.ChannelId]
+	}
+	return nil
+}
+
+func (s *sSystem) loadModelQualityAPIKeyNames(ctx context.Context, requestIDs []string, references *modelQualityEventReferences) error {
+	if len(requestIDs) == 0 {
+		return nil
+	}
+	usageColumns := dao.UsageLogs.Columns()
+	usageLogs := make([]entity.UsageLogs, 0, len(requestIDs))
+	if err := dao.UsageLogs.Ctx(ctx).
+		Fields(usageColumns.Id, usageColumns.RequestId, usageColumns.ApiKeyId).
+		WhereIn(usageColumns.RequestId, requestIDs).
+		OrderDesc(usageColumns.Id).
+		Scan(&usageLogs); err != nil {
+		return gerror.Wrap(err, "load model quality usage logs")
+	}
+	apiKeyIDSet := make(map[uint64]struct{})
+	for _, usageLog := range usageLogs {
+		if _, exists := references.requestAPIKeyIDs[usageLog.RequestId]; exists {
+			continue
+		}
+		references.requestAPIKeyIDs[usageLog.RequestId] = usageLog.ApiKeyId
+		if usageLog.ApiKeyId > 0 {
+			apiKeyIDSet[usageLog.ApiKeyId] = struct{}{}
+		}
+	}
+	apiKeyIDs := modelQualityReferenceIDs(apiKeyIDSet)
+	if len(apiKeyIDs) == 0 {
+		return nil
+	}
+	apiKeyColumns := dao.ApiKeys.Columns()
+	apiKeys := make([]entity.ApiKeys, 0, len(apiKeyIDs))
+	if err := dao.ApiKeys.Ctx(ctx).
+		Fields(apiKeyColumns.Id, apiKeyColumns.Name).
+		WhereIn(apiKeyColumns.Id, apiKeyIDs).
+		Scan(&apiKeys); err != nil {
+		return gerror.Wrap(err, "load model quality API keys")
+	}
+	for _, apiKey := range apiKeys {
+		references.apiKeyNames[apiKey.Id] = apiKey.Name
+	}
+	return nil
+}
+
+func applyModelQualityEventReferences(rows []modelQualityEventRow, references modelQualityEventReferences) {
+	for index := range rows {
+		row := &rows[index]
+		row.ChannelName = references.channelNames[row.ChannelId]
+		if row.ChannelName == "" {
+			row.ChannelName = "已删除渠道"
+		}
+		row.CredentialIndex = references.credentialIndexes[row.CredentialId]
+		row.APIKeyName = references.apiKeyNames[references.requestAPIKeyIDs[row.RequestId]]
+		if row.APIKeyName == "" {
+			row.APIKeyName = "未记录访问密钥"
+		}
+	}
+}
+
+func modelQualityReferenceIDs(values map[uint64]struct{}) []uint64 {
+	result := make([]uint64, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	return result
+}
+
+func modelQualityReferenceStrings(values map[string]struct{}) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	return result
 }
 
 func normalizeModelQualityEventsPage(input adminapi.ModelQualityEventsInput) (int, int) {
