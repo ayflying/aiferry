@@ -62,6 +62,10 @@ const securityForm = reactive({
   enabled: false,
   checkUserPrompt: false,
   keywordsText: '',
+  sensitiveDataRedactionEnabled: true,
+  passwordRedactionEnabled: true,
+  tokenRedactionEnabled: true,
+  personalDataRedactionEnabled: true,
 })
 const mailForm = reactive({
   enabled: false,
@@ -85,7 +89,7 @@ const sectionMeta = computed(() => ({
   basic: { title: '基础设置', description: '全局时区、应用身份与站点内容' },
   resilience: { title: '路由可靠性', description: '故障转移、健康检查与自动禁用' },
   quality: { title: '模型质量观测', description: '检测开关与已发现的可疑上游响应' },
-  security: { title: '安全与限制', description: '图片功能与请求内容过滤' },
+  security: { title: '安全与限制', description: '图片功能、请求过滤与上游数据脱敏' },
   mail: { title: '邮件提醒', description: '按模型使用触发的余额提醒与 SMTP 投递配置' },
 }[activeTab.value]))
 const activeTabLoading = computed(() => tabLoading[activeTab.value])
@@ -112,6 +116,10 @@ function applySecuritySettings(settings: SensitiveWordSettings) {
     enabled: settings.enabled,
     checkUserPrompt: settings.checkUserPrompt,
     keywordsText: settings.keywords.join('\n'),
+    sensitiveDataRedactionEnabled: settings.sensitiveDataRedactionEnabled,
+    passwordRedactionEnabled: settings.passwordRedactionEnabled,
+    tokenRedactionEnabled: settings.tokenRedactionEnabled,
+    personalDataRedactionEnabled: settings.personalDataRedactionEnabled,
   })
 }
 
@@ -238,6 +246,10 @@ async function saveSecuritySettings() {
       enabled: securityForm.enabled,
       checkUserPrompt: securityForm.checkUserPrompt,
       keywords: securityForm.keywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
+      sensitiveDataRedactionEnabled: securityForm.sensitiveDataRedactionEnabled,
+      passwordRedactionEnabled: securityForm.passwordRedactionEnabled,
+      tokenRedactionEnabled: securityForm.tokenRedactionEnabled,
+      personalDataRedactionEnabled: securityForm.personalDataRedactionEnabled,
     })
     applySecuritySettings(settings)
     showSuccess('安全与限制设置已保存', '保存成功')
@@ -327,6 +339,13 @@ watch(activeTab, (tab) => {
         <div class="setting-switch sensitive-switch"><div><strong>启用过滤</strong><span>检测到敏感关键词时阻止消息。</span></div><el-switch v-model="securityForm.enabled" /></div>
         <div class="setting-switch sensitive-switch"><div><strong>检查用户提示</strong><span>启用后，提示将在到达上游模型之前被扫描。</span></div><el-switch v-model="securityForm.checkUserPrompt" /></div>
         <el-form label-position="top" class="settings-form"><el-form-item label="已阻止的关键词"><el-input v-model="securityForm.keywordsText" type="textarea" :rows="12" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">每行代表一个关键词。留空以禁用列表，但保留开关状态。</p></el-form>
+      </section>
+      <section class="settings-section">
+        <div class="section-heading"><div><h2>上游数据脱敏</h2><span>在转发到渠道和模型质量观测前替换敏感内容；占位符不会在模型响应中恢复。</span></div><ShieldCheck :size="19" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>启用敏感数据脱敏</strong><span>关闭后，所有分类脱敏都会停止。仅在必须让上游接收真实数据时临时关闭。</span></div><el-switch v-model="securityForm.sensitiveDataRedactionEnabled" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>密码脱敏</strong><span>识别 JSON 密码字段、命令中的密码赋值和带用户名密码的 URL。</span></div><el-switch v-model="securityForm.passwordRedactionEnabled" :disabled="!securityForm.sensitiveDataRedactionEnabled" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>密钥与令牌脱敏</strong><span>识别 API Key、Bearer Token、授权信息、Cookie 和私钥内容。</span></div><el-switch v-model="securityForm.tokenRedactionEnabled" :disabled="!securityForm.sensitiveDataRedactionEnabled" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>个人信息脱敏</strong><span>识别邮箱、中国大陆手机号、身份证号和校验通过的银行卡号。</span></div><el-switch v-model="securityForm.personalDataRedactionEnabled" :disabled="!securityForm.sensitiveDataRedactionEnabled" /></div>
       </section>
     </template>
 

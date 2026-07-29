@@ -132,6 +132,14 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	if err := s.resilience.CheckSensitivePrompt(ctx, endpoint, body); err != nil {
 		return err
 	}
+	securitySettings, err := s.resilience.GetSensitiveWordSettings(ctx)
+	if err != nil {
+		return err
+	}
+	body, err = redactSensitiveData(body, securitySettings)
+	if err != nil {
+		return err
+	}
 	requestedModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if requestedModel == "" {
 		return gerror.New("model is required")

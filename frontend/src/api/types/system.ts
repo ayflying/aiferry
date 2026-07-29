@@ -3,6 +3,10 @@ export interface SensitiveWordSettings {
   enabled: boolean
   checkUserPrompt: boolean
   keywords: string[]
+  sensitiveDataRedactionEnabled: boolean
+  passwordRedactionEnabled: boolean
+  tokenRedactionEnabled: boolean
+  personalDataRedactionEnabled: boolean
 }
 
 export interface SystemInformationSettings {

@@ -38,10 +38,14 @@ type promptContentItem struct {
 
 func DefaultSensitiveWordSettings() adminapi.SensitiveWordSettingsInput {
 	return adminapi.SensitiveWordSettingsInput{
-		ImageEnabled:     true,
-		Enabled:         false,
-		CheckUserPrompt: false,
-		Keywords:        []string{},
+		ImageEnabled:                  true,
+		Enabled:                       false,
+		CheckUserPrompt:               false,
+		Keywords:                      []string{},
+		SensitiveDataRedactionEnabled: true,
+		PasswordRedactionEnabled:      true,
+		TokenRedactionEnabled:         true,
+		PersonalDataRedactionEnabled:  true,
 	}
 }
 

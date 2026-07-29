@@ -28,6 +28,9 @@ func TestDecodeSensitiveWordSettingsEnablesImagesForExistingSettings(t *testing.
 	if !settings.ImageEnabled {
 		t.Fatal("ImageEnabled = false, want true for settings saved before the image switch was added")
 	}
+	if !settings.SensitiveDataRedactionEnabled || !settings.PasswordRedactionEnabled || !settings.TokenRedactionEnabled || !settings.PersonalDataRedactionEnabled {
+		t.Fatalf("existing settings must enable sensitive data redaction by default: %#v", settings)
+	}
 }
 
 func TestHasImageInput(t *testing.T) {
