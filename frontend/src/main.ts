@@ -7,4 +7,9 @@ import './styles.css'
 import App from './App.vue'
 import router from './router'
 
-createApp(App).use(createPinia()).use(router).mount('#app')
+const app = createApp(App)
+app.use(createPinia())
+app.use(router)
+
+// Wait for the initial navigation and auth guard before rendering a protected layout.
+void router.isReady().then(() => { app.mount('#app') })
