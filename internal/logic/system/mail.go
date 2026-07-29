@@ -60,8 +60,8 @@ func DefaultMailSettings() MailSettings {
 	return MailSettings{
 		Enabled: false, ChannelAlertEnabled: true, ChannelBalanceThresholds: defaultChannelBalanceThresholds,
 		Port: 587, Security: "starttls", Threshold: 5,
-		SubjectTemplate: "AiFerry 余额不足提醒",
-		BodyTemplate:    "您好，{nickname}：\n\n您的 AiFerry 余额为 ${balance}，已低于提醒阈值 ${threshold}。\n\n请及时充值以避免调用中断。",
+		SubjectTemplate: "{system_name} 余额不足提醒",
+		BodyTemplate:    "您好，{nickname}：\n\n您的 {system_name} 余额为 {balance}，已低于提醒阈值 {threshold}。\n\n请访问 {url} 及时充值以避免调用中断。",
 	}
 }
 

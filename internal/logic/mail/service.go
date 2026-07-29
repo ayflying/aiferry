@@ -87,7 +87,8 @@ func (s *sMail) notifyLowBalance(ctx context.Context, userID uint64) {
 	if err != nil || !created {
 		return
 	}
-	subject, body := renderTemplates(settings, profile)
+	systemName, serverURL := s.templateSystemInformation(ctx)
+	subject, body := renderTemplates(settings, profile, systemName, serverURL)
 	if err = send(settings, profile.Email, subject, body); err != nil {
 		_ = s.app.Redis.Del(ctx, key).Err()
 	}
@@ -149,21 +150,37 @@ func deliver(client *smtp.Client, settings system.MailDeliverySettings, recipien
 	return gerror.Wrap(writer.Close(), "send SMTP message")
 }
 
-func renderTemplates(settings system.MailDeliverySettings, profile user.Profile) (string, string) {
+func renderTemplates(settings system.MailDeliverySettings, profile user.Profile, systemName, serverURL string) (string, string) {
 	replacer := strings.NewReplacer(
+		"${nickname}", profile.Nickname,
+		"${balance}", fmt.Sprintf("%.6f", profile.Balance),
+		"${threshold}", fmt.Sprintf("%.6f", settings.Threshold),
+		"${system_name}", systemName,
+		"${url}", serverURL,
 		"{nickname}", profile.Nickname,
 		"{balance}", fmt.Sprintf("%.6f", profile.Balance),
 		"{threshold}", fmt.Sprintf("%.6f", settings.Threshold),
+		"{system_name}", systemName,
+		"{url}", serverURL,
 	)
 	return replacer.Replace(settings.SubjectTemplate), replacer.Replace(settings.BodyTemplate)
 }
 
-func (s *sMail) systemName(ctx context.Context) string {
+func (s *sMail) templateSystemInformation(ctx context.Context) (string, string) {
 	information, err := s.settings.GetSystemInformation(ctx)
-	if err == nil && strings.TrimSpace(information.SystemName) != "" {
-		return information.SystemName
+	if err != nil {
+		return system.DefaultSystemInformation().SystemName, ""
 	}
-	return system.DefaultSystemInformation().SystemName
+	name := strings.TrimSpace(information.SystemName)
+	if name == "" {
+		name = system.DefaultSystemInformation().SystemName
+	}
+	return name, strings.TrimSpace(information.ServerURL)
+}
+
+func (s *sMail) systemName(ctx context.Context) string {
+	name, _ := s.templateSystemInformation(ctx)
+	return name
 }
 
 func reminderKey(userID uint64, threshold float64) string {

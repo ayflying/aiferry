@@ -9,15 +9,15 @@ import (
 
 func TestRenderTemplates(t *testing.T) {
 	settings := system.MailDeliverySettings{MailSettings: system.MailSettings{
-		SubjectTemplate: "余额提醒：{nickname}",
-		BodyTemplate:    "余额 {balance}，阈值 {threshold}，用户 {nickname}",
+		SubjectTemplate: "{system_name} 余额提醒：{nickname}",
+		BodyTemplate:    "余额 {balance}，阈值 ${threshold}，用户 {nickname}，网址 {url}，系统 ${system_name}",
 		Threshold:       5,
 	}}
-	subject, body := renderTemplates(settings, user.Profile{Nickname: "测试用户", Balance: 1.25})
-	if subject != "余额提醒：测试用户" {
+	subject, body := renderTemplates(settings, user.Profile{Nickname: "测试用户", Balance: 1.25}, "测试系统", "https://example.com")
+	if subject != "测试系统 余额提醒：测试用户" {
 		t.Fatalf("unexpected subject: %q", subject)
 	}
-	if body != "余额 1.250000，阈值 5.000000，用户 测试用户" {
+	if body != "余额 1.250000，阈值 5.000000，用户 测试用户，网址 https://example.com，系统 测试系统" {
 		t.Fatalf("unexpected body: %q", body)
 	}
 }
