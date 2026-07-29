@@ -18,3 +18,9 @@ func TestModelQualityEventViewUsesChannelName(t *testing.T) {
 		t.Fatalf("credential index = %d", view.CredentialIndex)
 	}
 }
+
+func TestModelQualityEventRetentionLimit(t *testing.T) {
+	if maxStoredModelQualityEvents != 999 {
+		t.Fatalf("retention limit = %d", maxStoredModelQualityEvents)
+	}
+}

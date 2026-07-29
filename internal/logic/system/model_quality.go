@@ -16,6 +16,7 @@ import (
 const (
 	defaultModelQualityEventsPageSize = 50
 	maxModelQualityEventsPageSize     = 200
+	maxStoredModelQualityEvents       = 999
 )
 
 type ModelQualityEventInput struct {
@@ -85,7 +86,27 @@ func (s *sSystem) RecordModelQualityEvent(ctx context.Context, input ModelQualit
 		QuestionChars:  input.QuestionChars,
 		AnswerChars:    input.AnswerChars,
 	}).Insert()
-	return gerror.Wrap(err, "record model quality event")
+	if err != nil {
+		return gerror.Wrap(err, "record model quality event")
+	}
+	return s.trimModelQualityEvents(ctx)
+}
+
+func (s *sSystem) trimModelQualityEvents(ctx context.Context) error {
+	columns := dao.ModelQualityEvents.Columns()
+	cutoff := modelQualityEventRow{}
+	if err := dao.ModelQualityEvents.Ctx(ctx).
+		Fields(columns.Id).
+		OrderDesc(columns.Id).
+		Limit(1, maxStoredModelQualityEvents).
+		Scan(&cutoff); err != nil {
+		return gerror.Wrap(err, "select model quality retention cutoff")
+	}
+	if cutoff.Id == 0 {
+		return nil
+	}
+	_, err := dao.ModelQualityEvents.Ctx(ctx).WhereLTE(columns.Id, cutoff.Id).Delete()
+	return gerror.Wrap(err, "trim model quality events")
 }
 
 func (s *sSystem) ListModelQualityEvents(ctx context.Context, input adminapi.ModelQualityEventsInput) (adminapi.ModelQualityEventList, error) {
