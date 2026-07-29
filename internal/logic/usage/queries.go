@@ -200,9 +200,10 @@ func (s *sUsage) List(ctx context.Context, input LogFilter) (LogPage, error) {
 	}
 	items := make([]LogView, 0)
 	credentialIndexField := "(SELECT COUNT(*) FROM " + dao.ChannelCredentials.Table() + " cc WHERE cc.channel_id=u.channel_id AND cc.id<=u.channel_credential_id) AS channel_credential_index"
-	err := query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,COALESCE(c.name,'已删除渠道') AS channel_name,"+credentialIndexField+",IF(u.api_key_id IS NULL,'系统',COALESCE(usr.name,'已删除用户')) AS user_name").
+	err := query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,COALESCE(c.name,'已删除渠道') AS channel_name,COALESCE(credential.key_prefix,'') AS channel_credential_prefix,"+credentialIndexField+",IF(u.api_key_id IS NULL,'系统',COALESCE(usr.name,'已删除用户')) AS user_name").
 		LeftJoin(dao.ApiKeys.Table()+" k", "k.id=u.api_key_id").
 		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").
+		LeftJoin(dao.ChannelCredentials.Table()+" credential", "credential.id=u.channel_credential_id").
 		LeftJoin(dao.Users.Table()+" usr", "usr.id=u.user_id").
 		OrderDesc("u.id").Page(input.Page, input.PageSize).Scan(&items)
 	if err != nil {

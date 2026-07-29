@@ -291,6 +291,7 @@ func (c *Controller) listUsage(r *ghttp.Request) {
 	if !isAdmin {
 		for index := range data.Items {
 			data.Items[index].ChannelName = ""
+			data.Items[index].ChannelCredentialPrefix = ""
 			data.Items[index].ChannelCredentialIndex = 0
 		}
 	}

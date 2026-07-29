@@ -1,4 +1,6 @@
-export function channelCredentialLabel(index: number | undefined): string {
+export function channelCredentialLabel(index: number | undefined, prefix?: string): string {
+  const keyPrefix = prefix?.trim()
+  if (keyPrefix) return index && index > 0 ? `密钥 ${keyPrefix} · #${index}` : `密钥 ${keyPrefix}`
   return index && index > 0 ? `密钥 #${index}` : '未记录渠道密钥'
 }
 

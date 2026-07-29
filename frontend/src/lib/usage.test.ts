@@ -4,6 +4,7 @@ import { channelCredentialLabel, channelCredentialReference } from './usage'
 describe('channelCredentialLabel', () => {
   it('uses the stable credential ordinal instead of its database ID', () => {
     expect(channelCredentialLabel(2)).toBe('密钥 #2')
+    expect(channelCredentialLabel(2, 'sk-live...')).toBe('密钥 sk-live... · #2')
   })
 
   it('describes usage records that predate credential tracking', () => {

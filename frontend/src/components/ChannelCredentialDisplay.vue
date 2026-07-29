@@ -3,6 +3,7 @@ import { channelCredentialLabel } from '../lib/usage'
 
 defineProps<{
   channelName?: string
+  credentialPrefix?: string
   credentialIndex?: number
 }>()
 </script>
@@ -10,6 +11,6 @@ defineProps<{
 <template>
   <div class="channel-credential-display">
     <strong>{{ channelName?.trim() || '已删除渠道' }}</strong>
-    <small>{{ channelCredentialLabel(credentialIndex) }}</small>
+    <small>{{ channelCredentialLabel(credentialIndex, credentialPrefix) }}</small>
   </div>
 </template>

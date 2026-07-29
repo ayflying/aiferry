@@ -30,6 +30,7 @@ export interface ModelQualityEvent {
   channelId: number
   channelName: string
   credentialId: number
+  credentialPrefix: string
   credentialIndex: number
   requestedModel: string
   expectedModel: string

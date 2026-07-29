@@ -177,18 +177,19 @@ type ModelQualityEventsInput struct {
 }
 
 type ModelQualityEventView struct {
-	Id              uint64    `json:"id"`
-	ChannelId       uint64    `json:"channelId"`
-	ChannelName     string    `json:"channelName"`
-	CredentialId    uint64    `json:"credentialId"`
-	CredentialIndex uint      `json:"credentialIndex"`
-	RequestedModel  string    `json:"requestedModel"`
-	ExpectedModel   string    `json:"expectedModel"`
-	ObservedModel   string    `json:"observedModel"`
-	Reasons         []string  `json:"reasons"`
-	QuestionChars   uint      `json:"questionChars"`
-	AnswerChars     uint      `json:"answerChars"`
-	CreatedAt       time.Time `json:"createdAt"`
+	Id               uint64    `json:"id"`
+	ChannelId        uint64    `json:"channelId"`
+	ChannelName      string    `json:"channelName"`
+	CredentialId     uint64    `json:"credentialId"`
+	CredentialPrefix string    `json:"credentialPrefix"`
+	CredentialIndex  uint      `json:"credentialIndex"`
+	RequestedModel   string    `json:"requestedModel"`
+	ExpectedModel    string    `json:"expectedModel"`
+	ObservedModel    string    `json:"observedModel"`
+	Reasons          []string  `json:"reasons"`
+	QuestionChars    uint      `json:"questionChars"`
+	AnswerChars      uint      `json:"answerChars"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 type ModelQualityEventList struct {
