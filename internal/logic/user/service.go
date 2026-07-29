@@ -48,6 +48,11 @@ type ManagedUser struct {
 	Usage       usage.UserSummary `json:"usage"`
 }
 
+type Option struct {
+	Id       uint64 `json:"id" orm:"id"`
+	Nickname string `json:"nickname" orm:"name"`
+}
+
 type apiKeyCache struct {
 	Id      uint64 `orm:"id"`
 	KeyHash string `orm:"key_hash"`
@@ -115,6 +120,19 @@ func (s *sUser) List(ctx context.Context) ([]ManagedUser, error) {
 		result = append(result, ManagedUser{Profile: profileFromEntity(row), APIKeyCount: int64(keyCount), Usage: summary})
 	}
 	return result, nil
+}
+
+func (s *sUser) ListOptions(ctx context.Context) ([]Option, error) {
+	rows := make([]Option, 0)
+	columns := dao.Users.Columns()
+	if err := dao.Users.Ctx(ctx).
+		Fields(columns.Id, columns.Name).
+		Where(columns.IdentityProvider, "casdoor").
+		OrderDesc(columns.Id).
+		Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "list user options")
+	}
+	return rows, nil
 }
 
 func (s *sUser) AdminEmails(ctx context.Context) ([]string, error) {

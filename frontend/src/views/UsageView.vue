@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
-import type { BillingItem, ManagedUser, UsageLog, UsagePage } from '../api/types'
+import type { BillingItem, UsageLog, UsagePage, UserOption } from '../api/types'
 import ChannelCredentialDisplay from '../components/ChannelCredentialDisplay.vue'
 import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import MobileRecordList from '../components/MobileRecordList.vue'
@@ -19,7 +19,8 @@ const loading = ref(false)
 const timeRange = ref(todayRange())
 const page = ref<UsagePage>({ items: [], summary: { requests: 0, estimatedCost: 0 }, startAt: timeRange.value[0].toISOString(), endAt: endOfSecond(timeRange.value[1]).toISOString(), total: 0, page: 1, pageSize: 20 })
 const filters = reactive({ model: '', userId: undefined as number | undefined, channelId: undefined as number | undefined, apiKeyId: undefined as number | undefined, startAt: timeRange.value[0].toISOString(), endAt: endOfSecond(timeRange.value[1]).toISOString(), page: 1, pageSize: 20 })
-const users = ref<ManagedUser[]>([])
+const users = ref<UserOption[]>([])
+const usersLoaded = ref(false)
 const isAdmin = computed(() => auth.user?.isAdmin === true)
 const usageItems = computed(() => page.value.items ?? [])
 const selectedUsage = ref<UsageLog>()
@@ -27,18 +28,24 @@ const detailOpen = ref(false)
 
 async function load() {
   loading.value = true
+  void loadSupport().catch((error) => showError(error, '加载用量筛选项失败'))
   try {
-    const dataPromise = apiGet<UsagePage>('/usage', filters)
-    const support = [
-      store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys(),
-    ]
-    if (isAdmin.value) {
-      support.push(store.channels.length ? Promise.resolve() : store.loadChannels())
-      support.push(apiGet<ManagedUser[]>('/users').then((items) => { users.value = items }))
-    }
-    await Promise.all([dataPromise, ...support])
-    page.value = await dataPromise
+    page.value = await apiGet<UsagePage>('/usage', filters)
   } catch (error) { showError(error, '加载用量记录失败') } finally { loading.value = false }
+}
+
+async function loadSupport() {
+  const support = [store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys()]
+  if (isAdmin.value) {
+    support.push(store.channels.length ? Promise.resolve() : store.loadChannels())
+    if (!usersLoaded.value) {
+      support.push(apiGet<UserOption[]>('/users', { compact: 1 }).then((items) => {
+        users.value = items
+        usersLoaded.value = true
+      }))
+    }
+  }
+  await Promise.all(support)
 }
 
 function search() { filters.page = 1; load() }

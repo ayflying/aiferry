@@ -125,18 +125,3 @@ func usageTrend(rows []entity.UsageLogs, location *time.Location, dateRange Dash
 	}
 	return result
 }
-
-func userSummaryFromUsageLogs(days int, rows []entity.UsageLogs) UserSummary {
-	result := UserSummary{Days: days}
-	for _, row := range rows {
-		result.Requests++
-		if row.HttpStatus >= 200 && row.HttpStatus <= 299 {
-			result.Successes++
-		}
-		result.InputTokens += row.InputTokens
-		result.OutputTokens += row.OutputTokens
-		result.TotalTokens += row.TotalTokens
-		result.EstimatedCost += row.EstimatedCost
-	}
-	return result
-}

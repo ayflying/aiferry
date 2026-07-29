@@ -103,17 +103,44 @@ func (s *sUsage) UserSummary(ctx context.Context, userID uint64, days int) (User
 	if days <= 0 || days > 90 {
 		days = 30
 	}
-	result := UserSummary{Days: days}
 	start := startOfDay(time.Now().In(s.timeLocation(ctx))).AddDate(0, 0, -days+1).UTC()
-	rows := make([]entity.UsageLogs, 0)
-	err := dao.UsageLogs.Ctx(ctx).
-		Where(dao.UsageLogs.Columns().UserId, userID).
-		WhereGTE(dao.UsageLogs.Columns().CreatedAt, start).
-		Scan(&rows)
+	columns := dao.UsageLogs.Columns()
+	query := dao.UsageLogs.Ctx(ctx).
+		Where(columns.UserId, userID).
+		WhereGTE(columns.CreatedAt, start)
+	requests, err := query.Clone().Count()
 	if err != nil {
-		return result, gerror.Wrap(err, "load user usage logs")
+		return UserSummary{}, gerror.Wrap(err, "count user usage logs")
 	}
-	return userSummaryFromUsageLogs(days, rows), nil
+	successes, err := query.Clone().WhereGTE(columns.HttpStatus, 200).WhereLTE(columns.HttpStatus, 299).Count()
+	if err != nil {
+		return UserSummary{}, gerror.Wrap(err, "count successful user usage logs")
+	}
+	inputTokens, err := query.Clone().Sum(columns.InputTokens)
+	if err != nil {
+		return UserSummary{}, gerror.Wrap(err, "sum user input tokens")
+	}
+	outputTokens, err := query.Clone().Sum(columns.OutputTokens)
+	if err != nil {
+		return UserSummary{}, gerror.Wrap(err, "sum user output tokens")
+	}
+	totalTokens, err := query.Clone().Sum(columns.TotalTokens)
+	if err != nil {
+		return UserSummary{}, gerror.Wrap(err, "sum user total tokens")
+	}
+	estimatedCost, err := query.Clone().Sum(columns.EstimatedCost)
+	if err != nil {
+		return UserSummary{}, gerror.Wrap(err, "sum user estimated cost")
+	}
+	return UserSummary{
+		Days:          days,
+		Requests:      int64(requests),
+		Successes:     int64(successes),
+		InputTokens:   uint64(inputTokens),
+		OutputTokens:  uint64(outputTokens),
+		TotalTokens:   uint64(totalTokens),
+		EstimatedCost: estimatedCost,
+	}, nil
 }
 
 func (s *sUsage) List(ctx context.Context, input LogFilter) (LogPage, error) {

@@ -19,6 +19,7 @@ type (
 		UpdateProfile(ctx context.Context, id uint64, nickname string, email string) (Profile, error)
 		Usage(ctx context.Context, id uint64, days int) (usage.UserSummary, error)
 		List(ctx context.Context) ([]ManagedUser, error)
+		ListOptions(ctx context.Context) ([]Option, error)
 		AdminEmails(ctx context.Context) ([]string, error)
 		UpdateBalance(ctx context.Context, id uint64, balance float64) (Profile, error)
 		CheckBalance(ctx context.Context, id uint64) error

@@ -121,3 +121,8 @@ export interface UsageLogSummary {
   requests: number
   estimatedCost: number
 }
+
+export interface UserOption {
+  id: number
+  nickname: string
+}

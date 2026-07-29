@@ -14,6 +14,11 @@ func (c *Controller) registerUserRoutes(group *ghttp.RouterGroup) {
 }
 
 func (c *Controller) listUsers(r *ghttp.Request) {
+	if r.GetQuery("compact").Bool() {
+		data, err := c.users.ListOptions(r.Context())
+		respond(r, data, err)
+		return
+	}
 	data, err := c.users.List(r.Context())
 	respond(r, data, err)
 }
