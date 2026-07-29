@@ -53,8 +53,17 @@ func (r *sensitiveDataRestorer) restoreString(value string) string {
 	if r == nil {
 		return value
 	}
-	for placeholder, original := range r.replacements {
-		value = strings.ReplaceAll(value, placeholder, original)
+	// One replacement can contain an earlier placeholder when multiple sensitive
+	// patterns overlap, such as a password embedded in an authenticated URL.
+	for range len(r.replacements) {
+		restored := value
+		for placeholder, original := range r.replacements {
+			restored = strings.ReplaceAll(restored, placeholder, original)
+		}
+		if restored == value {
+			return restored
+		}
+		value = restored
 	}
 	return value
 }

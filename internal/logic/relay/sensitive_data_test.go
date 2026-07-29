@@ -36,8 +36,14 @@ func TestRedactSensitiveDataRedactsContentWithoutBreakingToolSchema(t *testing.T
 		t.Fatalf("redacted request does not contain a request-scoped placeholder: %s", redacted)
 	}
 	restored := restorer.restoreBufferedResponse(redacted)
-	if !strings.Contains(string(restored), "database-password") || !strings.Contains(string(restored), "alice@example.com") {
-		t.Fatalf("restored request does not contain the original values: %s", restored)
+	for _, secret := range []string{
+		"database-password", "sk-abc1234567890", "cli-password", "sk-command-key-123", "url-password",
+		"eyJhbGciOiJIUzI1NiJ9.abc.123", "alice@example.com", "13800138000",
+		"11010519491231002X", "4111 1111 1111 1111",
+	} {
+		if !strings.Contains(string(restored), secret) {
+			t.Fatalf("restored request does not contain %q: %s", secret, restored)
+		}
 	}
 	if got := gjson.GetBytes(redacted, "max_tokens").Int(); got != 64 {
 		t.Fatalf("max_tokens = %d, want 64", got)
