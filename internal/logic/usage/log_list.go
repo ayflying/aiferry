@@ -27,16 +27,11 @@ func (s *sUsage) listUsageLogs(ctx context.Context, input LogFilter) (LogPage, e
 		return LogPage{}, gerror.Wrap(err, "count usage logs")
 	}
 	columns := dao.UsageLogs.Columns()
-	costs := make([]struct {
-		EstimatedCost float64 `orm:"estimated_cost"`
-	}, 0)
-	if err = query.Clone().Fields(columns.EstimatedCost).Scan(&costs); err != nil {
-		return LogPage{}, gerror.Wrap(err, "load usage log costs")
+	estimatedCost, err := query.Clone().Sum(columns.EstimatedCost)
+	if err != nil {
+		return LogPage{}, gerror.Wrap(err, "sum usage log costs")
 	}
-	summary := LogSummary{Requests: int64(total)}
-	for _, cost := range costs {
-		summary.EstimatedCost += cost.EstimatedCost
-	}
+	summary := LogSummary{Requests: int64(total), EstimatedCost: estimatedCost}
 	items := make([]LogView, 0)
 	if err = query.OrderDesc(columns.Id).Page(input.Page, input.PageSize).Scan(&items); err != nil {
 		return LogPage{}, gerror.Wrap(err, "list usage logs")
