@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { channelCredentialLabel } from '../lib/usage'
+import { channelCredentialReference } from '../lib/usage'
 
 defineProps<{
   channelName?: string
-  credentialPrefix?: string
   credentialIndex?: number
+  apiKeyName?: string
 }>()
 </script>
 
 <template>
   <div class="channel-credential-display">
-    <strong>{{ channelName?.trim() || '已删除渠道' }}</strong>
-    <small>{{ channelCredentialLabel(credentialIndex, credentialPrefix) }}</small>
+    <strong>{{ channelCredentialReference(channelName, credentialIndex) }}</strong>
+    <small>{{ apiKeyName?.trim() ? `密钥 ${apiKeyName.trim()}` : '未记录访问密钥' }}</small>
   </div>
 </template>

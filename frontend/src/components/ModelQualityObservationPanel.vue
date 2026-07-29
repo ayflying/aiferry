@@ -51,7 +51,7 @@ function observedModel(event: ModelQualityEvent): string {
     </div>
     <el-table v-loading="loading" :data="events.items" row-key="id" empty-text="暂无检测历史">
       <el-table-column label="时间" min-width="176"><template #default="{ row }"><span class="mono">{{ formatTime(row.createdAt) }}</span></template></el-table-column>
-      <el-table-column label="渠道 / 密钥" min-width="190"><template #default="{ row }"><ChannelCredentialDisplay class="cell-stack" :channel-name="row.channelName" :credential-prefix="row.credentialPrefix" :credential-index="row.credentialIndex" /></template></el-table-column>
+      <el-table-column label="渠道 / 密钥" min-width="190"><template #default="{ row }"><ChannelCredentialDisplay class="cell-stack" :channel-name="row.channelName" :credential-index="row.credentialIndex" :api-key-name="row.apiKeyName" /></template></el-table-column>
       <el-table-column label="模型" min-width="240"><template #default="{ row }"><div class="cell-stack"><strong>{{ row.requestedModel }}</strong><small>期望 {{ row.expectedModel }} · 实际 {{ observedModel(row) }}</small></div></template></el-table-column>
       <el-table-column label="检测信号" min-width="190"><template #default="{ row }"><div class="reason-list"><el-tag v-for="reason in row.reasons" :key="reason" type="warning" effect="plain" size="small">{{ reasonLabel(reason) }}</el-tag></div></template></el-table-column>
       <el-table-column label="文本长度" min-width="126"><template #default="{ row }"><div class="cell-stack mono"><strong>问 {{ formatNumber(row.questionChars) }}</strong><small>答 {{ formatNumber(row.answerChars) }}</small></div></template></el-table-column>

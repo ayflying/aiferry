@@ -32,19 +32,19 @@ type ModelQualityEventInput struct {
 }
 
 type modelQualityEventRow struct {
-	Id               uint64    `orm:"id"`
-	ChannelId        uint64    `orm:"channel_id"`
-	ChannelName      string    `orm:"channel_name"`
-	CredentialId     uint64    `orm:"credential_id"`
-	CredentialPrefix string    `orm:"credential_prefix"`
-	CredentialIndex  uint      `orm:"credential_index"`
-	RequestedModel   string    `orm:"requested_model"`
-	ExpectedModel    string    `orm:"expected_model"`
-	ObservedModel    string    `orm:"observed_model"`
-	ReasonsJson      string    `orm:"reasons_json"`
-	QuestionChars    uint      `orm:"question_chars"`
-	AnswerChars      uint      `orm:"answer_chars"`
-	CreatedAt        time.Time `orm:"created_at"`
+	Id              uint64    `orm:"id"`
+	ChannelId       uint64    `orm:"channel_id"`
+	ChannelName     string    `orm:"channel_name"`
+	CredentialId    uint64    `orm:"credential_id"`
+	CredentialIndex uint      `orm:"credential_index"`
+	APIKeyName      string    `orm:"api_key_name"`
+	RequestedModel  string    `orm:"requested_model"`
+	ExpectedModel   string    `orm:"expected_model"`
+	ObservedModel   string    `orm:"observed_model"`
+	ReasonsJson     string    `orm:"reasons_json"`
+	QuestionChars   uint      `orm:"question_chars"`
+	AnswerChars     uint      `orm:"answer_chars"`
+	CreatedAt       time.Time `orm:"created_at"`
 }
 
 func (s *sSystem) GetModelQualitySettings(ctx context.Context) (adminapi.ModelQualitySettingsInput, error) {
@@ -119,9 +119,10 @@ func (s *sSystem) ListModelQualityEvents(ctx context.Context, input adminapi.Mod
 	}
 	credentialIndexField := "(SELECT COUNT(*) FROM " + dao.ChannelCredentials.Table() + " cc WHERE cc.channel_id=e.channel_id AND cc.id<=e.credential_id) AS credential_index"
 	rows := make([]modelQualityEventRow, 0)
-	if err = model.Fields("e.*,COALESCE(c.name,'已删除渠道') AS channel_name,COALESCE(credential.key_prefix,'') AS credential_prefix,"+credentialIndexField).
+	if err = model.Fields("e.*,COALESCE(c.name,'已删除渠道') AS channel_name,COALESCE(api_key.name,'未记录访问密钥') AS api_key_name,"+credentialIndexField).
 		LeftJoin(dao.Channels.Table()+" c", "c.id=e.channel_id").
-		LeftJoin(dao.ChannelCredentials.Table()+" credential", "credential.id=e.credential_id").
+		LeftJoin(dao.UsageLogs.Table()+" u", "u.request_id=e.request_id").
+		LeftJoin(dao.ApiKeys.Table()+" api_key", "api_key.id=u.api_key_id").
 		OrderDesc("e.id").Page(page, pageSize).Scan(&rows); err != nil {
 		return adminapi.ModelQualityEventList{}, gerror.Wrap(err, "list model quality events")
 	}
@@ -151,7 +152,7 @@ func modelQualityEventView(row modelQualityEventRow) adminapi.ModelQualityEventV
 	reasons := make([]string, 0)
 	_ = json.Unmarshal([]byte(row.ReasonsJson), &reasons)
 	return adminapi.ModelQualityEventView{
-		Id: row.Id, ChannelId: row.ChannelId, ChannelName: row.ChannelName, CredentialId: row.CredentialId, CredentialPrefix: row.CredentialPrefix, CredentialIndex: row.CredentialIndex,
+		Id: row.Id, ChannelId: row.ChannelId, ChannelName: row.ChannelName, CredentialId: row.CredentialId, CredentialIndex: row.CredentialIndex, APIKeyName: row.APIKeyName,
 		RequestedModel: row.RequestedModel, ExpectedModel: row.ExpectedModel, ObservedModel: row.ObservedModel,
 		Reasons: uniqueModelQualityReasons(reasons), QuestionChars: row.QuestionChars, AnswerChars: row.AnswerChars, CreatedAt: row.CreatedAt,
 	}
