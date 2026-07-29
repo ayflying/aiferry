@@ -10,6 +10,7 @@ const router = createRouter({
     { path: '/about', name: 'about', component: () => import('../views/PublicDocumentView.vue'), meta: { title: '关于', public: true, document: 'about' } },
     { path: '/terms', name: 'terms', component: () => import('../views/PublicDocumentView.vue'), meta: { title: '用户协议', public: true, document: 'terms' } },
     { path: '/privacy', name: 'privacy', component: () => import('../views/PublicDocumentView.vue'), meta: { title: '隐私政策', public: true, document: 'privacy' } },
+    { path: '/homepage-unavailable', name: 'homepage-unavailable', component: () => import('../views/HomepageUnavailableView.vue'), meta: { title: '页面不可用', public: true } },
     { path: '/', name: 'home', component: () => import('../views/HomeView.vue'), meta: { title: '首页', public: true } },
     { path: '/dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: '仪表盘', admin: true } },
     { path: '/channels', name: 'channels', component: () => import('../views/ChannelsView.vue'), meta: { title: '渠道', admin: true, channelTab: 'channels' } },
@@ -37,9 +38,9 @@ router.beforeEach(async (to) => {
     try {
       await system.load()
     } catch {
-      return { name: 'login' }
+      return { name: 'homepage-unavailable' }
     }
-    if (!system.information.publicHomepageEnabled) return { name: 'login' }
+    if (!system.information.publicHomepageEnabled) return { name: 'homepage-unavailable' }
   }
   if (to.meta.public) {
     if (to.name !== 'login') return true

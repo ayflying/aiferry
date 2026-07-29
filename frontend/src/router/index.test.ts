@@ -9,6 +9,7 @@ vi.mock('../stores/auth', () => ({
 
 vi.mock('../views/LoginView.vue', () => ({ default: { name: 'LoginView' } }))
 vi.mock('../views/HomeView.vue', () => ({ default: { name: 'HomeView' } }))
+vi.mock('../views/HomepageUnavailableView.vue', () => ({ default: { name: 'HomepageUnavailableView' } }))
 
 import router from './index'
 import { useSystemStore } from '../stores/system'
@@ -36,12 +37,20 @@ describe('public homepage route', () => {
     await router.replace('/login')
   })
 
-  it('redirects to login when the public homepage is disabled', async () => {
+  it('shows an unavailable page instead of redirecting to login when the public homepage is disabled', async () => {
     useSystemStore().apply({ publicHomepageEnabled: false })
 
     await router.push('/')
 
-    expect(router.currentRoute.value.name).toBe('login')
+    expect(router.currentRoute.value.name).toBe('homepage-unavailable')
+  })
+
+  it('does not redirect to login when the homepage configuration cannot be loaded', async () => {
+    vi.spyOn(useSystemStore(), 'load').mockRejectedValueOnce(new Error('network unavailable'))
+
+    await router.push('/')
+
+    expect(router.currentRoute.value.name).toBe('homepage-unavailable')
   })
 
   it('allows the home route when the public homepage is enabled', async () => {
