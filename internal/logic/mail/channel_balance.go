@@ -21,10 +21,8 @@ func (s *sMail) notifyChannelLowBalance(ctx context.Context, channelID uint64, c
 	if err != nil {
 		return
 	}
-	for _, threshold := range thresholds {
-		if remaining >= threshold {
-			_ = s.app.Redis.Del(ctx, channelBalanceReminderKey(channelID, threshold)).Err()
-		}
+	for _, threshold := range recoveredChannelBalanceThresholds(remaining, thresholds) {
+		_ = s.app.Redis.Del(ctx, channelBalanceReminderKey(channelID, threshold)).Err()
 	}
 	threshold, alerted := lowestTriggeredChannelBalanceThreshold(remaining, thresholds)
 	if !alerted {
@@ -57,6 +55,16 @@ func lowestTriggeredChannelBalanceThreshold(remaining float64, thresholds []floa
 		found = true
 	}
 	return selected, found
+}
+
+func recoveredChannelBalanceThresholds(remaining float64, thresholds []float64) []float64 {
+	recovered := make([]float64, 0, len(thresholds))
+	for _, threshold := range thresholds {
+		if remaining >= threshold {
+			recovered = append(recovered, threshold)
+		}
+	}
+	return recovered
 }
 
 func (s *sMail) ClearChannelLowBalanceReminders(ctx context.Context, channelID uint64) error {

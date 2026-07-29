@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/yunloli/aiferry/internal/logic/system"
@@ -58,5 +59,26 @@ func TestChannelBalanceReminderKeyPreservesDecimalThreshold(t *testing.T) {
 	key := channelBalanceReminderKey(42, 0.5)
 	if key != "aiferry:mail:channel-low-balance:42:0.5" {
 		t.Fatalf("unexpected channel balance reminder key: %q", key)
+	}
+}
+
+func TestRecoveredChannelBalanceThresholds(t *testing.T) {
+	thresholds := []float64{10, 5, 1}
+	tests := []struct {
+		name      string
+		remaining float64
+		want      []float64
+	}{
+		{name: "zero balance retains every reminder", remaining: 0, want: []float64{}},
+		{name: "between one and five only clears one", remaining: 4.82, want: []float64{1}},
+		{name: "at five clears recovered thresholds", remaining: 5, want: []float64{5, 1}},
+		{name: "above all thresholds clears every reminder", remaining: 10, want: []float64{10, 5, 1}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := recoveredChannelBalanceThresholds(test.remaining, thresholds); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("recoveredChannelBalanceThresholds(%v) = %v, want %v", test.remaining, got, test.want)
+			}
+		})
 	}
 }

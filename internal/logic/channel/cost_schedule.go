@@ -9,8 +9,8 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 var costSyncRetryDelays = []time.Duration{0, 5 * time.Minute, 10 * time.Minute}
@@ -79,11 +79,6 @@ func (s *sChannel) syncPlatformCosts(ctx context.Context, reason string) {
 			continue
 		}
 		g.Log().Infof(ctx, "scheduled cost sync for channel %d succeeded (%s)", channel.Id, reason)
-		if s.mail != nil {
-			if err = s.mail.ClearChannelLowBalanceReminders(ctx, channel.Id); err != nil {
-				g.Log().Warningf(ctx, "clear channel %d low-balance reminders after scheduled cost sync (%s): %v", channel.Id, reason, err)
-			}
-		}
 	}
 }
 
