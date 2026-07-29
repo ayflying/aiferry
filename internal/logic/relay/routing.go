@@ -12,20 +12,46 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/apikey"
 	"github.com/yunloli/aiferry/internal/logic/system"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([]Candidate, error) {
-	var candidates []Candidate
-	err := dao.ChannelModels.Ctx(ctx).As("m").Fields(`
-		m.id AS channel_model_id,m.public_name,m.upstream_name,
-		c.id AS channel_id,c.name AS channel_name,c.base_url,
-		c.organization_id,c.project_id,c.proxy_url_cipher,c.advanced_config,c.priority,c.weight`).
-		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id AND c.status=1").
-		Where("m.enabled", 1).
-		Where("m.public_name", model).
-		Scan(&candidates)
-	if err != nil {
+	modelColumns := dao.ChannelModels.Columns()
+	models := make([]entity.ChannelModels, 0)
+	if err := dao.ChannelModels.Ctx(ctx).
+		Where(modelColumns.Enabled, 1).
+		Where(modelColumns.PublicName, model).
+		Scan(&models); err != nil {
 		return nil, gerror.Wrap(err, "load model routes")
+	}
+	channelIDs := make(map[uint64]struct{}, len(models))
+	for _, row := range models {
+		channelIDs[row.ChannelId] = struct{}{}
+	}
+	channels, err := activeRouteChannels(ctx, sortedRouteIDs(channelIDs))
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]Candidate, 0, len(models))
+	for _, row := range models {
+		channel, exists := channels[row.ChannelId]
+		if !exists {
+			continue
+		}
+		candidates = append(candidates, Candidate{
+			ChannelModelID: row.Id,
+			ChannelID:      channel.Id,
+			ChannelName:    channel.Name,
+			BaseURL:        channel.BaseUrl,
+			OrganizationID: channel.OrganizationId,
+			ProjectID:      channel.ProjectId,
+			ProxyURLCipher: channel.ProxyUrlCipher,
+			AdvancedConfig: channel.AdvancedConfig,
+			Priority:       channel.Priority,
+			Weight:         channel.Weight,
+			PublicName:     row.PublicName,
+			UpstreamName:   row.UpstreamName,
+		})
 	}
 	available := candidates[:0]
 	for _, candidate := range candidates {
@@ -85,14 +111,62 @@ func weightedOrder(candidates []Candidate) []Candidate {
 }
 
 func (s *sRelay) channelGroupIDs(ctx context.Context, channelID uint64) ([]uint64, error) {
-	var ids []uint64
-	err := dao.ChannelGroupMembers.Ctx(ctx).As("m").
-		Fields("m.channel_group_id").
-		InnerJoin(dao.ChannelGroups.Table()+" g", "g.id=m.channel_group_id AND g.status=1").
-		Where("m.channel_id", channelID).
-		OrderAsc("m.channel_group_id").
-		Scan(&ids)
-	return ids, gerror.Wrap(err, "load channel groups")
+	membershipColumns := dao.ChannelGroupMembers.Columns()
+	var memberships []uint64
+	if err := dao.ChannelGroupMembers.Ctx(ctx).
+		Fields(membershipColumns.ChannelGroupId).
+		Where(membershipColumns.ChannelId, channelID).
+		OrderAsc(membershipColumns.ChannelGroupId).
+		Scan(&memberships); err != nil {
+		return nil, gerror.Wrap(err, "load channel group memberships")
+	}
+	if len(memberships) == 0 {
+		return nil, nil
+	}
+	groupColumns := dao.ChannelGroups.Columns()
+	groups := make([]entity.ChannelGroups, 0, len(memberships))
+	if err := dao.ChannelGroups.Ctx(ctx).
+		Fields(groupColumns.Id).
+		WhereIn(groupColumns.Id, memberships).
+		Where(groupColumns.Status, 1).
+		OrderAsc(groupColumns.Id).
+		Scan(&groups); err != nil {
+		return nil, gerror.Wrap(err, "load active channel groups")
+	}
+	result := make([]uint64, 0, len(groups))
+	for _, group := range groups {
+		result = append(result, group.Id)
+	}
+	return result, nil
+}
+
+func activeRouteChannels(ctx context.Context, channelIDs []uint64) (map[uint64]entity.Channels, error) {
+	result := make(map[uint64]entity.Channels)
+	if len(channelIDs) == 0 {
+		return result, nil
+	}
+	columns := dao.Channels.Columns()
+	channels := make([]entity.Channels, 0, len(channelIDs))
+	if err := dao.Channels.Ctx(ctx).
+		Fields(columns.Id, columns.Name, columns.BaseUrl, columns.OrganizationId, columns.ProjectId, columns.ProxyUrlCipher, columns.AdvancedConfig, columns.Priority, columns.Weight).
+		WhereIn(columns.Id, channelIDs).
+		Where(columns.Status, 1).
+		Scan(&channels); err != nil {
+		return nil, gerror.Wrap(err, "load active route channels")
+	}
+	for _, channel := range channels {
+		result[channel.Id] = channel
+	}
+	return result, nil
+}
+
+func sortedRouteIDs(values map[uint64]struct{}) []uint64 {
+	result := make([]uint64, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 func keyAllowsModel(key apikey.AuthKey, model string) bool {

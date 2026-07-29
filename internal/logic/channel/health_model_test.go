@@ -1,8 +1,9 @@
 package channel
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 func TestChannelAutoDisableEnabledDefaultsAndOverrides(t *testing.T) {
@@ -16,18 +17,15 @@ func TestChannelAutoDisableEnabledDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
-func TestHealthCheckModelJoinUsesConfiguredModelOrEnabledFallback(t *testing.T) {
-	modelID := healthCheckModelIDExpression("c")
-	if !strings.Contains(modelID, "COALESCE(c.health_check_model_id") ||
-		!strings.Contains(modelID, "fallback.channel_id=c.id") ||
-		!strings.Contains(modelID, "fallback.enabled=1") ||
-		!strings.Contains(modelID, "ORDER BY fallback.id ASC LIMIT 1") {
-		t.Fatalf("unexpected health-check model selection: %s", modelID)
+func TestSelectHealthCheckModelIDUsesConfiguredModelOrEnabledFallback(t *testing.T) {
+	models := []entity.ChannelModels{{Id: 3}, {Id: 7}}
+	if got := selectHealthCheckModelID(0, models); got != 3 {
+		t.Fatalf("fallback model = %d, want 3", got)
 	}
-	join := healthCheckModelJoin("c", "m")
-	if !strings.Contains(join, "m.id="+modelID) ||
-		!strings.Contains(join, "m.channel_id=c.id") ||
-		!strings.Contains(join, "m.enabled=1") {
-		t.Fatalf("unexpected health-check model join: %s", join)
+	if got := selectHealthCheckModelID(7, models); got != 7 {
+		t.Fatalf("configured model = %d, want 7", got)
+	}
+	if got := selectHealthCheckModelID(9, models); got != 0 {
+		t.Fatalf("missing configured model = %d, want 0", got)
 	}
 }

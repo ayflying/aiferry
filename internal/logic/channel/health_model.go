@@ -2,7 +2,6 @@ package channel
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -12,22 +11,15 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-// healthCheckModelIDExpression keeps explicit health-check model choices first,
-// and otherwise selects this channel's first enabled model deterministically.
-func healthCheckModelIDExpression(channelAlias string) string {
-	return fmt.Sprintf(
-		"COALESCE(%[1]s.health_check_model_id,(SELECT fallback.id FROM channel_models fallback WHERE fallback.channel_id=%[1]s.id AND fallback.enabled=1 AND fallback.deleted_at IS NULL ORDER BY fallback.id ASC LIMIT 1))",
-		channelAlias,
-	)
-}
-
-func healthCheckModelJoin(channelAlias, modelAlias string) string {
-	return fmt.Sprintf(
-		"%[2]s.id=%[1]s AND %[2]s.channel_id=%[3]s.id AND %[2]s.enabled=1 AND %[2]s.deleted_at IS NULL",
-		healthCheckModelIDExpression(channelAlias),
-		modelAlias,
-		channelAlias,
-	)
+// selectHealthCheckModelID chooses a configured enabled model, or the first
+// enabled model because callers load candidates in ascending ID order.
+func selectHealthCheckModelID(configuredID uint64, models []entity.ChannelModels) uint64 {
+	for _, model := range models {
+		if configuredID == 0 || model.Id == configuredID {
+			return model.Id
+		}
+	}
+	return 0
 }
 
 func (s *sChannel) validateHealthCheckModel(ctx context.Context, channelID, modelID uint64) (any, error) {

@@ -78,3 +78,23 @@ func TestCodeStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestRedemptionCodeMatchesFiltersWithoutRawSQL(t *testing.T) {
+	now := time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)
+	future := now.Add(time.Hour)
+	past := now.Add(-time.Hour)
+	redeemed := now.Add(-time.Minute)
+	active := codeRow{Name: "夏日额度", Code: "AFR-ACTIVE", ExpiresAt: &future}
+	if !redemptionCodeMatches(active, "额度", statusActive, now) {
+		t.Fatal("active code should match keyword and status")
+	}
+	if redemptionCodeMatches(active, "missing", "all", now) {
+		t.Fatal("non-matching keyword should be excluded")
+	}
+	if !redemptionCodeMatches(codeRow{Code: "AFR-USED", RedeemedAt: &redeemed}, "", statusUsed, now) {
+		t.Fatal("redeemed code should match used status")
+	}
+	if !redemptionCodeMatches(codeRow{Code: "AFR-EXPIRED", ExpiresAt: &past}, "", statusExpired, now) {
+		t.Fatal("expired code should match expired status")
+	}
+}

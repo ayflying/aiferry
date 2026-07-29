@@ -10,11 +10,11 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/do"
-	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/logic/auth"
 	"github.com/yunloli/aiferry/internal/logic/secret"
+	"github.com/yunloli/aiferry/internal/model/do"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 const cacheTTL = 5 * time.Minute
@@ -28,6 +28,7 @@ type View struct {
 	UserId               uint64     `json:"userId"`
 	Name                 string     `json:"name"`
 	KeyPrefix            string     `json:"keyPrefix"`
+	KeyCipher            string     `json:"-" orm:"key_cipher"`
 	SecretAvailable      bool       `json:"secretAvailable"`
 	Status               int        `json:"status"`
 	SpendLimit           *float64   `json:"spendLimit"`
@@ -75,17 +76,20 @@ func (s *sAPIKey) List(ctx context.Context) ([]View, error) {
 		return nil, gerror.New("authenticated user is required")
 	}
 	rows := make([]View, 0)
+	columns := dao.ApiKeys.Columns()
 	query := dao.ApiKeys.Ctx(ctx).
-		Fields("id,user_id,name,key_prefix,key_cipher IS NOT NULL AND key_cipher <> '' AS secret_available,status,spend_limit,daily_spend_limit,spent_amount,daily_spent_amount,daily_spend_date,expires_at,last_used_at,created_at").
-		OrderDesc(dao.ApiKeys.Columns().Id)
+		Fields(columns.Id, columns.UserId, columns.Name, columns.KeyPrefix, columns.KeyCipher, columns.Status, columns.SpendLimit, columns.DailySpendLimit, columns.SpentAmount, columns.DailySpentAmount, columns.DailySpendDate, columns.ExpiresAt, columns.LastUsedAt, columns.CreatedAt).
+		OrderDesc(columns.Id)
 	if !s.app.Config.IsAdminRole(current.Role) {
-		query = query.Where(dao.ApiKeys.Columns().UserId, current.Id)
+		query = query.Where(columns.UserId, current.Id)
 	}
 	err := query.Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "list API keys")
 	}
 	for index := range rows {
+		rows[index].SecretAvailable = strings.TrimSpace(rows[index].KeyCipher) != ""
+		rows[index].KeyCipher = ""
 		if err = s.populatePolicy(ctx, &rows[index]); err != nil {
 			return nil, err
 		}

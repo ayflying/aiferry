@@ -10,8 +10,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/logic/secret"
+	"github.com/yunloli/aiferry/internal/model/do"
 )
 
 func (s *sAPIKey) Authenticate(ctx context.Context, bearer string) (AuthKey, error) {
@@ -43,9 +43,10 @@ func (s *sAPIKey) getCached(ctx context.Context, hash string) (AuthKey, error) {
 	} else if err != redis.Nil {
 		return AuthKey{}, gerror.Wrap(err, "read API key cache")
 	}
+	columns := dao.ApiKeys.Columns()
 	if err = dao.ApiKeys.Ctx(ctx).
-		Fields("id,user_id,name,key_hash,status,spend_limit,daily_spend_limit,spent_amount,daily_spent_amount,daily_spend_date,expires_at").
-		Where(dao.ApiKeys.Columns().KeyHash, hash).
+		Fields(columns.Id, columns.UserId, columns.Name, columns.KeyHash, columns.Status, columns.SpendLimit, columns.DailySpendLimit, columns.SpentAmount, columns.DailySpentAmount, columns.DailySpendDate, columns.ExpiresAt).
+		Where(columns.KeyHash, hash).
 		Scan(&key); err != nil {
 		return AuthKey{}, gerror.Wrap(err, "find API key")
 	}

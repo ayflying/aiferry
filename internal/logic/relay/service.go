@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -90,32 +91,51 @@ func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Ser
 }
 
 func (s *sRelay) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
-	var rows []struct {
+	modelColumns := dao.ChannelModels.Columns()
+	rows := make([]struct {
+		ChannelId  uint64 `orm:"channel_id"`
 		PublicName string `orm:"public_name"`
-	}
-	err := dao.ChannelModels.Ctx(ctx).As("m").
-		Fields("DISTINCT m.public_name").
-		InnerJoin(dao.Channels.Table()+" c", "c.id=m.channel_id AND c.status=1").
-		Where("m.enabled", 1).
-		OrderAsc("m.public_name").
+	}, 0)
+	err := dao.ChannelModels.Ctx(ctx).
+		Fields(modelColumns.ChannelId, modelColumns.PublicName).
+		Where(modelColumns.Enabled, 1).
 		Scan(&rows)
 	if err != nil {
 		return ModelList{}, gerror.Wrap(err, "list public models")
 	}
-	models := make([]Model, 0, len(rows))
+	channelIDs := make(map[uint64]struct{}, len(rows))
 	for _, row := range rows {
-		if len(key.AllowedModels) > 0 && !containsString(key.AllowedModels, row.PublicName) {
+		channelIDs[row.ChannelId] = struct{}{}
+	}
+	activeChannels, err := activeRouteChannels(ctx, sortedRouteIDs(channelIDs))
+	if err != nil {
+		return ModelList{}, err
+	}
+	publicNames := make(map[string]struct{})
+	for _, row := range rows {
+		if _, active := activeChannels[row.ChannelId]; active {
+			publicNames[row.PublicName] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(publicNames))
+	for name := range publicNames {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	models := make([]Model, 0, len(names))
+	for _, name := range names {
+		if len(key.AllowedModels) > 0 && !containsString(key.AllowedModels, name) {
 			continue
 		}
-		if !s.prices.IsPriced(row.PublicName) {
+		if !s.prices.IsPriced(name) {
 			continue
 		}
-		candidates, routeErr := s.route(ctx, row.PublicName, key)
+		candidates, routeErr := s.route(ctx, name, key)
 		if routeErr != nil {
 			return ModelList{}, routeErr
 		}
 		if len(candidates) > 0 {
-			models = append(models, Model{ID: row.PublicName, Object: "model", Created: 0, OwnedBy: "aiferry"})
+			models = append(models, Model{ID: name, Object: "model", Created: 0, OwnedBy: "aiferry"})
 		}
 	}
 	return ModelList{Object: "list", Data: models}, nil

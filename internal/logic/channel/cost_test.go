@@ -3,6 +3,8 @@ package channel
 import (
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 func TestCostRangeDefaultsToCurrentDay(t *testing.T) {
@@ -55,5 +57,18 @@ func TestCostResultUsesSingleCurrencySummary(t *testing.T) {
 	result.applySingleSummary()
 	if result.Currency != "USD" || result.UsedAmount == nil || *result.UsedAmount != used || result.RemainingAmount == nil || *result.RemainingAmount != remaining {
 		t.Fatalf("single currency summary was not exposed: %+v", result)
+	}
+}
+
+func TestApplyTrackedCostPreservesUnknownRemainingBalance(t *testing.T) {
+	used := 3.5
+	updatedUsed, remaining, currency := applyTrackedCost(&used, nil, "", decimal.RequireFromString("1.25"))
+	if updatedUsed != 4.75 || remaining != nil || currency != "USD" {
+		t.Fatalf("unexpected tracked cost update: used=%v remaining=%v currency=%q", updatedUsed, remaining, currency)
+	}
+	currentRemaining := 1.0
+	_, remaining, currency = applyTrackedCost(nil, &currentRemaining, "usd", decimal.RequireFromString("1.25"))
+	if remaining == nil || *remaining != 0 || currency != "usd" {
+		t.Fatalf("unexpected remaining balance update: remaining=%v currency=%q", remaining, currency)
 	}
 }

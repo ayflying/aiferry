@@ -14,10 +14,10 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/do"
-	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/logic/usage"
+	"github.com/yunloli/aiferry/internal/model/do"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 type sUser struct {
@@ -182,19 +182,29 @@ func (s *sUser) Debit(ctx context.Context, id uint64, amount decimal.Decimal) er
 	if amount.LessThanOrEqual(decimal.Zero) {
 		return nil
 	}
-	literal := amount.StringFixed(8)
-	result, err := dao.Users.Ctx(ctx).
-		Where(dao.Users.Columns().Id, id).
-		WhereGTE(dao.Users.Columns().Balance, literal).
-		Data(do.Users{Balance: gdb.Raw("balance - " + literal)}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "debit user balance")
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return ErrInsufficientBalance
-	}
-	return nil
+	return dao.Users.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		columns := dao.Users.Columns()
+		var account entity.Users
+		if err := dao.Users.Ctx(txCtx).
+			Fields(columns.Id, columns.Balance).
+			Where(columns.Id, id).
+			Lock(gdb.LockForUpdate).
+			Scan(&account); err != nil {
+			return gerror.Wrap(err, "lock user balance for debit")
+		}
+		balance := decimal.NewFromFloat(account.Balance).Round(8)
+		if account.Id == 0 || balance.LessThan(amount) {
+			return ErrInsufficientBalance
+		}
+		updatedBalance, _ := balance.Sub(amount).Round(8).Float64()
+		if _, err := dao.Users.Ctx(txCtx).
+			Where(columns.Id, account.Id).
+			Data(do.Users{Balance: updatedBalance}).
+			Update(); err != nil {
+			return gerror.Wrap(err, "debit user balance")
+		}
+		return nil
+	})
 }
 
 func (s *sUser) Credit(ctx context.Context, id uint64, amount decimal.Decimal) error {
@@ -202,18 +212,28 @@ func (s *sUser) Credit(ctx context.Context, id uint64, amount decimal.Decimal) e
 	if amount.LessThanOrEqual(decimal.Zero) {
 		return gerror.New("充值金额必须大于零")
 	}
-	literal := amount.StringFixed(8)
-	result, err := dao.Users.Ctx(ctx).
-		Where(dao.Users.Columns().Id, id).
-		Data(do.Users{Balance: gdb.Raw("balance + " + literal)}).
-		Update()
-	if err != nil {
-		return gerror.Wrap(err, "credit user balance")
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return gerror.New("用户不存在")
-	}
-	return nil
+	return dao.Users.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		columns := dao.Users.Columns()
+		var account entity.Users
+		if err := dao.Users.Ctx(txCtx).
+			Fields(columns.Id, columns.Balance).
+			Where(columns.Id, id).
+			Lock(gdb.LockForUpdate).
+			Scan(&account); err != nil {
+			return gerror.Wrap(err, "lock user balance for credit")
+		}
+		if account.Id == 0 {
+			return gerror.New("用户不存在")
+		}
+		updatedBalance, _ := decimal.NewFromFloat(account.Balance).Add(amount).Round(8).Float64()
+		if _, err := dao.Users.Ctx(txCtx).
+			Where(columns.Id, account.Id).
+			Data(do.Users{Balance: updatedBalance}).
+			Update(); err != nil {
+			return gerror.Wrap(err, "credit user balance")
+		}
+		return nil
+	})
 }
 
 func (s *sUser) Delete(ctx context.Context, id, operatorID uint64) error {

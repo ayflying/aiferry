@@ -15,8 +15,8 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/logic/user"
+	"github.com/yunloli/aiferry/internal/model/do"
 )
 
 const (
@@ -103,21 +103,40 @@ func (s *sRedemption) Create(ctx context.Context, operatorID uint64, input admin
 
 func (s *sRedemption) List(ctx context.Context, filter ListFilter) ([]View, error) {
 	now := time.Now()
-	model, err := applyListFilter(dao.RedemptionCodes.Ctx(ctx), filter, now)
+	keyword, status, err := normalizeListFilter(filter)
 	if err != nil {
 		return nil, err
 	}
 	rows := make([]codeRow, 0)
-	if err = model.OrderDesc(dao.RedemptionCodes.Columns().CreatedAt).Scan(&rows); err != nil {
+	if err = dao.RedemptionCodes.Ctx(ctx).OrderDesc(dao.RedemptionCodes.Columns().CreatedAt).Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list redemption codes")
 	}
-	return s.views(ctx, rows, now)
+	filtered := make([]codeRow, 0, len(rows))
+	for _, row := range rows {
+		if redemptionCodeMatches(row, keyword, status, now) {
+			filtered = append(filtered, row)
+		}
+	}
+	return s.views(ctx, filtered, now)
 }
 
 func (s *sRedemption) DeleteInvalid(ctx context.Context) (int, error) {
 	now := time.Now()
+	rows := make([]codeRow, 0)
+	if err := dao.RedemptionCodes.Ctx(ctx).Scan(&rows); err != nil {
+		return 0, gerror.Wrap(err, "load redemption codes for cleanup")
+	}
+	ids := make([]uint64, 0)
+	for _, row := range rows {
+		if row.RedeemedAt != nil || (row.ExpiresAt != nil && !row.ExpiresAt.After(now)) {
+			ids = append(ids, row.Id)
+		}
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
 	result, err := dao.RedemptionCodes.Ctx(ctx).
-		Where("`redeemed_at` IS NOT NULL OR (`expires_at` IS NOT NULL AND `expires_at` <= ?)", now).
+		WhereIn(dao.RedemptionCodes.Columns().Id, ids).
 		Delete()
 	if err != nil {
 		return 0, gerror.Wrap(err, "delete invalid redemption codes")
@@ -205,25 +224,35 @@ func normalizeCreateInput(input adminapi.RedemptionCodeCreateInput) (string, dec
 	return name, amount, &expiresAt, nil
 }
 
-func applyListFilter(model *gdb.Model, filter ListFilter, now time.Time) (*gdb.Model, error) {
-	keyword := strings.TrimSpace(filter.Keyword)
-	if keyword != "" {
-		like := "%" + keyword + "%"
-		model = model.Where("(`name` LIKE ? OR `code` LIKE ?)", like, like)
-	}
-	switch strings.TrimSpace(filter.Status) {
-	case "", "all":
-		return model, nil
-	case statusActive:
-		model = model.Where("`redeemed_at` IS NULL AND (`expires_at` IS NULL OR `expires_at` > ?)", now)
-	case statusUsed:
-		model = model.WhereNotNull(dao.RedemptionCodes.Columns().RedeemedAt)
-	case statusExpired:
-		model = model.Where("`redeemed_at` IS NULL AND `expires_at` IS NOT NULL AND `expires_at` <= ?", now)
+func normalizeListFilter(filter ListFilter) (string, string, error) {
+	status := strings.TrimSpace(filter.Status)
+	switch status {
+	case "", "all", statusActive, statusUsed, statusExpired:
+		return strings.TrimSpace(filter.Keyword), status, nil
 	default:
-		return nil, gerror.New("兑换码状态筛选无效")
+		return "", "", gerror.New("兑换码状态筛选无效")
 	}
-	return model, nil
+}
+
+func redemptionCodeMatches(row codeRow, keyword, status string, now time.Time) bool {
+	if keyword != "" {
+		keyword = strings.ToLower(keyword)
+		if !strings.Contains(strings.ToLower(row.Name), keyword) && !strings.Contains(strings.ToLower(row.Code), keyword) {
+			return false
+		}
+	}
+	switch status {
+	case "", "all":
+		return true
+	case statusActive:
+		return row.RedeemedAt == nil && (row.ExpiresAt == nil || row.ExpiresAt.After(now))
+	case statusUsed:
+		return row.RedeemedAt != nil
+	case statusExpired:
+		return row.RedeemedAt == nil && row.ExpiresAt != nil && !row.ExpiresAt.After(now)
+	default:
+		return false
+	}
 }
 
 func codeStatus(row codeRow, now time.Time) string {

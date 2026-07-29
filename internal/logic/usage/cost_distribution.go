@@ -2,11 +2,13 @@ package usage
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 type costBucketUnit string
@@ -38,49 +40,47 @@ func (s *sUsage) costDistribution(ctx context.Context, dateRange DashboardRange,
 		return result, nil
 	}
 
-	base := dao.UsageLogs.Ctx(ctx).
+	rows := make([]entity.UsageLogs, 0)
+	if err := dao.UsageLogs.Ctx(ctx).
 		WhereGTE(dao.UsageLogs.Columns().CreatedAt, startAt).
-		WhereLT(dao.UsageLogs.Columns().CreatedAt, endAt)
-	var total struct {
-		EstimatedCost float64 `orm:"estimated_cost"`
+		WhereLT(dao.UsageLogs.Columns().CreatedAt, endAt).
+		Scan(&rows); err != nil {
+		return result, gerror.Wrap(err, "load cost distribution usage logs")
 	}
-	if err := base.Clone().Fields("COALESCE(SUM(estimated_cost),0) AS estimated_cost").Scan(&total); err != nil {
-		return result, gerror.Wrap(err, "load cost distribution total")
+	modelCosts := make(map[string]float64)
+	for _, row := range rows {
+		result.TotalEstimatedCost += row.EstimatedCost
+		modelCosts[row.RequestedModel] += row.EstimatedCost
 	}
-	result.TotalEstimatedCost = total.EstimatedCost
-
-	var models []struct {
-		Name          string  `orm:"name"`
-		EstimatedCost float64 `orm:"estimated_cost"`
-	}
-	if err := base.Clone().Fields("requested_model AS name, COALESCE(SUM(estimated_cost),0) AS estimated_cost").
-		Group(dao.UsageLogs.Columns().RequestedModel).OrderDesc("estimated_cost").OrderAsc(dao.UsageLogs.Columns().RequestedModel).
-		Limit(recentCostModelLimit).Scan(&models); err != nil {
-		return result, gerror.Wrap(err, "load cost distribution models")
-	}
-	if len(models) == 0 {
+	if len(modelCosts) == 0 {
 		return result, nil
+	}
+	type modelCost struct {
+		Name          string
+		EstimatedCost float64
+	}
+	models := make([]modelCost, 0, len(modelCosts))
+	for name, estimatedCost := range modelCosts {
+		models = append(models, modelCost{Name: name, EstimatedCost: estimatedCost})
+	}
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].EstimatedCost == models[j].EstimatedCost {
+			return models[i].Name < models[j].Name
+		}
+		return models[i].EstimatedCost > models[j].EstimatedCost
+	})
+	if len(models) > recentCostModelLimit {
+		models = models[:recentCostModelLimit]
 	}
 
 	selectedNames := make(map[string]struct{}, len(models))
 	for _, model := range models {
 		selectedNames[model.Name] = struct{}{}
 	}
-	var rows []struct {
-		CreatedAt     time.Time `orm:"created_at"`
-		Name          string    `orm:"name"`
-		EstimatedCost float64   `orm:"estimated_cost"`
-	}
-	if err := base.Clone().
-		Fields("created_at, requested_model AS name, COALESCE(estimated_cost,0) AS estimated_cost").
-		OrderAsc("created_at").Scan(&rows); err != nil {
-		return result, gerror.Wrap(err, "load cost distribution rows")
-	}
-
 	costsByModel := make(map[string]map[string]float64, len(models)+1)
 	hasOtherModels := false
 	for _, row := range rows {
-		name := row.Name
+		name := row.RequestedModel
 		if _, selected := selectedNames[name]; !selected {
 			name = otherCostModelName
 			hasOtherModels = true

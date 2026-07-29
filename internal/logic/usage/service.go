@@ -129,6 +129,9 @@ type LogView struct {
 	Id                     uint64            `json:"id" orm:"id"`
 	RequestId              string            `json:"requestId" orm:"request_id"`
 	UserId                 uint64            `json:"userId" orm:"user_id"`
+	APIKeyId               uint64            `json:"-" orm:"api_key_id"`
+	ChannelId              uint64            `json:"-" orm:"channel_id"`
+	ChannelCredentialId    uint64            `json:"-" orm:"channel_credential_id"`
 	UserName               string            `json:"userName" orm:"user_name"`
 	APIKeyName             string            `json:"apiKeyName" orm:"api_key_name"`
 	ChannelName            string            `json:"channelName" orm:"channel_name"`

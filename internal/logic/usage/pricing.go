@@ -2,12 +2,14 @@ package usage
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/shopspring/decimal"
 	"github.com/tidwall/gjson"
 
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 type publicModelPrice struct {
@@ -69,28 +71,28 @@ func EstimateRuleCost(ctx context.Context, modelName, endpoint string, tokens To
 }
 
 func EstimateRuleBreakdown(ctx context.Context, modelName, endpoint string, tokens TokenUsage) *BillingBreakdown {
-	var rules []struct {
-		ID             uint64 `orm:"id"`
-		Name           string `orm:"name"`
-		Source         string `orm:"source"`
-		Priority       int    `orm:"priority"`
-		Currency       string `orm:"currency"`
-		ConditionsJSON string `orm:"conditions_json"`
-		RatesJSON      string `orm:"rates_json"`
-	}
+	rules := make([]entity.ModelPriceRules, 0)
+	columns := dao.ModelPriceRules.Columns()
 	err := dao.ModelPriceRules.Ctx(ctx).
-		Fields("id,name,source,priority,currency,conditions_json,rates_json").
-		Where("model_name", modelName).
-		Where("status", 1).
-		OrderDesc("priority").
-		OrderDesc("source = 'manual'").
-		OrderDesc("id").
+		Where(columns.ModelName, modelName).
+		Where(columns.Status, 1).
 		Scan(&rules)
 	if err != nil {
 		return nil
 	}
+	sort.Slice(rules, func(i, j int) bool {
+		if rules[i].Priority != rules[j].Priority {
+			return rules[i].Priority > rules[j].Priority
+		}
+		leftManual := rules[i].Source == "manual"
+		rightManual := rules[j].Source == "manual"
+		if leftManual != rightManual {
+			return leftManual
+		}
+		return rules[i].Id > rules[j].Id
+	})
 	for _, rule := range rules {
-		if breakdown, ok := RuleBreakdown(rule.ConditionsJSON, rule.RatesJSON, endpoint, tokens); ok {
+		if breakdown, ok := RuleBreakdown(rule.ConditionsJson, rule.RatesJson, endpoint, tokens); ok {
 			currency := strings.ToUpper(strings.TrimSpace(rule.Currency))
 			if currency == "" {
 				currency = "USD"
@@ -98,7 +100,7 @@ func EstimateRuleBreakdown(ctx context.Context, modelName, endpoint string, toke
 			breakdown.BillingMode = "rules"
 			breakdown.Currency = currency
 			breakdown.Rule = &BillingRuleSnapshot{
-				ID: rule.ID, Name: rule.Name, Source: rule.Source, Priority: rule.Priority, Conditions: rule.ConditionsJSON,
+				ID: rule.Id, Name: rule.Name, Source: rule.Source, Priority: rule.Priority, Conditions: rule.ConditionsJson,
 			}
 			return breakdown
 		}

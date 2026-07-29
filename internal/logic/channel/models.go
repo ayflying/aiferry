@@ -137,19 +137,7 @@ func (s *sChannel) SelectModels(ctx context.Context, channelID uint64, input adm
 }
 
 func (s *sChannel) ListModels(ctx context.Context, channelID uint64) ([]ModelView, error) {
-	rows := make([]ModelView, 0)
-	model := dao.ChannelModels.Ctx(ctx).As("m").
-		Fields(`m.id,m.channel_id,c.name AS channel_name,m.public_name,m.upstream_name,m.discovered,m.enabled,
-			p.input_price,p.cached_input_price,p.cache_write_price,p.output_price,p.image_input_price,p.audio_input_price,p.audio_output_price,p.request_price,
-			COALESCE(p.billing_mode,'token') AS billing_mode,m.last_test_endpoint,m.last_test_status,
-			m.last_test_latency_ms,m.last_test_error,m.last_test_at,m.updated_at`).
-		LeftJoin(dao.Channels.Table()+" c", "c.id=m.channel_id").
-		LeftJoin(dao.ModelPrices.Table()+" p", "p.public_name=m.public_name AND p.deleted_at IS NULL")
-	if channelID > 0 {
-		model = model.Where("m.channel_id", channelID)
-	}
-	err := model.OrderAsc("m.public_name").OrderAsc("m.upstream_name").Scan(&rows)
-	return rows, gerror.Wrap(err, "list channel models")
+	return s.listModelViews(ctx, channelID)
 }
 
 func (s *sChannel) DeleteFailedModels(ctx context.Context, channelID uint64) (int, error) {
@@ -173,14 +161,7 @@ func (s *sChannel) DeleteFailedModels(ctx context.Context, channelID uint64) (in
 }
 
 func (s *sChannel) ListPublicModels(ctx context.Context) ([]PublicModelView, error) {
-	rows := make([]PublicModelView, 0)
-	err := dao.ChannelModels.Ctx(ctx).As("m").
-		Fields(`MIN(m.id) AS id,m.public_name,p.input_price,p.cached_input_price,p.cache_write_price,p.output_price,p.image_input_price,p.audio_input_price,p.audio_output_price,p.request_price,COALESCE(p.billing_mode,'token') AS billing_mode`).
-		LeftJoin(dao.ModelPrices.Table()+" p", "p.public_name=m.public_name AND p.deleted_at IS NULL").
-		Group("m.public_name,p.input_price,p.cached_input_price,p.cache_write_price,p.output_price,p.image_input_price,p.audio_input_price,p.audio_output_price,p.request_price,p.billing_mode").
-		OrderAsc("m.public_name").
-		Scan(&rows)
-	return rows, gerror.Wrap(err, "list public models")
+	return s.listPublicModelViews(ctx)
 }
 
 func (s *sChannel) UpdateModel(ctx context.Context, id uint64, input adminapi.ModelInput) error {

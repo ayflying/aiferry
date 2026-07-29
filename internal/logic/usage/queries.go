@@ -2,14 +2,13 @@ package usage
 
 import (
 	"context"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 const (
@@ -75,103 +74,28 @@ func parseLogTime(value string, location *time.Location) (time.Time, error) {
 func (s *sUsage) Dashboard(ctx context.Context, dateRange DashboardRange) (Dashboard, error) {
 	location := s.timeLocation(ctx)
 	now := time.Now().In(location)
-	var result Dashboard
-	base := dao.UsageLogs.Ctx(ctx).
+	rows := make([]entity.UsageLogs, 0)
+	if err := dao.UsageLogs.Ctx(ctx).
 		WhereGTE(dao.UsageLogs.Columns().CreatedAt, dateRange.StartAt).
-		WhereLT(dao.UsageLogs.Columns().CreatedAt, dateRange.EndAt)
-	if err := base.Clone().Fields(`
-		COUNT(*) AS requests,
-		COALESCE(SUM(CASE WHEN http_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0) AS successes,
-		COALESCE(SUM(input_tokens),0) AS input_tokens,
-		COALESCE(SUM(output_tokens),0) AS output_tokens,
-		COALESCE(SUM(total_tokens),0) AS total_tokens,
-		COALESCE(SUM(estimated_cost),0) AS estimated_cost,
-		COALESCE(AVG(duration_ms),0) AS average_latency`).Scan(&result.Summary); err != nil {
-		return result, gerror.Wrap(err, "load dashboard summary")
+		WhereLT(dao.UsageLogs.Columns().CreatedAt, dateRange.EndAt).
+		Scan(&rows); err != nil {
+		return Dashboard{}, gerror.Wrap(err, "load dashboard usage logs")
+	}
+	channelNames, err := loadUsageChannelNames(ctx, usageChannelIDs(rows))
+	if err != nil {
+		return Dashboard{}, err
 	}
 	trendRange := dateRange
 	if current := now.UTC(); trendRange.EndAt.After(current) {
 		trendRange.EndAt = current
 	}
 	trendBucketUnit := dashboardTrendBucketUnit(trendRange, location)
-	trend, err := s.usageTrend(base, location, trendRange, trendBucketUnit)
-	if err != nil {
-		return result, gerror.Wrap(err, "load usage trend")
-	}
-	result.Trend = trend
-	result.TrendBucketUnit = trendBucketUnit
-	if err := base.Clone().Fields(`requested_model AS name,COUNT(*) AS requests,COALESCE(SUM(total_tokens),0) AS total_tokens,COALESCE(SUM(estimated_cost),0) AS estimated_cost`).
-		Group(dao.UsageLogs.Columns().RequestedModel).OrderDesc("requests").Limit(8).Scan(&result.ByModel); err != nil {
-		return result, gerror.Wrap(err, "load model breakdown")
-	}
-	if err := dao.UsageLogs.Ctx(ctx).As("u").
-		WhereGTE("u."+dao.UsageLogs.Columns().CreatedAt, dateRange.StartAt).
-		WhereLT("u."+dao.UsageLogs.Columns().CreatedAt, dateRange.EndAt).
-		Fields(`COALESCE(c.name,'不可用渠道') AS name,COUNT(*) AS requests,COALESCE(SUM(u.total_tokens),0) AS total_tokens,COALESCE(SUM(u.estimated_cost),0) AS estimated_cost`).
-		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").Group("u.channel_id,c.name").OrderDesc("requests").Limit(8).Scan(&result.ByChannel); err != nil {
-		return result, gerror.Wrap(err, "load channel breakdown")
-	}
+	result := dashboardFromUsageLogs(rows, channelNames, location, trendRange, trendBucketUnit)
 	recentCost, err := s.costDistribution(ctx, dateRange, now, location)
 	if err != nil {
 		return result, err
 	}
 	result.RecentCost = recentCost
-	return result, nil
-}
-
-func (s *sUsage) usageTrend(base *gdb.Model, location *time.Location, dateRange DashboardRange, bucketUnit string) ([]TrendPoint, error) {
-	type row struct {
-		CreatedAt     time.Time `orm:"created_at"`
-		InputTokens   uint64    `orm:"input_tokens"`
-		OutputTokens  uint64    `orm:"output_tokens"`
-		EstimatedCost float64   `orm:"estimated_cost"`
-	}
-	rows := make([]row, 0)
-	if err := base.Clone().Fields("created_at,input_tokens,output_tokens,COALESCE(estimated_cost,0) AS estimated_cost").Scan(&rows); err != nil {
-		return nil, err
-	}
-	bucketLayout := time.DateOnly
-	if bucketUnit == trendBucketHour {
-		bucketLayout = "2006-01-02 15:00:00"
-	}
-	values := make(map[string]TrendPoint)
-	for _, row := range rows {
-		bucket := row.CreatedAt.In(location).Format(bucketLayout)
-		point := values[bucket]
-		point.Bucket = bucket
-		point.Requests++
-		point.InputTokens += row.InputTokens
-		point.OutputTokens += row.OutputTokens
-		if point.EstimatedCost == nil {
-			point.EstimatedCost = new(float64)
-		}
-		*point.EstimatedCost += row.EstimatedCost
-		values[bucket] = point
-	}
-	if bucketUnit == trendBucketHour {
-		start := dateRange.StartAt.In(location)
-		start = time.Date(start.Year(), start.Month(), start.Day(), start.Hour(), 0, 0, 0, location)
-		end := dateRange.EndAt.In(location)
-		result := make([]TrendPoint, 0, 25)
-		for bucketTime := start; bucketTime.Before(end); bucketTime = bucketTime.Add(time.Hour) {
-			bucket := bucketTime.Format(bucketLayout)
-			point, exists := values[bucket]
-			if !exists {
-				point = TrendPoint{Bucket: bucket, EstimatedCost: new(float64)}
-			}
-			result = append(result, point)
-		}
-		return result, nil
-	}
-	buckets := make([]string, 0, len(values))
-	for bucket := range values {
-		buckets = append(buckets, bucket)
-	}
-	sort.Strings(buckets)
-	result := make([]TrendPoint, 0, len(buckets))
-	for _, bucket := range buckets {
-		result = append(result, values[bucket])
-	}
 	return result, nil
 }
 
@@ -181,62 +105,17 @@ func (s *sUsage) UserSummary(ctx context.Context, userID uint64, days int) (User
 	}
 	result := UserSummary{Days: days}
 	start := startOfDay(time.Now().In(s.timeLocation(ctx))).AddDate(0, 0, -days+1).UTC()
+	rows := make([]entity.UsageLogs, 0)
 	err := dao.UsageLogs.Ctx(ctx).
 		Where(dao.UsageLogs.Columns().UserId, userID).
 		WhereGTE(dao.UsageLogs.Columns().CreatedAt, start).
-		Fields(`
-			COUNT(*) AS requests,
-			COALESCE(SUM(CASE WHEN http_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END),0) AS successes,
-			COALESCE(SUM(input_tokens),0) AS input_tokens,
-			COALESCE(SUM(output_tokens),0) AS output_tokens,
-			COALESCE(SUM(total_tokens),0) AS total_tokens,
-			COALESCE(SUM(estimated_cost),0) AS estimated_cost`).
-		Scan(&result)
-	return result, gerror.Wrap(err, "load user usage summary")
+		Scan(&rows)
+	if err != nil {
+		return result, gerror.Wrap(err, "load user usage logs")
+	}
+	return userSummaryFromUsageLogs(days, rows), nil
 }
 
 func (s *sUsage) List(ctx context.Context, input LogFilter) (LogPage, error) {
-	if input.Page < 1 {
-		input.Page = 1
-	}
-	if input.PageSize < 1 || input.PageSize > 100 {
-		input.PageSize = 20
-	}
-	if input.EndAt.Before(input.StartAt) {
-		return LogPage{}, gerror.New("结束时间不能早于开始时间")
-	}
-	query := dao.UsageLogs.Ctx(ctx).As("u")
-	query = query.WhereGTE("u.created_at", input.StartAt).WhereLTE("u.created_at", input.EndAt)
-	if input.ModelName != "" {
-		query = query.WhereLike("u.requested_model", "%"+input.ModelName+"%")
-	}
-	if input.ChannelID > 0 {
-		query = query.Where("u.channel_id", input.ChannelID)
-	}
-	if input.APIKeyID > 0 {
-		query = query.Where("u.api_key_id", input.APIKeyID)
-	}
-	if input.UserID > 0 {
-		query = query.Where("u.user_id", input.UserID)
-	}
-	var summary LogSummary
-	if err := query.Clone().Fields("COUNT(*) AS requests,COALESCE(SUM(u.estimated_cost),0) AS estimated_cost").Scan(&summary); err != nil {
-		return LogPage{}, gerror.Wrap(err, "count usage logs")
-	}
-	items := make([]LogView, 0)
-	credentialIndexField := "(SELECT COUNT(*) FROM " + dao.ChannelCredentials.Table() + " cc WHERE cc.channel_id=u.channel_id AND cc.id<=u.channel_credential_id) AS channel_credential_index"
-	err := query.Fields("u.*,COALESCE(k.name,'系统测试') AS api_key_name,COALESCE(c.name,'已删除渠道') AS channel_name,"+credentialIndexField+",IF(u.api_key_id IS NULL,'系统',COALESCE(usr.name,'已删除用户')) AS user_name").
-		LeftJoin(dao.ApiKeys.Table()+" k", "k.id=u.api_key_id").
-		LeftJoin(dao.Channels.Table()+" c", "c.id=u.channel_id").
-		LeftJoin(dao.Users.Table()+" usr", "usr.id=u.user_id").
-		OrderDesc("u.id").Page(input.Page, input.PageSize).Scan(&items)
-	if err != nil {
-		return LogPage{}, gerror.Wrap(err, "list usage logs")
-	}
-	for index := range items {
-		items[index].BillingDetails = ParseBillingBreakdown(items[index].BillingDetailsJSON)
-	}
-	s.reconstructLegacyBillingDetails(ctx, items)
-	s.populateIPLocations(items)
-	return LogPage{Items: items, Summary: summary, StartAt: input.StartAt, EndAt: input.EndAt, Total: int(summary.Requests), Page: input.Page, PageSize: input.PageSize}, nil
+	return s.listUsageLogs(ctx, input)
 }
