@@ -31,17 +31,18 @@ type ModelQualityEventInput struct {
 }
 
 type modelQualityEventRow struct {
-	Id             uint64    `orm:"id"`
-	ChannelId      uint64    `orm:"channel_id"`
-	ChannelName    string    `orm:"channel_name"`
-	CredentialId   uint64    `orm:"credential_id"`
-	RequestedModel string    `orm:"requested_model"`
-	ExpectedModel  string    `orm:"expected_model"`
-	ObservedModel  string    `orm:"observed_model"`
-	ReasonsJson    string    `orm:"reasons_json"`
-	QuestionChars  uint      `orm:"question_chars"`
-	AnswerChars    uint      `orm:"answer_chars"`
-	CreatedAt      time.Time `orm:"created_at"`
+	Id              uint64    `orm:"id"`
+	ChannelId       uint64    `orm:"channel_id"`
+	ChannelName     string    `orm:"channel_name"`
+	CredentialId    uint64    `orm:"credential_id"`
+	CredentialIndex uint      `orm:"credential_index"`
+	RequestedModel  string    `orm:"requested_model"`
+	ExpectedModel   string    `orm:"expected_model"`
+	ObservedModel   string    `orm:"observed_model"`
+	ReasonsJson     string    `orm:"reasons_json"`
+	QuestionChars   uint      `orm:"question_chars"`
+	AnswerChars     uint      `orm:"answer_chars"`
+	CreatedAt       time.Time `orm:"created_at"`
 }
 
 func (s *sSystem) GetModelQualitySettings(ctx context.Context) (adminapi.ModelQualitySettingsInput, error) {
@@ -94,8 +95,9 @@ func (s *sSystem) ListModelQualityEvents(ctx context.Context, input adminapi.Mod
 	if err != nil {
 		return adminapi.ModelQualityEventList{}, gerror.Wrap(err, "count model quality events")
 	}
+	credentialIndexField := "(SELECT COUNT(*) FROM " + dao.ChannelCredentials.Table() + " cc WHERE cc.channel_id=e.channel_id AND cc.id<=e.credential_id) AS credential_index"
 	rows := make([]modelQualityEventRow, 0)
-	if err = model.Fields("e.*,COALESCE(c.name,'已删除渠道') AS channel_name").
+	if err = model.Fields("e.*,COALESCE(c.name,'已删除渠道') AS channel_name,"+credentialIndexField).
 		LeftJoin(dao.Channels.Table()+" c", "c.id=e.channel_id").
 		OrderDesc("e.id").Page(page, pageSize).Scan(&rows); err != nil {
 		return adminapi.ModelQualityEventList{}, gerror.Wrap(err, "list model quality events")
@@ -126,7 +128,7 @@ func modelQualityEventView(row modelQualityEventRow) adminapi.ModelQualityEventV
 	reasons := make([]string, 0)
 	_ = json.Unmarshal([]byte(row.ReasonsJson), &reasons)
 	return adminapi.ModelQualityEventView{
-		Id: row.Id, ChannelId: row.ChannelId, ChannelName: row.ChannelName, CredentialId: row.CredentialId,
+		Id: row.Id, ChannelId: row.ChannelId, ChannelName: row.ChannelName, CredentialId: row.CredentialId, CredentialIndex: row.CredentialIndex,
 		RequestedModel: row.RequestedModel, ExpectedModel: row.ExpectedModel, ObservedModel: row.ObservedModel,
 		Reasons: uniqueModelQualityReasons(reasons), QuestionChars: row.QuestionChars, AnswerChars: row.AnswerChars, CreatedAt: row.CreatedAt,
 	}
