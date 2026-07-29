@@ -136,7 +136,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	if err != nil {
 		return err
 	}
-	body, err = redactSensitiveData(body, securitySettings)
+	body, sensitiveDataRestorer, err := redactSensitiveDataWithRestore(body, securitySettings)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	)
 	for index := range candidates {
 		for {
-			outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings, excludedCredentials)
+			outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings, excludedCredentials, sensitiveDataRestorer)
 			attempts += outcome.attempts
 			if outcome.attempts > 0 {
 				last = outcome.result
@@ -213,7 +213,11 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
 			}
 			if !isStream {
-				s.writeBufferedResponse(writer, result.status, result.body, result.headers)
+				responseBody := result.body
+				if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices {
+					responseBody = sensitiveDataRestorer.restoreBufferedResponse(responseBody)
+				}
+				s.writeBufferedResponse(writer, result.status, responseBody, result.headers)
 			}
 			s.scheduleModelQualityAnalysis(ctx, requestID, candidate, requestedModel, endpoint, body, isStream, settings.ModelQualityDetectionEnabled, result)
 			return nil

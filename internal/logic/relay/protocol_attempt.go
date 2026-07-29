@@ -15,13 +15,13 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/channel"
 )
 
-func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput) (attemptResult, bool, error) {
+func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
 	advancedConfig, err := channel.ParseAdvancedConfig([]byte(candidate.AdvancedConfig))
 	if err != nil {
 		return attemptResult{}, false, err
 	}
 	primary := directProtocolPlan(endpoint)
-	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, primary)
+	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, primary, sensitiveDataRestorer)
 	needsFallback := shouldFallbackWithProtocolConversion(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	if handled || attemptErr != nil || !needsFallback {
 		return result, handled, attemptErr
@@ -30,10 +30,10 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if !ok {
 		return result, handled, attemptErr
 	}
-	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, fallback)
+	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, fallback, sensitiveDataRestorer)
 }
 
-func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocolPlan) (attemptResult, bool, error) {
+func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocolPlan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
 	convertedBody, err := plan.convertRequest(originalBody)
 	if err != nil {
 		return attemptResult{}, false, err
@@ -109,6 +109,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		converter = nil
 	}
 	capture := newStreamResponseCapture(plan.upstreamEndpoint)
+	streamRestorer := newSensitiveDataStreamRestorer(sensitiveDataRestorer)
 	pending := make([][]byte, 0)
 	pendingSize := 0
 	committed := false
@@ -169,29 +170,31 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 				continue
 			}
 			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-			if !committed && !streamPayloadHasVisibleOutput(line) {
-				pending = append(pending, output)
-				pendingSize += len(output)
-				if pendingSize <= maxPendingStreamBytes {
+			for _, restoredOutput := range streamRestorer.restoreSSELine(output) {
+				if !committed && !streamPayloadHasVisibleOutput(line) {
+					pending = append(pending, restoredOutput)
+					pendingSize += len(restoredOutput)
+					if pendingSize <= maxPendingStreamBytes {
+						continue
+					}
+					committed = true
+					if err = flushPending(); err != nil {
+						result.errorMessage = err.Error()
+						return result, true, nil
+					}
 					continue
 				}
-				committed = true
+				if !committed {
+					committed = true
+				}
 				if err = flushPending(); err != nil {
 					result.errorMessage = err.Error()
 					return result, true, nil
 				}
-				continue
-			}
-			if !committed {
-				committed = true
-			}
-			if err = flushPending(); err != nil {
-				result.errorMessage = err.Error()
-				return result, true, nil
-			}
-			if err = writeOutput(output); err != nil {
-				result.errorMessage = err.Error()
-				return result, true, nil
+				if err = writeOutput(restoredOutput); err != nil {
+					result.errorMessage = err.Error()
+					return result, true, nil
+				}
 			}
 		}
 	}
@@ -201,16 +204,18 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 				continue
 			}
 			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
-			if !committed {
-				committed = true
-				if err = flushPending(); err != nil {
+			for _, restoredOutput := range streamRestorer.restoreSSELine(output) {
+				if !committed {
+					committed = true
+					if err = flushPending(); err != nil {
+						result.errorMessage = err.Error()
+						return result, true, nil
+					}
+				}
+				if err = writeOutput(restoredOutput); err != nil {
 					result.errorMessage = err.Error()
 					return result, true, nil
 				}
-			}
-			if err = writeOutput(output); err != nil {
-				result.errorMessage = err.Error()
-				return result, true, nil
 			}
 		}
 	}
@@ -223,6 +228,19 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	}
 	if !result.wroteBytes {
 		if err = flushPending(); err != nil {
+			result.errorMessage = err.Error()
+			return result, true, nil
+		}
+	}
+	for _, output := range streamRestorer.flushPending() {
+		if !committed {
+			committed = true
+			if err = flushPending(); err != nil {
+				result.errorMessage = err.Error()
+				return result, true, nil
+			}
+		}
+		if err = writeOutput(output); err != nil {
 			result.errorMessage = err.Error()
 			return result, true, nil
 		}

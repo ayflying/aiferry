@@ -2,7 +2,10 @@ package relay
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -11,15 +14,9 @@ import (
 	adminapi "github.com/yunloli/aiferry/api/admin"
 )
 
-const (
-	redactedPassword = "[REDACTED_PASSWORD]"
-	redactedToken    = "[REDACTED_TOKEN]"
-	redactedPersonal = "[REDACTED_PERSONAL_DATA]"
-)
-
 var (
 	assignmentPattern      = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9])([A-Za-z][A-Za-z0-9_-]*)(\s*(?:=|:)\s*)((?:bearer\s+)?[^\s,;]+)`)
-	chinesePasswordPattern = regexp.MustCompile(`密码\s*(?:为|是|=|:)\s*[^\s,;]+`)
+	chinesePasswordPattern = regexp.MustCompile(`密码\s*(?:为|是|=|:)\s*([^\s,;]+)`)
 	basicAuthURLPattern    = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://[^/\s:@]+:)([^@/\s]+)(@)`)
 	bearerTokenPattern     = regexp.MustCompile(`(?i)\bbearer\s+[a-z0-9._~+/=-]+`)
 	commonTokenPattern     = regexp.MustCompile(`\b(?:sk|rk|pk)-[a-zA-Z0-9_-]{8,}\b|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)
@@ -30,60 +27,93 @@ var (
 	bankCardPattern        = regexp.MustCompile(`\b(?:\d[ -]?){12,18}\d\b`)
 )
 
+type sensitiveDataRestorer struct {
+	requestID    string
+	replacements map[string]string
+	nextID       uint64
+}
+
 func redactSensitiveData(body []byte, settings adminapi.SensitiveWordSettingsInput) ([]byte, error) {
+	redacted, _, err := redactSensitiveDataWithRestore(body, settings)
+	return redacted, err
+}
+
+func redactSensitiveDataWithRestore(body []byte, settings adminapi.SensitiveWordSettingsInput) ([]byte, *sensitiveDataRestorer, error) {
 	if !settings.SensitiveDataRedactionEnabled {
-		return body, nil
+		return body, nil, nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	var payload any
 	if err := decoder.Decode(&payload); err != nil {
-		return nil, gerror.Wrap(err, "decode request for sensitive data redaction")
+		return nil, nil, gerror.Wrap(err, "decode request for sensitive data redaction")
 	}
-	result, err := json.Marshal(redactSensitiveValue(payload, settings))
+	restorer, err := newSensitiveDataRestorer()
 	if err != nil {
-		return nil, gerror.Wrap(err, "encode redacted request")
+		return nil, nil, err
 	}
-	return result, nil
+	result, err := json.Marshal(redactSensitiveValue(payload, settings, restorer))
+	if err != nil {
+		return nil, nil, gerror.Wrap(err, "encode redacted request")
+	}
+	return result, restorer, nil
 }
 
-func redactSensitiveValue(value any, settings adminapi.SensitiveWordSettingsInput) any {
+func newSensitiveDataRestorer() (*sensitiveDataRestorer, error) {
+	seed := make([]byte, 16)
+	if _, err := rand.Read(seed); err != nil {
+		return nil, gerror.Wrap(err, "create sensitive data placeholder")
+	}
+	return &sensitiveDataRestorer{
+		requestID:    hex.EncodeToString(seed),
+		replacements: make(map[string]string),
+	}, nil
+}
+
+func (r *sensitiveDataRestorer) redact(value string) string {
+	r.nextID++
+	placeholder := fmt.Sprintf("[[aiferry:secret:%s:%d]]", r.requestID, r.nextID)
+	r.replacements[placeholder] = value
+	return placeholder
+}
+
+func redactSensitiveValue(value any, settings adminapi.SensitiveWordSettingsInput, restorer *sensitiveDataRestorer) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, item := range typed {
-			if placeholder, shouldReplace := sensitiveFieldPlaceholder(key, item, settings); shouldReplace {
-				typed[key] = placeholder
+			if shouldReplace := sensitiveFieldShouldRedact(key, item, settings); shouldReplace {
+				typed[key] = restorer.redact(sensitiveScalarString(item))
 				continue
 			}
-			typed[key] = redactSensitiveValue(item, settings)
+			typed[key] = redactSensitiveValue(item, settings, restorer)
 		}
 		return typed
 	case []any:
 		for index, item := range typed {
-			typed[index] = redactSensitiveValue(item, settings)
+			typed[index] = redactSensitiveValue(item, settings, restorer)
 		}
 		return typed
 	case string:
-		return redactSensitiveText(typed, settings)
+		return redactSensitiveText(typed, settings, restorer)
 	default:
 		return value
 	}
 }
 
-func sensitiveFieldPlaceholder(key string, value any, settings adminapi.SensitiveWordSettingsInput) (string, bool) {
+func sensitiveFieldShouldRedact(key string, value any, settings adminapi.SensitiveWordSettingsInput) bool {
 	if !isSensitiveScalar(value) {
-		return "", false
+		return false
 	}
 	normalized := normalizeSensitiveKey(key)
 	switch {
 	case settings.PasswordRedactionEnabled && isPasswordField(normalized):
-		return redactedPassword, true
+		return true
 	case settings.TokenRedactionEnabled && isTokenField(normalized):
-		return redactedToken, true
+		return true
 	case settings.PersonalDataRedactionEnabled && (strings.Contains(normalized, "email") || strings.Contains(normalized, "phone") || strings.Contains(normalized, "mobile") || strings.Contains(normalized, "idcard") || strings.Contains(normalized, "identity") || strings.Contains(normalized, "bankcard")):
-		return redactedPersonal, true
+		return true
 	default:
-		return "", false
+		return false
 	}
 }
 
@@ -123,38 +153,50 @@ func isSensitiveScalar(value any) bool {
 	}
 }
 
-func redactSensitiveText(value string, settings adminapi.SensitiveWordSettingsInput) string {
+func sensitiveScalarString(value any) string {
+	return fmt.Sprint(value)
+}
+
+func redactSensitiveText(value string, settings adminapi.SensitiveWordSettingsInput, restorer *sensitiveDataRestorer) string {
 	if settings.PasswordRedactionEnabled {
-		value = redactAssignments(value, isPasswordField, redactedPassword)
-		value = chinesePasswordPattern.ReplaceAllString(value, "密码="+redactedPassword)
-		value = basicAuthURLPattern.ReplaceAllString(value, "${1}"+redactedPassword+"${3}")
+		value = redactAssignments(value, isPasswordField, restorer.redact)
+		value = chinesePasswordPattern.ReplaceAllStringFunc(value, func(match string) string {
+			parts := chinesePasswordPattern.FindStringSubmatch(match)
+			return "密码=" + restorer.redact(parts[1])
+		})
+		value = basicAuthURLPattern.ReplaceAllStringFunc(value, func(match string) string {
+			parts := basicAuthURLPattern.FindStringSubmatch(match)
+			return parts[1] + restorer.redact(parts[2]) + parts[3]
+		})
 	}
 	if settings.TokenRedactionEnabled {
-		value = privateKeyPattern.ReplaceAllString(value, redactedToken)
-		value = redactAssignments(value, isTokenField, redactedToken)
-		value = bearerTokenPattern.ReplaceAllString(value, "Bearer "+redactedToken)
-		value = commonTokenPattern.ReplaceAllString(value, redactedToken)
+		value = privateKeyPattern.ReplaceAllStringFunc(value, restorer.redact)
+		value = redactAssignments(value, isTokenField, restorer.redact)
+		value = bearerTokenPattern.ReplaceAllStringFunc(value, func(match string) string {
+			return "Bearer " + restorer.redact(strings.TrimSpace(match[len("Bearer "):]))
+		})
+		value = commonTokenPattern.ReplaceAllStringFunc(value, restorer.redact)
 	}
 	if settings.PersonalDataRedactionEnabled {
-		value = emailPattern.ReplaceAllString(value, redactedPersonal)
-		value = redactValidatedMatches(value, chineseIDPattern, validChineseID, redactedPersonal)
-		value = redactValidatedMatches(value, bankCardPattern, validBankCard, redactedPersonal)
-		value = mainlandPhonePattern.ReplaceAllString(value, redactedPersonal)
+		value = emailPattern.ReplaceAllStringFunc(value, restorer.redact)
+		value = redactValidatedMatches(value, chineseIDPattern, validChineseID, restorer.redact)
+		value = redactValidatedMatches(value, bankCardPattern, validBankCard, restorer.redact)
+		value = mainlandPhonePattern.ReplaceAllStringFunc(value, restorer.redact)
 	}
 	return value
 }
 
-func redactAssignments(value string, matches func(string) bool, replacement string) string {
+func redactAssignments(value string, matches func(string) bool, redact func(string) string) string {
 	return assignmentPattern.ReplaceAllStringFunc(value, func(assignment string) string {
 		parts := assignmentPattern.FindStringSubmatch(assignment)
 		if len(parts) != 5 || !matches(normalizeSensitiveKey(parts[2])) {
 			return assignment
 		}
-		return parts[1] + parts[2] + parts[3] + replacement
+		return parts[1] + parts[2] + parts[3] + redact(parts[4])
 	})
 }
 
-func redactValidatedMatches(value string, pattern *regexp.Regexp, valid func(string) bool, replacement string) string {
+func redactValidatedMatches(value string, pattern *regexp.Regexp, valid func(string) bool, redact func(string) string) string {
 	locations := pattern.FindAllStringIndex(value, -1)
 	if len(locations) == 0 {
 		return value
@@ -170,7 +212,7 @@ func redactValidatedMatches(value string, pattern *regexp.Regexp, valid func(str
 			continue
 		}
 		builder.WriteString(value[last:location[0]])
-		builder.WriteString(replacement)
+		builder.WriteString(redact(matched))
 		last = location[1]
 		changed = true
 	}

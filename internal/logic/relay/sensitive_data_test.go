@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -18,9 +19,9 @@ func TestRedactSensitiveDataRedactsContentWithoutBreakingToolSchema(t *testing.T
   "tools":[{"type":"function","function":{"name":"connect","parameters":{"type":"object","properties":{"password":{"type":"string"}}}}}]
 }`)
 
-	redacted, err := redactSensitiveData(body, redactionSettings())
+	redacted, restorer, err := redactSensitiveDataWithRestore(body, redactionSettings())
 	if err != nil {
-		t.Fatalf("redactSensitiveData() error = %v", err)
+		t.Fatalf("redactSensitiveDataWithRestore() error = %v", err)
 	}
 	for _, secret := range []string{
 		"database-password", "sk-abc1234567890", "cli-password", "sk-command-key-123", "url-password",
@@ -31,10 +32,12 @@ func TestRedactSensitiveDataRedactsContentWithoutBreakingToolSchema(t *testing.T
 			t.Fatalf("redacted request still contains %q: %s", secret, redacted)
 		}
 	}
-	for _, placeholder := range []string{redactedPassword, redactedToken, redactedPersonal} {
-		if !strings.Contains(string(redacted), placeholder) {
-			t.Fatalf("redacted request does not contain %q: %s", placeholder, redacted)
-		}
+	if !strings.Contains(string(redacted), "[[aiferry:secret:") {
+		t.Fatalf("redacted request does not contain a request-scoped placeholder: %s", redacted)
+	}
+	restored := restorer.restoreBufferedResponse(redacted)
+	if !strings.Contains(string(restored), "database-password") || !strings.Contains(string(restored), "alice@example.com") {
+		t.Fatalf("restored request does not contain the original values: %s", restored)
 	}
 	if got := gjson.GetBytes(redacted, "max_tokens").Int(); got != 64 {
 		t.Fatalf("max_tokens = %d, want 64", got)
@@ -66,12 +69,103 @@ func TestRedactSensitiveDataRespectsTotalAndCategorySwitches(t *testing.T) {
 	if got := gjson.GetBytes(redacted, "password").String(); got != "plain-password" {
 		t.Fatalf("password = %q, want original when category is disabled", got)
 	}
-	if got := gjson.GetBytes(redacted, "token").String(); got != redactedToken {
-		t.Fatalf("token = %q, want %q", got, redactedToken)
+	if got := gjson.GetBytes(redacted, "token").String(); !strings.HasPrefix(got, "[[aiferry:secret:") {
+		t.Fatalf("token = %q, want a request-scoped placeholder", got)
 	}
-	if got := gjson.GetBytes(redacted, "email").String(); got != redactedPersonal {
-		t.Fatalf("email = %q, want %q", got, redactedPersonal)
+	if got := gjson.GetBytes(redacted, "email").String(); !strings.HasPrefix(got, "[[aiferry:secret:") {
+		t.Fatalf("email = %q, want a request-scoped placeholder", got)
 	}
+}
+
+func TestSensitiveDataRestorerRestoresOnlyCurrentRequestPlaceholders(t *testing.T) {
+	request := []byte(`{"messages":[{"role":"user","content":"token=sk-abc1234567890"}]}`)
+	_, restorer, err := redactSensitiveDataWithRestore(request, redactionSettings())
+	if err != nil {
+		t.Fatalf("redactSensitiveDataWithRestore() error = %v", err)
+	}
+	var placeholder string
+	for value := range restorer.replacements {
+		placeholder = value
+	}
+	response := sensitiveJSONForTest(t, map[string]any{
+		"choices":    []any{map[string]any{"message": map[string]any{"content": "Use " + placeholder}}},
+		"tool_calls": []any{map[string]any{"function": map[string]any{"arguments": `{"token":"` + placeholder + `"}`}}},
+	})
+	restored := restorer.restoreBufferedResponse(response)
+	if strings.Contains(string(restored), placeholder) {
+		t.Fatalf("restored response still contains placeholder: %s", restored)
+	}
+	if got := gjson.GetBytes(restored, "choices.0.message.content").String(); got != "Use sk-abc1234567890" {
+		t.Fatalf("message content = %q", got)
+	}
+	if got := gjson.GetBytes(restored, "tool_calls.0.function.arguments").String(); got != `{"token":"sk-abc1234567890"}` {
+		t.Fatalf("tool arguments = %q", got)
+	}
+	other := newSensitiveDataRestorerForTest(t)
+	if got := other.restoreBufferedResponse(response); strings.Contains(string(got), "sk-abc1234567890") {
+		t.Fatal("a different request restored a placeholder it did not create")
+	}
+}
+
+func TestSensitiveDataStreamRestorerHandlesSplitPlaceholder(t *testing.T) {
+	request := []byte(`{"messages":[{"role":"user","content":"token=sk-abc1234567890"}]}`)
+	_, restorer, err := redactSensitiveDataWithRestore(request, redactionSettings())
+	if err != nil {
+		t.Fatalf("redactSensitiveDataWithRestore() error = %v", err)
+	}
+	var placeholder string
+	for value := range restorer.replacements {
+		placeholder = value
+	}
+	streamRestorer := newSensitiveDataStreamRestorer(restorer)
+	first := streamRestorer.restoreSSELine(sensitiveSSELineForTest(t, "Use "+placeholder[:16]))
+	if len(first) != 1 {
+		t.Fatalf("first response lines = %d, want 1", len(first))
+	}
+	firstPayload, _, valid := sseDataPayload(first[0])
+	if !valid {
+		t.Fatalf("first response is not a valid SSE payload: %s", first[0])
+	}
+	if got := gjson.GetBytes(firstPayload, "choices.0.delta.content").String(); got != "Use " {
+		t.Fatalf("first chunk = %q, want %q", got, "Use ")
+	}
+	second := streamRestorer.restoreSSELine(sensitiveSSELineForTest(t, placeholder[16:]+" now"))
+	if len(second) != 1 {
+		t.Fatalf("second response lines = %d, want 1", len(second))
+	}
+	secondPayload, _, valid := sseDataPayload(second[0])
+	if !valid {
+		t.Fatalf("second response is not a valid SSE payload: %s", second[0])
+	}
+	if got := gjson.GetBytes(secondPayload, "choices.0.delta.content").String(); got != "sk-abc1234567890 now" {
+		t.Fatalf("second chunk = %q", got)
+	}
+}
+
+func newSensitiveDataRestorerForTest(t *testing.T) *sensitiveDataRestorer {
+	t.Helper()
+	restorer, err := newSensitiveDataRestorer()
+	if err != nil {
+		t.Fatalf("newSensitiveDataRestorer() error = %v", err)
+	}
+	return restorer
+}
+
+func sensitiveJSONForTest(t *testing.T, payload any) []byte {
+	t.Helper()
+	result, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return result
+}
+
+func sensitiveSSELineForTest(t *testing.T, content string) []byte {
+	t.Helper()
+	payload := sensitiveJSONForTest(t, map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{"content": content}}},
+	})
+	return append(append([]byte("data: "), payload...), '\n')
 }
 
 func redactionSettings() adminapi.SensitiveWordSettingsInput {
