@@ -67,7 +67,7 @@ function renderChart() {
 		color: ['#1677ff', '#16866f'],
 		grid: { top: 42, right: 72, bottom: 32, left: 58, containLabel: true },
 		tooltip: { trigger: 'axis' },
-		legend: { top: 4, right: 76, textStyle: { color: '#66717d', fontSize: 11 } },
+		legend: { top: 4, left: 'center', textStyle: { color: '#66717d', fontSize: 11 } },
 		xAxis: { type: 'category', data: dashboard.value.trend.map((item) => formatTrendBucket(item.bucket, dashboard.value.trendBucketUnit)), axisLine: { lineStyle: { color: '#dce2e7' } }, axisLabel: { color: '#66717d', hideOverlap: true, interval: hourly ? 2 : 'auto' }, axisTick: { show: false } },
 		yAxis: [
 			{ type: 'value', name: '请求', nameTextStyle: { color: '#66717d' }, splitLine: { lineStyle: { color: '#edf0f2' } } },
