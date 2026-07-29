@@ -11,7 +11,7 @@ import (
 
 func (s *sChannel) encryptProxyURL(value string) (string, error) {
 	value = strings.TrimSpace(value)
-	if _, err := appservice.NewSOCKS5HTTPClient(s.app.HTTP, value); err != nil {
+	if _, err := appservice.NewProxyHTTPClient(s.app.HTTP, value); err != nil {
 		return "", err
 	}
 	cipher, err := s.app.Secrets.Encrypt(value)
@@ -26,5 +26,5 @@ func (s *sChannel) HTTPClientForProxy(proxyURLCipher string) (*http.Client, erro
 	if err != nil {
 		return nil, gerror.Wrap(err, "decrypt channel proxy URL")
 	}
-	return appservice.NewSOCKS5HTTPClient(s.app.HTTP, proxyURL)
+	return appservice.NewProxyHTTPClient(s.app.HTTP, proxyURL)
 }

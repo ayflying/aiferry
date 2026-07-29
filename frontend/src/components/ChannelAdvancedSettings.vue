@@ -33,8 +33,8 @@ function setStoreAllowed(value: boolean | string | number) {
 
     <div class="proxy-field">
       <div class="field-label"><strong>代理地址</strong><el-button v-if="editing && hasProxy" text size="small" @click="emit('clearProxy')">清除已保存代理</el-button></div>
-      <el-input v-model="proxyUrl" type="password" show-password :placeholder="editing && hasProxy ? '已配置；留空保持不变' : 'socks5://user:pass@host:port'" autocomplete="new-password" />
-      <span>此渠道的网络代理，仅支持 SOCKS5。</span>
+	      <el-input v-model="proxyUrl" type="password" show-password :placeholder="editing && hasProxy ? '已配置；留空保持不变' : 'http://user:pass@host:port'" autocomplete="new-password" />
+	      <span>此渠道的网络代理，支持 HTTP/HTTPS 和 SOCKS5，例如 http:// 或 socks5://。</span>
     </div>
 
     <div class="prompt-field">
