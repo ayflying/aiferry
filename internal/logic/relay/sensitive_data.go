@@ -77,9 +77,18 @@ func newSensitiveDataRestorer() (*sensitiveDataRestorer, error) {
 func (r *sensitiveDataRestorer) redact(value string) string {
 	r.nextID++
 	// Keep the value opaque without syntax that upstream filters may treat specially.
-	placeholder := fmt.Sprintf("aiferry_ref_%s_%d", r.requestID, r.nextID)
+	placeholder := fmt.Sprintf("aiferry_ref_%s_%d_", r.requestID, r.nextID)
 	r.replacements[placeholder] = value
 	return placeholder
+}
+
+func (r *sensitiveDataRestorer) redactTextMatch(value string) string {
+	for placeholder := range r.replacements {
+		if strings.Contains(value, placeholder) {
+			return value
+		}
+	}
+	return r.redact(value)
 }
 
 func redactSensitiveValue(value any, settings adminapi.SensitiveWordSettingsInput, restorer *sensitiveDataRestorer) any {
@@ -163,30 +172,31 @@ func sensitiveScalarString(value any) string {
 }
 
 func redactSensitiveText(value string, settings adminapi.SensitiveWordSettingsInput, restorer *sensitiveDataRestorer) string {
+	redactMatch := restorer.redactTextMatch
 	if settings.PasswordRedactionEnabled {
-		value = redactAssignments(value, isPasswordField, restorer.redact)
+		value = redactAssignments(value, isPasswordField, redactMatch)
 		value = chinesePasswordPattern.ReplaceAllStringFunc(value, func(match string) string {
 			parts := chinesePasswordPattern.FindStringSubmatch(match)
-			return "密码=" + restorer.redact(parts[1])
+			return "密码=" + redactMatch(parts[1])
 		})
 		value = basicAuthURLPattern.ReplaceAllStringFunc(value, func(match string) string {
 			parts := basicAuthURLPattern.FindStringSubmatch(match)
-			return parts[1] + restorer.redact(parts[2]) + parts[3]
+			return parts[1] + redactMatch(parts[2]) + parts[3]
 		})
 	}
 	if settings.TokenRedactionEnabled {
-		value = privateKeyPattern.ReplaceAllStringFunc(value, restorer.redact)
-		value = redactAssignments(value, isTokenField, restorer.redact)
+		value = privateKeyPattern.ReplaceAllStringFunc(value, redactMatch)
+		value = redactAssignments(value, isTokenField, redactMatch)
 		value = bearerTokenPattern.ReplaceAllStringFunc(value, func(match string) string {
-			return "Bearer " + restorer.redact(strings.TrimSpace(match[len("Bearer "):]))
+			return "Bearer " + redactMatch(strings.TrimSpace(match[len("Bearer "):]))
 		})
-		value = commonTokenPattern.ReplaceAllStringFunc(value, restorer.redact)
+		value = commonTokenPattern.ReplaceAllStringFunc(value, redactMatch)
 	}
 	if settings.PersonalDataRedactionEnabled {
-		value = emailPattern.ReplaceAllStringFunc(value, restorer.redact)
-		value = redactValidatedMatches(value, chineseIDPattern, validChineseID, restorer.redact)
-		value = redactValidatedMatches(value, bankCardPattern, validBankCard, restorer.redact)
-		value = mainlandPhonePattern.ReplaceAllStringFunc(value, restorer.redact)
+		value = emailPattern.ReplaceAllStringFunc(value, redactMatch)
+		value = redactValidatedMatches(value, chineseIDPattern, validChineseID, redactMatch)
+		value = redactValidatedMatches(value, bankCardPattern, validBankCard, redactMatch)
+		value = mainlandPhonePattern.ReplaceAllStringFunc(value, redactMatch)
 	}
 	return value
 }
