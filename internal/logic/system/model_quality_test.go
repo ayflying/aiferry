@@ -46,3 +46,10 @@ func TestModelQualityEventRetentionLimit(t *testing.T) {
 		t.Fatalf("retention limit = %d", maxStoredModelQualityEvents)
 	}
 }
+
+func TestModelQualityRetentionCutoffWindow(t *testing.T) {
+	offset, limit := modelQualityRetentionCutoffWindow()
+	if offset != maxStoredModelQualityEvents || limit != 1 {
+		t.Fatalf("retention cutoff window = (%d, %d), want (%d, 1)", offset, limit, maxStoredModelQualityEvents)
+	}
+}

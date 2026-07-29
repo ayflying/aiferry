@@ -105,10 +105,11 @@ func (s *sSystem) RecordModelQualityEvent(ctx context.Context, input ModelQualit
 func (s *sSystem) trimModelQualityEvents(ctx context.Context) error {
 	columns := dao.ModelQualityEvents.Columns()
 	cutoff := modelQualityEventRow{}
+	offset, limit := modelQualityRetentionCutoffWindow()
 	if err := dao.ModelQualityEvents.Ctx(ctx).
 		Fields(columns.Id).
 		OrderDesc(columns.Id).
-		Limit(1, maxStoredModelQualityEvents).
+		Limit(offset, limit).
 		Scan(&cutoff); err != nil {
 		return gerror.Wrap(err, "select model quality retention cutoff")
 	}
@@ -117,6 +118,10 @@ func (s *sSystem) trimModelQualityEvents(ctx context.Context) error {
 	}
 	_, err := dao.ModelQualityEvents.Ctx(ctx).WhereLTE(columns.Id, cutoff.Id).Delete()
 	return gerror.Wrap(err, "trim model quality events")
+}
+
+func modelQualityRetentionCutoffWindow() (offset, limit int) {
+	return maxStoredModelQualityEvents, 1
 }
 
 func (s *sSystem) ListModelQualityEvents(ctx context.Context, input adminapi.ModelQualityEventsInput) (adminapi.ModelQualityEventList, error) {
