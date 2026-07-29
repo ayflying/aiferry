@@ -52,7 +52,11 @@ func redactSensitiveDataWithRestore(body []byte, settings adminapi.SensitiveWord
 	if err != nil {
 		return nil, nil, err
 	}
-	result, err := json.Marshal(redactSensitiveValue(payload, settings, restorer))
+	redacted := redactSensitiveValue(payload, settings, restorer)
+	if len(restorer.replacements) == 0 {
+		return body, nil, nil
+	}
+	result, err := json.Marshal(redacted)
 	if err != nil {
 		return nil, nil, gerror.Wrap(err, "encode redacted request")
 	}
@@ -72,7 +76,8 @@ func newSensitiveDataRestorer() (*sensitiveDataRestorer, error) {
 
 func (r *sensitiveDataRestorer) redact(value string) string {
 	r.nextID++
-	placeholder := fmt.Sprintf("[[aiferry:secret:%s:%d]]", r.requestID, r.nextID)
+	// Keep the value opaque without syntax that upstream filters may treat specially.
+	placeholder := fmt.Sprintf("aiferry_ref_%s_%d", r.requestID, r.nextID)
 	r.replacements[placeholder] = value
 	return placeholder
 }
