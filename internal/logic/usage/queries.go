@@ -89,11 +89,17 @@ func (s *sUsage) Dashboard(ctx context.Context, dateRange DashboardRange) (Dashb
 		COALESCE(AVG(duration_ms),0) AS average_latency`).Scan(&result.Summary); err != nil {
 		return result, gerror.Wrap(err, "load dashboard summary")
 	}
-	trend, err := s.dailyTrend(base, location)
+	trendRange := dateRange
+	if current := now.UTC(); trendRange.EndAt.After(current) {
+		trendRange.EndAt = current
+	}
+	trendBucketUnit := dashboardTrendBucketUnit(trendRange, location)
+	trend, err := s.usageTrend(base, location, trendRange, trendBucketUnit)
 	if err != nil {
 		return result, gerror.Wrap(err, "load usage trend")
 	}
 	result.Trend = trend
+	result.TrendBucketUnit = trendBucketUnit
 	if err := base.Clone().Fields(`requested_model AS name,COUNT(*) AS requests,COALESCE(SUM(total_tokens),0) AS total_tokens,COALESCE(SUM(estimated_cost),0) AS estimated_cost`).
 		Group(dao.UsageLogs.Columns().RequestedModel).OrderDesc("requests").Limit(8).Scan(&result.ByModel); err != nil {
 		return result, gerror.Wrap(err, "load model breakdown")
@@ -113,7 +119,7 @@ func (s *sUsage) Dashboard(ctx context.Context, dateRange DashboardRange) (Dashb
 	return result, nil
 }
 
-func (s *sUsage) dailyTrend(base *gdb.Model, location *time.Location) ([]TrendPoint, error) {
+func (s *sUsage) usageTrend(base *gdb.Model, location *time.Location, dateRange DashboardRange, bucketUnit string) ([]TrendPoint, error) {
 	type row struct {
 		CreatedAt     time.Time `orm:"created_at"`
 		InputTokens   uint64    `orm:"input_tokens"`
@@ -124,9 +130,13 @@ func (s *sUsage) dailyTrend(base *gdb.Model, location *time.Location) ([]TrendPo
 	if err := base.Clone().Fields("created_at,input_tokens,output_tokens,COALESCE(estimated_cost,0) AS estimated_cost").Scan(&rows); err != nil {
 		return nil, err
 	}
+	bucketLayout := time.DateOnly
+	if bucketUnit == trendBucketHour {
+		bucketLayout = "2006-01-02 15:00:00"
+	}
 	values := make(map[string]TrendPoint)
 	for _, row := range rows {
-		bucket := row.CreatedAt.In(location).Format("2006-01-02")
+		bucket := row.CreatedAt.In(location).Format(bucketLayout)
 		point := values[bucket]
 		point.Bucket = bucket
 		point.Requests++
@@ -137,6 +147,21 @@ func (s *sUsage) dailyTrend(base *gdb.Model, location *time.Location) ([]TrendPo
 		}
 		*point.EstimatedCost += row.EstimatedCost
 		values[bucket] = point
+	}
+	if bucketUnit == trendBucketHour {
+		start := dateRange.StartAt.In(location)
+		start = time.Date(start.Year(), start.Month(), start.Day(), start.Hour(), 0, 0, 0, location)
+		end := dateRange.EndAt.In(location)
+		result := make([]TrendPoint, 0, 25)
+		for bucketTime := start; bucketTime.Before(end); bucketTime = bucketTime.Add(time.Hour) {
+			bucket := bucketTime.Format(bucketLayout)
+			point, exists := values[bucket]
+			if !exists {
+				point = TrendPoint{Bucket: bucket, EstimatedCost: new(float64)}
+			}
+			result = append(result, point)
+		}
+		return result, nil
 	}
 	buckets := make([]string, 0, len(values))
 	for bucket := range values {

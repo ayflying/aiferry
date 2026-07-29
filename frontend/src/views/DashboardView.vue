@@ -23,7 +23,7 @@ const loading = ref(false)
 const period = ref<DashboardPeriod>({ kind: 'quick', value: 'last24Hours' })
 const dashboard = ref<Dashboard>({
   summary: { requests: 0, successes: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, averageLatency: 0 },
-  trend: [], byModel: [], byChannel: [], recentCost: { totalEstimatedCost: 0, bucketUnit: 'hour', models: [] },
+  trend: [], trendBucketUnit: 'hour', byModel: [], byChannel: [], recentCost: { totalEstimatedCost: 0, bucketUnit: 'hour', models: [] },
 })
 const chartElement = ref<HTMLDivElement>()
 const costChartElement = ref<HTMLDivElement>()
@@ -34,6 +34,7 @@ let costChart: EChartsType | undefined
 
 const success = computed(() => successRate(dashboard.value.summary.requests, dashboard.value.summary.successes))
 const availableChannelCount = computed(() => store.channels.filter(isChannelRoutable).length)
+const trendBucketLabel = computed(() => dashboard.value.trendBucketUnit === 'hour' ? '按小时聚合' : '按天聚合')
 const costBucketLabel = computed(() => ({
   hour: '按小时聚合',
   day: '按天聚合',
@@ -58,24 +59,29 @@ async function load() {
 }
 
 function renderChart() {
-  if (!chartElement.value) return
-  chart ||= init(chartElement.value)
-  chart.setOption({
-    animationDuration: 450,
-    color: ['#1677ff', '#16866f'],
-    grid: { top: 24, right: 18, bottom: 28, left: 48 },
-    tooltip: { trigger: 'axis' },
-    legend: { top: 0, right: 8, textStyle: { color: '#66717d', fontSize: 11 } },
-    xAxis: { type: 'category', data: dashboard.value.trend.map((item) => item.bucket.slice(5)), axisLine: { lineStyle: { color: '#dce2e7' } }, axisLabel: { color: '#66717d' } },
-    yAxis: [
-      { type: 'value', name: '请求', nameTextStyle: { color: '#66717d' }, splitLine: { lineStyle: { color: '#edf0f2' } } },
-      { type: 'value', name: 'Token', nameTextStyle: { color: '#66717d' }, splitLine: { show: false } },
-    ],
-    series: [
-      { name: '请求', type: 'bar', barMaxWidth: 22, data: dashboard.value.trend.map((item) => item.requests), itemStyle: { borderRadius: [3, 3, 0, 0] } },
-      { name: 'Token', type: 'line', yAxisIndex: 1, smooth: true, symbolSize: 6, data: dashboard.value.trend.map((item) => item.inputTokens + item.outputTokens) },
-    ],
-  })
+	if (!chartElement.value) return
+	chart ||= init(chartElement.value)
+	const hourly = dashboard.value.trendBucketUnit === 'hour'
+	chart.setOption({
+		animationDuration: 450,
+		color: ['#1677ff', '#16866f'],
+		grid: { top: 42, right: 72, bottom: 32, left: 58, containLabel: true },
+		tooltip: { trigger: 'axis' },
+		legend: { top: 4, right: 76, textStyle: { color: '#66717d', fontSize: 11 } },
+		xAxis: { type: 'category', data: dashboard.value.trend.map((item) => formatTrendBucket(item.bucket, dashboard.value.trendBucketUnit)), axisLine: { lineStyle: { color: '#dce2e7' } }, axisLabel: { color: '#66717d', hideOverlap: true, interval: hourly ? 2 : 'auto' }, axisTick: { show: false } },
+		yAxis: [
+			{ type: 'value', name: '请求', nameTextStyle: { color: '#66717d' }, splitLine: { lineStyle: { color: '#edf0f2' } } },
+			{ type: 'value', name: 'Token', nameTextStyle: { color: '#66717d' }, splitLine: { show: false } },
+		],
+		series: [
+			{ name: '请求', type: 'bar', barMaxWidth: hourly ? 16 : 22, data: dashboard.value.trend.map((item) => item.requests), itemStyle: { borderRadius: [3, 3, 0, 0] } },
+			{ name: 'Token', type: 'line', yAxisIndex: 1, smooth: !hourly, showSymbol: !hourly, symbolSize: 6, data: dashboard.value.trend.map((item) => item.inputTokens + item.outputTokens) },
+		],
+	})
+}
+
+function formatTrendBucket(bucket: string, unit: Dashboard['trendBucketUnit']) {
+	return unit === 'hour' ? bucket.slice(5, 16) : bucket.slice(5)
 }
 
 function renderCostChart() {
@@ -174,7 +180,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dis
 
     <section class="dashboard-grid panel">
       <div class="chart-block">
-        <div class="section-heading"><h2>请求与 Token 趋势</h2><span>按天聚合</span></div>
+        <div class="section-heading"><h2>请求与 Token 趋势</h2><span>{{ trendBucketLabel }}</span></div>
         <div ref="chartElement" class="trend-chart" />
       </div>
       <div class="ranking-block">

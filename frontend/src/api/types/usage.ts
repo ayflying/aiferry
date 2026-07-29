@@ -42,6 +42,7 @@ export interface RecentCostDistribution {
 export interface Dashboard {
   summary: Summary
   trend: TrendPoint[]
+  trendBucketUnit: 'hour' | 'day'
   byModel: Breakdown[]
   byChannel: Breakdown[]
   recentCost: RecentCostDistribution

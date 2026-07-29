@@ -107,11 +107,12 @@ type RecentCostDistribution struct {
 }
 
 type Dashboard struct {
-	Summary    Summary                `json:"summary"`
-	Trend      []TrendPoint           `json:"trend"`
-	ByModel    []Breakdown            `json:"byModel"`
-	ByChannel  []Breakdown            `json:"byChannel"`
-	RecentCost RecentCostDistribution `json:"recentCost"`
+	Summary         Summary                `json:"summary"`
+	Trend           []TrendPoint           `json:"trend"`
+	TrendBucketUnit string                 `json:"trendBucketUnit"`
+	ByModel         []Breakdown            `json:"byModel"`
+	ByChannel       []Breakdown            `json:"byChannel"`
+	RecentCost      RecentCostDistribution `json:"recentCost"`
 }
 
 type UserSummary struct {

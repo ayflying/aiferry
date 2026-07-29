@@ -11,6 +11,8 @@ import (
 const (
 	maxDashboardDays     = 90
 	dashboardRollingHours = 24
+	trendBucketHour      = "hour"
+	trendBucketDay       = "day"
 )
 
 // DashboardRange uses an exclusive end boundary so the selected final day is complete.
@@ -78,4 +80,16 @@ func dashboardDayCount(start, end time.Time) int {
 		count++
 	}
 	return count
+}
+
+func dashboardTrendBucketUnit(dateRange DashboardRange, location *time.Location) string {
+	start := dateRange.StartAt.In(location)
+	end := dateRange.EndAt.In(location)
+	if !end.After(start) {
+		return trendBucketDay
+	}
+	if end.Sub(start) <= 24*time.Hour || (start.Equal(startOfDay(start)) && end.Equal(startOfDay(start).AddDate(0, 0, 1))) {
+		return trendBucketHour
+	}
+	return trendBucketDay
 }

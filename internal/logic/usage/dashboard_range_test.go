@@ -59,3 +59,25 @@ func TestParseDashboardRangeUsesRolling24Hours(t *testing.T) {
 		t.Fatalf("end = %s, want %s", got, want)
 	}
 }
+
+func TestDashboardTrendBucketUnitUsesHoursForSingleDayRanges(t *testing.T) {
+	location := time.FixedZone("CST", 8*60*60)
+	cases := []struct {
+		name  string
+		start time.Time
+		end   time.Time
+		want  string
+	}{
+		{name: "rolling 24 hours", start: time.Date(2026, time.July, 19, 15, 30, 0, 0, location), end: time.Date(2026, time.July, 20, 15, 30, 0, 0, location), want: trendBucketHour},
+		{name: "complete local day", start: time.Date(2026, time.July, 20, 0, 0, 0, 0, location), end: time.Date(2026, time.July, 21, 0, 0, 0, 0, location), want: trendBucketHour},
+		{name: "multiple days", start: time.Date(2026, time.July, 19, 0, 0, 0, 0, location), end: time.Date(2026, time.July, 21, 0, 0, 0, 0, location), want: trendBucketDay},
+	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			got := dashboardTrendBucketUnit(DashboardRange{StartAt: item.start.UTC(), EndAt: item.end.UTC()}, location)
+			if got != item.want {
+				t.Fatalf("dashboardTrendBucketUnit() = %q, want %q", got, item.want)
+			}
+		})
+	}
+}
