@@ -9,7 +9,7 @@ describe('model pricing display', () => {
       { label: '输入', value: 1.5 },
       { label: '缓存读', value: 0.15 },
       { label: '缓存写', value: 3 },
-      { label: '补全', value: 12 },
+      { label: '输出', value: 12 },
     ])
   })
 

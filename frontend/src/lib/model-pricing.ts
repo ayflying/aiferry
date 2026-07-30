@@ -18,7 +18,7 @@ const tokenPriceFields: Array<{ label: string; field: keyof TokenPriceField }> =
   { label: '输入', field: 'inputPrice' },
   { label: '缓存读', field: 'cachedInputPrice' },
   { label: '缓存写', field: 'cacheWritePrice' },
-  { label: '补全', field: 'outputPrice' },
+  { label: '输出', field: 'outputPrice' },
   { label: '图像输入', field: 'imageInputPrice' },
   { label: '音频输入', field: 'audioInputPrice' },
   { label: '音频输出', field: 'audioOutputPrice' },
