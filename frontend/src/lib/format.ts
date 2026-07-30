@@ -77,8 +77,8 @@ export function formatLatency(value?: number | null): string {
 export function formatUsageDuration(value?: number | null): string {
   if (value === undefined || value === null) return '—'
   const seconds = value / 1000
-  if (seconds > 60) return `${(seconds / 60).toFixed(1)} 分钟`
-  return `${seconds.toFixed(1)}s`
+  if (seconds > 60) return `${(seconds / 60).toFixed(1)} 分`
+  return `${seconds.toFixed(1)}秒`
 }
 
 export function formatTokenSpeed(outputTokens?: number | null, durationMs?: number | null): string {
