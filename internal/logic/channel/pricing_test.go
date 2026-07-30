@@ -6,6 +6,72 @@ import (
 	"testing"
 )
 
+func pricePointer(value float64) *float64 {
+	return &value
+}
+
+func TestMissingPublicPriceValuesKeepsOnlyUnfilledFields(t *testing.T) {
+	synced := modelPriceValues{
+		Input:       pricePointer(1.5),
+		CachedInput: pricePointer(0.15),
+		CacheWrite:  pricePointer(3),
+		Output:      pricePointer(12),
+		Request:     pricePointer(0.01),
+	}
+	current := PublicModelView{
+		InputPrice:       pricePointer(5),
+		CachedInputPrice: pricePointer(0),
+		OutputPrice:      pricePointer(30),
+	}
+
+	result := missingPublicPriceValues(synced, current)
+	if result.Input != nil || result.CachedInput != nil || result.Output != nil {
+		t.Fatalf("filled prices must not be overwritten: %#v", result)
+	}
+	if result.CacheWrite == nil || *result.CacheWrite != 3 || result.Request == nil || *result.Request != 0.01 {
+		t.Fatalf("unfilled prices must remain syncable: %#v", result)
+	}
+}
+
+func TestMissingPublicPriceValuesKeepsAllValuesForEmptyPrice(t *testing.T) {
+	synced := modelPriceValues{Input: pricePointer(1.5), Output: pricePointer(12)}
+	result := missingPublicPriceValues(synced, PublicModelView{})
+	if result.Input == nil || *result.Input != 1.5 || result.Output == nil || *result.Output != 12 {
+		t.Fatalf("empty prices must be populated by synchronization: %#v", result)
+	}
+	if !result.hasAny() {
+		t.Fatal("expected synchronizable values")
+	}
+}
+
+func TestMissingPublicPriceValuesSkipsAlreadyFilledPrice(t *testing.T) {
+	result := missingPublicPriceValues(
+		modelPriceValues{
+			Input:       pricePointer(1.5),
+			CachedInput: pricePointer(0.15),
+			CacheWrite:  pricePointer(3),
+			Output:      pricePointer(12),
+			ImageInput:  pricePointer(4),
+			AudioInput:  pricePointer(2),
+			AudioOutput: pricePointer(6),
+			Request:     pricePointer(0.01),
+		},
+		PublicModelView{
+			InputPrice:       pricePointer(5),
+			CachedInputPrice: pricePointer(0),
+			CacheWritePrice:  pricePointer(8),
+			OutputPrice:      pricePointer(30),
+			ImageInputPrice:  pricePointer(4),
+			AudioInputPrice:  pricePointer(2),
+			AudioOutputPrice: pricePointer(6),
+			RequestPrice:     pricePointer(0.01),
+		},
+	)
+	if result.hasAny() {
+		t.Fatalf("expected no values to synchronize, got %#v", result)
+	}
+}
+
 func TestModelPriceValuesFromRuleUsesUnconditionalRates(t *testing.T) {
 	rule := syncedRule{Conditions: json.RawMessage(`{}`), Rates: json.RawMessage(`{"inputPerMillion":1.25,"cachedInputPerMillion":0.25,"cacheWritePerMillion":3,"outputPerMillion":5,"imageInputPerMillion":4,"audioInputPerMillion":2,"audioOutputPerMillion":6,"request":0.01}`)}
 	values, ok := modelPriceValuesFromRule(rule)

@@ -158,7 +158,57 @@ func (s *sChannel) replacePublicPrice(ctx context.Context, modelName string, val
 }
 
 func (s *sChannel) mergePublicPrice(ctx context.Context, modelName string, values modelPriceValues) error {
+	var current PublicModelView
+	if err := dao.ModelPrices.Ctx(ctx).
+		Where(dao.ModelPrices.Columns().PublicName, modelName).
+		Scan(&current); err != nil {
+		return gerror.Wrap(err, "load current public model price")
+	}
+	values = missingPublicPriceValues(values, current)
+	if !values.hasAny() {
+		return nil
+	}
 	return s.savePublicPrice(ctx, modelName, values, false, false, "")
+}
+
+// missingPublicPriceValues retains only fields that have not been set.
+func missingPublicPriceValues(values modelPriceValues, current PublicModelView) modelPriceValues {
+	if current.InputPrice != nil {
+		values.Input = nil
+	}
+	if current.CachedInputPrice != nil {
+		values.CachedInput = nil
+	}
+	if current.CacheWritePrice != nil {
+		values.CacheWrite = nil
+	}
+	if current.OutputPrice != nil {
+		values.Output = nil
+	}
+	if current.ImageInputPrice != nil {
+		values.ImageInput = nil
+	}
+	if current.AudioInputPrice != nil {
+		values.AudioInput = nil
+	}
+	if current.AudioOutputPrice != nil {
+		values.AudioOutput = nil
+	}
+	if current.RequestPrice != nil {
+		values.Request = nil
+	}
+	return values
+}
+
+func (values modelPriceValues) hasAny() bool {
+	return values.Input != nil ||
+		values.CachedInput != nil ||
+		values.CacheWrite != nil ||
+		values.Output != nil ||
+		values.ImageInput != nil ||
+		values.AudioInput != nil ||
+		values.AudioOutput != nil ||
+		values.Request != nil
 }
 
 func (s *sChannel) savePublicPrice(ctx context.Context, modelName string, values modelPriceValues, replaceToken, replaceRequest bool, billingMode string) error {
