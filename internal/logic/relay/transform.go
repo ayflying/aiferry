@@ -50,6 +50,10 @@ func supportedRequestFields(endpoint string, payload map[string]any, config chan
 		for _, field := range []string{"input", "dimensions", "encoding_format"} {
 			fields[field] = struct{}{}
 		}
+	case "/images/generations":
+		for _, field := range []string{"prompt", "background", "moderation", "n", "output_compression", "output_format", "partial_images", "quality", "response_format", "size", "style"} {
+			fields[field] = struct{}{}
+		}
 	}
 	result := make(map[string]any, len(fields))
 	for field := range fields {

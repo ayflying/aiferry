@@ -177,6 +177,8 @@ func sensitivePromptTexts(endpoint string, body []byte) []string {
 		return responseInputTexts(payload["input"])
 	case "/embeddings":
 		return embeddingInputTexts(payload["input"])
+	case "/images/generations":
+		return imageGenerationPromptTexts(payload["prompt"])
 	default:
 		return nil
 	}
@@ -272,6 +274,14 @@ func embeddingInputTexts(raw json.RawMessage) []string {
 		return nil
 	}
 	return texts
+}
+
+func imageGenerationPromptTexts(raw json.RawMessage) []string {
+	var prompt string
+	if len(raw) == 0 || json.Unmarshal(raw, &prompt) != nil {
+		return nil
+	}
+	return []string{prompt}
 }
 
 func contentTexts(raw json.RawMessage) []string {

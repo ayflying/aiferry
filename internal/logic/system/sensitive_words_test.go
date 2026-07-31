@@ -124,6 +124,12 @@ func TestMatchesSensitivePrompt(t *testing.T) {
 			body:     `{"input":["allowed","BLOCKED text"]}`,
 			want:     true,
 		},
+		{
+			name:     "image generation prompt",
+			endpoint: "/images/generations",
+			body:     `{"prompt":"A blocked image"}`,
+			want:     true,
+		},
 	}
 
 	for _, test := range tests {

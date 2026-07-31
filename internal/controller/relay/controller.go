@@ -27,6 +27,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/chat/completions", c.proxy("/chat/completions"))
 	group.POST("/responses", c.proxy("/responses"))
 	group.POST("/embeddings", c.proxy("/embeddings"))
+	group.POST("/images/generations", c.proxy("/images/generations"))
 }
 
 func (c *Controller) models(r *ghttp.Request) {

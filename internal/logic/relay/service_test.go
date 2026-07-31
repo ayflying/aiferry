@@ -194,6 +194,29 @@ func TestPrepareRequestBodyBlocksOptionalFieldsByDefault(t *testing.T) {
 	}
 }
 
+func TestPrepareImageGenerationRequestPreservesOpenAIFields(t *testing.T) {
+	config := channel.DefaultAdvancedConfig()
+	body, err := prepareRequestBody("/images/generations", []byte(`{"model":"public-image","prompt":"A blue ferry","n":1,"size":"1024x1024","quality":"high","output_format":"png","unknown":"blocked"}`), "upstream-image", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err = json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["model"] != "upstream-image" {
+		t.Fatalf("model was not mapped: %#v", payload)
+	}
+	for _, field := range []string{"prompt", "n", "size", "quality", "output_format"} {
+		if _, ok := payload[field]; !ok {
+			t.Fatalf("%s should be forwarded: %#v", field, payload)
+		}
+	}
+	if _, ok := payload["unknown"]; ok {
+		t.Fatalf("unknown field should be blocked: %#v", payload)
+	}
+}
+
 func TestPrepareRequestBodyAllowsConfiguredFieldsAndSystemPromptAppend(t *testing.T) {
 	config := channel.DefaultAdvancedConfig()
 	config.PassthroughRequestBody = true
