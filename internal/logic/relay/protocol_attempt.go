@@ -115,8 +115,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	committed := false
 	writeOutput := func(output []byte) error {
 		if !result.wroteBytes {
-			first := time.Since(startedAt).Milliseconds()
-			result.firstTokenMs = &first
+			recordFirstStreamOutput(&result, startedAt)
 			copyResponseHeaders(writer.Header(), result.headers)
 			writer.WriteHeader(resp.StatusCode)
 		}
@@ -159,6 +158,9 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 				return result, true, nil
 			}
 			return result, false, nil
+		}
+		if streamPayloadHasVisibleOutput(line) {
+			recordFirstStreamOutput(&result, startedAt)
 		}
 		parseSSEUsage(line, &result.tokens)
 		lines := [][]byte{line}

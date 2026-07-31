@@ -81,8 +81,13 @@ func streamPayloadHasVisibleOutput(line []byte) bool {
 	}
 	eventType := gjson.GetBytes(payload, "type").String()
 	switch eventType {
-	case "response.output_text.delta", "response.refusal.delta", "response.function_call_arguments.delta":
+	case "response.output_text.delta", "response.refusal.delta", "response.function_call_arguments.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		return strings.TrimSpace(gjson.GetBytes(payload, "delta").String()) != ""
+	case "content_block_delta":
+		delta := gjson.GetBytes(payload, "delta")
+		return strings.TrimSpace(delta.Get("text").String()) != "" ||
+			strings.TrimSpace(delta.Get("thinking").String()) != "" ||
+			strings.TrimSpace(delta.Get("partial_json").String()) != ""
 	case "response.output_item.added":
 		return gjson.GetBytes(payload, "item.type").String() == "function_call"
 	}
@@ -93,5 +98,7 @@ func streamPayloadHasVisibleOutput(line []byte) bool {
 	delta := choice.Get("delta")
 	return strings.TrimSpace(delta.Get("content").String()) != "" ||
 		strings.TrimSpace(delta.Get("reasoning_content").String()) != "" ||
+		strings.TrimSpace(delta.Get("reasoning").String()) != "" ||
+		strings.TrimSpace(delta.Get("thinking").String()) != "" ||
 		delta.Get("tool_calls.#").Int() > 0
 }

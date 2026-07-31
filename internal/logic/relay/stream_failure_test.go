@@ -28,4 +28,10 @@ func TestStreamPayloadHasVisibleOutputSkipsPrelude(t *testing.T) {
 	if !streamPayloadHasVisibleOutput([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n")) {
 		t.Fatal("output delta should commit the stream")
 	}
+	if !streamPayloadHasVisibleOutput([]byte("data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n")) {
+		t.Fatal("reasoning summary delta should commit the stream")
+	}
+	if !streamPayloadHasVisibleOutput([]byte("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"thinking\"}}\n")) {
+		t.Fatal("thinking delta should commit the stream")
+	}
 }

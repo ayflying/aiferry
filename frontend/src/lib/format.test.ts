@@ -47,7 +47,7 @@ describe('format helpers', () => {
   it('formats usage durations with Chinese units', () => {
     expect(formatUsageDuration()).toBe('—')
     expect(formatUsageDuration(60_000)).toBe('60.0秒')
-    expect(formatUsageDuration(60_001)).toBe('1.0 分')
-    expect(formatUsageDuration(90_000)).toBe('1.5 分')
+    expect(formatUsageDuration(60_001)).toBe('1.0分')
+    expect(formatUsageDuration(90_000)).toBe('1.5分')
   })
 })
