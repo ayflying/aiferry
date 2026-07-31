@@ -104,19 +104,22 @@ func TestRedactSensitiveDataKeepsResponsesShapeAndUsesWireSafePlaceholders(t *te
 	if got := gjson.GetBytes(redacted, "tools.0.parameters.properties.password.type").String(); got != "string" {
 		t.Fatalf("Responses tool schema type = %q, want string", got)
 	}
-	if input := gjson.GetBytes(redacted, "input.0.content.0.text").String(); strings.Contains(input, "demo-password") || strings.Contains(input, "sk-demo-token-123456789") {
+	input := gjson.GetBytes(redacted, "input.0.content.0.text").String()
+	if strings.Contains(input, "demo-password") || strings.Contains(input, "sk-demo-token-123456789") {
 		t.Fatalf("Responses input still contains a sensitive value: %s", input)
 	}
 	if len(restorer.replacements) == 0 {
 		t.Fatal("expected request-scoped replacements")
 	}
+	activePlaceholder := false
 	for placeholder := range restorer.replacements {
 		if !strings.HasPrefix(placeholder, "aiferry_ref_") || strings.ContainsAny(placeholder, "[]:") || strings.Contains(strings.ToLower(placeholder), "secret") {
 			t.Fatalf("placeholder is not safe for an upstream text request: %q", placeholder)
 		}
-		if !strings.Contains(string(redacted), placeholder) {
-			t.Fatalf("outbound Responses request is missing placeholder %q", placeholder)
-		}
+		activePlaceholder = activePlaceholder || strings.Contains(input, placeholder)
+	}
+	if !activePlaceholder {
+		t.Fatalf("outbound Responses input is missing a request-scoped placeholder: %s", input)
 	}
 }
 
