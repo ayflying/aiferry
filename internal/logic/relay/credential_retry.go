@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
@@ -33,25 +34,45 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 		current := candidate
 		current.ChannelCredentialID = credential.ID
 		current.APIKeyCipher = credential.APIKeyCipher
-		attemptStartedAt := time.Now()
-		attemptWriter := writer
-		if !stream {
-			attemptWriter = nil
-		}
-		result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, startedAt, settings, sensitiveDataRestorer)
-		result.latency = time.Since(attemptStartedAt)
-		last = channelAttempt{candidate: current, result: result, attempts: last.attempts + 1}
-		if attemptErr != nil {
-			last.result = failedAttemptResult(last.result, attemptErr.Error())
-			last.result.timedOut = isUpstreamTimeout(attemptErr)
+		for _, baseURL := range candidateBaseURLs(current) {
+			current.BaseURL = baseURL
+			attemptStartedAt := time.Now()
+			attemptWriter := writer
+			if !stream {
+				attemptWriter = nil
+			}
+			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, startedAt, settings, sensitiveDataRestorer)
+			result.latency = time.Since(attemptStartedAt)
+			last = channelAttempt{candidate: current, result: result, attempts: last.attempts + 1}
+			if attemptErr != nil {
+				last.result = failedAttemptResult(last.result, attemptErr.Error())
+				last.result.timedOut = isUpstreamTimeout(attemptErr)
+			}
+			if attemptCompleted(last.result, attemptErr) {
+				last.handled = true
+				return last
+			}
 		}
 		s.maybeAutoDisable(ctx, settings, current, last.result)
-		if attemptCompleted(last.result, attemptErr) {
-			last.handled = true
-			return last
-		}
 		excluded[current.ChannelCredentialID] = struct{}{}
 	}
+}
+
+func candidateBaseURLs(candidate Candidate) []string {
+	urls := make([]string, 0, len(candidate.BackupBaseURLs)+1)
+	seen := make(map[string]struct{}, len(candidate.BackupBaseURLs)+1)
+	for _, value := range append([]string{candidate.BaseURL}, candidate.BackupBaseURLs...) {
+		value = strings.TrimRight(strings.TrimSpace(value), "/")
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		urls = append(urls, value)
+	}
+	return urls
 }
 
 func attemptCompleted(result attemptResult, attemptErr error) bool {

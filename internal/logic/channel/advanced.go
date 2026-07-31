@@ -13,21 +13,22 @@ const maxSystemPromptLength = 16 << 10
 // AdvancedConfig controls how a channel normalizes request and response payloads.
 // All optional request fields are blocked until explicitly enabled.
 type AdvancedConfig struct {
-	ForceOpenAIFormat      bool   `json:"forceOpenAIFormat"`
-	ReasoningToContent     bool   `json:"reasoningToContent"`
-	PassthroughRequestBody bool   `json:"passthroughRequestBody"`
-	SkipAsyncPollingDelay  bool   `json:"skipAsyncPollingDelay"`
-	SystemPrompt           string `json:"systemPrompt"`
-	AppendSystemPrompt     bool   `json:"appendSystemPrompt"`
-	AllowServiceTier       bool   `json:"allowServiceTier"`
-	BlockStore             bool   `json:"blockStore"`
-	AllowSafetyIdentifier  bool   `json:"allowSafetyIdentifier"`
-	AllowInclude           bool   `json:"allowInclude"`
-	AllowInferenceGeo      bool   `json:"allowInferenceGeo"`
+	BackupBaseURLs         []string `json:"backupBaseUrls"`
+	ForceOpenAIFormat      bool     `json:"forceOpenAIFormat"`
+	ReasoningToContent     bool     `json:"reasoningToContent"`
+	PassthroughRequestBody bool     `json:"passthroughRequestBody"`
+	SkipAsyncPollingDelay  bool     `json:"skipAsyncPollingDelay"`
+	SystemPrompt           string   `json:"systemPrompt"`
+	AppendSystemPrompt     bool     `json:"appendSystemPrompt"`
+	AllowServiceTier       bool     `json:"allowServiceTier"`
+	BlockStore             bool     `json:"blockStore"`
+	AllowSafetyIdentifier  bool     `json:"allowSafetyIdentifier"`
+	AllowInclude           bool     `json:"allowInclude"`
+	AllowInferenceGeo      bool     `json:"allowInferenceGeo"`
 }
 
 func DefaultAdvancedConfig() AdvancedConfig {
-	return AdvancedConfig{BlockStore: true}
+	return AdvancedConfig{BackupBaseURLs: []string{}, BlockStore: true}
 }
 
 func ParseAdvancedConfig(raw []byte) (AdvancedConfig, error) {
@@ -65,4 +66,21 @@ func MarshalAdvancedConfig(config AdvancedConfig) (string, error) {
 		return "", gerror.Wrap(err, "encode channel advanced config")
 	}
 	return string(data), nil
+}
+
+func (config AdvancedConfig) UpstreamBaseURLs(primary string) []string {
+	urls := make([]string, 0, len(config.BackupBaseURLs)+1)
+	seen := make(map[string]struct{}, len(config.BackupBaseURLs)+1)
+	for _, value := range append([]string{primary}, config.BackupBaseURLs...) {
+		value = strings.TrimRight(strings.TrimSpace(value), "/")
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		urls = append(urls, value)
+	}
+	return urls
 }

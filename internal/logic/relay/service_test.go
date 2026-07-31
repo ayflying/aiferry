@@ -47,6 +47,19 @@ func TestWeightedOrderKeepsPriorityGroups(t *testing.T) {
 	}
 }
 
+func TestCandidateBaseURLsUsesPrimaryThenDistinctBackups(t *testing.T) {
+	urls := candidateBaseURLs(Candidate{BaseURL: "https://primary.example.com/v1/", BackupBaseURLs: []string{"https://cdn-a.example.com/v1", "https://primary.example.com/v1", "https://cdn-a.example.com/v1", "https://cdn-b.example.com/v1/"}})
+	want := []string{"https://primary.example.com/v1", "https://cdn-a.example.com/v1", "https://cdn-b.example.com/v1"}
+	if len(urls) != len(want) {
+		t.Fatalf("URLs = %#v, want %#v", urls, want)
+	}
+	for index := range want {
+		if urls[index] != want[index] {
+			t.Fatalf("URLs = %#v, want %#v", urls, want)
+		}
+	}
+}
+
 func TestRetryableStatus(t *testing.T) {
 	for _, status := range []int{401, 402, 403, 404, 408, 429, 500, 503} {
 		if !retryableStatus(status) {

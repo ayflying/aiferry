@@ -9,6 +9,7 @@ export interface CostQueryConfig {
 }
 
 export interface ChannelAdvancedConfig {
+  backupBaseUrls: string[]
   forceOpenAIFormat: boolean
   reasoningToContent: boolean
   passthroughRequestBody: boolean

@@ -9,9 +9,9 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
-	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
 
 func (s *sChannel) List(ctx context.Context) ([]View, error) {
@@ -111,7 +111,7 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 	if err != nil {
 		return 0, err
 	}
-	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, "")
+	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, "", baseURL)
 	if err != nil {
 		return 0, err
 	}
@@ -174,7 +174,7 @@ func (s *sChannel) Update(ctx context.Context, id uint64, input adminapi.Channel
 	if err != nil {
 		return err
 	}
-	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, current.AdvancedConfig)
+	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, current.AdvancedConfig, baseURL)
 	if err != nil {
 		return err
 	}
@@ -295,13 +295,45 @@ func (s *sChannel) toView(row entity.Channels) View {
 	return view
 }
 
-func advancedConfigJSON(raw []byte, fallback string) (string, error) {
+func advancedConfigJSON(raw []byte, fallback, primaryBaseURL string) (string, error) {
 	if len(raw) == 0 && fallback != "" {
-		return fallback, nil
+		raw = []byte(fallback)
 	}
 	config, err := ParseAdvancedConfig(raw)
 	if err != nil {
 		return "", err
 	}
+	backupBaseURLs, err := normalizeBackupBaseURLs(config.BackupBaseURLs, primaryBaseURL)
+	if err != nil {
+		return "", err
+	}
+	config.BackupBaseURLs = backupBaseURLs
 	return MarshalAdvancedConfig(config)
+}
+
+func normalizeBackupBaseURLs(values []string, primaryBaseURL string) ([]string, error) {
+	primaryBaseURL, err := normalizeBaseURL(primaryBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(values) > 8 {
+		return nil, gerror.New("最多可配置 8 个备用 API 根地址")
+	}
+	result := make([]string, 0, len(values))
+	seen := map[string]struct{}{primaryBaseURL: {}}
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		normalized, normalizeErr := normalizeBaseURL(value)
+		if normalizeErr != nil {
+			return nil, gerror.New("备用 API 根地址必须是绝对 HTTP(S) 地址")
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result, nil
 }

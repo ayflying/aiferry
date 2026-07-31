@@ -2,6 +2,7 @@ import type { ChannelAdvancedConfig, ChannelInput, ChannelType } from '../api/ty
 
 export function createDefaultChannelAdvancedConfig(): ChannelAdvancedConfig {
   return {
+    backupBaseUrls: [],
     forceOpenAIFormat: false,
     reasoningToContent: false,
     passthroughRequestBody: false,

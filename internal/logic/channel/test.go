@@ -15,12 +15,12 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/do"
-	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/upstreamerror"
 	"github.com/yunloli/aiferry/internal/logic/usage"
+	"github.com/yunloli/aiferry/internal/model/do"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 type TestResult struct {
@@ -61,20 +61,38 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 		return TestResult{}, err
 	}
 	endpoints := testEndpoints(input.Endpoint, model.UpstreamName)
+	advancedConfig, err := ParseAdvancedConfig([]byte(channel.AdvancedConfig))
+	if err != nil {
+		return TestResult{}, err
+	}
+	baseURLs := advancedConfig.UpstreamBaseURLs(channel.BaseUrl)
 	var (
 		result     TestResult
 		billingErr error
+		path       string
+		tokens     usage.TokenUsage
 	)
+	tested := false
+	finished := false
 	for index, endpoint := range endpoints {
-		current, path, tokens, requestErr := s.testModelEndpoint(ctx, channel, credential, typeConfig, model, endpoint, input.Stream)
-		if requestErr != nil {
-			return TestResult{}, requestErr
+		for _, baseURL := range baseURLs {
+			current, currentPath, currentTokens, requestErr := s.testModelEndpoint(ctx, channel, credential, typeConfig, model, baseURL, endpoint, input.Stream)
+			if requestErr != nil {
+				return TestResult{}, requestErr
+			}
+			tested = true
+			result, path, tokens = current, currentPath, currentTokens
+			if result.Success {
+				finished = true
+				break
+			}
 		}
-		result = current
-		billingErr = s.recordTestUsage(ctx, userID, channel, credential.ID, model, path, &result, tokens)
-		if result.Success || index == len(endpoints)-1 || !canTryAlternativeEndpoint(result) {
+		if finished || index == len(endpoints)-1 || !canTryAlternativeEndpoint(result) {
 			break
 		}
+	}
+	if tested {
+		billingErr = s.recordTestUsage(ctx, userID, channel, credential.ID, model, path, &result, tokens)
 	}
 	if result.Success {
 		s.clearCredentialTransient(ctx, credential.ID)
@@ -98,10 +116,10 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	return result, nil
 }
 
-func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
+func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
 	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream)
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, channel.BaseUrl+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}

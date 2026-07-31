@@ -11,6 +11,7 @@ import (
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/apikey"
+	channelconfig "github.com/yunloli/aiferry/internal/logic/channel"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -38,11 +39,16 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 		if !exists {
 			continue
 		}
+		advancedConfig, configErr := channelconfig.ParseAdvancedConfig([]byte(channel.AdvancedConfig))
+		if configErr != nil {
+			return nil, gerror.Wrap(configErr, "parse channel advanced config")
+		}
 		candidates = append(candidates, Candidate{
 			ChannelModelID: row.Id,
 			ChannelID:      channel.Id,
 			ChannelName:    channel.Name,
 			BaseURL:        channel.BaseUrl,
+			BackupBaseURLs: advancedConfig.BackupBaseURLs,
 			OrganizationID: channel.OrganizationId,
 			ProjectID:      channel.ProjectId,
 			ProxyURLCipher: channel.ProxyUrlCipher,
