@@ -20,18 +20,14 @@ func (s *sRelay) record(ctx context.Context, requestID string, key apikey.AuthKe
 		upstreamEndpoint = endpoint
 	}
 	billingDetails := s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens)
-	var cost *decimal.Decimal
-	if billingDetails != nil {
-		calculated := billingDetails.Cost()
-		cost = &calculated
-	}
+	cost, chargeable := pricedUsageCost(s.requiresBalanceCheck(candidate.PublicName), billingDetails)
 	recordStatus := result.status
 	recordError := result.errorMessage
 	var chargeErr error
 	if result.status >= 200 && result.status < 300 {
 		if cost == nil {
 			chargeErr = ErrUpstreamUsageNotBillable
-		} else {
+		} else if chargeable {
 			if s.channels != nil {
 				if err := s.channels.ApplyCredentialUsageCost(ctx, candidate.ChannelID, candidate.ChannelCredentialID, *cost); err != nil {
 					g.Log().Warningf(ctx, "apply channel %d usage cost: %v", candidate.ChannelID, err)
@@ -86,11 +82,30 @@ func (s *sRelay) missingBillableUsage(candidate Candidate, endpoint string, resu
 	if result.status < 200 || result.status >= 300 {
 		return false
 	}
+	if !s.requiresBalanceCheck(candidate.PublicName) {
+		return false
+	}
 	upstreamEndpoint := result.upstreamEndpoint
 	if upstreamEndpoint == "" {
 		upstreamEndpoint = endpoint
 	}
 	return s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens) == nil
+}
+
+func (s *sRelay) requiresBalanceCheck(modelName string) bool {
+	return s.prices.IsPriced(modelName)
+}
+
+func pricedUsageCost(priced bool, billingDetails *usage.BillingBreakdown) (*decimal.Decimal, bool) {
+	if billingDetails != nil {
+		cost := billingDetails.Cost()
+		return &cost, true
+	}
+	if !priced {
+		freeCost := decimal.Zero
+		return &freeCost, false
+	}
+	return nil, false
 }
 
 func (s *sRelay) location(clientIP string) string {

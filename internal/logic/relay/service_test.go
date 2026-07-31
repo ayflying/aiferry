@@ -10,6 +10,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/shopspring/decimal"
 	"github.com/yunloli/aiferry/internal/logic/channel"
+	"github.com/yunloli/aiferry/internal/logic/pricingcache"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
@@ -103,6 +104,30 @@ func TestMissingBillableUsageErrorIsDistinct(t *testing.T) {
 	}
 	if errors.Is(gerror.New("账户余额不足"), ErrUpstreamUsageNotBillable) {
 		t.Fatal("balance errors must not be retried as upstream failures")
+	}
+}
+
+func TestUnpricedModelUsesFreeBillingWithoutBalanceCheck(t *testing.T) {
+	relay := &sRelay{prices: pricingcache.New()}
+	if relay.requiresBalanceCheck("unpriced-model") {
+		t.Fatal("unpriced model must not require a user balance")
+	}
+	cost, chargeable := pricedUsageCost(false, nil)
+	if cost == nil || !cost.IsZero() {
+		t.Fatalf("unpriced model cost = %v, want 0", cost)
+	}
+	if chargeable {
+		t.Fatal("unpriced model must not debit user or channel balance")
+	}
+	if relay.missingBillableUsage(Candidate{PublicName: "unpriced-model"}, "/chat/completions", attemptResult{status: http.StatusOK}) {
+		t.Fatal("unpriced model must not fail over for missing billable usage")
+	}
+}
+
+func TestPricedModelStillRequiresMatchedUsage(t *testing.T) {
+	cost, chargeable := pricedUsageCost(true, nil)
+	if cost != nil || chargeable {
+		t.Fatalf("priced model without matched usage = cost %v, chargeable %t", cost, chargeable)
 	}
 }
 

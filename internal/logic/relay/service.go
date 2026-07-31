@@ -128,9 +128,6 @@ func (s *sRelay) Models(ctx context.Context, key apikey.AuthKey) (ModelList, err
 		if len(key.AllowedModels) > 0 && !containsString(key.AllowedModels, name) {
 			continue
 		}
-		if !s.prices.IsPriced(name) {
-			continue
-		}
 		candidates, routeErr := s.route(ctx, name, key)
 		if routeErr != nil {
 			return ModelList{}, routeErr
@@ -179,11 +176,10 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	if len(candidates) == 0 {
 		return gerror.Wrapf(ErrNoAvailableChannel, "no available channel for model %s", requestedModel)
 	}
-	if !s.prices.IsPriced(requestedModel) {
-		return gerror.New("当前模型未配置可用价格，无法计费")
-	}
-	if err = s.users.CheckBalance(ctx, key.UserId); err != nil {
-		return err
+	if s.requiresBalanceCheck(requestedModel) {
+		if err = s.users.CheckBalance(ctx, key.UserId); err != nil {
+			return err
+		}
 	}
 	requestID := newRequestID()
 	startedAt := time.Now()
