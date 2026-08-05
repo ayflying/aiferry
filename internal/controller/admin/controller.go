@@ -15,6 +15,7 @@ import (
 	mailservice "github.com/yunloli/aiferry/internal/logic/mail"
 	"github.com/yunloli/aiferry/internal/logic/pricesource"
 	"github.com/yunloli/aiferry/internal/logic/redemption"
+	"github.com/yunloli/aiferry/internal/logic/requestfirewall"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/logic/user"
@@ -27,6 +28,7 @@ type Controller struct {
 	prices      *pricesource.Service
 	apiKeys     *apikey.Service
 	settings    *system.Service
+	firewall    *requestfirewall.Service
 	usage       *usage.Service
 	users       *user.Service
 	auth        *auth.Service
@@ -34,8 +36,8 @@ type Controller struct {
 	redemptions *redemption.Service
 }
 
-func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, usageSvc *usage.Service, userSvc *user.Service, authSvc *auth.Service, mailSvc *mailservice.Service, redemptionSvc *redemption.Service) *Controller {
-	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, usage: usageSvc, users: userSvc, auth: authSvc, mail: mailSvc, redemptions: redemptionSvc}
+func New(channelSvc *channel.Service, channelTypeSvc *channeltype.Service, groupSvc *channelgroup.Service, priceSvc *pricesource.Service, apiKeySvc *apikey.Service, systemSvc *system.Service, firewallSvc *requestfirewall.Service, usageSvc *usage.Service, userSvc *user.Service, authSvc *auth.Service, mailSvc *mailservice.Service, redemptionSvc *redemption.Service) *Controller {
+	return &Controller{channels: channelSvc, types: channelTypeSvc, groups: groupSvc, prices: priceSvc, apiKeys: apiKeySvc, settings: systemSvc, firewall: firewallSvc, usage: usageSvc, users: userSvc, auth: authSvc, mail: mailSvc, redemptions: redemptionSvc}
 }
 
 func (c *Controller) Register(group *ghttp.RouterGroup) {

@@ -25,6 +25,7 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
 	"github.com/yunloli/aiferry/internal/logic/redemption"
 	"github.com/yunloli/aiferry/internal/logic/relay"
+	"github.com/yunloli/aiferry/internal/logic/requestfirewall"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/logic/user"
@@ -59,6 +60,7 @@ var (
 				usageSvc        = usage.New(locationSvc, systemSvc)
 				userSvc         = user.New(appSvc, usageSvc)
 				redemptionSvc   = redemption.New(userSvc)
+				firewallSvc     = requestfirewall.New(systemSvc)
 				priceCache      = pricingcache.New()
 				channelGroupSvc = channelgroup.New()
 				channelTypeSvc  = channeltype.New(builtins)
@@ -66,9 +68,9 @@ var (
 				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc, priceCache, userSvc, mailSvc)
 				priceSourceSvc  = pricesource.New(channelSvc)
 				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc, channelSvc, locationSvc)
-				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, usageSvc, userSvc, authSvc, mailSvc, redemptionSvc)
+				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, firewallSvc, usageSvc, userSvc, authSvc, mailSvc, redemptionSvc)
 				authCtrl        = authctrl.New(authSvc, userSvc, systemSvc)
-				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc)
+				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc, firewallSvc)
 				s               = g.Server()
 			)
 			if err = priceCache.Load(ctx); err != nil {

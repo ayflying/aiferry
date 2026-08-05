@@ -39,6 +39,8 @@ type (
 		ResetChannelRecoverySchedule(ctx context.Context, channelID uint64)
 		BeginRecoveryAttempt(ctx context.Context, target RecoveryTarget, id uint64, autoDisabledAt time.Time) (bool, error)
 		FinishRecoveryAttempt(ctx context.Context, target RecoveryTarget, id uint64, succeeded bool)
+		GetRequestFirewallSettings(ctx context.Context) (adminapi.RequestFirewallSettingsInput, error)
+		UpdateRequestFirewallSettings(ctx context.Context, input adminapi.RequestFirewallSettingsInput) (adminapi.RequestFirewallSettingsInput, error)
 		GetSensitiveWordSettings(ctx context.Context) (adminapi.SensitiveWordSettingsInput, error)
 		UpdateSensitiveWordSettings(ctx context.Context, input adminapi.SensitiveWordSettingsInput) (adminapi.SensitiveWordSettingsInput, error)
 		CheckSensitivePrompt(ctx context.Context, endpoint string, body []byte) error

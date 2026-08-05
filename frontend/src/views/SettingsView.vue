@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Clock3, Database, Gauge, HardDrive, Image as ImageIcon, Info, Mail, Send, ShieldAlert, ShieldCheck } from '@lucide/vue'
 import { apiGet, apiPost, apiPut } from '../api/client'
-import type { BaseSettings, MailSettings, SensitiveWordSettings, SystemInformationSettings, SystemResilienceSettings } from '../api/types'
+import type { BaseSettings, MailSettings, RequestFirewallSettings, SensitiveWordSettings, SystemInformationSettings, SystemResilienceSettings } from '../api/types'
 import ModelQualityObservationPanel from '../components/ModelQualityObservationPanel.vue'
 import { showError, showSuccess } from '../lib/error'
 import { setDisplayTimeZone } from '../lib/format'
@@ -67,6 +67,14 @@ const securityForm = reactive({
   tokenRedactionEnabled: true,
   personalDataRedactionEnabled: true,
 })
+const firewallForm = reactive<RequestFirewallSettings>({
+  enabled: true,
+  maxConcurrentRequests: 256,
+  maxConcurrentRequestsPerIp: 32,
+  maxConcurrentRequestsPerKey: 64,
+  requestsPerMinutePerIp: 600,
+  requestsPerMinutePerApiKey: 600,
+})
 const mailForm = reactive({
   enabled: false,
   channelAlertEnabled: true,
@@ -123,6 +131,10 @@ function applySecuritySettings(settings: SensitiveWordSettings) {
   })
 }
 
+function applyRequestFirewallSettings(settings: RequestFirewallSettings) {
+  Object.assign(firewallForm, settings)
+}
+
 async function loadOverview() {
   tabLoading.overview = true
   try {
@@ -159,7 +171,12 @@ async function loadMail() {
 async function loadSecuritySettings() {
   tabLoading.security = true
   try {
-    applySecuritySettings(await apiGet<SensitiveWordSettings>('/system/sensitive-words'))
+    const [securitySettings, firewallSettings] = await Promise.all([
+      apiGet<SensitiveWordSettings>('/system/sensitive-words'),
+      apiGet<RequestFirewallSettings>('/system/request-firewall'),
+    ])
+    applySecuritySettings(securitySettings)
+    applyRequestFirewallSettings(firewallSettings)
   } catch (error) { showError(error, '加载安全与限制设置失败') } finally { tabLoading.security = false }
 }
 
@@ -241,17 +258,21 @@ async function saveMail() {
 async function saveSecuritySettings() {
   securitySaving.value = true
   try {
-    const settings = await apiPut<SensitiveWordSettings>('/system/sensitive-words', {
-      imageEnabled: securityForm.imageEnabled,
-      enabled: securityForm.enabled,
-      checkUserPrompt: securityForm.checkUserPrompt,
-      keywords: securityForm.keywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
-      sensitiveDataRedactionEnabled: securityForm.sensitiveDataRedactionEnabled,
-      passwordRedactionEnabled: securityForm.passwordRedactionEnabled,
-      tokenRedactionEnabled: securityForm.tokenRedactionEnabled,
-      personalDataRedactionEnabled: securityForm.personalDataRedactionEnabled,
-    })
-    applySecuritySettings(settings)
+    const [securitySettings, firewallSettings] = await Promise.all([
+      apiPut<SensitiveWordSettings>('/system/sensitive-words', {
+        imageEnabled: securityForm.imageEnabled,
+        enabled: securityForm.enabled,
+        checkUserPrompt: securityForm.checkUserPrompt,
+        keywords: securityForm.keywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
+        sensitiveDataRedactionEnabled: securityForm.sensitiveDataRedactionEnabled,
+        passwordRedactionEnabled: securityForm.passwordRedactionEnabled,
+        tokenRedactionEnabled: securityForm.tokenRedactionEnabled,
+        personalDataRedactionEnabled: securityForm.personalDataRedactionEnabled,
+      }),
+      apiPut<RequestFirewallSettings>('/system/request-firewall', { ...firewallForm }),
+    ])
+    applySecuritySettings(securitySettings)
+    applyRequestFirewallSettings(firewallSettings)
     showSuccess('安全与限制设置已保存', '保存成功')
   } catch (error) { showError(error, '保存安全与限制设置失败') } finally { securitySaving.value = false }
 }
@@ -331,6 +352,11 @@ watch(activeTab, (tab) => {
 
     <template v-else-if="activeTab === 'security'">
       <section class="settings-section">
+        <div class="section-heading"><div><h2>请求防火墙</h2><span>限制单一来源的请求速率与持续并发。</span></div><ShieldCheck :size="19" /></div>
+        <div class="setting-switch sensitive-switch"><div><strong>启用请求防火墙</strong><span>命中限制时直接返回 HTTP 429，不记录用量也不转发到上游。</span></div><el-switch v-model="firewallForm.enabled" /></div>
+        <el-form label-position="top" class="settings-form"><div class="form-grid firewall-grid"><el-form-item label="最大总并发"><el-input-number v-model="firewallForm.maxConcurrentRequests" :disabled="!firewallForm.enabled" :min="1" :max="4096" controls-position="right" /></el-form-item><el-form-item label="单 IP 最大并发"><el-input-number v-model="firewallForm.maxConcurrentRequestsPerIp" :disabled="!firewallForm.enabled" :min="1" :max="1024" controls-position="right" /></el-form-item><el-form-item label="单密钥最大并发"><el-input-number v-model="firewallForm.maxConcurrentRequestsPerKey" :disabled="!firewallForm.enabled" :min="1" :max="1024" controls-position="right" /></el-form-item><el-form-item label="单 IP 每分钟请求"><el-input-number v-model="firewallForm.requestsPerMinutePerIp" :disabled="!firewallForm.enabled" :min="1" :max="60000" controls-position="right" /></el-form-item><el-form-item label="单密钥每分钟请求"><el-input-number v-model="firewallForm.requestsPerMinutePerApiKey" :disabled="!firewallForm.enabled" :min="1" :max="60000" controls-position="right" /></el-form-item></div><p class="field-hint">默认值：总并发 256，单 IP 32，单密钥 64，每分钟各 600 次。防火墙状态只保存在当前进程内，不会增加数据库写入。</p></el-form>
+      </section>
+      <section class="settings-section">
         <div class="section-heading"><div><h2>图片功能</h2><span>控制是否允许请求携带图片内容。</span></div><ImageIcon :size="19" /></div>
         <div class="setting-switch sensitive-switch"><div><strong>允许图片输入</strong><span>关闭后，Chat Completions 与 Responses 的图片请求会在到达上游前被拒绝。</span></div><el-switch v-model="securityForm.imageEnabled" /></div>
       </section>
@@ -367,4 +393,6 @@ watch(activeTab, (tab) => {
 .settings-section:has(.smtp-test) .form-grid { display: contents; }
 @media (max-width: 600px) { .settings-section:has(.smtp-test) .settings-form { grid-template-columns: 1fr; } }
 .sensitive-switch { margin-top: 18px; }.sensitive-switch + .sensitive-switch { padding-top: 16px; border-top: 1px solid #dce2e7; }
+.firewall-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 720px) { .firewall-grid { grid-template-columns: 1fr; } }
 </style>

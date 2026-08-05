@@ -212,6 +212,15 @@ type SensitiveWordSettingsInput struct {
 	PersonalDataRedactionEnabled  bool     `json:"personalDataRedactionEnabled"`
 }
 
+type RequestFirewallSettingsInput struct {
+	Enabled                     bool `json:"enabled"`
+	MaxConcurrentRequests       int  `json:"maxConcurrentRequests"`
+	MaxConcurrentRequestsPerIP  int  `json:"maxConcurrentRequestsPerIp"`
+	MaxConcurrentRequestsPerKey int  `json:"maxConcurrentRequestsPerKey"`
+	RequestsPerMinutePerIP      int  `json:"requestsPerMinutePerIp"`
+	RequestsPerMinutePerAPIKey  int  `json:"requestsPerMinutePerApiKey"`
+}
+
 type SystemInformationInput struct {
 	SystemName            string `json:"systemName"`
 	ServerURL             string `json:"serverUrl"`

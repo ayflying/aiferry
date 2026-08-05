@@ -17,6 +17,7 @@ import (
 	_ "github.com/yunloli/aiferry/internal/logic/pricingcache"
 	_ "github.com/yunloli/aiferry/internal/logic/redemption"
 	_ "github.com/yunloli/aiferry/internal/logic/relay"
+	_ "github.com/yunloli/aiferry/internal/logic/requestfirewall"
 	_ "github.com/yunloli/aiferry/internal/logic/secret"
 	_ "github.com/yunloli/aiferry/internal/logic/system"
 	_ "github.com/yunloli/aiferry/internal/logic/upstreamerror"

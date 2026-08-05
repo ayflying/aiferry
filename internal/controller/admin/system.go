@@ -20,6 +20,8 @@ func (c *Controller) registerSystemRoutes(group *ghttp.RouterGroup) {
 	group.GET("/system/model-quality/events", c.listModelQualityEvents)
 	group.GET("/system/sensitive-words", c.getSensitiveWordSettings)
 	group.PUT("/system/sensitive-words", c.updateSensitiveWordSettings)
+	group.GET("/system/request-firewall", c.getRequestFirewallSettings)
+	group.PUT("/system/request-firewall", c.updateRequestFirewallSettings)
 	group.GET("/system/mail", c.getMailSettings)
 	group.PUT("/system/mail", c.updateMailSettings)
 	group.POST("/system/mail/test", c.sendMailTest)
@@ -113,6 +115,23 @@ func (c *Controller) updateSensitiveWordSettings(r *ghttp.Request) {
 		return
 	}
 	data, err := c.settings.UpdateSensitiveWordSettings(r.Context(), input)
+	respond(r, data, err)
+}
+
+func (c *Controller) getRequestFirewallSettings(r *ghttp.Request) {
+	data, err := c.settings.GetRequestFirewallSettings(r.Context())
+	respond(r, data, err)
+}
+
+func (c *Controller) updateRequestFirewallSettings(r *ghttp.Request) {
+	var input adminapi.RequestFirewallSettingsInput
+	if !parse(r, &input) {
+		return
+	}
+	data, err := c.settings.UpdateRequestFirewallSettings(r.Context(), input)
+	if err == nil && c.firewall != nil {
+		c.firewall.SetSettings(data)
+	}
 	respond(r, data, err)
 }
 

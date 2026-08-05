@@ -9,6 +9,15 @@ export interface SensitiveWordSettings {
   personalDataRedactionEnabled: boolean
 }
 
+export interface RequestFirewallSettings {
+  enabled: boolean
+  maxConcurrentRequests: number
+  maxConcurrentRequestsPerIp: number
+  maxConcurrentRequestsPerKey: number
+  requestsPerMinutePerIp: number
+  requestsPerMinutePerApiKey: number
+}
+
 export interface SystemInformationSettings {
   systemName: string
   serverUrl: string

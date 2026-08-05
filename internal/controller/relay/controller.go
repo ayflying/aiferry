@@ -3,23 +3,26 @@ package relay
 import (
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"github.com/yunloli/aiferry/internal/logic/apikey"
 	relaysvc "github.com/yunloli/aiferry/internal/logic/relay"
+	"github.com/yunloli/aiferry/internal/logic/requestfirewall"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/user"
 )
 
 type Controller struct {
-	apiKeys *apikey.Service
-	relay   *relaysvc.Service
+	apiKeys  *apikey.Service
+	relay    *relaysvc.Service
+	firewall *requestfirewall.Service
 }
 
-func New(apiKeySvc *apikey.Service, relaySvc *relaysvc.Service) *Controller {
-	return &Controller{apiKeys: apiKeySvc, relay: relaySvc}
+func New(apiKeySvc *apikey.Service, relaySvc *relaysvc.Service, firewallSvc *requestfirewall.Service) *Controller {
+	return &Controller{apiKeys: apiKeySvc, relay: relaySvc, firewall: firewallSvc}
 }
 
 func (c *Controller) Register(group *ghttp.RouterGroup) {
@@ -31,10 +34,20 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 }
 
 func (c *Controller) models(r *ghttp.Request) {
+	clientRelease, limited := c.admitClient(r)
+	if limited {
+		return
+	}
+	defer clientRelease()
 	key, ok := c.authenticate(r)
 	if !ok {
 		return
 	}
+	keyRelease, limited := c.admitAPIKey(r, key)
+	if limited {
+		return
+	}
+	defer keyRelease()
 	data, err := c.relay.Models(r.Context(), key)
 	if err != nil {
 		writeError(r, http.StatusInternalServerError, "server_error", err.Error())
@@ -47,10 +60,20 @@ func (c *Controller) models(r *ghttp.Request) {
 
 func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 	return func(r *ghttp.Request) {
+		clientRelease, limited := c.admitClient(r)
+		if limited {
+			return
+		}
+		defer clientRelease()
 		key, ok := c.authenticate(r)
 		if !ok {
 			return
 		}
+		keyRelease, limited := c.admitAPIKey(r, key)
+		if limited {
+			return
+		}
+		defer keyRelease()
 		body, err := io.ReadAll(io.LimitReader(r.Body, (16<<20)+1))
 		if err != nil {
 			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
@@ -78,6 +101,31 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 		}
 		r.Exit()
 	}
+}
+
+func (c *Controller) admitClient(r *ghttp.Request) (func(), bool) {
+	if c.firewall == nil {
+		return func() {}, false
+	}
+	release, rejection := c.firewall.AcquireClient(r.Context(), requestfirewall.RequestInput{ClientIP: clientIP(r)})
+	return c.handleFirewallAdmission(r, release, rejection)
+}
+
+func (c *Controller) admitAPIKey(r *ghttp.Request, key apikey.AuthKey) (func(), bool) {
+	if c.firewall == nil {
+		return func() {}, false
+	}
+	release, rejection := c.firewall.AcquireAPIKey(requestfirewall.RequestInput{APIKeyID: key.Id})
+	return c.handleFirewallAdmission(r, release, rejection)
+}
+
+func (c *Controller) handleFirewallAdmission(r *ghttp.Request, release func(), rejection *requestfirewall.Rejection) (func(), bool) {
+	if rejection == nil {
+		return release, false
+	}
+	r.Response.Header().Set("Retry-After", strconv.Itoa(rejection.RetryAfter))
+	writeError(r, http.StatusTooManyRequests, "rate_limit_exceeded", rejection.Message)
+	return nil, true
 }
 
 func (c *Controller) authenticate(r *ghttp.Request) (apikey.AuthKey, bool) {
