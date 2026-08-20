@@ -47,6 +47,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 			ChannelModelID: row.Id,
 			ChannelID:      channel.Id,
 			ChannelName:    channel.Name,
+			ChannelType:    channel.Type,
 			BaseURL:        channel.BaseUrl,
 			BackupBaseURLs: advancedConfig.BackupBaseURLs,
 			OrganizationID: channel.OrganizationId,
@@ -154,7 +155,7 @@ func activeRouteChannels(ctx context.Context, channelIDs []uint64) (map[uint64]e
 	columns := dao.Channels.Columns()
 	channels := make([]entity.Channels, 0, len(channelIDs))
 	if err := dao.Channels.Ctx(ctx).
-		Fields(columns.Id, columns.Name, columns.BaseUrl, columns.OrganizationId, columns.ProjectId, columns.ProxyUrlCipher, columns.AdvancedConfig, columns.Priority, columns.Weight).
+		Fields(columns.Id, columns.Name, columns.Type, columns.BaseUrl, columns.OrganizationId, columns.ProjectId, columns.ProxyUrlCipher, columns.AdvancedConfig, columns.Priority, columns.Weight).
 		WhereIn(columns.Id, channelIDs).
 		Where(columns.Status, 1).
 		Scan(&channels); err != nil {

@@ -42,6 +42,7 @@ type Candidate struct {
 	ChannelModelID      uint64 `orm:"channel_model_id"`
 	ChannelID           uint64 `orm:"channel_id"`
 	ChannelName         string `orm:"channel_name"`
+	ChannelType         string `orm:"channel_type"`
 	BaseURL             string `orm:"base_url"`
 	BackupBaseURLs      []string
 	ChannelCredentialID uint64

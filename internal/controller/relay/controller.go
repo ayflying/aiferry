@@ -31,6 +31,8 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/responses", c.proxy("/responses"))
 	group.POST("/embeddings", c.proxy("/embeddings"))
 	group.POST("/images/generations", c.proxy("/images/generations"))
+	group.POST("/video/generations", c.videoGenerations)
+	group.GET("/video/generations/{task_id}", c.videoTask)
 }
 
 func (c *Controller) models(r *ghttp.Request) {
@@ -103,6 +105,69 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 	}
 }
 
+func (c *Controller) videoGenerations(r *ghttp.Request) {
+	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, (64<<20)+1))
+		if err != nil {
+			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+			return
+		}
+		status, response, headers, err := c.relay.CreateVideo(r.Context(), r.Header, body, key)
+		if err != nil {
+			c.writeRelayError(r, err)
+			return
+		}
+		copyUpstreamResponseHeaders(r.Response.Header(), headers)
+		r.Response.Status = status
+		r.Response.Write(response)
+		r.Exit()
+	})
+}
+
+func (c *Controller) videoTask(r *ghttp.Request) {
+	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
+		status, response, headers, err := c.relay.GetVideoTask(r.Context(), r.Header, r.GetRouter("task_id").String(), key)
+		if err != nil {
+			c.writeRelayError(r, err)
+			return
+		}
+		copyUpstreamResponseHeaders(r.Response.Header(), headers)
+		r.Response.Status = status
+		r.Response.Write(response)
+		r.Exit()
+	})
+}
+
+func (c *Controller) withAuthenticatedKey(r *ghttp.Request, handler func(apikey.AuthKey)) {
+	clientRelease, limited := c.admitClient(r)
+	if limited {
+		return
+	}
+	defer clientRelease()
+	key, ok := c.authenticate(r)
+	if !ok {
+		return
+	}
+	keyRelease, limited := c.admitAPIKey(r, key)
+	if limited {
+		return
+	}
+	defer keyRelease()
+	handler(key)
+}
+
+func (c *Controller) writeRelayError(r *ghttp.Request, err error) {
+	if relaysvc.IsRetryableAvailabilityError(err) {
+		writeRetryableAvailabilityError(r)
+		return
+	}
+	if user.IsInsufficientBalance(err) {
+		writeError(r, http.StatusPaymentRequired, "insufficient_balance", err.Error())
+		return
+	}
+	writeError(r, http.StatusBadRequest, "invalid_request_error", err.Error())
+}
+
 func (c *Controller) admitClient(r *ghttp.Request) (func(), bool) {
 	if c.firewall == nil {
 		return func() {}, false
@@ -144,6 +209,18 @@ func (c *Controller) authenticate(r *ghttp.Request) (apikey.AuthKey, bool) {
 		return apikey.AuthKey{}, false
 	}
 	return key, true
+}
+
+func copyUpstreamResponseHeaders(target, source http.Header) {
+	for name, values := range source {
+		switch strings.ToLower(name) {
+		case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "content-length":
+			continue
+		}
+		for _, value := range values {
+			target.Add(name, value)
+		}
+	}
 }
 
 func writeRetryableAvailabilityError(r *ghttp.Request) {
