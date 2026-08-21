@@ -214,7 +214,13 @@ func (s *sRelay) downloadMiniMaxVideo(ctx context.Context, incomingHeaders http.
 	if resourceURL == "" {
 		return 0, nil, nil, gerror.New("video is not completed or does not include a downloadable file")
 	}
-	file := s.callVideoUpstream(ctx, http.MethodGet, resourceURL, incomingHeaders, nil, candidate)
+	fileCandidate := candidate
+	if !sameUpstreamOrigin(candidate.BaseURL, resourceURL) {
+		fileCandidate.APIKeyCipher = ""
+		fileCandidate.OrganizationID = ""
+		fileCandidate.ProjectID = ""
+	}
+	file := s.callVideoUpstream(ctx, http.MethodGet, resourceURL, incomingHeaders, nil, fileCandidate)
 	return normalizedVideoUpstreamResponse(file.status, file.body, file.headers, file.err)
 }
 
@@ -263,10 +269,20 @@ func resolveMiniMaxVideoResourceURL(baseURL, resourceURL string) (string, error)
 	return base.ResolveReference(resource).String(), nil
 }
 
+func sameUpstreamOrigin(baseURL, targetURL string) bool {
+	base, baseErr := url.Parse(baseURL)
+	target, targetErr := url.Parse(targetURL)
+	return baseErr == nil && targetErr == nil && strings.EqualFold(base.Scheme, target.Scheme) && strings.EqualFold(base.Host, target.Host)
+}
+
 func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, incomingHeaders http.Header, body []byte, candidate Candidate) videoUpstreamResult {
-	apiKey, err := s.app.Secrets.Decrypt(candidate.APIKeyCipher)
-	if err != nil {
-		return videoUpstreamResult{err: err}
+	apiKey := ""
+	var err error
+	if candidate.APIKeyCipher != "" {
+		apiKey, err = s.app.Secrets.Decrypt(candidate.APIKeyCipher)
+		if err != nil {
+			return videoUpstreamResult{err: err}
+		}
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
@@ -275,7 +291,9 @@ func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, i
 		return videoUpstreamResult{err: gerror.Wrap(err, "create video upstream request")}
 	}
 	copyRequestHeaders(req.Header, incomingHeaders)
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	if method == http.MethodPost && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}

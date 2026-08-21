@@ -135,6 +135,12 @@ func TestResolveMiniMaxVideoResourceURL(t *testing.T) {
 	if _, err = resolveMiniMaxVideoResourceURL("https://gateway.example/v1", "file:///tmp/result.mp4"); err == nil {
 		t.Fatal("expected non-HTTP resource URL to be rejected")
 	}
+	if !sameUpstreamOrigin("https://gateway.example/v1", "https://gateway.example/resources/result.mp4") {
+		t.Fatal("expected same upstream origin")
+	}
+	if sameUpstreamOrigin("https://gateway.example/v1", "https://cdn.example/result.mp4") {
+		t.Fatal("expected different upstream origin")
+	}
 }
 
 func TestNormalizedVideoUpstreamResponseAddsStructuredErrorForEmptyFailure(t *testing.T) {
