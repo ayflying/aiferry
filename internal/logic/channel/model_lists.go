@@ -53,6 +53,7 @@ func (s *sChannel) listPublicModelViews(ctx context.Context) ([]PublicModelView,
 	models := make([]entity.ChannelModels, 0)
 	if err := dao.ChannelModels.Ctx(ctx).
 		Fields(columns.Id, columns.PublicName).
+		Where(columns.Enabled, 1).
 		OrderAsc(columns.Id).
 		Scan(&models); err != nil {
 		return nil, gerror.Wrap(err, "load public channel models")
