@@ -26,6 +26,7 @@ LABEL org.opencontainers.image.title="AiFerry" \
       org.opencontainers.image.version="$VERSION" \
       org.opencontainers.image.revision="$VCS_REF"
 COPY --from=backend-build /out/aiferry /app/aiferry
+COPY --from=backend-build /src/VERSION /app/VERSION
 COPY --from=backend-build /src/manifest /app/manifest
 COPY --from=frontend-build /src/frontend/dist /app/web
 ENV TZ=Asia/Shanghai \

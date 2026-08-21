@@ -9,6 +9,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gcmd"
 
+	"github.com/yunloli/aiferry/internal/buildinfo"
 	"github.com/yunloli/aiferry/internal/config"
 	adminctrl "github.com/yunloli/aiferry/internal/controller/admin"
 	authctrl "github.com/yunloli/aiferry/internal/controller/auth"
@@ -87,7 +88,11 @@ var (
 			s.SetIndexFolder(false)
 			s.SetIndexFiles([]string{"index.html"})
 			s.BindHandler("GET:/healthz", func(r *ghttp.Request) {
-				r.Response.WriteJson(map[string]any{"status": "ok"})
+				r.Response.WriteJson(map[string]any{
+					"status":   "ok",
+					"version":  buildinfo.RuntimeVersion(),
+					"revision": buildinfo.Revision,
+				})
 			})
 			s.Group("/api/auth", func(group *ghttp.RouterGroup) {
 				authCtrl.RegisterPublic(group)
