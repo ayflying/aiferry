@@ -3,7 +3,9 @@ package channel
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"errors"
 	mathrand "math/rand/v2"
 	"strings"
 	"time"
@@ -13,9 +15,9 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
-	"github.com/yunloli/aiferry/internal/logic/system"
 )
 
 type CredentialView struct {
@@ -159,6 +161,10 @@ func (s *sChannel) HasAvailableCredential(ctx context.Context, channelID uint64)
 	return len(credentials) > 0, err
 }
 
+func isMissingCredentialBindingError(err error) bool {
+	return errors.Is(err, sql.ErrNoRows)
+}
+
 func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID uint64, excluded map[uint64]struct{}) (RouteCredential, error) {
 	credentials, err := s.availableCredentials(ctx, channelID, excluded)
 	if err != nil {
@@ -169,7 +175,7 @@ func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID uin
 	}
 	var binding entity.ApiKeyChannelCredentials
 	if excluded == nil {
-		if err = dao.ApiKeyChannelCredentials.Ctx(ctx).Where(do.ApiKeyChannelCredentials{ApiKeyId: apiKeyID, ChannelId: channelID}).Scan(&binding); err != nil {
+		if err = dao.ApiKeyChannelCredentials.Ctx(ctx).Where(do.ApiKeyChannelCredentials{ApiKeyId: apiKeyID, ChannelId: channelID}).Scan(&binding); err != nil && !isMissingCredentialBindingError(err) {
 			return RouteCredential{}, gerror.Wrap(err, "load channel credential binding")
 		}
 		if binding.ChannelCredentialId > 0 {
