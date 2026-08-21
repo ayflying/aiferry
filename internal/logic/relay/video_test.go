@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"mime/multipart"
+	"net/http"
 	"testing"
 )
 
@@ -98,5 +99,44 @@ func TestVideoResourceURL(t *testing.T) {
 	}
 	if got := videoResourceURL(candidate, "video_123", true); got != "https://gateway.example/v1/videos/video_123/content" {
 		t.Fatalf("content URL = %q", got)
+	}
+}
+
+func TestNormalizedVideoUpstreamResponseAddsStructuredErrorForEmptyFailure(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Trace-Id", "upstream-trace-123")
+	status, body, responseHeaders, err := normalizedVideoUpstreamResponse(400, nil, headers, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 400 {
+		t.Fatalf("status = %d", status)
+	}
+	if responseHeaders.Get("Trace-Id") != "upstream-trace-123" {
+		t.Fatalf("Trace-Id = %q", responseHeaders.Get("Trace-Id"))
+	}
+	if responseHeaders.Get("Content-Type") != "application/json" {
+		t.Fatalf("Content-Type = %q", responseHeaders.Get("Content-Type"))
+	}
+	if responseHeaders.Get("X-AiFerry-Upstream-Status") != "400" {
+		t.Fatalf("X-AiFerry-Upstream-Status = %q", responseHeaders.Get("X-AiFerry-Upstream-Status"))
+	}
+	if got := string(body); got != `{"error":{"message":"Upstream video provider returned HTTP 400 without an error response body","type":"upstream_error"}}` {
+		t.Fatalf("body = %s", got)
+	}
+}
+
+func TestNormalizedVideoUpstreamResponseKeepsNonEmptyUpstreamError(t *testing.T) {
+	original := []byte(`{"error":{"message":"provider rejected ratio","type":"invalid_request_error"}}`)
+	headers := http.Header{"Content-Type": []string{"application/json"}}
+	status, body, responseHeaders, err := normalizedVideoUpstreamResponse(400, original, headers, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 400 || string(body) != string(original) {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	if responseHeaders.Get("X-AiFerry-Upstream-Status") != "" {
+		t.Fatalf("unexpected upstream status header: %q", responseHeaders.Get("X-AiFerry-Upstream-Status"))
 	}
 }
