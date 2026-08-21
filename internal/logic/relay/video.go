@@ -235,6 +235,7 @@ func (s *sRelay) downloadMiniMaxVideo(ctx context.Context, incomingHeaders http.
 		fileCandidate.APIKeyCipher = ""
 		fileCandidate.OrganizationID = ""
 		fileCandidate.ProjectID = ""
+		fileCandidate.ProxyURLCipher = ""
 	}
 	file := s.callVideoUpstream(ctx, http.MethodGet, resourceURL, incomingHeaders, nil, fileCandidate)
 	return normalizedVideoUpstreamResponse(file.status, file.body, file.headers, file.err)

@@ -141,6 +141,13 @@ func TestResolveMiniMaxVideoResourceURL(t *testing.T) {
 	if sameUpstreamOrigin("https://gateway.example/v1", "https://cdn.example/result.mp4") {
 		t.Fatal("expected different upstream origin")
 	}
+	candidate := Candidate{ProxyURLCipher: "encrypted-proxy"}
+	if !sameUpstreamOrigin(candidate.BaseURL, resource) {
+		candidate.ProxyURLCipher = ""
+	}
+	if candidate.ProxyURLCipher != "" {
+		t.Fatal("cross-origin resource must not use the channel proxy")
+	}
 }
 
 func TestNormalizedVideoUpstreamResponseAddsStructuredErrorForEmptyFailure(t *testing.T) {
