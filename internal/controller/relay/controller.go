@@ -32,11 +32,11 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/embeddings", c.proxy("/embeddings"))
 	group.POST("/images/generations", c.proxy("/images/generations"))
 	group.POST("/video/generations", c.videoGenerations)
-	group.GET("/video/generations/{task_id}/content", c.videoTaskContent)
-	group.GET("/video/generations/{task_id}", c.videoTask)
+	group.GET("/video/generations/:task_id/content", c.videoTaskContent)
+	group.GET("/video/generations/:task_id", c.videoTask)
 	group.POST("/videos", c.videos)
-	group.GET("/videos/{video_id}", c.video)
-	group.GET("/videos/{video_id}/content", c.videoContent)
+	group.GET("/videos/:video_id", c.video)
+	group.GET("/videos/:video_id/content", c.videoContent)
 }
 
 func (c *Controller) models(r *ghttp.Request) {
