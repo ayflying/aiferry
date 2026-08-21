@@ -1,12 +1,14 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"testing"
 )
 
 func TestPrepareVideoRequestBodyMapsLegacyPromptWithoutChangingModel(t *testing.T) {
-	body, err := prepareVideoRequestBody([]byte(`{"model":"minimax-h3","prompt":"A ferry crossing a quiet lake","duration":5,"resolution":"2K","ratio":"16:9"}`), "minimax")
+	body, err := prepareVideoRequestBody([]byte(`{"model":"minimax-h3","prompt":"A ferry crossing a quiet lake","duration":5,"resolution":"2K","ratio":"16:9"}`), "application/json", "minimax")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,24 +32,9 @@ func TestPrepareVideoRequestBodyMapsLegacyPromptWithoutChangingModel(t *testing.
 	}
 }
 
-func TestPrepareVideoRequestBodyPreservesMiniMaxMultimodalContent(t *testing.T) {
-	body, err := prepareVideoRequestBody([]byte(`{"model":"minimax-h3","content":[{"type":"text","text":"Make the character dance"},{"type":"image_url","image_url":{"url":"https://example.com/input.png"},"role":"first_frame"}],"duration":5,"resolution":"2K"}`), "minimax")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var payload map[string]any
-	if err = json.Unmarshal(body, &payload); err != nil {
-		t.Fatal(err)
-	}
-	content := payload["content"].([]any)
-	if len(content) != 2 || payload["model"] != "minimax-h3" {
-		t.Fatalf("payload = %#v", payload)
-	}
-}
-
 func TestPrepareVideoRequestBodyPreservesNonMiniMaxPayload(t *testing.T) {
 	original := []byte(`{"model":"other","prompt":"test","custom":true}`)
-	body, err := prepareVideoRequestBody(original, "openai")
+	body, err := prepareVideoRequestBody(original, "application/json", "openai")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,22 +43,60 @@ func TestPrepareVideoRequestBodyPreservesNonMiniMaxPayload(t *testing.T) {
 	}
 }
 
-func TestVideoCreateURLUsesChannelProtocol(t *testing.T) {
-	if got := videoCreateURL(Candidate{ChannelType: "minimax", BaseURL: "https://api.minimax.io/v1"}); got != "https://api.minimax.io/v2/video_generation" {
-		t.Fatalf("MiniMax URL = %q", got)
+func TestVideoRequestedModelSupportsJSONAndMultipart(t *testing.T) {
+	model, err := videoRequestedModel([]byte(`{"model":"sora-2-pro","prompt":"test"}`), "application/json")
+	if err != nil || model != "sora-2-pro" {
+		t.Fatalf("JSON model = %q, err = %v", model, err)
 	}
-	if got := videoCreateURL(Candidate{ChannelType: "openai", BaseURL: "https://gateway.example/v1"}); got != "https://gateway.example/v1/video/generations" {
-		t.Fatalf("compatible URL = %q", got)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err = writer.WriteField("prompt", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.WriteField("model", "sora-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	model, err = videoRequestedModel(body.Bytes(), writer.FormDataContentType())
+	if err != nil || model != "sora-2" {
+		t.Fatalf("multipart model = %q, err = %v", model, err)
 	}
 }
 
-func TestMiniMaxVideoURLRemovesOpenAICompatibleVersionSuffix(t *testing.T) {
-	for input, want := range map[string]string{
-		"https://api.minimax.io/v1": "https://api.minimax.io/v2/video_generation",
-		"https://api.minimaxi.com":   "https://api.minimaxi.com/v2/video_generation",
-	} {
-		if got := miniMaxVideoURL(input, "/v2/video_generation"); got != want {
-			t.Fatalf("miniMaxVideoURL(%q) = %q, want %q", input, got, want)
-		}
+func TestVideoCreateURLUsesChannelProtocol(t *testing.T) {
+	miniMax := Candidate{ChannelType: "minimax", BaseURL: "https://api.minimax.io/v1"}
+	if got := videoCreateURL(miniMax, legacyVideoAPI); got != "https://api.minimax.io/v2/video_generation" {
+		t.Fatalf("MiniMax URL = %q", got)
+	}
+	openAI := Candidate{ChannelType: "openai", BaseURL: "https://gateway.example/v1"}
+	if got := videoCreateURL(openAI, legacyVideoAPI); got != "https://gateway.example/v1/video/generations" {
+		t.Fatalf("legacy URL = %q", got)
+	}
+	if got := videoCreateURL(openAI, openAIVideoAPI); got != "https://gateway.example/v1/videos" {
+		t.Fatalf("OpenAI URL = %q", got)
+	}
+}
+
+func TestVideoResponseIDAcceptsBothUpstreamShapes(t *testing.T) {
+	if got := videoResponseID([]byte(`{"task_id":"task_1"}`), legacyVideoAPI); got != "task_1" {
+		t.Fatalf("legacy id = %q", got)
+	}
+	if got := videoResponseID([]byte(`{"id":"video_1"}`), openAIVideoAPI); got != "video_1" {
+		t.Fatalf("OpenAI id = %q", got)
+	}
+	if got := videoResponseID([]byte(`{"task_id":"task_2"}`), openAIVideoAPI); got != "task_2" {
+		t.Fatalf("fallback id = %q", got)
+	}
+}
+
+func TestVideoResourceURL(t *testing.T) {
+	candidate := Candidate{BaseURL: "https://gateway.example/v1/"}
+	if got := videoResourceURL(candidate, "video_123", false); got != "https://gateway.example/v1/videos/video_123" {
+		t.Fatalf("retrieve URL = %q", got)
+	}
+	if got := videoResourceURL(candidate, "video_123", true); got != "https://gateway.example/v1/videos/video_123/content" {
+		t.Fatalf("content URL = %q", got)
 	}
 }

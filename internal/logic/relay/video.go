@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -20,22 +22,36 @@ const (
 	videoTaskRouteTTL  = 24 * time.Hour
 )
 
+type videoAPIMode string
+
+const (
+	legacyVideoAPI videoAPIMode = "legacy"
+	openAIVideoAPI videoAPIMode = "openai"
+)
+
 type videoTaskRoute struct {
-	UserID   uint64    `json:"userId"`
-	APIKeyID uint64    `json:"apiKeyId"`
-	Candidate Candidate `json:"candidate"`
+	UserID   uint64       `json:"userId"`
+	APIKeyID uint64       `json:"apiKeyId"`
+	Mode     videoAPIMode `json:"mode"`
+	Candidate Candidate    `json:"candidate"`
 }
 
-// CreateVideo preserves the legacy OpenAI-compatible /v1/video/generations surface
-// while adapting MiniMax channels to their native asynchronous H3 API.
 func (s *sRelay) CreateVideo(ctx context.Context, incomingHeaders http.Header, body []byte, key apikey.AuthKey) (int, []byte, http.Header, error) {
+	return s.createVideo(ctx, incomingHeaders, body, key, legacyVideoAPI)
+}
+
+func (s *sRelay) CreateVideos(ctx context.Context, incomingHeaders http.Header, body []byte, key apikey.AuthKey) (int, []byte, http.Header, error) {
+	return s.createVideo(ctx, incomingHeaders, body, key, openAIVideoAPI)
+}
+
+func (s *sRelay) createVideo(ctx context.Context, incomingHeaders http.Header, body []byte, key apikey.AuthKey, mode videoAPIMode) (int, []byte, http.Header, error) {
 	if len(body) > maxVideoRequestBody {
 		return 0, nil, nil, gerror.New("video request body exceeds 64 MiB")
 	}
-	if !gjson.ValidBytes(body) {
-		return 0, nil, nil, gerror.New("video request body must be valid JSON")
+	requestedModel, err := videoRequestedModel(body, incomingHeaders.Get("Content-Type"))
+	if err != nil {
+		return 0, nil, nil, err
 	}
-	requestedModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if requestedModel == "" {
 		return 0, nil, nil, gerror.New("model is required")
 	}
@@ -58,16 +74,16 @@ func (s *sRelay) CreateVideo(ctx context.Context, incomingHeaders http.Header, b
 		}
 		candidate.ChannelCredentialID = credential.ID
 		candidate.APIKeyCipher = credential.APIKeyCipher
-		result := s.createVideoUpstream(ctx, incomingHeaders, body, candidate)
+		result := s.createVideoUpstream(ctx, incomingHeaders, body, mode, candidate)
 		last = result
 		if result.err != nil || result.status < http.StatusOK || result.status >= http.StatusMultipleChoices {
 			continue
 		}
-		taskID := strings.TrimSpace(gjson.GetBytes(result.body, "task_id").String())
-		if taskID == "" {
-			return 0, nil, nil, gerror.New("video upstream response did not include task_id")
+		videoID := videoResponseID(result.body, mode)
+		if videoID == "" {
+			return 0, nil, nil, gerror.New("video upstream response did not include a task or video identifier")
 		}
-		if err = s.storeVideoTaskRoute(ctx, taskID, key, candidate); err != nil {
+		if err = s.storeVideoTaskRoute(ctx, videoID, key, mode, candidate); err != nil {
 			return 0, nil, nil, err
 		}
 		return result.status, result.body, result.headers, nil
@@ -81,19 +97,47 @@ func (s *sRelay) CreateVideo(ctx context.Context, incomingHeaders http.Header, b
 	return 0, nil, nil, gerror.Wrap(ErrEligibleChannelsExhausted, "all eligible video channels failed")
 }
 
-// GetVideoTask queries the task using the same upstream credential and only permits
-// the API key that created the task. Task-to-channel state is intentionally stored
-// in Redis instead of a database migration because MiniMax task identifiers expire.
 func (s *sRelay) GetVideoTask(ctx context.Context, incomingHeaders http.Header, taskID string, key apikey.AuthKey) (int, []byte, http.Header, error) {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return 0, nil, nil, gerror.New("task_id is required")
-	}
 	route, err := s.loadVideoTaskRoute(ctx, taskID, key)
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	return s.queryVideoUpstream(ctx, incomingHeaders, taskID, route.Candidate)
+	if route.Mode == openAIVideoAPI {
+		return s.getOpenAIVideo(ctx, incomingHeaders, taskID, route)
+	}
+	if route.Candidate.ChannelType == "minimax" {
+		return s.queryMiniMaxVideo(ctx, incomingHeaders, taskID, route.Candidate)
+	}
+	result := s.callVideoUpstream(ctx, http.MethodGet, strings.TrimRight(route.Candidate.BaseURL, "/")+"/video/generations/"+taskID, incomingHeaders, nil, route.Candidate)
+	return result.status, result.body, result.headers, result.err
+}
+
+func (s *sRelay) GetOpenAIVideo(ctx context.Context, incomingHeaders http.Header, videoID string, key apikey.AuthKey) (int, []byte, http.Header, error) {
+	route, err := s.loadVideoTaskRoute(ctx, videoID, key)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	return s.getOpenAIVideo(ctx, incomingHeaders, videoID, route)
+}
+
+func (s *sRelay) GetOpenAIVideoContent(ctx context.Context, incomingHeaders http.Header, videoID string, key apikey.AuthKey) (int, []byte, http.Header, error) {
+	route, err := s.loadVideoTaskRoute(ctx, videoID, key)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	if route.Candidate.ChannelType == "minimax" {
+		return 0, nil, nil, gerror.New("video content download is not available for this MiniMax task; use the completed file URL")
+	}
+	result := s.callVideoUpstream(ctx, http.MethodGet, videoResourceURL(route.Candidate, videoID, true), incomingHeaders, nil, route.Candidate)
+	return result.status, result.body, result.headers, result.err
+}
+
+func (s *sRelay) getOpenAIVideo(ctx context.Context, incomingHeaders http.Header, videoID string, route videoTaskRoute) (int, []byte, http.Header, error) {
+	if route.Candidate.ChannelType == "minimax" {
+		return s.queryMiniMaxVideo(ctx, incomingHeaders, videoID, route.Candidate)
+	}
+	result := s.callVideoUpstream(ctx, http.MethodGet, videoResourceURL(route.Candidate, videoID, false), incomingHeaders, nil, route.Candidate)
+	return result.status, result.body, result.headers, result.err
 }
 
 type videoUpstreamResult struct {
@@ -103,18 +147,15 @@ type videoUpstreamResult struct {
 	err     error
 }
 
-func (s *sRelay) createVideoUpstream(ctx context.Context, incomingHeaders http.Header, body []byte, candidate Candidate) videoUpstreamResult {
-	payload, err := prepareVideoRequestBody(body, candidate.ChannelType)
+func (s *sRelay) createVideoUpstream(ctx context.Context, incomingHeaders http.Header, body []byte, mode videoAPIMode, candidate Candidate) videoUpstreamResult {
+	payload, err := prepareVideoRequestBody(body, incomingHeaders.Get("Content-Type"), candidate.ChannelType)
 	if err != nil {
 		return videoUpstreamResult{err: err}
 	}
-	return s.callVideoUpstream(ctx, http.MethodPost, videoCreateURL(candidate), incomingHeaders, payload, candidate)
+	return s.callVideoUpstream(ctx, http.MethodPost, videoCreateURL(candidate, mode), incomingHeaders, payload, candidate)
 }
 
-func (s *sRelay) queryVideoUpstream(ctx context.Context, incomingHeaders http.Header, taskID string, candidate Candidate) (int, []byte, http.Header, error) {
-	if candidate.ChannelType != "minimax" {
-		return 0, nil, nil, gerror.New("video task polling is currently available only for MiniMax channels")
-	}
+func (s *sRelay) queryMiniMaxVideo(ctx context.Context, incomingHeaders http.Header, taskID string, candidate Candidate) (int, []byte, http.Header, error) {
 	result := s.callVideoUpstream(ctx, http.MethodGet, miniMaxVideoURL(candidate.BaseURL, "/v2/query/video_generation/"+taskID), incomingHeaders, nil, candidate)
 	return result.status, result.body, result.headers, result.err
 }
@@ -132,7 +173,7 @@ func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, i
 	}
 	copyRequestHeaders(req.Header, incomingHeaders)
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	if method == http.MethodPost {
+	if method == http.MethodPost && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if candidate.OrganizationID != "" {
@@ -160,12 +201,19 @@ func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, i
 	return videoUpstreamResult{status: resp.StatusCode, body: responseBody, headers: resp.Header.Clone()}
 }
 
-func prepareVideoRequestBody(original []byte, channelType string) ([]byte, error) {
+func prepareVideoRequestBody(original []byte, contentType, channelType string) ([]byte, error) {
 	if channelType != "minimax" {
 		return original, nil
 	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err == nil && mediaType == "multipart/form-data" {
+		return nil, gerror.New("MiniMax video channels require application/json requests")
+	}
+	if !gjson.ValidBytes(original) {
+		return nil, gerror.New("video request body must be valid JSON")
+	}
 	var payload map[string]any
-	if err := json.Unmarshal(original, &payload); err != nil {
+	if err = json.Unmarshal(original, &payload); err != nil {
 		return nil, gerror.Wrap(err, "decode video request body")
 	}
 	if _, exists := payload["content"]; !exists {
@@ -180,11 +228,22 @@ func prepareVideoRequestBody(original []byte, channelType string) ([]byte, error
 	return result, gerror.Wrap(err, "encode MiniMax video request")
 }
 
-func videoCreateURL(candidate Candidate) string {
+func videoCreateURL(candidate Candidate, mode videoAPIMode) string {
 	if candidate.ChannelType == "minimax" {
 		return miniMaxVideoURL(candidate.BaseURL, "/v2/video_generation")
 	}
+	if mode == openAIVideoAPI {
+		return strings.TrimRight(candidate.BaseURL, "/") + "/videos"
+	}
 	return strings.TrimRight(candidate.BaseURL, "/") + "/video/generations"
+}
+
+func videoResourceURL(candidate Candidate, videoID string, content bool) string {
+	path := "/videos/" + videoID
+	if content {
+		path += "/content"
+	}
+	return strings.TrimRight(candidate.BaseURL, "/") + path
 }
 
 func miniMaxVideoURL(baseURL, path string) string {
@@ -193,8 +252,53 @@ func miniMaxVideoURL(baseURL, path string) string {
 	return baseURL + path
 }
 
-func (s *sRelay) storeVideoTaskRoute(ctx context.Context, taskID string, key apikey.AuthKey, candidate Candidate) error {
-	encoded, err := json.Marshal(videoTaskRoute{UserID: key.UserId, APIKeyID: key.Id, Candidate: candidate})
+func videoRequestedModel(body []byte, contentType string) (string, error) {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType == "" || mediaType == "application/json" {
+		if !gjson.ValidBytes(body) {
+			return "", gerror.New("video request body must be valid JSON")
+		}
+		return strings.TrimSpace(gjson.GetBytes(body, "model").String()), nil
+	}
+	if mediaType != "multipart/form-data" || params["boundary"] == "" {
+		return "", gerror.New("video request content type must be application/json or multipart/form-data")
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	for {
+		part, partErr := reader.NextPart()
+		if partErr == io.EOF {
+			break
+		}
+		if partErr != nil {
+			return "", gerror.Wrap(partErr, "read video multipart request")
+		}
+		if part.FormName() != "model" {
+			continue
+		}
+		model, readErr := io.ReadAll(io.LimitReader(part, 1024))
+		if readErr != nil {
+			return "", gerror.Wrap(readErr, "read video model field")
+		}
+		return strings.TrimSpace(string(model)), nil
+	}
+	return "", nil
+}
+
+func videoResponseID(body []byte, mode videoAPIMode) string {
+	primary := "task_id"
+	fallback := "id"
+	if mode == openAIVideoAPI {
+		primary, fallback = fallback, primary
+	}
+	id := strings.TrimSpace(gjson.GetBytes(body, primary).String())
+	if id == "" {
+		id = strings.TrimSpace(gjson.GetBytes(body, fallback).String())
+	}
+	return id
+}
+
+func (s *sRelay) storeVideoTaskRoute(ctx context.Context, taskID string, key apikey.AuthKey, mode videoAPIMode, candidate Candidate) error {
+	encoded, err := json.Marshal(videoTaskRoute{UserID: key.UserId, APIKeyID: key.Id, Mode: mode, Candidate: candidate})
 	if err != nil {
 		return gerror.Wrap(err, "encode video task route")
 	}
@@ -205,6 +309,10 @@ func (s *sRelay) storeVideoTaskRoute(ctx context.Context, taskID string, key api
 }
 
 func (s *sRelay) loadVideoTaskRoute(ctx context.Context, taskID string, key apikey.AuthKey) (videoTaskRoute, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return videoTaskRoute{}, gerror.New("video identifier is required")
+	}
 	encoded, err := s.app.Redis.Get(ctx, videoTaskRouteKey(taskID)).Bytes()
 	if err != nil {
 		return videoTaskRoute{}, gerror.New("video task not found or has expired")

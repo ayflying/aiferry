@@ -33,6 +33,9 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/images/generations", c.proxy("/images/generations"))
 	group.POST("/video/generations", c.videoGenerations)
 	group.GET("/video/generations/{task_id}", c.videoTask)
+	group.POST("/videos", c.videos)
+	group.GET("/videos/{video_id}", c.video)
+	group.GET("/videos/{video_id}/content", c.videoContent)
 }
 
 func (c *Controller) models(r *ghttp.Request) {
@@ -127,6 +130,53 @@ func (c *Controller) videoGenerations(r *ghttp.Request) {
 func (c *Controller) videoTask(r *ghttp.Request) {
 	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
 		status, response, headers, err := c.relay.GetVideoTask(r.Context(), r.Header, r.GetRouter("task_id").String(), key)
+		if err != nil {
+			c.writeRelayError(r, err)
+			return
+		}
+		copyUpstreamResponseHeaders(r.Response.Header(), headers)
+		r.Response.Status = status
+		r.Response.Write(response)
+		r.Exit()
+	})
+}
+
+func (c *Controller) videos(r *ghttp.Request) {
+	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, (64<<20)+1))
+		if err != nil {
+			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+			return
+		}
+		status, response, headers, err := c.relay.CreateVideos(r.Context(), r.Header, body, key)
+		if err != nil {
+			c.writeRelayError(r, err)
+			return
+		}
+		copyUpstreamResponseHeaders(r.Response.Header(), headers)
+		r.Response.Status = status
+		r.Response.Write(response)
+		r.Exit()
+	})
+}
+
+func (c *Controller) video(r *ghttp.Request) {
+	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
+		status, response, headers, err := c.relay.GetOpenAIVideo(r.Context(), r.Header, r.GetRouter("video_id").String(), key)
+		if err != nil {
+			c.writeRelayError(r, err)
+			return
+		}
+		copyUpstreamResponseHeaders(r.Response.Header(), headers)
+		r.Response.Status = status
+		r.Response.Write(response)
+		r.Exit()
+	})
+}
+
+func (c *Controller) videoContent(r *ghttp.Request) {
+	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
+		status, response, headers, err := c.relay.GetOpenAIVideoContent(r.Context(), r.Header, r.GetRouter("video_id").String(), key)
 		if err != nil {
 			c.writeRelayError(r, err)
 			return
