@@ -50,6 +50,7 @@ type Candidate struct {
 	OrganizationID      string `orm:"organization_id"`
 	ProjectID           string `orm:"project_id"`
 	ProxyURLCipher      string `orm:"proxy_url_cipher"`
+	DirectHTTP          bool   `json:"-" orm:"-"`
 	AdvancedConfig      string `orm:"advanced_config"`
 	Priority            int    `orm:"priority"`
 	Weight              uint   `orm:"weight"`

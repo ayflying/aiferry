@@ -236,6 +236,7 @@ func (s *sRelay) downloadMiniMaxVideo(ctx context.Context, incomingHeaders http.
 		fileCandidate.OrganizationID = ""
 		fileCandidate.ProjectID = ""
 		fileCandidate.ProxyURLCipher = ""
+		fileCandidate.DirectHTTP = true
 	}
 	file := s.callVideoUpstream(ctx, http.MethodGet, resourceURL, incomingHeaders, nil, fileCandidate)
 	return normalizedVideoUpstreamResponse(file.status, file.body, file.headers, file.err)
@@ -330,6 +331,9 @@ func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, i
 		req.Header.Set("OpenAI-Project", candidate.ProjectID)
 	}
 	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
+	if candidate.DirectHTTP {
+		client = s.app.HTTPDirect
+	}
 	if err != nil {
 		return videoUpstreamResult{err: err}
 	}

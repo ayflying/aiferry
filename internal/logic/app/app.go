@@ -19,10 +19,11 @@ import (
 )
 
 type sApp struct {
-	Config  config.App
-	Redis   *redis.Client
-	Secrets *secret.Service
-	HTTP    *http.Client
+	Config     config.App
+	Redis      *redis.Client
+	Secrets    *secret.Service
+	HTTP       *http.Client
+	HTTPDirect *http.Client
 }
 
 func New(ctx context.Context, cfg config.App) (*sApp, error) {
@@ -54,11 +55,14 @@ func New(ctx context.Context, cfg config.App) (*sApp, error) {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 180 * time.Second,
 	}
+	directTransport := transport.Clone()
+	directTransport.Proxy = nil
 	return &sApp{
-		Config:  cfg,
-		Redis:   redisClient,
-		Secrets: secrets,
-		HTTP:    &http.Client{Transport: transport},
+		Config:     cfg,
+		Redis:      redisClient,
+		Secrets:    secrets,
+		HTTP:       &http.Client{Transport: transport},
+		HTTPDirect: &http.Client{Transport: directTransport},
 	}, nil
 }
 
