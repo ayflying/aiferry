@@ -68,16 +68,37 @@ func newSensitiveDataRestorer() (*sensitiveDataRestorer, error) {
 	if _, err := rand.Read(seed); err != nil {
 		return nil, gerror.Wrap(err, "create sensitive data placeholder")
 	}
+	requestID := strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return 'a' + (r - '0')
+		}
+		return r
+	}, hex.EncodeToString(seed))
 	return &sensitiveDataRestorer{
-		requestID:    hex.EncodeToString(seed),
+		requestID:    requestID,
 		replacements: make(map[string]string),
 	}, nil
+}
+
+func alphabeticID(value uint64) string {
+	if value == 0 {
+		return "a"
+	}
+	var reversed []byte
+	for value > 0 {
+		reversed = append(reversed, byte('a'+value%26))
+		value /= 26
+	}
+	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+		reversed[left], reversed[right] = reversed[right], reversed[left]
+	}
+	return string(reversed)
 }
 
 func (r *sensitiveDataRestorer) redact(value string) string {
 	r.nextID++
 	// Keep the value opaque without syntax that upstream filters may treat specially.
-	placeholder := fmt.Sprintf("aiferry_ref_%s_%d_", r.requestID, r.nextID)
+	placeholder := fmt.Sprintf("aiferry_ref_%s_%s_", r.requestID, alphabeticID(r.nextID))
 	r.replacements[placeholder] = value
 	return placeholder
 }
