@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	adminapi "github.com/yunloli/aiferry/api/admin"
 )
 
 func TestRedactGatewayRequestRemovesGatewayDomainBeforeForwarding(t *testing.T) {
@@ -15,7 +17,7 @@ func TestRedactGatewayRequestRemovesGatewayDomainBeforeForwarding(t *testing.T) 
 		"X-Forwarded-Host": []string{"gateway.example"},
 	}
 
-	redactedBody, redactedHeaders := redactGatewayRequest(body, headers, "gateway.example:8443")
+	redactedBody, redactedHeaders := redactGatewayRequest(body, headers, "gateway.example:8443", adminapi.SensitiveWordSettingsInput{SensitiveDataRedactionEnabled: true})
 	if strings.Contains(strings.ToLower(string(redactedBody)), "gateway.example") {
 		t.Fatalf("gateway host remained in body: %s", redactedBody)
 	}
@@ -47,8 +49,24 @@ func TestRedactGatewayRequestRemovesGatewayDomainBeforeForwarding(t *testing.T) 
 
 func TestRedactGatewayRequestLeavesUnrelatedTextUntouched(t *testing.T) {
 	body := []byte(`{"input":"https://other.example/path"}`)
-	redacted, _ := redactGatewayRequest(body, http.Header{}, "gateway.example")
+	redacted, _ := redactGatewayRequest(body, http.Header{}, "gateway.example", adminapi.SensitiveWordSettingsInput{SensitiveDataRedactionEnabled: true})
 	if string(redacted) != string(body) {
 		t.Fatalf("unrelated content changed: %s", redacted)
+	}
+}
+
+func TestRedactGatewayRequestRespectsDisabledDataRedaction(t *testing.T) {
+	body := []byte(`{"input":"https://gateway.example/path"}`)
+	headers := http.Header{"User-Agent": []string{"client at gateway.example"}, "Origin": []string{"https://gateway.example"}}
+
+	forwardedBody, forwardedHeaders := redactGatewayRequest(body, headers, "gateway.example", adminapi.SensitiveWordSettingsInput{SensitiveDataRedactionEnabled: false})
+	if string(forwardedBody) != string(body) {
+		t.Fatalf("gateway host was redacted while disabled: %s", forwardedBody)
+	}
+	if forwardedHeaders.Get("User-Agent") != headers.Get("User-Agent") || forwardedHeaders.Get("Origin") != headers.Get("Origin") {
+		t.Fatalf("headers changed while disabled: %#v", forwardedHeaders)
+	}
+	if forwardedHeaders.Get("User-Agent") == "" {
+		t.Fatal("forwarded headers must not alias the input headers")
 	}
 }

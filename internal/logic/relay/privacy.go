@@ -6,11 +6,16 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	adminapi "github.com/yunloli/aiferry/api/admin"
 )
 
 const redactedGatewayHost = "redacted.invalid"
 
-func redactGatewayRequest(body []byte, headers http.Header, gatewayHost string) ([]byte, http.Header) {
+func redactGatewayRequest(body []byte, headers http.Header, gatewayHost string, settings adminapi.SensitiveWordSettingsInput) ([]byte, http.Header) {
+	if !settings.SensitiveDataRedactionEnabled {
+		return body, headers.Clone()
+	}
 	return []byte(redactGatewayText(string(body), gatewayHost)), redactGatewayHeaders(headers, gatewayHost)
 }
 

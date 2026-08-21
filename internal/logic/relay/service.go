@@ -147,12 +147,12 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	if !gjson.ValidBytes(body) {
 		return gerror.New("request body must be valid JSON")
 	}
-	body, incomingHeaders = redactGatewayRequest(body, incomingHeaders, gatewayHost)
-	if err := s.resilience.CheckSensitivePrompt(ctx, endpoint, body); err != nil {
-		return err
-	}
 	securitySettings, err := s.resilience.GetSensitiveWordSettings(ctx)
 	if err != nil {
+		return err
+	}
+	body, incomingHeaders = redactGatewayRequest(body, incomingHeaders, gatewayHost, securitySettings)
+	if err := s.resilience.CheckSensitivePrompt(ctx, endpoint, body); err != nil {
 		return err
 	}
 	body, sensitiveDataRestorer, err := redactSensitiveDataWithRestore(body, securitySettings)
