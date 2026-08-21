@@ -32,6 +32,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/embeddings", c.proxy("/embeddings"))
 	group.POST("/images/generations", c.proxy("/images/generations"))
 	group.POST("/video/generations", c.videoGenerations)
+	group.GET("/video/generations/{task_id}/content", c.videoTaskContent)
 	group.GET("/video/generations/{task_id}", c.videoTask)
 	group.POST("/videos", c.videos)
 	group.GET("/videos/{video_id}", c.video)
@@ -127,6 +128,17 @@ func (c *Controller) videoGenerations(r *ghttp.Request) {
 func (c *Controller) videoTask(r *ghttp.Request) {
 	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
 		status, response, headers, err := c.relay.GetVideoTask(r.Context(), r.Header, r.GetRouter("task_id").String(), key)
+		if err != nil {
+			c.writeRelayError(r, err)
+			return
+		}
+		writeVideoResponse(r, status, response, headers)
+	})
+}
+
+func (c *Controller) videoTaskContent(r *ghttp.Request) {
+	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
+		status, response, headers, err := c.relay.GetVideoTaskContent(r.Context(), r.Header, r.GetRouter("task_id").String(), key)
 		if err != nil {
 			c.writeRelayError(r, err)
 			return

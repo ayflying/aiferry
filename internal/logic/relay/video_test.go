@@ -6,6 +6,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"testing"
+
+	"github.com/tidwall/gjson"
 )
 
 func TestPrepareVideoRequestBodyMapsLegacyPromptWithoutChangingModel(t *testing.T) {
@@ -99,6 +101,39 @@ func TestVideoResourceURL(t *testing.T) {
 	}
 	if got := videoResourceURL(candidate, "video_123", true); got != "https://gateway.example/v1/videos/video_123/content" {
 		t.Fatalf("content URL = %q", got)
+	}
+}
+
+func TestMiniMaxVideoContentPathsAndResponseURLRewrite(t *testing.T) {
+	if got := videoContentPath("task_123", legacyVideoAPI); got != "/v1/video/generations/task_123/content" {
+		t.Fatalf("legacy content path = %q", got)
+	}
+	if got := videoContentPath("video_123", openAIVideoAPI); got != "/v1/videos/video_123/content" {
+		t.Fatalf("OpenAI content path = %q", got)
+	}
+	body := rewriteMiniMaxVideoResponseURL([]byte(`{"status":"completed","url":"/resources/gateway/result.mp4"}`), "/v1/video/generations/task_123/content")
+	if got := gjson.GetBytes(body, "url").String(); got != "/v1/video/generations/task_123/content" {
+		t.Fatalf("rewritten URL = %q", got)
+	}
+}
+
+func TestResolveMiniMaxVideoResourceURL(t *testing.T) {
+	resource, err := resolveMiniMaxVideoResourceURL("https://gateway.example/v1", "/resources/gateway/result.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resource != "https://gateway.example/resources/gateway/result.mp4" {
+		t.Fatalf("relative resource URL = %q", resource)
+	}
+	resource, err = resolveMiniMaxVideoResourceURL("https://gateway.example/v1", "https://cdn.example/result.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resource != "https://cdn.example/result.mp4" {
+		t.Fatalf("absolute resource URL = %q", resource)
+	}
+	if _, err = resolveMiniMaxVideoResourceURL("https://gateway.example/v1", "file:///tmp/result.mp4"); err == nil {
+		t.Fatal("expected non-HTTP resource URL to be rejected")
 	}
 }
 

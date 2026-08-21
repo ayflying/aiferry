@@ -16,7 +16,7 @@ func (s *sRelay) writeBufferedResponse(writer http.ResponseWriter, status int, b
 }
 
 func copyRequestHeaders(target, source http.Header) {
-	for _, name := range []string{"Accept", "Content-Type", "User-Agent", "OpenAI-Beta", "Idempotency-Key"} {
+	for _, name := range []string{"Accept", "Content-Type", "User-Agent", "OpenAI-Beta", "Idempotency-Key", "Range"} {
 		for _, value := range source.Values(name) {
 			target.Add(name, value)
 		}
