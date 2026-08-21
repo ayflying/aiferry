@@ -33,10 +33,11 @@ const (
 )
 
 type videoTaskRoute struct {
-	UserID    uint64       `json:"userId"`
-	APIKeyID  uint64       `json:"apiKeyId"`
-	Mode      videoAPIMode `json:"mode"`
-	Candidate Candidate    `json:"candidate"`
+	UserID      uint64       `json:"userId"`
+	APIKeyID    uint64       `json:"apiKeyId"`
+	Mode        videoAPIMode `json:"mode"`
+	Candidate   Candidate    `json:"candidate"`
+	ResourceURL string       `json:"resourceUrl,omitempty"`
 }
 
 func (s *sRelay) CreateVideo(ctx context.Context, incomingHeaders http.Header, body []byte, key apikey.AuthKey) (int, []byte, http.Header, error) {
@@ -86,7 +87,7 @@ func (s *sRelay) createVideo(ctx context.Context, incomingHeaders http.Header, b
 		if videoID == "" {
 			return 0, nil, nil, gerror.New("video upstream response did not include a task or video identifier")
 		}
-		if err = s.storeVideoTaskRoute(ctx, videoID, key, mode, candidate); err != nil {
+		if err = s.storeVideoTaskRoute(ctx, videoID, key, mode, candidate, ""); err != nil {
 			return 0, nil, nil, err
 		}
 		return result.status, result.body, result.headers, nil
@@ -109,7 +110,14 @@ func (s *sRelay) GetVideoTask(ctx context.Context, incomingHeaders http.Header, 
 		return s.getOpenAIVideo(ctx, incomingHeaders, taskID, route)
 	}
 	if route.Candidate.ChannelType == "minimax" {
-		return s.queryMiniMaxVideo(ctx, incomingHeaders, taskID, route.Candidate, videoContentPath(taskID, route.Mode))
+		status, body, headers, err, resourceURL := s.queryMiniMaxVideo(ctx, incomingHeaders, taskID, route.Candidate, videoContentPath(taskID, route.Mode))
+		if err == nil && status >= http.StatusOK && status < http.StatusMultipleChoices && resourceURL != "" {
+			route.ResourceURL = resourceURL
+			if storeErr := s.storeVideoTaskRoute(ctx, taskID, key, route.Mode, route.Candidate, resourceURL); storeErr != nil {
+				return 0, nil, nil, storeErr
+			}
+		}
+		return status, body, headers, err
 	}
 	result := s.callVideoUpstream(ctx, http.MethodGet, strings.TrimRight(route.Candidate.BaseURL, "/")+"/video/generations/"+taskID, incomingHeaders, nil, route.Candidate)
 	return normalizedVideoUpstreamResponse(result.status, result.body, result.headers, result.err)
@@ -124,7 +132,7 @@ func (s *sRelay) GetVideoTaskContent(ctx context.Context, incomingHeaders http.H
 		return s.getOpenAIVideoContent(ctx, incomingHeaders, taskID, route)
 	}
 	if route.Candidate.ChannelType == "minimax" {
-		return s.downloadMiniMaxVideo(ctx, incomingHeaders, taskID, route.Candidate)
+		return s.downloadMiniMaxVideo(ctx, incomingHeaders, taskID, route.Candidate, route.ResourceURL)
 	}
 	result := s.callVideoUpstream(ctx, http.MethodGet, strings.TrimRight(route.Candidate.BaseURL, "/")+"/video/generations/"+taskID+"/content", incomingHeaders, nil, route.Candidate)
 	return normalizedVideoUpstreamResponse(result.status, result.body, result.headers, result.err)
@@ -148,7 +156,7 @@ func (s *sRelay) GetOpenAIVideoContent(ctx context.Context, incomingHeaders http
 
 func (s *sRelay) getOpenAIVideoContent(ctx context.Context, incomingHeaders http.Header, videoID string, route videoTaskRoute) (int, []byte, http.Header, error) {
 	if route.Candidate.ChannelType == "minimax" {
-		return s.downloadMiniMaxVideo(ctx, incomingHeaders, videoID, route.Candidate)
+		return s.downloadMiniMaxVideo(ctx, incomingHeaders, videoID, route.Candidate, route.ResourceURL)
 	}
 	result := s.callVideoUpstream(ctx, http.MethodGet, videoResourceURL(route.Candidate, videoID, true), incomingHeaders, nil, route.Candidate)
 	return normalizedVideoUpstreamResponse(result.status, result.body, result.headers, result.err)
@@ -156,7 +164,8 @@ func (s *sRelay) getOpenAIVideoContent(ctx context.Context, incomingHeaders http
 
 func (s *sRelay) getOpenAIVideo(ctx context.Context, incomingHeaders http.Header, videoID string, route videoTaskRoute) (int, []byte, http.Header, error) {
 	if route.Candidate.ChannelType == "minimax" {
-		return s.queryMiniMaxVideo(ctx, incomingHeaders, videoID, route.Candidate, videoContentPath(videoID, openAIVideoAPI))
+		status, body, headers, err, _ := s.queryMiniMaxVideo(ctx, incomingHeaders, videoID, route.Candidate, videoContentPath(videoID, openAIVideoAPI))
+		return status, body, headers, err
 	}
 	result := s.callVideoUpstream(ctx, http.MethodGet, videoResourceURL(route.Candidate, videoID, false), incomingHeaders, nil, route.Candidate)
 	return normalizedVideoUpstreamResponse(result.status, result.body, result.headers, result.err)
@@ -192,24 +201,31 @@ func (s *sRelay) createVideoUpstream(ctx context.Context, incomingHeaders http.H
 	return s.callVideoUpstream(ctx, http.MethodPost, videoCreateURL(candidate, mode), incomingHeaders, payload, candidate)
 }
 
-func (s *sRelay) queryMiniMaxVideo(ctx context.Context, incomingHeaders http.Header, taskID string, candidate Candidate, contentPath string) (int, []byte, http.Header, error) {
+func (s *sRelay) queryMiniMaxVideo(ctx context.Context, incomingHeaders http.Header, taskID string, candidate Candidate, contentPath string) (int, []byte, http.Header, error, string) {
 	result := s.callVideoUpstream(ctx, http.MethodGet, miniMaxVideoURL(candidate.BaseURL, "/v2/query/video_generation/"+taskID), incomingHeaders, nil, candidate)
 	status, body, headers, err := normalizedVideoUpstreamResponse(result.status, result.body, result.headers, result.err)
 	if err != nil || status < http.StatusOK || status >= http.StatusMultipleChoices {
-		return status, body, headers, err
+		return status, body, headers, err, ""
 	}
-	return status, rewriteMiniMaxVideoResponseURL(body, contentPath), headers, nil
+	resourceURL, err := resolveMiniMaxVideoResourceURL(candidate.BaseURL, miniMaxVideoResponseURL(body))
+	if err != nil {
+		return 0, nil, nil, err, ""
+	}
+	return status, rewriteMiniMaxVideoResponseURL(body, contentPath), headers, nil, resourceURL
 }
 
-func (s *sRelay) downloadMiniMaxVideo(ctx context.Context, incomingHeaders http.Header, taskID string, candidate Candidate) (int, []byte, http.Header, error) {
-	result := s.callVideoUpstream(ctx, http.MethodGet, miniMaxVideoURL(candidate.BaseURL, "/v2/query/video_generation/"+taskID), incomingHeaders, nil, candidate)
-	status, body, headers, err := normalizedVideoUpstreamResponse(result.status, result.body, result.headers, result.err)
-	if err != nil || status < http.StatusOK || status >= http.StatusMultipleChoices {
-		return status, body, headers, err
-	}
-	resourceURL, err := resolveMiniMaxVideoResourceURL(candidate.BaseURL, gjson.GetBytes(body, "url").String())
-	if err != nil {
-		return 0, nil, nil, err
+func (s *sRelay) downloadMiniMaxVideo(ctx context.Context, incomingHeaders http.Header, taskID string, candidate Candidate, resourceURL string) (int, []byte, http.Header, error) {
+	if strings.TrimSpace(resourceURL) == "" {
+		result := s.callVideoUpstream(ctx, http.MethodGet, miniMaxVideoURL(candidate.BaseURL, "/v2/query/video_generation/"+taskID), incomingHeaders, nil, candidate)
+		status, body, headers, err := normalizedVideoUpstreamResponse(result.status, result.body, result.headers, result.err)
+		if err != nil || status < http.StatusOK || status >= http.StatusMultipleChoices {
+			return status, body, headers, err
+		}
+		var resolveErr error
+		resourceURL, resolveErr = resolveMiniMaxVideoResourceURL(candidate.BaseURL, miniMaxVideoResponseURL(body))
+		if resolveErr != nil {
+			return 0, nil, nil, resolveErr
+		}
 	}
 	if resourceURL == "" {
 		return 0, nil, nil, gerror.New("video is not completed or does not include a downloadable file")
@@ -224,8 +240,17 @@ func (s *sRelay) downloadMiniMaxVideo(ctx context.Context, incomingHeaders http.
 	return normalizedVideoUpstreamResponse(file.status, file.body, file.headers, file.err)
 }
 
+func miniMaxVideoResponseURL(body []byte) string {
+	for _, path := range []string{"url", "task.content.url", "data.url", "data.task.content.url"} {
+		if value := strings.TrimSpace(gjson.GetBytes(body, path).String()); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func rewriteMiniMaxVideoResponseURL(body []byte, contentPath string) []byte {
-	if !gjson.ValidBytes(body) || strings.TrimSpace(gjson.GetBytes(body, "url").String()) == "" {
+	if !gjson.ValidBytes(body) || miniMaxVideoResponseURL(body) == "" {
 		return body
 	}
 	var payload map[string]any
@@ -422,8 +447,8 @@ func videoResponseID(body []byte, mode videoAPIMode) string {
 	return id
 }
 
-func (s *sRelay) storeVideoTaskRoute(ctx context.Context, taskID string, key apikey.AuthKey, mode videoAPIMode, candidate Candidate) error {
-	encoded, err := json.Marshal(videoTaskRoute{UserID: key.UserId, APIKeyID: key.Id, Mode: mode, Candidate: candidate})
+func (s *sRelay) storeVideoTaskRoute(ctx context.Context, taskID string, key apikey.AuthKey, mode videoAPIMode, candidate Candidate, resourceURL string) error {
+	encoded, err := json.Marshal(videoTaskRoute{UserID: key.UserId, APIKeyID: key.Id, Mode: mode, Candidate: candidate, ResourceURL: resourceURL})
 	if err != nil {
 		return gerror.Wrap(err, "encode video task route")
 	}
