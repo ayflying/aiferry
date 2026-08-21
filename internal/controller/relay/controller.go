@@ -120,10 +120,7 @@ func (c *Controller) videoGenerations(r *ghttp.Request) {
 			c.writeRelayError(r, err)
 			return
 		}
-		copyUpstreamResponseHeaders(r.Response.Header(), headers)
-		r.Response.Status = status
-		r.Response.Write(response)
-		r.Exit()
+		writeVideoResponse(r, status, response, headers)
 	})
 }
 
@@ -134,10 +131,7 @@ func (c *Controller) videoTask(r *ghttp.Request) {
 			c.writeRelayError(r, err)
 			return
 		}
-		copyUpstreamResponseHeaders(r.Response.Header(), headers)
-		r.Response.Status = status
-		r.Response.Write(response)
-		r.Exit()
+		writeVideoResponse(r, status, response, headers)
 	})
 }
 
@@ -153,10 +147,7 @@ func (c *Controller) videos(r *ghttp.Request) {
 			c.writeRelayError(r, err)
 			return
 		}
-		copyUpstreamResponseHeaders(r.Response.Header(), headers)
-		r.Response.Status = status
-		r.Response.Write(response)
-		r.Exit()
+		writeVideoResponse(r, status, response, headers)
 	})
 }
 
@@ -167,10 +158,7 @@ func (c *Controller) video(r *ghttp.Request) {
 			c.writeRelayError(r, err)
 			return
 		}
-		copyUpstreamResponseHeaders(r.Response.Header(), headers)
-		r.Response.Status = status
-		r.Response.Write(response)
-		r.Exit()
+		writeVideoResponse(r, status, response, headers)
 	})
 }
 
@@ -181,10 +169,7 @@ func (c *Controller) videoContent(r *ghttp.Request) {
 			c.writeRelayError(r, err)
 			return
 		}
-		copyUpstreamResponseHeaders(r.Response.Header(), headers)
-		r.Response.Status = status
-		r.Response.Write(response)
-		r.Exit()
+		writeVideoResponse(r, status, response, headers)
 	})
 }
 
@@ -259,6 +244,29 @@ func (c *Controller) authenticate(r *ghttp.Request) (apikey.AuthKey, bool) {
 		return apikey.AuthKey{}, false
 	}
 	return key, true
+}
+
+func writeVideoResponse(r *ghttp.Request, status int, body []byte, headers http.Header) {
+	body, headers = normalizedVideoClientResponse(status, body, headers)
+	copyUpstreamResponseHeaders(r.Response.Header(), headers)
+	r.Response.Status = status
+	r.Response.Write(body)
+	r.Exit()
+}
+
+func normalizedVideoClientResponse(status int, body []byte, headers http.Header) ([]byte, http.Header) {
+	if status < http.StatusMultipleChoices || len(body) > 0 {
+		return body, headers
+	}
+	if headers == nil {
+		headers = make(http.Header)
+	} else {
+		headers = headers.Clone()
+	}
+	headers.Set("Content-Type", "application/json")
+	headers.Set("X-AiFerry-Upstream-Status", strconv.Itoa(status))
+	message := "Upstream video provider returned HTTP " + strconv.Itoa(status) + " without an error response body"
+	return relaysvc.OpenAIErrorResponse("upstream_error", message), headers
 }
 
 func copyUpstreamResponseHeaders(target, source http.Header) {

@@ -44,6 +44,11 @@ func hopByHopHeader(name string) bool {
 }
 
 func openAIError(kind, message string) []byte {
+	return OpenAIErrorResponse(kind, message)
+}
+
+// OpenAIErrorResponse creates the shared OpenAI-compatible error payload for controller fallbacks.
+func OpenAIErrorResponse(kind, message string) []byte {
 	payload, _ := json.Marshal(map[string]any{"error": map[string]any{"type": kind, "message": message}})
 	return payload
 }

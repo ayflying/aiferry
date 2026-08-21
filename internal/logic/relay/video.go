@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/tidwall/gjson"
 
 	"github.com/yunloli/aiferry/internal/logic/apikey"
@@ -214,7 +215,11 @@ func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, i
 	if len(responseBody) > maxVideoRequestBody {
 		return videoUpstreamResult{status: resp.StatusCode, err: gerror.New("video upstream response exceeds 64 MiB")}
 	}
-	return videoUpstreamResult{status: resp.StatusCode, body: responseBody, headers: resp.Header.Clone()}
+	responseHeaders := resp.Header.Clone()
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		g.Log().Warningf(ctx, "video upstream failed channel_id=%d credential_id=%d status=%d response_bytes=%d upstream_trace_id=%q", candidate.ChannelID, candidate.ChannelCredentialID, resp.StatusCode, len(responseBody), responseHeaders.Get("Trace-Id"))
+	}
+	return videoUpstreamResult{status: resp.StatusCode, body: responseBody, headers: responseHeaders}
 }
 
 func prepareVideoRequestBody(original []byte, contentType, channelType string) ([]byte, error) {
