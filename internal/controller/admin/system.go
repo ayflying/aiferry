@@ -3,7 +3,8 @@ package admin
 import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
-	adminapi "github.com/yunloli/aiferry/api/admin"
+	adminapi 	"github.com/yunloli/aiferry/api/admin"
+	"github.com/yunloli/aiferry/internal/buildinfo"
 	"github.com/yunloli/aiferry/internal/logic/system"
 )
 
@@ -38,6 +39,8 @@ func (c *Controller) systemInfo(r *ghttp.Request) {
 		"database":   "mysql",
 		"cache":      "redis",
 		"apiVersion": "v1",
+		"version":    buildinfo.Version,
+		"revision":   buildinfo.Revision,
 	}, nil)
 }
 
