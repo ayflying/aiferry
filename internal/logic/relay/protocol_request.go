@@ -79,6 +79,30 @@ func responsesInputToChat(value any) []any {
 	return result
 }
 
+func chatToolCallsToResponses(value any) []any {
+	result := make([]any, 0)
+	for _, itemValue := range arrayValue(value) {
+		item, ok := objectValue(itemValue)
+		if !ok || stringValue(item["type"]) != "function" {
+			continue
+		}
+		function, ok := objectValue(item["function"])
+		if !ok {
+			continue
+		}
+		callID := stringValue(item["id"])
+		result = append(result, map[string]any{
+			"type":      "function_call",
+			"id":        callID,
+			"call_id":   callID,
+			"name":      stringValue(function["name"]),
+			"arguments": stringValue(function["arguments"]),
+			"status":    "completed",
+		})
+	}
+	return result
+}
+
 func chatContentToResponses(value any) any {
 	if _, ok := value.(string); ok {
 		return value

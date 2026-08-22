@@ -247,6 +247,10 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		if recordErr := s.record(ctx, requestID, key, lastCandidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, last); recordErr != nil {
 			g.Log().Errorf(ctx, "record failed request %s: %v", requestID, recordErr)
 		}
+		if !last.wroteBytes && last.status >= http.StatusBadRequest && last.status < http.StatusInternalServerError && !retryableStatusForRules(last.status, settings.RetryStatusCodes) {
+			s.writeBufferedResponse(writer, last.status, sensitiveDataRestorer.restoreBufferedResponse(last.body), last.headers)
+			return nil
+		}
 	} else {
 		last = failedAttemptResult(last, "All eligible channels failed")
 	}

@@ -40,6 +40,37 @@ func TestChatRequestToResponses(t *testing.T) {
 	}
 }
 
+func TestChatToolContinuationToResponsesIncludesFunctionCallItems(t *testing.T) {
+	body, err := chatRequestToResponses([]byte(`{
+  "model":"gpt-test",
+  "messages":[
+    {"role":"assistant","content":null,"tool_calls":[{"id":"call_lookup","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+    {"role":"tool","tool_call_id":"call_lookup","content":"Sunny"}
+  ]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(body, "input.0.type").String(); actual != "function_call" {
+		t.Fatalf("function call type = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.0.id").String(); actual != "call_lookup" {
+		t.Fatalf("function call id = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.0.call_id").String(); actual != "call_lookup" {
+		t.Fatalf("function call call_id = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.0.name").String(); actual != "lookup" {
+		t.Fatalf("function call name = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.1.type").String(); actual != "function_call_output" {
+		t.Fatalf("function output type = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.1.call_id").String(); actual != "call_lookup" {
+		t.Fatalf("function output call_id = %q", actual)
+	}
+}
+
 func TestGPTChatPrefersResponsesAndKeepsCacheOptions(t *testing.T) {
 	plan := preferredProtocolPlan(chatCompletionsEndpoint, "GPT-5.6-terra")
 	if plan.upstreamEndpoint != responsesEndpoint || plan.conversion != chatToResponsesConversion {
