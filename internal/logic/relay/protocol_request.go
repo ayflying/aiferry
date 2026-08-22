@@ -129,6 +129,31 @@ func chatContentToResponses(value any) any {
 	return parts
 }
 
+func chatAssistantContentToResponses(value any) []any {
+	result := make([]any, 0)
+	if text, ok := value.(string); ok {
+		return append(result, map[string]any{"type": "output_text", "text": text})
+	}
+	for _, itemValue := range arrayValue(value) {
+		item, ok := objectValue(itemValue)
+		if !ok {
+			continue
+		}
+		switch stringValue(item["type"]) {
+		case "text", "input_text", "output_text":
+			converted := map[string]any{"type": "output_text", "text": stringValue(item["text"])}
+			copyPromptCacheBreakpoint(item, converted)
+			result = append(result, converted)
+		case "refusal":
+			refusal := stringOr(item["refusal"], stringValue(item["text"]))
+			if refusal != "" {
+				result = append(result, map[string]any{"type": "refusal", "refusal": refusal})
+			}
+		}
+	}
+	return result
+}
+
 func responsesContentToChat(value any) any {
 	if _, ok := value.(string); ok {
 		return value

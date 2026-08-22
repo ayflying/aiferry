@@ -44,30 +44,55 @@ func TestChatToolContinuationToResponsesIncludesFunctionCallItems(t *testing.T) 
 	body, err := chatRequestToResponses([]byte(`{
   "model":"gpt-test",
   "messages":[
-    {"role":"assistant","content":null,"tool_calls":[{"id":"call_lookup","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+    {"role":"assistant","content":[{"type":"text","text":"Let me check."}],"tool_calls":[{"id":"call_lookup","type":"function","function":{"name":"lookup","arguments":"{}"}}]},
     {"role":"tool","tool_call_id":"call_lookup","content":"Sunny"}
   ]
 }`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if actual := gjson.GetBytes(body, "input.0.type").String(); actual != "function_call" {
+	if actual := gjson.GetBytes(body, "input.0.content.0.type").String(); actual != "output_text" {
+		t.Fatalf("assistant content type = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.1.type").String(); actual != "function_call" {
 		t.Fatalf("function call type = %q", actual)
 	}
-	if actual := gjson.GetBytes(body, "input.0.id").String(); actual != "call_lookup" {
+	if actual := gjson.GetBytes(body, "input.1.id").String(); actual != "call_lookup" {
 		t.Fatalf("function call id = %q", actual)
 	}
-	if actual := gjson.GetBytes(body, "input.0.call_id").String(); actual != "call_lookup" {
+	if actual := gjson.GetBytes(body, "input.1.call_id").String(); actual != "call_lookup" {
 		t.Fatalf("function call call_id = %q", actual)
 	}
-	if actual := gjson.GetBytes(body, "input.0.name").String(); actual != "lookup" {
+	if actual := gjson.GetBytes(body, "input.1.name").String(); actual != "lookup" {
 		t.Fatalf("function call name = %q", actual)
 	}
-	if actual := gjson.GetBytes(body, "input.1.type").String(); actual != "function_call_output" {
+	if actual := gjson.GetBytes(body, "input.2.type").String(); actual != "function_call_output" {
 		t.Fatalf("function output type = %q", actual)
 	}
-	if actual := gjson.GetBytes(body, "input.1.call_id").String(); actual != "call_lookup" {
+	if actual := gjson.GetBytes(body, "input.2.call_id").String(); actual != "call_lookup" {
 		t.Fatalf("function output call_id = %q", actual)
+	}
+}
+
+func TestChatAssistantContentToResponsesUsesSupportedTypes(t *testing.T) {
+	body, err := chatRequestToResponses([]byte(`{
+  "model":"gpt-test",
+  "messages":[
+    {"role":"assistant","content":"Answer"},
+    {"role":"assistant","content":null,"refusal":"I cannot help with that."}
+  ]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(body, "input.0.content.0.type").String(); actual != "output_text" {
+		t.Fatalf("assistant text type = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.1.content.0.type").String(); actual != "refusal" {
+		t.Fatalf("assistant refusal type = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.1.content.0.refusal").String(); actual != "I cannot help with that." {
+		t.Fatalf("assistant refusal = %q", actual)
 	}
 }
 

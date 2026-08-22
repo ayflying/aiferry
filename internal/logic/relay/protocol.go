@@ -148,13 +148,19 @@ func chatRequestToResponses(body []byte) ([]byte, error) {
 			input = append(input, map[string]any{"type": "function_call_output", "call_id": stringValue(message["tool_call_id"]), "output": content})
 			continue
 		case "assistant":
+			assistantContent := chatAssistantContentToResponses(content)
+			if refusal := stringValue(message["refusal"]); refusal != "" {
+				assistantContent = append(assistantContent, map[string]any{"type": "refusal", "refusal": refusal})
+			}
 			if toolCalls := chatToolCallsToResponses(message["tool_calls"]); len(toolCalls) > 0 {
-				if stringValue(content) != "" || len(arrayValue(content)) > 0 {
-					input = append(input, map[string]any{"role": role, "content": chatContentToResponses(content)})
+				if len(assistantContent) > 0 {
+					input = append(input, map[string]any{"role": role, "content": assistantContent})
 				}
 				input = append(input, toolCalls...)
 				continue
 			}
+			input = append(input, map[string]any{"role": role, "content": assistantContent})
+			continue
 		}
 		if role == "" {
 			role = "user"
