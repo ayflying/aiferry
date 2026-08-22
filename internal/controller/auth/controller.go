@@ -40,6 +40,8 @@ func (c *Controller) RegisterProtected(group *ghttp.RouterGroup) {
 	group.POST("/logout", c.logout)
 }
 
+// Callback 接收 Casdoor 回调。错误统一回到登录页，但服务端日志保留具体阶段，
+// 这样用户不会看到敏感的上游 token 或内部数据库信息，运维仍能定位失败环节。
 func (c *Controller) Callback(r *ghttp.Request) {
 	_, token, returnTo, err := c.auth.CompleteLogin(
 		r.Context(),

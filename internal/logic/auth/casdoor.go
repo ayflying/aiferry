@@ -12,6 +12,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
+// exchangeCode 使用一次性 authorization code 向 Casdoor 换取 access token。
+// client_secret 只在后端请求中使用，不能下发到前端或写入浏览器 Cookie。
 func (s *sAuth) exchangeCode(ctx context.Context, code, callbackURL string) (string, error) {
 	payload, err := json.Marshal(map[string]string{
 		"grant_type":    "authorization_code",
@@ -51,6 +53,8 @@ func (s *sAuth) exchangeCode(ctx context.Context, code, callbackURL string) (str
 	return token.AccessToken, nil
 }
 
+// getAccount 使用 access token 拉取 Casdoor 当前账户资料。
+// 同时传递查询参数和 Bearer 头以兼容不同 Casdoor 版本，但不会记录 token 或完整响应。
 func (s *sAuth) getAccount(ctx context.Context, accessToken string) (casdoorAccount, error) {
 	endpoint, err := url.Parse(s.app.Config.CasdoorEndpoint + "/api/get-account")
 	if err != nil {

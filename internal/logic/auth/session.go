@@ -16,6 +16,8 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
+// Authenticate 从 Redis 读取会话，并重新查询本地用户状态。
+// 会话只缓存身份快照，权限和停用状态以数据库当前值为准，避免用户被停用后仍可使用旧会话。
 func (s *sAuth) Authenticate(ctx context.Context, token string) (SessionUser, error) {
 	if token == "" {
 		return SessionUser{}, ErrUnauthorized
@@ -51,6 +53,8 @@ func (s *sAuth) Logout(ctx context.Context, token string) error {
 	return gerror.Wrap(s.app.Redis.Del(ctx, sessionKey(token)).Err(), "delete login session")
 }
 
+// RequireUser 是普通登录接口的认证中间件：成功后把 SessionUser 放入请求上下文，
+// 后续控制器通过 CurrentUser 读取，避免重复解析 Cookie 或访问 Redis。
 func (s *sAuth) RequireUser(r *ghttp.Request) {
 	token := r.Cookie.Get(sessionCookieName).String()
 	user, err := s.Authenticate(r.Context(), token)
@@ -79,6 +83,8 @@ func (s *sAuth) RequireAdmin(r *ghttp.Request) {
 	r.Middleware.Next()
 }
 
+// RequireCurrentAdmin 保护管理写操作。它不影响 Casdoor 用户完成登录，
+// 但仍保留本地管理员角色边界，防止“允许登录”被误解为“允许修改全局配置”。
 func (s *sAuth) RequireCurrentAdmin(r *ghttp.Request) {
 	user, ok := CurrentUser(r.Context())
 	if !ok {

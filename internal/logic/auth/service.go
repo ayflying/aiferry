@@ -17,10 +17,14 @@ import (
 )
 
 const (
+	// sessionCookieName 保存登录成功后签发的随机会话令牌；令牌本身不包含用户资料。
 	sessionCookieName = "aiferry_session"
-	stateCookieName   = "aiferry_oauth_state"
-	stateTTL          = 10 * time.Minute
-	maxAuthBodySize   = 2 << 20
+	// stateCookieName 与 Redis 中的 OAuth state 双重校验，防止回调被伪造或串用。
+	stateCookieName = "aiferry_oauth_state"
+	// stateTTL 限制 OAuth 登录流程的有效窗口，过期后必须重新发起登录。
+	stateTTL = 10 * time.Minute
+	// maxAuthBodySize 限制 Casdoor 响应体，避免异常上游响应占用过多内存。
+	maxAuthBodySize = 2 << 20
 )
 
 var (
@@ -94,6 +98,8 @@ func (s *sAuth) Config(ctx context.Context) (authapi.ConfigView, error) {
 	return authapi.ConfigView{Enabled: true, Provider: "Casdoor", LoginPath: "/api/auth/login", TimeZone: settings.TimeZone}, nil
 }
 
+// BeginLogin 创建一次性 OAuth 登录状态，并生成 Casdoor 授权地址。
+// callbackURL 会写入 Redis，回调时使用同一地址交换 code，避免代理环境下地址被篡改。
 func (s *sAuth) BeginLogin(ctx context.Context, callbackURL, returnTo string) (string, string, error) {
 	state, err := randomToken(32)
 	if err != nil {
@@ -116,7 +122,11 @@ func (s *sAuth) BeginLogin(ctx context.Context, callbackURL, returnTo string) (s
 	return s.app.Config.CasdoorEndpoint + "/login/oauth/authorize?" + values.Encode(), state, nil
 }
 
+// CompleteLogin 完成 OAuth code 交换、Casdoor 账户校验、本地用户同步和会话签发。
+// 任何一步失败都不会创建本地登录会话；普通用户与管理员的区别只在 role，
+// 不在这里做用户组准入判断。
 func (s *sAuth) CompleteLogin(ctx context.Context, state, stateCookie, code string) (SessionUser, string, string, error) {
+	// 同时校验 URL state、浏览器 Cookie 和 Redis state，确保回调属于当前登录流程。
 	if state == "" || code == "" || stateCookie == "" || state != stateCookie {
 		return SessionUser{}, "", "", ErrInvalidState
 	}
@@ -139,6 +149,8 @@ func (s *sAuth) CompleteLogin(ctx context.Context, state, stateCookie, code stri
 	if err != nil {
 		return SessionUser{}, "", "", gerror.Wrap(err, "fetch Casdoor account")
 	}
+	// Casdoor 返回的禁用、删除或禁止状态优先于本地缓存；这样管理员在 Casdoor
+	// 侧停用账号后，旧的 AiFerry 会话也无法继续创建或刷新。
 	if accountDisabled(account) {
 		return SessionUser{}, "", "", ErrAccessDenied
 	}
