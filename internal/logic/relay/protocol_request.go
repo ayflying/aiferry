@@ -119,7 +119,14 @@ func chatContentToResponses(value any) any {
 			copyPromptCacheBreakpoint(item, converted)
 			parts = append(parts, converted)
 		case "image_url":
-			converted := map[string]any{"type": "input_image", "image_url": item["image_url"]}
+			// Chat Completions 使用 {"image_url":{"url":"..."}}，而 Responses
+			// 的 input_image.image_url 必须是字符串。兼容已是字符串的扩展客户端，
+			// 但绝不能把 Chat 的整个对象直接转发给 Responses。
+			imageURL := item["image_url"]
+			if image, ok := objectValue(imageURL); ok {
+				imageURL = stringValue(image["url"])
+			}
+			converted := map[string]any{"type": "input_image", "image_url": imageURL}
 			copyPromptCacheBreakpoint(item, converted)
 			parts = append(parts, converted)
 		default:

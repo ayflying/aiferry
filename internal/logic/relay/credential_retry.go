@@ -48,7 +48,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 				last.result = failedAttemptResult(last.result, attemptErr.Error())
 				last.result.timedOut = isUpstreamTimeout(attemptErr)
 			}
-			if attemptCompleted(last.result, attemptErr) {
+			if attemptCompleted(last.result, attemptErr) || nonRetryableClientFailure(last.result, attemptErr, settings) {
 				last.handled = true
 				return last
 			}
@@ -77,4 +77,16 @@ func candidateBaseURLs(candidate Candidate) []string {
 
 func attemptCompleted(result attemptResult, attemptErr error) bool {
 	return result.wroteBytes || (attemptErr == nil && result.status >= http.StatusOK && result.status < http.StatusMultipleChoices)
+}
+
+// nonRetryableClientFailure 对切换凭据或备用地址也无法修复的请求错误停止重试。
+// 仅当上游明确提示接口不支持时保留协议回退，因为切换到另一套 API 后仍可能成功。
+func nonRetryableClientFailure(result attemptResult, attemptErr error, settings adminapi.SystemResilienceSettingsInput) bool {
+	if attemptErr != nil || result.wroteBytes || result.status < http.StatusBadRequest || result.status >= http.StatusInternalServerError {
+		return false
+	}
+	if retryableStatusForRules(result.status, settings.RetryStatusCodes) {
+		return false
+	}
+	return !shouldFallbackWithProtocolConversion(result.status, result.body)
 }

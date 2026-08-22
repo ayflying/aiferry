@@ -96,6 +96,29 @@ func TestChatAssistantContentToResponsesUsesSupportedTypes(t *testing.T) {
 	}
 }
 
+func TestChatImageContentToResponsesUsesStringURL(t *testing.T) {
+	body, err := chatRequestToResponses([]byte(`{
+  "model":"gpt-test",
+  "messages":[{"role":"user","content":[
+    {"type":"text","text":"Describe this image"},
+    {"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"high"}},
+    {"type":"image_url","image_url":"data:image/png;base64,AAAA"}
+  ]}]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"input.0.content.1.image_url", "input.0.content.2.image_url"} {
+		value := gjson.GetBytes(body, path)
+		if value.Type != gjson.String {
+			t.Fatalf("%s must be a string, got %s", path, value.Raw)
+		}
+	}
+	if actual := gjson.GetBytes(body, "input.0.content.1.image_url").String(); actual != "https://example.com/image.png" {
+		t.Fatalf("object image URL = %q", actual)
+	}
+}
+
 func TestGPTChatPrefersResponsesAndKeepsCacheOptions(t *testing.T) {
 	plan := preferredProtocolPlan(chatCompletionsEndpoint, "GPT-5.6-terra")
 	if plan.upstreamEndpoint != responsesEndpoint || plan.conversion != chatToResponsesConversion {
@@ -221,6 +244,9 @@ func TestProtocolFallbackOnlyForUnsupportedEndpoints(t *testing.T) {
 	}
 	if shouldFallbackWithProtocolConversion(400, []byte(`{"error":{"message":"temperature is invalid"}}`)) {
 		t.Fatal("ordinary validation failure must not trigger protocol fallback")
+	}
+	if shouldFallbackWithProtocolConversion(400, []byte(`{"error":{"code":"invalid_type","message":"image_url must be a string"}}`)) {
+		t.Fatal("image URL validation failure must not trigger protocol fallback")
 	}
 }
 

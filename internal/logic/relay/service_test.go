@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/yunloli/aiferry/internal/logic/channel"
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
+	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
@@ -75,6 +76,19 @@ func TestRetryableStatus(t *testing.T) {
 		if retryableStatus(status) {
 			t.Fatalf("status %d should not retry", status)
 		}
+	}
+}
+
+func TestNonRetryableClientFailureStopsCredentialTraversal(t *testing.T) {
+	settings := system.DefaultResilienceSettings()
+	if !nonRetryableClientFailure(attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"code":"invalid_type","message":"image_url must be a string"}}`)}, nil, settings) {
+		t.Fatal("image URL validation failure must stop retries")
+	}
+	if nonRetryableClientFailure(attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"message":"Responses API is not supported"}}`)}, nil, settings) {
+		t.Fatal("unsupported endpoint must retain protocol fallback")
+	}
+	if nonRetryableClientFailure(attemptResult{status: http.StatusTooManyRequests}, nil, settings) {
+		t.Fatal("configured retryable status must continue retries")
 	}
 }
 
