@@ -119,17 +119,37 @@ func chatContentToResponses(value any) any {
 			copyPromptCacheBreakpoint(item, converted)
 			parts = append(parts, converted)
 		case "image_url":
-			// Chat Completions 使用 {"image_url":{"url":"..."}}，而 Responses
+			// Chat Completions 使用 {"image_url":{"url":"...","detail":"..."}}，而 Responses
 			// 的 input_image.image_url 必须是字符串。兼容已是字符串的扩展客户端，
 			// 但绝不能把 Chat 的整个对象直接转发给 Responses。
 			imageURL := item["image_url"]
+			converted := map[string]any{"type": "input_image"}
 			if image, ok := objectValue(imageURL); ok {
-				imageURL = stringValue(image["url"])
+				converted["image_url"] = stringValue(image["url"])
+				if detail := stringValue(image["detail"]); detail != "" {
+					converted["detail"] = detail
+				}
+			} else {
+				converted["image_url"] = imageURL
 			}
-			converted := map[string]any{"type": "input_image", "image_url": imageURL}
+			copyPromptCacheBreakpoint(item, converted)
+			parts = append(parts, converted)
+		case "file":
+			// 两种协议的文件元数据层级不同：Chat 放在 file 对象中，Responses
+			// 要求 file_id、file_data、filename 直接位于 input_file 内容块。
+			converted := copyProtocolFields(item, "file_id", "file_data", "filename")
+			if file, ok := objectValue(item["file"]); ok {
+				for _, field := range []string{"file_id", "file_data", "filename"} {
+					if value, exists := file[field]; exists {
+						converted[field] = value
+					}
+				}
+			}
+			converted["type"] = "input_file"
 			copyPromptCacheBreakpoint(item, converted)
 			parts = append(parts, converted)
 		default:
+			// input_audio 等两种协议字段完全一致的内容块无需改写，原样保留。
 			parts = append(parts, item)
 		}
 	}
@@ -177,10 +197,23 @@ func responsesContentToChat(value any) any {
 			copyPromptCacheBreakpoint(item, converted)
 			parts = append(parts, converted)
 		case "input_image":
-			converted := map[string]any{"type": "image_url", "image_url": item["image_url"]}
+			// Responses 使用字符串 image_url；转换回 Chat 时重新包成 image_url 对象，
+			// 避免把 Responses 专用结构发送到严格校验的 Chat 上游。
+			image := map[string]any{"url": item["image_url"]}
+			if detail := stringValue(item["detail"]); detail != "" {
+				image["detail"] = detail
+			}
+			converted := map[string]any{"type": "image_url", "image_url": image}
+			copyPromptCacheBreakpoint(item, converted)
+			parts = append(parts, converted)
+		case "input_file":
+			// 与正向转换相反，将 Responses 的扁平文件字段归入 Chat 的 file 对象。
+			file := copyProtocolFields(item, "file_id", "file_data", "filename")
+			converted := map[string]any{"type": "file", "file": file}
 			copyPromptCacheBreakpoint(item, converted)
 			parts = append(parts, converted)
 		default:
+			// input_audio 等同构字段保持原样，避免丢失格式或 Base64 数据。
 			parts = append(parts, item)
 		}
 	}

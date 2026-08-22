@@ -119,6 +119,54 @@ func TestChatImageContentToResponsesUsesStringURL(t *testing.T) {
 	}
 }
 
+func TestMultimodalProtocolConversion(t *testing.T) {
+	responsesBody, err := chatRequestToResponses([]byte(`{
+  "model":"gpt-test","messages":[{"role":"user","content":[
+    {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA","detail":"high"}},
+    {"type":"file","file":{"file_id":"file_chat","filename":"notes.txt"}},
+    {"type":"input_audio","input_audio":{"data":"QUJD","format":"wav"}}
+  ]}]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(responsesBody, "input.0.content.0.image_url"); actual.Type != gjson.String || actual.String() != "data:image/png;base64,AAAA" {
+		t.Fatalf("Responses image URL = %s", actual.Raw)
+	}
+	if actual := gjson.GetBytes(responsesBody, "input.0.content.0.detail").String(); actual != "high" {
+		t.Fatalf("Responses image detail = %q", actual)
+	}
+	if actual := gjson.GetBytes(responsesBody, "input.0.content.1.file_id").String(); actual != "file_chat" {
+		t.Fatalf("Responses file id = %q", actual)
+	}
+	if actual := gjson.GetBytes(responsesBody, "input.0.content.2.input_audio.format").String(); actual != "wav" {
+		t.Fatalf("Responses audio format = %q", actual)
+	}
+
+	chatBody, err := responsesRequestToChat([]byte(`{
+  "model":"gpt-test","input":[{"role":"user","content":[
+    {"type":"input_image","image_url":"https://example.com/image.png","detail":"low"},
+    {"type":"input_file","file_id":"file_response","filename":"report.pdf"},
+    {"type":"input_audio","input_audio":{"data":"REVG","format":"mp3"}}
+  ]}]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(chatBody, "messages.0.content.0.image_url.url").String(); actual != "https://example.com/image.png" {
+		t.Fatalf("Chat image URL = %q", actual)
+	}
+	if actual := gjson.GetBytes(chatBody, "messages.0.content.0.image_url.detail").String(); actual != "low" {
+		t.Fatalf("Chat image detail = %q", actual)
+	}
+	if actual := gjson.GetBytes(chatBody, "messages.0.content.1.file.file_id").String(); actual != "file_response" {
+		t.Fatalf("Chat file id = %q", actual)
+	}
+	if actual := gjson.GetBytes(chatBody, "messages.0.content.2.input_audio.format").String(); actual != "mp3" {
+		t.Fatalf("Chat audio format = %q", actual)
+	}
+}
+
 func TestGPTChatPrefersResponsesAndKeepsCacheOptions(t *testing.T) {
 	plan := preferredProtocolPlan(chatCompletionsEndpoint, "GPT-5.6-terra")
 	if plan.upstreamEndpoint != responsesEndpoint || plan.conversion != chatToResponsesConversion {
