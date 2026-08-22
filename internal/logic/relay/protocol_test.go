@@ -168,6 +168,33 @@ func TestMultimodalProtocolConversion(t *testing.T) {
 	}
 }
 
+func TestChatAssistantMultimodalContentToResponses(t *testing.T) {
+	body, err := chatRequestToResponses([]byte(`{
+  "model":"gpt-test","messages":[{"role":"assistant","content":[
+    {"type":"text","text":"I saw this"},
+    {"type":"image_url","image_url":{"url":"https://example.com/a.png","detail":"high"}},
+    {"type":"file","file":{"file_id":"file_assistant","filename":"a.txt"}},
+    {"type":"input_audio","input_audio":{"data":"QUJD","format":"wav"}}
+  ]}]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct{ path, want string }{
+		{"input.0.content.0.type", "output_text"},
+		{"input.0.content.1.type", "input_image"},
+		{"input.0.content.1.image_url", "https://example.com/a.png"},
+		{"input.0.content.1.detail", "high"},
+		{"input.0.content.2.type", "input_file"},
+		{"input.0.content.2.file_id", "file_assistant"},
+		{"input.0.content.3.type", "input_audio"},
+	} {
+		if actual := gjson.GetBytes(body, check.path).String(); actual != check.want {
+			t.Fatalf("%s = %q, want %q", check.path, actual, check.want)
+		}
+	}
+}
+
 func TestInvalidFileDownloadDoesNotTriggerProtocolFallback(t *testing.T) {
 	body := []byte(`{"error":{"code":"invalid_value","message":"Error while downloading file. Upstream status code: 404.","type":"invalid_request_error"}}`)
 	if shouldFallbackWithProtocolConversion(400, body) {

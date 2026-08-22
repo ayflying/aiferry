@@ -173,6 +173,36 @@ func chatAssistantContentToResponses(value any) []any {
 			converted := map[string]any{"type": "output_text", "text": stringValue(item["text"])}
 			copyPromptCacheBreakpoint(item, converted)
 			result = append(result, converted)
+		case "image_url":
+			// assistant 历史消息也可能包含图片。虽然它来自 assistant，Responses
+			// 仍会严格校验内容块类型，不能把 Chat 的 image_url 原样传入。
+			imageURL := item["image_url"]
+			converted := map[string]any{"type": "input_image"}
+			if image, ok := objectValue(imageURL); ok {
+				converted["image_url"] = stringValue(image["url"])
+				if detail := stringValue(image["detail"]); detail != "" {
+					converted["detail"] = detail
+				}
+			} else {
+				converted["image_url"] = imageURL
+			}
+			copyPromptCacheBreakpoint(item, converted)
+			result = append(result, converted)
+		case "file":
+			converted := copyProtocolFields(item, "file_id", "file_data", "filename")
+			if file, ok := objectValue(item["file"]); ok {
+				for _, field := range []string{"file_id", "file_data", "filename"} {
+					if value, exists := file[field]; exists {
+						converted[field] = value
+					}
+				}
+			}
+			converted["type"] = "input_file"
+			copyPromptCacheBreakpoint(item, converted)
+			result = append(result, converted)
+		case "input_audio":
+			// input_audio 已是 Responses 支持的类型，保留其 Base64 数据和格式。
+			result = append(result, item)
 		case "refusal":
 			refusal := stringOr(item["refusal"], stringValue(item["text"]))
 			if refusal != "" {
