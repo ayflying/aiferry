@@ -64,6 +64,12 @@ function changeTimeRange(value: [Date, Date] | null) {
   search()
 }
 function isSuccessful(row: UsageLog) { return row.httpStatus >= 200 && row.httpStatus < 300 }
+// cachedInputTokens 由上游 usage 返回：缺失表示上游没有提供缓存统计，0 表示明确未命中，正数表示命中缓存。
+function cacheStatus(row: UsageLog) {
+  if (row.cachedInputTokens === undefined || row.cachedInputTokens === null) return '上游未返回'
+  if (row.cachedInputTokens === 0) return '未命中'
+  return `命中 ${formatNumber(row.cachedInputTokens)}`
+}
 function failurePreview(row: UsageLog) { return row.errorMessage.split('\n', 1)[0] || '查看失败日志' }
 function latencyTone(value: number | undefined | null, fastMs: number, slowMs: number) {
   if (value === undefined || value === null) return 'latency-unknown'
@@ -139,7 +145,7 @@ onMounted(load)
         <template #mobile><MobileRecordList :loading="loading">
           <article v-for="row in usageItems" :key="row.id" class="mobile-record">
             <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.requestedModel }}</strong><small>{{ formatTime(row.createdAt) }} · {{ formatIPLocation(row.ipLocation) }}</small></div><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag></div>
-            <dl class="mobile-record__facts"><div><dt>{{ isAdmin ? '渠道 / 密钥' : '访问密钥' }}</dt><dd><ChannelCredentialDisplay v-if="isAdmin" class="request-cell" :channel-name="row.channelName" :credential-index="row.channelCredentialIndex" :api-key-name="row.apiKeyName" /><span v-else>{{ row.apiKeyName || '—' }}</span></dd></div><div v-if="isAdmin"><dt>用户</dt><dd>{{ row.userName || `#${row.userId}` }}</dd></div><div><dt>Token</dt><dd class="mono">入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</dd></div><div><dt>估算成本</dt><dd :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</dd></div><div><dt>{{ row.isStream ? '流式速度' : '响应耗时' }}</dt><dd>{{ row.isStream ? formatTokenSpeed(row.outputTokens, row.durationMs) : formatUsageDuration(row.durationMs) }}</dd></div><div><dt>推理强度</dt><dd>{{ formatReasoningEffort(row.reasoningEffort) }}</dd></div></dl>
+            <dl class="mobile-record__facts"><div><dt>{{ isAdmin ? '渠道 / 密钥' : '访问密钥' }}</dt><dd><ChannelCredentialDisplay v-if="isAdmin" class="request-cell" :channel-name="row.channelName" :credential-index="row.channelCredentialIndex" :api-key-name="row.apiKeyName" /><span v-else>{{ row.apiKeyName || '—' }}</span></dd></div><div v-if="isAdmin"><dt>用户</dt><dd>{{ row.userName || `#${row.userId}` }}</dd></div><div><dt>Token</dt><dd class="mono">入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</dd></div><div><dt>请求缓存</dt><dd class="mono" :class="{ muted: row.cachedInputTokens == null }">{{ cacheStatus(row) }}</dd></div><div><dt>估算成本</dt><dd :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</dd></div><div><dt>{{ row.isStream ? '流式速度' : '响应耗时' }}</dt><dd>{{ row.isStream ? formatTokenSpeed(row.outputTokens, row.durationMs) : formatUsageDuration(row.durationMs) }}</dd></div><div><dt>推理强度</dt><dd>{{ formatReasoningEffort(row.reasoningEffort) }}</dd></div></dl>
             <div class="mobile-record__footer"><span class="muted">{{ row.isStream ? '流式响应' : '非流式响应' }}</span><el-button size="small" @click="openUsageDetail(row)">{{ isSuccessful(row) ? '查看计费详情' : '查看失败日志' }}</el-button></div>
           </article>
         </MobileRecordList></template>
