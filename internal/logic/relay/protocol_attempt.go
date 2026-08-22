@@ -60,7 +60,9 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		return attemptResult{}, false, gerror.Wrap(err, "create upstream request")
 	}
 	copyRequestHeaders(req.Header, incomingHeaders)
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if candidate.OrganizationID != "" {
 		req.Header.Set("OpenAI-Organization", candidate.OrganizationID)

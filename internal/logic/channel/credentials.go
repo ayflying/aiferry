@@ -327,6 +327,9 @@ func credentialView(row credentialRow) CredentialView {
 
 func maskedCredentialPrefix(value string) string {
 	value = strings.TrimSpace(value)
+	if value == "" {
+		return "无密钥"
+	}
 	if len(value) <= 8 {
 		return "已配置"
 	}

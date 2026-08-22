@@ -160,7 +160,9 @@ func (s *sChannel) setConfiguredHeaders(ctx context.Context, req *http.Request, 
 		if err != nil {
 			return err
 		}
-		req.Header.Set(headerName, headerPrefix+key)
+		if key != "" {
+			req.Header.Set(headerName, headerPrefix+key)
+		}
 	case channeltype.AuthManagementKey:
 		if channel.ManagementKeyCipher == "" {
 			return gerror.New("channel type requires a management key")

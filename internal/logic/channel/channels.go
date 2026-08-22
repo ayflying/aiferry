@@ -93,9 +93,6 @@ func (s *sChannel) Get(ctx context.Context, id uint64) (entity.Channels, error) 
 }
 
 func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uint64, error) {
-	if input.APIKey == nil || strings.TrimSpace(*input.APIKey) == "" {
-		return 0, gerror.New("API key is required")
-	}
 	if input.HealthCheckModelID != 0 {
 		return 0, gerror.New("test model can only be selected after the channel is created")
 	}
@@ -103,7 +100,11 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 	if err != nil {
 		return 0, err
 	}
-	apiKeyCipher, err := s.app.Secrets.Encrypt(strings.TrimSpace(*input.APIKey))
+	apiKey := ""
+	if input.APIKey != nil {
+		apiKey = strings.TrimSpace(*input.APIKey)
+	}
+	apiKeyCipher, err := s.app.Secrets.Encrypt(apiKey)
 	if err != nil {
 		return 0, err
 	}
@@ -152,7 +153,7 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 		if groupErr := s.groups.SetChannelIDs(txCtx, id, input.GroupIDs); groupErr != nil {
 			return groupErr
 		}
-		return s.createCredentialTx(txCtx, id, strings.TrimSpace(*input.APIKey))
+		return s.createCredentialTx(txCtx, id, apiKey)
 	})
 	if err != nil {
 		return 0, err
