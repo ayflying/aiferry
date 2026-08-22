@@ -30,8 +30,8 @@ func TestModelQualitySignals(t *testing.T) {
 		question:      question,
 		answer:        "不知道。",
 	})
-	if len(signals) != 2 {
-		t.Fatalf("expected two signals, got %#v", signals)
+	if len(signals) != 1 || signals[0].reason != "upstream_model_tier_lower" {
+		t.Fatalf("expected upstream_model_tier_lower signal, got %#v", signals)
 	}
 }
 

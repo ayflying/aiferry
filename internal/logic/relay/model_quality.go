@@ -176,9 +176,6 @@ func inspectModelQuality(input modelQualityInput) []modelQualitySignal {
 	if modelTierLower(input.expectedModel, input.observedModel) {
 		signals = append(signals, modelQualitySignal{reason: "upstream_model_tier_lower"})
 	}
-	if answerIsUnexpectedlyShort(input.question, input.answer) {
-		signals = append(signals, modelQualitySignal{reason: "answer_too_short_for_prompt"})
-	}
 	return signals
 }
 
@@ -208,36 +205,6 @@ func requestQuestionText(endpoint string, body []byte) string {
 		})
 	}
 	return strings.TrimSpace(truncateQualityText(text.String(), maxQualityTextRunes))
-}
-
-func answerIsUnexpectedlyShort(question, answer string) bool {
-	questionSize := utf8.RuneCountInString(strings.TrimSpace(question))
-	answerSize := utf8.RuneCountInString(strings.TrimSpace(answer))
-	if !questionRequestsDetailedAnswer(question, questionSize) {
-		return false
-	}
-	if questionSize >= 40 && answerSize < 10 {
-		return true
-	}
-	if questionSize >= 240 && answerSize < 60 {
-		return true
-	}
-	return questionSize >= 600 && answerSize*12 < questionSize
-}
-
-func questionRequestsDetailedAnswer(question string, questionSize int) bool {
-	if questionSize >= 240 {
-		return true
-	}
-	if questionSize < 40 {
-		return false
-	}
-	for _, marker := range []string{"analyze", "compare", "design", "explain", "implement", "investigate", "plan", "step", "分析", "比较", "方案", "实现", "排查", "解释", "设计", "步骤"} {
-		if strings.Contains(strings.ToLower(question), marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func modelTierLower(expected, observed string) bool {

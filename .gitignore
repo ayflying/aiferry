@@ -12,9 +12,11 @@ gf
 main
 main.exe
 output/
+outputs/
 manifest/output/
 temp/
 temp.yaml
+*.tar.gz
 frontend/test-results/
 frontend/playwright-report/
 bin
