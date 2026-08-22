@@ -97,6 +97,12 @@ func shouldFallbackWithProtocolConversion(status int, body []byte) bool {
 		if message == "" {
 			message = strings.ToLower(string(body))
 		}
+		// 文件 URL/文件数据错误属于请求内容问题，不是协议端点不支持。
+		// 若把它当成协议回退条件，会把同一个失效 URL 再发给 Chat 上游，
+		// 既不能修复请求，还会造成额外重试。
+		if strings.Contains(message, "error while downloading file") || strings.Contains(message, "downloading file") {
+			return false
+		}
 		for _, marker := range []string{"endpoint", "chat completions", "responses api", "responses endpoint", "not support", "unsupported", "not compatible"} {
 			if strings.Contains(message, marker) {
 				return true

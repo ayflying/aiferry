@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tidwall/gjson"
+	adminapi "github.com/yunloli/aiferry/api/admin"
 )
 
 func TestChatRequestToResponses(t *testing.T) {
@@ -164,6 +165,16 @@ func TestMultimodalProtocolConversion(t *testing.T) {
 	}
 	if actual := gjson.GetBytes(chatBody, "messages.0.content.2.input_audio.format").String(); actual != "mp3" {
 		t.Fatalf("Chat audio format = %q", actual)
+	}
+}
+
+func TestInvalidFileDownloadDoesNotTriggerProtocolFallback(t *testing.T) {
+	body := []byte(`{"error":{"code":"invalid_value","message":"Error while downloading file. Upstream status code: 404.","type":"invalid_request_error"}}`)
+	if shouldFallbackWithProtocolConversion(400, body) {
+		t.Fatal("invalid file download must not trigger protocol fallback")
+	}
+	if !nonRetryableClientFailure(attemptResult{status: 400, body: body}, nil, adminapi.SystemResilienceSettingsInput{}) {
+		t.Fatal("invalid file download must stop credential and backup URL retries")
 	}
 }
 

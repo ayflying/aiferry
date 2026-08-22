@@ -137,6 +137,8 @@ func chatContentToResponses(value any) any {
 		case "file":
 			// 两种协议的文件元数据层级不同：Chat 放在 file 对象中，Responses
 			// 要求 file_id、file_data、filename 直接位于 input_file 内容块。
+			// Chat 的 file.url 不能直接转发：Responses 会主动下载该 URL，
+			// URL 失效或不可公网访问时就会返回 400 invalid_value/404。
 			converted := copyProtocolFields(item, "file_id", "file_data", "filename")
 			if file, ok := objectValue(item["file"]); ok {
 				for _, field := range []string{"file_id", "file_data", "filename"} {
