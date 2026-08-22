@@ -20,13 +20,13 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	primary := directProtocolPlan(endpoint)
+	primary := preferredProtocolPlan(endpoint, candidate.PublicName)
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, primary, sensitiveDataRestorer)
 	needsFallback := shouldFallbackWithProtocolConversion(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	if handled || attemptErr != nil || !needsFallback {
 		return result, handled, attemptErr
 	}
-	fallback, ok := fallbackProtocolPlan(endpoint)
+	fallback, ok := alternateProtocolPlan(endpoint, primary)
 	if !ok {
 		return result, handled, attemptErr
 	}

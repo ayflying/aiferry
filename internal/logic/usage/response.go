@@ -9,7 +9,7 @@ import (
 func ParseJSONUsage(body []byte) TokenUsage {
 	input := optionalUint(body, "usage.input_tokens", "usage.prompt_tokens", "response.usage.input_tokens")
 	cached := optionalUint(body, "usage.input_tokens_details.cached_tokens", "usage.prompt_tokens_details.cached_tokens", "response.usage.input_tokens_details.cached_tokens")
-	cacheWrite := optionalUint(body, "usage.cache_creation_input_tokens", "usage.cache_creation_tokens", "usage.input_tokens_details.cache_creation_tokens", "usage.prompt_tokens_details.cache_creation_tokens")
+	cacheWrite := optionalUint(body, "usage.cache_write_tokens", "usage.cache_creation_input_tokens", "usage.cache_creation_tokens", "usage.input_tokens_details.cache_write_tokens", "usage.prompt_tokens_details.cache_write_tokens", "usage.input_tokens_details.cache_creation_tokens", "usage.prompt_tokens_details.cache_creation_tokens")
 	imageInput := optionalUint(body, "usage.image_tokens", "usage.input_tokens_details.image_tokens", "usage.prompt_tokens_details.image_tokens")
 	audioInput := optionalUint(body, "usage.audio_tokens", "usage.input_tokens_details.audio_tokens", "usage.prompt_tokens_details.audio_tokens")
 	output := optionalUint(body, "usage.output_tokens", "usage.completion_tokens", "response.usage.output_tokens")

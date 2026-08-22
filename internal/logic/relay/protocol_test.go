@@ -40,6 +40,41 @@ func TestChatRequestToResponses(t *testing.T) {
 	}
 }
 
+func TestGPTChatPrefersResponsesAndKeepsCacheOptions(t *testing.T) {
+	plan := preferredProtocolPlan(chatCompletionsEndpoint, "GPT-5.6-terra")
+	if plan.upstreamEndpoint != responsesEndpoint || plan.conversion != chatToResponsesConversion {
+		t.Fatalf("GPT Chat plan = %+v, want Chat to Responses conversion", plan)
+	}
+	if fallback, ok := alternateProtocolPlan(chatCompletionsEndpoint, plan); !ok || fallback.upstreamEndpoint != chatCompletionsEndpoint || fallback.conversion != "" {
+		t.Fatalf("GPT fallback plan = %+v, want direct Chat", fallback)
+	}
+	body, err := plan.convertRequest([]byte(`{
+  "model":"gpt-5.6-terra",
+  "prompt_cache_key":"support:stable",
+  "prompt_cache_options":{"mode":"implicit"},
+  "messages":[{"role":"user","content":[{"type":"text","text":"Hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(body, "prompt_cache_key").String(); actual != "support:stable" {
+		t.Fatalf("prompt_cache_key = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "prompt_cache_options.mode").String(); actual != "implicit" {
+		t.Fatalf("prompt_cache_options.mode = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "input.0.content.0.prompt_cache_breakpoint.mode").String(); actual != "explicit" {
+		t.Fatalf("prompt cache breakpoint = %q", actual)
+	}
+}
+
+func TestNonGPTChatKeepsDirectProtocol(t *testing.T) {
+	plan := preferredProtocolPlan(chatCompletionsEndpoint, "deepseek-v4-pro")
+	if plan.upstreamEndpoint != chatCompletionsEndpoint || plan.conversion != "" {
+		t.Fatalf("non-GPT Chat plan = %+v, want direct Chat", plan)
+	}
+}
+
 func TestResponsesRequestToChat(t *testing.T) {
 	body, err := responsesRequestToChat([]byte(`{
   "model":"gpt-test","instructions":"Follow policy",

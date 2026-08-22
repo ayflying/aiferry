@@ -91,9 +91,13 @@ func chatContentToResponses(value any) any {
 		}
 		switch stringValue(item["type"]) {
 		case "text":
-			parts = append(parts, map[string]any{"type": "input_text", "text": stringValue(item["text"])})
+			converted := map[string]any{"type": "input_text", "text": stringValue(item["text"])}
+			copyPromptCacheBreakpoint(item, converted)
+			parts = append(parts, converted)
 		case "image_url":
-			parts = append(parts, map[string]any{"type": "input_image", "image_url": item["image_url"]})
+			converted := map[string]any{"type": "input_image", "image_url": item["image_url"]}
+			copyPromptCacheBreakpoint(item, converted)
+			parts = append(parts, converted)
 		default:
 			parts = append(parts, item)
 		}
@@ -113,12 +117,22 @@ func responsesContentToChat(value any) any {
 		}
 		switch stringValue(item["type"]) {
 		case "input_text", "output_text":
-			parts = append(parts, map[string]any{"type": "text", "text": stringValue(item["text"])})
+			converted := map[string]any{"type": "text", "text": stringValue(item["text"])}
+			copyPromptCacheBreakpoint(item, converted)
+			parts = append(parts, converted)
 		case "input_image":
-			parts = append(parts, map[string]any{"type": "image_url", "image_url": item["image_url"]})
+			converted := map[string]any{"type": "image_url", "image_url": item["image_url"]}
+			copyPromptCacheBreakpoint(item, converted)
+			parts = append(parts, converted)
 		default:
 			parts = append(parts, item)
 		}
 	}
 	return parts
+}
+
+func copyPromptCacheBreakpoint(source, target map[string]any) {
+	if value, exists := source["prompt_cache_breakpoint"]; exists {
+		target["prompt_cache_breakpoint"] = value
+	}
 }

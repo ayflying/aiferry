@@ -27,6 +27,10 @@ func TestParseJSONUsageVariants(t *testing.T) {
 	if tokens.CacheWrite == nil || *tokens.CacheWrite != 4 || tokens.ImageInput == nil || *tokens.ImageInput != 3 || tokens.AudioInput == nil || *tokens.AudioInput != 2 || tokens.AudioOutput == nil || *tokens.AudioOutput != 5 {
 		t.Fatalf("special usage details were not parsed: %+v", tokens)
 	}
+	tokens = parseJSONUsage([]byte(`{"usage":{"input_tokens":20,"input_tokens_details":{"cached_tokens":12,"cache_write_tokens":8},"output_tokens":7}}`))
+	if tokens.CachedInput == nil || *tokens.CachedInput != 12 || tokens.CacheWrite == nil || *tokens.CacheWrite != 8 {
+		t.Fatalf("GPT-5.6 cache usage was not parsed: %+v", tokens)
+	}
 }
 
 func TestParseSSEUsage(t *testing.T) {
@@ -197,7 +201,7 @@ func TestRuleCostSupportsRequestOnlyPricing(t *testing.T) {
 func TestPrepareRequestBodyBlocksOptionalFieldsByDefault(t *testing.T) {
 	config := channel.DefaultAdvancedConfig()
 	config.SystemPrompt = "渠道规则"
-	body, err := prepareRequestBody("/chat/completions", []byte(`{"model":"public-model","messages":[{"role":"user","content":"你好"}],"service_tier":"flex","store":true,"include":["usage"],"unknown":"blocked"}`), "upstream-model", config)
+	body, err := prepareRequestBody("/chat/completions", []byte(`{"model":"public-model","messages":[{"role":"user","content":"你好"}],"prompt_cache_key":"support:stable","prompt_cache_options":{"mode":"implicit"},"service_tier":"flex","store":true,"include":["usage"],"unknown":"blocked"}`), "upstream-model", config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +216,9 @@ func TestPrepareRequestBodyBlocksOptionalFieldsByDefault(t *testing.T) {
 		if _, ok := payload[field]; ok {
 			t.Fatalf("%s should be blocked: %#v", field, payload)
 		}
+	}
+	if payload["prompt_cache_key"] != "support:stable" || payload["prompt_cache_options"].(map[string]any)["mode"] != "implicit" {
+		t.Fatalf("prompt cache fields should be forwarded: %#v", payload)
 	}
 	messages, ok := payload["messages"].([]any)
 	if !ok || len(messages) != 2 {

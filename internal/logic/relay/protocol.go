@@ -26,6 +26,26 @@ func directProtocolPlan(endpoint string) protocolPlan {
 	return protocolPlan{clientEndpoint: endpoint, upstreamEndpoint: endpoint}
 }
 
+func preferredProtocolPlan(endpoint, model string) protocolPlan {
+	if endpoint == chatCompletionsEndpoint && isGPTModel(model) {
+		if plan, ok := fallbackProtocolPlan(endpoint); ok {
+			return plan
+		}
+	}
+	return directProtocolPlan(endpoint)
+}
+
+func alternateProtocolPlan(endpoint string, primary protocolPlan) (protocolPlan, bool) {
+	if primary.converts() {
+		return directProtocolPlan(endpoint), true
+	}
+	return fallbackProtocolPlan(endpoint)
+}
+
+func isGPTModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-")
+}
+
 func fallbackProtocolPlan(endpoint string) (protocolPlan, bool) {
 	switch endpoint {
 	case chatCompletionsEndpoint:
@@ -91,7 +111,7 @@ func chatRequestToResponses(body []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	target := copyProtocolFields(source, "model", "stream", "user", "temperature", "top_p", "parallel_tool_calls", "metadata")
+	target := copyProtocolFields(source, "model", "stream", "user", "temperature", "top_p", "parallel_tool_calls", "metadata", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention")
 	if value, exists := source["max_completion_tokens"]; exists {
 		target["max_output_tokens"] = value
 	} else if value, exists := source["max_tokens"]; exists {
@@ -147,7 +167,7 @@ func responsesRequestToChat(body []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	target := copyProtocolFields(source, "model", "stream", "user", "temperature", "top_p", "parallel_tool_calls")
+	target := copyProtocolFields(source, "model", "stream", "user", "temperature", "top_p", "parallel_tool_calls", "prompt_cache_key", "prompt_cache_options", "prompt_cache_retention")
 	if value, exists := source["max_output_tokens"]; exists {
 		target["max_completion_tokens"] = value
 	}

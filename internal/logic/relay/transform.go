@@ -36,6 +36,7 @@ func prepareRequestBody(endpoint string, originalBody []byte, upstreamModel stri
 func supportedRequestFields(endpoint string, payload map[string]any, config channel.AdvancedConfig) map[string]any {
 	fields := map[string]struct{}{
 		"model": {}, "stream": {}, "user": {},
+		"prompt_cache_key": {}, "prompt_cache_options": {}, "prompt_cache_retention": {},
 	}
 	switch endpoint {
 	case "/chat/completions":
