@@ -2,7 +2,9 @@ package channel
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -157,11 +159,15 @@ func (s *sChannel) replacePublicPrice(ctx context.Context, modelName string, val
 	return s.savePublicPrice(ctx, modelName, values, true, false, BillingModeToken)
 }
 
+func isMissingPublicPriceError(err error) bool {
+	return errors.Is(err, sql.ErrNoRows)
+}
+
 func (s *sChannel) mergePublicPrice(ctx context.Context, modelName string, values modelPriceValues) error {
 	var current PublicModelView
 	if err := dao.ModelPrices.Ctx(ctx).
 		Where(dao.ModelPrices.Columns().PublicName, modelName).
-		Scan(&current); err != nil {
+		Scan(&current); err != nil && !isMissingPublicPriceError(err) {
 		return gerror.Wrap(err, "load current public model price")
 	}
 	values = missingPublicPriceValues(values, current)

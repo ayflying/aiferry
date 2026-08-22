@@ -1,13 +1,28 @@
 package channel
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
 
 func pricePointer(value float64) *float64 {
 	return &value
+}
+
+func TestIsMissingPublicPriceErrorOnlyAcceptsNoRows(t *testing.T) {
+	if !isMissingPublicPriceError(sql.ErrNoRows) {
+		t.Fatal("sql.ErrNoRows should mean an empty public price record")
+	}
+	if !isMissingPublicPriceError(fmt.Errorf("wrapped: %w", sql.ErrNoRows)) {
+		t.Fatal("wrapped sql.ErrNoRows should mean an empty public price record")
+	}
+	if isMissingPublicPriceError(errors.New("database connection lost")) {
+		t.Fatal("ordinary database errors must not be ignored")
+	}
 }
 
 func TestMissingPublicPriceValuesKeepsOnlyUnfilledFields(t *testing.T) {
