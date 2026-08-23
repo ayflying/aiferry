@@ -252,6 +252,41 @@ func responsesContentToChat(value any) any {
 	return parts
 }
 
+// normalizeNestedChatContent 递归整理工具结果等嵌套历史内容。
+// 这类内容不一定经过普通 message.content 分支，但其中仍可能存在
+// Chat 格式的 image_url；Responses 会校验嵌套 output 数组中的每个 type。
+func normalizeNestedChatContent(value any) any {
+	if items, ok := value.([]any); ok {
+		result := make([]any, len(items))
+		for i, item := range items {
+			result[i] = normalizeNestedChatContent(item)
+		}
+		return result
+	}
+	item, ok := objectValue(value)
+	if !ok {
+		return value
+	}
+	if stringValue(item["type"]) == "image_url" {
+		imageURL := item["image_url"]
+		converted := map[string]any{"type": "input_image"}
+		if image, ok := objectValue(imageURL); ok {
+			converted["image_url"] = stringValue(image["url"])
+			if detail := stringValue(image["detail"]); detail != "" {
+				converted["detail"] = detail
+			}
+		} else {
+			converted["image_url"] = imageURL
+		}
+		return converted
+	}
+	result := make(map[string]any, len(item))
+	for key, child := range item {
+		result[key] = normalizeNestedChatContent(child)
+	}
+	return result
+}
+
 func copyPromptCacheBreakpoint(source, target map[string]any) {
 	if value, exists := source["prompt_cache_breakpoint"]; exists {
 		target["prompt_cache_breakpoint"] = value

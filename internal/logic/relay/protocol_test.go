@@ -195,6 +195,21 @@ func TestChatAssistantMultimodalContentToResponses(t *testing.T) {
 	}
 }
 
+func TestNestedToolOutputImageToResponses(t *testing.T) {
+	body, err := chatRequestToResponses([]byte(`{
+  "model":"gpt-test","messages":[{"role":"tool","tool_call_id":"call_1","content":[{"type":"image_url","image_url":{"url":"https://example.com/nested.png","detail":"low"}}]}]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(body, "input.0.output.0.type").String(); actual != "input_image" {
+		t.Fatalf("nested output type = %q body=%s", actual, body)
+	}
+	if actual := gjson.GetBytes(body, "input.0.output.0.image_url").String(); actual != "https://example.com/nested.png" {
+		t.Fatalf("nested output image URL = %q", actual)
+	}
+}
+
 func TestInvalidFileDownloadDoesNotTriggerProtocolFallback(t *testing.T) {
 	body := []byte(`{"error":{"code":"invalid_value","message":"Error while downloading file. Upstream status code: 404.","type":"invalid_request_error"}}`)
 	if shouldFallbackWithProtocolConversion(400, body) {

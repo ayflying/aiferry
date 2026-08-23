@@ -151,7 +151,10 @@ func chatRequestToResponses(body []byte) ([]byte, error) {
 				continue
 			}
 		case "tool":
-			input = append(input, map[string]any{"type": "function_call_output", "call_id": stringValue(message["tool_call_id"]), "output": content})
+			// 工具结果可能携带上一次 Responses 输出的嵌套 output 数组。
+			// 其中的 Chat image_url 也必须递归转换，否则会落到
+			// input[n].output[0].type=image_url 的上游校验错误。
+			input = append(input, map[string]any{"type": "function_call_output", "call_id": stringValue(message["tool_call_id"]), "output": normalizeNestedChatContent(content)})
 			continue
 		case "assistant":
 			assistantContent := chatAssistantContentToResponses(content)
