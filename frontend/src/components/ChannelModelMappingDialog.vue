@@ -36,6 +36,7 @@ const visibleDiscoveredModels = computed(() => {
     ? props.discoveredModels.filter((item) => item.name.toLowerCase().includes(keyword))
     : props.discoveredModels
 })
+const selectedDiscoveredModels = computed(() => props.discoveredModels.filter((item) => props.selectedModelNames.includes(item.name)))
 const allVisibleSelected = computed(() => visibleDiscoveredModels.value.length > 0
   && visibleDiscoveredModels.value.every((item) => props.selectedModelNames.includes(item.name)))
 
@@ -75,7 +76,7 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
           <div class="mapping-toolbar"><span class="mapping-count">{{ modelMappings.length }} 条映射关系</span><el-button type="primary" :icon="Plus" @click="emit('addMapping')">添加映射</el-button></div>
           <div v-if="modelMappings.length" class="mapping-list">
             <div v-for="mapping in modelMappings" :key="mapping.id" class="mapping-entry-row">
-              <el-select :model-value="mapping.upstreamName" filterable clearable placeholder="选择上游模型" class="mapping-upstream" @update:model-value="updateMapping(mapping.id, 'upstreamName', $event)"><el-option v-for="item in discoveredModels" :key="item.name" :label="item.name" :value="item.name" /></el-select>
+              <el-select :model-value="mapping.upstreamName" filterable clearable placeholder="选择已启用模型" class="mapping-upstream" @update:model-value="updateMapping(mapping.id, 'upstreamName', $event)"><el-option v-for="item in selectedDiscoveredModels" :key="item.name" :label="item.name" :value="item.name" /></el-select>
               <el-input :model-value="mapping.publicName" maxlength="191" placeholder="填写自定义公开名称" class="mapping-public" @update:model-value="updateMapping(mapping.id, 'publicName', $event)" />
               <el-tooltip content="删除映射"><el-button text :icon="Trash2" :aria-label="`删除 ${mapping.upstreamName || '此条'} 映射`" @click="emit('removeMapping', mapping.id)" /></el-tooltip>
             </div>
