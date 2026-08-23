@@ -116,6 +116,13 @@ func TestNonRetryableClientFailureStopsCredentialTraversal(t *testing.T) {
 	if !nonRetryableClientFailure(attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"code":"invalid_type","message":"image_url must be a string"}}`)}, nil, settings) {
 		t.Fatal("image URL validation failure must stop retries")
 	}
+	// 文件下载失败在 Responses 中表现为 HTTP 400，而错误详情内带有上游文件服务的
+	// 404。它不是“模型不存在”的路由错误，切换密钥、备用地址或渠道也无法让该 URL
+	// 重新可访问；必须立即返回，避免同一个失效文件被重复请求多次。
+	fileDownload404 := attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"code":"invalid_value","message":"Error while downloading file. Upstream status code: 404.","param":"url"}}`)}
+	if !nonRetryableClientFailure(fileDownload404, nil, settings) {
+		t.Fatal("file download 404 wrapped in HTTP 400 must stop retries")
+	}
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusUnprocessableEntity} {
 		if !nonRetryableClientFailure(attemptResult{status: status}, nil, settings) {
 			t.Fatalf("upstream client error status %d must stop retries", status)
