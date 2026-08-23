@@ -76,17 +76,32 @@ func candidateBaseURLs(candidate Candidate) []string {
 }
 
 func attemptCompleted(result attemptResult, attemptErr error) bool {
-	return result.wroteBytes || (attemptErr == nil && result.status >= http.StatusOK && result.status < http.StatusMultipleChoices)
+	// Chat/Responses relay requests are expected to return HTTP 200. Any other
+	// status is an upstream error and must remain in the retry/failover decision.
+	return result.wroteBytes || (attemptErr == nil && result.status == http.StatusOK)
 }
 
 // nonRetryableClientFailure 对切换凭据或备用地址也无法修复的请求错误停止重试。
-// 仅当上游明确提示接口不支持时保留协议回退，因为切换到另一套 API 后仍可能成功。
+// 上游鉴权失败表示当前密钥不可用，不能继续用同一请求轮换密钥或地址；
+// 只有明确表示接口不支持的响应才允许协议回退。
 func nonRetryableClientFailure(result attemptResult, attemptErr error, settings adminapi.SystemResilienceSettingsInput) bool {
 	if attemptErr != nil || result.wroteBytes || result.status < http.StatusBadRequest || result.status >= http.StatusInternalServerError {
 		return false
 	}
-	if retryableStatusForRules(result.status, settings.RetryStatusCodes) {
-		return false
+	// A received 4xx response is a definitive response for this request after
+	// the one in-attempt protocol fallback (if applicable). Do not send the
+	// same user payload again with another credential or backup URL. Only the
+	// explicitly transient client statuses remain eligible for retry.
+	if result.status >= http.StatusBadRequest && result.status < http.StatusInternalServerError {
+		if (result.status == http.StatusBadRequest || result.status == http.StatusUnprocessableEntity) && shouldFallbackWithProtocolConversion(result.status, result.body) {
+			return false
+		}
+		switch result.status {
+		case http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
+			return !retryableStatusForRules(result.status, settings.RetryStatusCodes)
+		default:
+			return true
+		}
 	}
-	return !shouldFallbackWithProtocolConversion(result.status, result.body)
+	return false
 }
