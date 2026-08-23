@@ -125,17 +125,6 @@
 		"models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
 		"costs": { "adapter": "newapi_balance", "method": "GET", "path": "/api/user/self", "authType": "management_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "fixedCurrency": "USD" }
 	  }
-	},
-	{
-	  "id": 9000000000000013,
-	  "name": "OpenCode Go",
-	  "code": "opencode_go",
-	  "config": {
-		"baseUrl": "https://opencode.ai/zen/go/v1",
-		"models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
-		"costs": { "adapter": "none" },
-		"pricing": { "adapter": "none" }
-	  }
 	}
   ]
 }
