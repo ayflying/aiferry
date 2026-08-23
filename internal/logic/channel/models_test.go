@@ -41,12 +41,29 @@ func TestNormalizeModelMappingsSupportsAliasesAndLegacyNames(t *testing.T) {
 	}
 }
 
-func TestNormalizeModelMappingsRejectsDuplicateUpstreamModel(t *testing.T) {
-	_, err := normalizeModelMappings(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+func TestNormalizeModelMappingsAllowsMultipleAliasesForUpstreamModel(t *testing.T) {
+	mappings, err := normalizeModelMappings(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
 		{UpstreamName: "gpt-5", PublicName: "gpt-5-main"},
 		{UpstreamName: "gpt-5", PublicName: "gpt-5-backup"},
 	}})
-	if err == nil || err.Error() != "duplicate upstream model: gpt-5" {
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []modelMapping{
+		{UpstreamName: "gpt-5", PublicName: "gpt-5-main"},
+		{UpstreamName: "gpt-5", PublicName: "gpt-5-backup"},
+	}
+	if !reflect.DeepEqual(mappings, want) {
+		t.Fatalf("unexpected mappings: got %#v, want %#v", mappings, want)
+	}
+}
+
+func TestNormalizeModelMappingsRejectsDuplicateMapping(t *testing.T) {
+	_, err := normalizeModelMappings(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{UpstreamName: "gpt-5", PublicName: "gpt-5-main"},
+		{UpstreamName: "gpt-5", PublicName: "gpt-5-main"},
+	}})
+	if err == nil || err.Error() != "duplicate model mapping: gpt-5 -> gpt-5-main" {
 		t.Fatalf("unexpected duplicate error: %v", err)
 	}
 }
