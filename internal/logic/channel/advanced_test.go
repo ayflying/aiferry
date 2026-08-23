@@ -10,7 +10,7 @@ func TestParseAdvancedConfigDefaultsToBlockingStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.BlockStore || config.PassthroughRequestBody || config.AllowServiceTier {
+	if !config.BlockStore || config.PassthroughRequestBody || config.PassthroughPromptCache || config.AllowServiceTier {
 		t.Fatalf("unexpected default config: %+v", config)
 	}
 }
@@ -22,6 +22,16 @@ func TestParseAdvancedConfigKeepsExplicitStorePermission(t *testing.T) {
 	}
 	if config.BlockStore || !config.AllowInclude {
 		t.Fatalf("unexpected parsed config: %+v", config)
+	}
+}
+
+func TestParseAdvancedConfigKeepsExplicitPromptCachePassthrough(t *testing.T) {
+	config, err := ParseAdvancedConfig([]byte(`{"passthroughPromptCache":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.PassthroughPromptCache {
+		t.Fatalf("prompt cache passthrough was not preserved: %+v", config)
 	}
 }
 

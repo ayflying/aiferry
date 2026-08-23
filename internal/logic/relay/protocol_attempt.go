@@ -15,13 +15,13 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/channel"
 )
 
-func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
+func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
 	advancedConfig, err := channel.ParseAdvancedConfig([]byte(candidate.AdvancedConfig))
 	if err != nil {
 		return attemptResult{}, false, err
 	}
 	primary := preferredProtocolPlan(endpoint, candidate.PublicName)
-	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, primary, sensitiveDataRestorer)
+	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, userID, settings, advancedConfig, primary, sensitiveDataRestorer)
 	needsFallback := shouldFallbackWithProtocolConversion(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	if handled || attemptErr != nil || !needsFallback {
 		return result, handled, attemptErr
@@ -30,15 +30,19 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if !ok {
 		return result, handled, attemptErr
 	}
-	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, settings, advancedConfig, fallback, sensitiveDataRestorer)
+	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, userID, settings, advancedConfig, fallback, sensitiveDataRestorer)
 }
 
-func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocolPlan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
+func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocolPlan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
 	convertedBody, err := plan.convertRequest(originalBody)
 	if err != nil {
 		return attemptResult{}, false, err
 	}
 	body, err := prepareRequestBody(plan.upstreamEndpoint, convertedBody, candidate.UpstreamName, advancedConfig)
+	if err != nil {
+		return attemptResult{}, false, err
+	}
+	body, err = applyPromptCachePolicy(body, candidate, userID, advancedConfig)
 	if err != nil {
 		return attemptResult{}, false, err
 	}

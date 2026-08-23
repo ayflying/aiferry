@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/shopspring/decimal"
+	"github.com/tidwall/gjson"
 	"github.com/yunloli/aiferry/internal/logic/channel"
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
 	"github.com/yunloli/aiferry/internal/logic/system"
@@ -31,6 +32,37 @@ func TestParseJSONUsageVariants(t *testing.T) {
 	tokens = parseJSONUsage([]byte(`{"usage":{"input_tokens":20,"input_tokens_details":{"cached_tokens":12,"cache_write_tokens":8},"output_tokens":7}}`))
 	if tokens.CachedInput == nil || *tokens.CachedInput != 12 || tokens.CacheWrite == nil || *tokens.CacheWrite != 8 {
 		t.Fatalf("GPT-5.6 cache usage was not parsed: %+v", tokens)
+	}
+}
+
+func TestPromptCachePolicyUsesSystemKeyUnlessPassthroughEnabled(t *testing.T) {
+	candidate := Candidate{ChannelID: 9, ChannelCredentialID: 2, PublicName: "gpt-5.6-terra"}
+	body := []byte(`{"model":"gpt-5.6-terra","prompt_cache_key":"client-key","prompt_cache_options":{"mode":"implicit"},"input":[{"content":[{"type":"input_text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]}]}`)
+
+	systemBody, err := applyPromptCachePolicy(body, candidate, 42, channel.DefaultAdvancedConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(systemBody, "prompt_cache_key").String(); actual != stablePromptCacheKey(42, candidate) {
+		t.Fatalf("system prompt_cache_key = %q", actual)
+	}
+	for _, path := range []string{"prompt_cache_options", "input.0.content.0.prompt_cache_breakpoint"} {
+		if gjson.GetBytes(systemBody, path).Exists() {
+			t.Fatalf("system-managed cache must remove %s: %s", path, systemBody)
+		}
+	}
+
+	config := channel.DefaultAdvancedConfig()
+	config.PassthroughPromptCache = true
+	passthroughBody, err := applyPromptCachePolicy(body, candidate, 42, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(passthroughBody, "prompt_cache_key").String(); actual != "client-key" {
+		t.Fatalf("passthrough prompt_cache_key = %q", actual)
+	}
+	if actual := gjson.GetBytes(passthroughBody, "input.0.content.0.prompt_cache_breakpoint.mode").String(); actual != "explicit" {
+		t.Fatalf("passthrough breakpoint = %q", actual)
 	}
 }
 

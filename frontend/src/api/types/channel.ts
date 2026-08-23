@@ -13,6 +13,7 @@ export interface ChannelAdvancedConfig {
   forceOpenAIFormat: boolean
   reasoningToContent: boolean
   passthroughRequestBody: boolean
+  passthroughPromptCache: boolean
   skipAsyncPollingDelay: boolean
   systemPrompt: string
   appendSystemPrompt: boolean

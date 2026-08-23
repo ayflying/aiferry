@@ -29,6 +29,10 @@ function setStoreAllowed(value: boolean | string | number) {
         <div><strong>透传请求体</strong><span>默认关闭，仅转发已支持字段；下方字段开关仍优先执行</span></div>
         <el-switch v-model="config.passthroughRequestBody" />
       </div>
+      <div class="setting-row">
+        <div><strong>透传客户端缓存参数</strong><span>开启后原样转发 prompt_cache_* 与缓存断点；关闭时由系统按用户、模型和渠道凭据生成稳定缓存键</span></div>
+        <el-switch v-model="config.passthroughPromptCache" />
+      </div>
     </div>
 
     <div class="proxy-field">

@@ -17,6 +17,7 @@ type AdvancedConfig struct {
 	ForceOpenAIFormat      bool     `json:"forceOpenAIFormat"`
 	ReasoningToContent     bool     `json:"reasoningToContent"`
 	PassthroughRequestBody bool     `json:"passthroughRequestBody"`
+	PassthroughPromptCache bool     `json:"passthroughPromptCache"`
 	SkipAsyncPollingDelay  bool     `json:"skipAsyncPollingDelay"`
 	SystemPrompt           string   `json:"systemPrompt"`
 	AppendSystemPrompt     bool     `json:"appendSystemPrompt"`

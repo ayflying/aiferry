@@ -18,7 +18,7 @@ type channelAttempt struct {
 
 // attemptChannel keeps retries inside one channel until no usable upstream key
 // remains. Those retries do not consume the cross-channel failover budget.
-func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, candidate Candidate, stream bool, startedAt time.Time, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, excluded map[uint64]struct{}, sensitiveDataRestorer *sensitiveDataRestorer) channelAttempt {
+func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, candidate Candidate, stream bool, startedAt time.Time, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, excluded map[uint64]struct{}, sensitiveDataRestorer *sensitiveDataRestorer) channelAttempt {
 	candidate.ReasoningEffort = requestReasoningEffort(body)
 	last := channelAttempt{candidate: candidate}
 	for {
@@ -41,7 +41,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			if !stream {
 				attemptWriter = nil
 			}
-			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, startedAt, settings, sensitiveDataRestorer)
+			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, startedAt, userID, settings, sensitiveDataRestorer)
 			result.latency = time.Since(attemptStartedAt)
 			last = channelAttempt{candidate: current, result: result, attempts: last.attempts + 1}
 			if attemptErr != nil {

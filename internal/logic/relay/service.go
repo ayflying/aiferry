@@ -197,7 +197,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	)
 	for index := range candidates {
 		for {
-			outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.Id, settings, excludedCredentials, sensitiveDataRestorer)
+			outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, startedAt, key.UserId, key.Id, settings, excludedCredentials, sensitiveDataRestorer)
 			attempts += outcome.attempts
 			if outcome.attempts > 0 {
 				last = outcome.result
