@@ -13,6 +13,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/logic/channel"
+	"github.com/yunloli/aiferry/internal/logic/protocol"
 )
 
 func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
@@ -20,25 +21,25 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	primary := preferredProtocolPlan(endpoint, candidate.PublicName)
+	primary := protocol.PreferredPlan(endpoint, candidate.PublicName)
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, userID, settings, advancedConfig, primary, sensitiveDataRestorer)
-	needsFallback := shouldFallbackWithProtocolConversion(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
+	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	if handled || attemptErr != nil || !needsFallback {
 		return result, handled, attemptErr
 	}
-	fallback, ok := alternateProtocolPlan(endpoint, primary)
+	fallback, ok := protocol.AlternatePlan(endpoint, primary)
 	if !ok {
 		return result, handled, attemptErr
 	}
 	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, userID, settings, advancedConfig, fallback, sensitiveDataRestorer)
 }
 
-func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocolPlan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
-	convertedBody, err := plan.convertRequest(originalBody)
+func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocol.Plan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
+	convertedBody, err := plan.ConvertRequest(originalBody)
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	body, err := prepareRequestBody(plan.upstreamEndpoint, convertedBody, candidate.UpstreamName, advancedConfig)
+	body, err := prepareRequestBody(plan.UpstreamEndpoint(), convertedBody, candidate.UpstreamName, advancedConfig)
 	if err != nil {
 		return attemptResult{}, false, err
 	}
@@ -46,7 +47,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	if stream && plan.upstreamEndpoint == chatCompletionsEndpoint {
+	if stream && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
 	apiKey, err := s.app.Secrets.Decrypt(candidate.APIKeyCipher)
@@ -59,7 +60,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(settings.NonStreamTimeoutSeconds)*time.Second)
 	}
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, candidate.BaseURL+plan.upstreamEndpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, candidate.BaseURL+plan.UpstreamEndpoint(), bytes.NewReader(body))
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "create upstream request")
 	}
@@ -91,11 +92,11 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if !stream || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
-		responseBody = normalizeResponseBody(plan.upstreamEndpoint, responseBody, candidate.UpstreamName, advancedConfig)
-		result := attemptResult{status: resp.StatusCode, body: plan.convertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
-		result.upstreamEndpoint = plan.upstreamEndpoint
-		result.protocolConversion = plan.conversion
-		result.responseText, result.responseModel = captureBufferedResponse(plan.upstreamEndpoint, responseBody)
+		responseBody = normalizeResponseBody(plan.UpstreamEndpoint(), responseBody, candidate.UpstreamName, advancedConfig)
+		result := attemptResult{status: resp.StatusCode, body: plan.ConvertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
+		result.upstreamEndpoint = plan.UpstreamEndpoint()
+		result.protocolConversion = plan.Conversion()
+		result.responseText, result.responseModel = captureBufferedResponse(plan.UpstreamEndpoint(), responseBody)
 		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 			result.errorMessage = upstreamError(responseBody, resp.Status)
 		}
@@ -106,15 +107,15 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	}
 	defer resp.Body.Close()
 	flusher, _ := writer.(http.Flusher)
-	result := attemptResult{status: resp.StatusCode, headers: responseHeaders(resp.Header, plan), upstreamEndpoint: plan.upstreamEndpoint, protocolConversion: plan.conversion}
-	if plan.converts() {
+	result := attemptResult{status: resp.StatusCode, headers: responseHeaders(resp.Header, plan), upstreamEndpoint: plan.UpstreamEndpoint(), protocolConversion: plan.Conversion()}
+	if plan.Converts() {
 		result.headers.Set("Content-Type", "text/event-stream")
 	}
-	converter := newProtocolStreamConverter(plan)
-	if !plan.converts() {
+	converter := protocol.NewStreamConverter(plan)
+	if !plan.Converts() {
 		converter = nil
 	}
-	capture := newStreamResponseCapture(plan.upstreamEndpoint)
+	capture := newStreamResponseCapture(plan.UpstreamEndpoint())
 	streamRestorer := newSensitiveDataStreamRestorer(sensitiveDataRestorer)
 	pending := make([][]byte, 0)
 	pendingSize := 0
@@ -152,7 +153,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	scanner.Buffer(make([]byte, 64*1024), 8<<20)
 	for scanner.Scan() {
 		line := append(append([]byte(nil), scanner.Bytes()...), '\n')
-		line = normalizeSSELine(plan.upstreamEndpoint, line, candidate.UpstreamName, advancedConfig)
+		line = normalizeSSELine(plan.UpstreamEndpoint(), line, candidate.UpstreamName, advancedConfig)
 		capture.Observe(line)
 		if failure, failed := parseStreamFailure(line); failed {
 			result.status = failure.status
@@ -177,7 +178,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			if len(output) == 0 {
 				continue
 			}
-			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
+			output = normalizeSSELine(plan.ClientEndpoint(), output, candidate.UpstreamName, advancedConfig)
 			for _, restoredOutput := range streamRestorer.restoreSSELine(output) {
 				if !committed && !streamPayloadHasVisibleOutput(line) {
 					pending = append(pending, restoredOutput)
@@ -211,7 +212,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			if len(output) == 0 {
 				continue
 			}
-			output = normalizeSSELine(plan.clientEndpoint, output, candidate.UpstreamName, advancedConfig)
+			output = normalizeSSELine(plan.ClientEndpoint(), output, candidate.UpstreamName, advancedConfig)
 			for _, restoredOutput := range streamRestorer.restoreSSELine(output) {
 				if !committed {
 					committed = true
@@ -259,9 +260,9 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	return result, true, nil
 }
 
-func responseHeaders(headers http.Header, plan protocolPlan) http.Header {
+func responseHeaders(headers http.Header, plan protocol.Plan) http.Header {
 	result := headers.Clone()
-	if plan.converts() {
+	if plan.Converts() {
 		result.Del("Content-Length")
 		result.Del("Content-Encoding")
 		result.Set("Content-Type", "application/json")

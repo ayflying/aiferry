@@ -1,4 +1,4 @@
-package relay
+package protocol
 
 import (
 	"encoding/json"

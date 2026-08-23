@@ -7,6 +7,7 @@ import (
 	"time"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
+	"github.com/yunloli/aiferry/internal/logic/protocol"
 )
 
 type channelAttempt struct {
@@ -93,7 +94,7 @@ func nonRetryableClientFailure(result attemptResult, attemptErr error, settings 
 	// same user payload again with another credential or backup URL. Only the
 	// explicitly transient client statuses remain eligible for retry.
 	if result.status >= http.StatusBadRequest && result.status < http.StatusInternalServerError {
-		if (result.status == http.StatusBadRequest || result.status == http.StatusUnprocessableEntity) && shouldFallbackWithProtocolConversion(result.status, result.body) {
+		if (result.status == http.StatusBadRequest || result.status == http.StatusUnprocessableEntity) && protocol.ShouldFallback(result.status, result.body) {
 			return false
 		}
 		switch result.status {

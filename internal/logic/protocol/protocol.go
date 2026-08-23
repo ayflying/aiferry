@@ -1,4 +1,4 @@
-package relay
+package protocol
 
 import (
 	"encoding/json"
@@ -9,59 +9,73 @@ import (
 )
 
 const (
-	chatCompletionsEndpoint = "/chat/completions"
-	responsesEndpoint       = "/responses"
+	// ChatCompletionsEndpoint 和 ResponsesEndpoint 是 Relay 路由及协议转换共用的
+	// 上游端点标识。转换规则只在这两个 OpenAI 兼容端点之间生效。
+	ChatCompletionsEndpoint = "/chat/completions"
+	ResponsesEndpoint       = "/responses"
 
 	chatToResponsesConversion = "chat_to_responses"
 	responsesToChatConversion = "responses_to_chat"
 )
 
-type protocolPlan struct {
+type Plan struct {
 	clientEndpoint   string
 	upstreamEndpoint string
 	conversion       string
 }
 
-func directProtocolPlan(endpoint string) protocolPlan {
-	return protocolPlan{clientEndpoint: endpoint, upstreamEndpoint: endpoint}
+func directPlan(endpoint string) Plan {
+	return Plan{clientEndpoint: endpoint, upstreamEndpoint: endpoint}
 }
 
-func preferredProtocolPlan(endpoint, model string) protocolPlan {
-	if endpoint == chatCompletionsEndpoint && isGPTModel(model) {
-		if plan, ok := fallbackProtocolPlan(endpoint); ok {
+func PreferredPlan(endpoint, model string) Plan {
+	if endpoint == ChatCompletionsEndpoint && isGPTModel(model) {
+		if plan, ok := fallbackPlan(endpoint); ok {
 			return plan
 		}
 	}
-	return directProtocolPlan(endpoint)
+	return directPlan(endpoint)
 }
 
-func alternateProtocolPlan(endpoint string, primary protocolPlan) (protocolPlan, bool) {
-	if primary.converts() {
-		return directProtocolPlan(endpoint), true
+func AlternatePlan(endpoint string, primary Plan) (Plan, bool) {
+	if primary.Converts() {
+		return directPlan(endpoint), true
 	}
-	return fallbackProtocolPlan(endpoint)
+	return fallbackPlan(endpoint)
 }
 
 func isGPTModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gpt-")
 }
 
-func fallbackProtocolPlan(endpoint string) (protocolPlan, bool) {
+func fallbackPlan(endpoint string) (Plan, bool) {
 	switch endpoint {
-	case chatCompletionsEndpoint:
-		return protocolPlan{clientEndpoint: endpoint, upstreamEndpoint: responsesEndpoint, conversion: chatToResponsesConversion}, true
-	case responsesEndpoint:
-		return protocolPlan{clientEndpoint: endpoint, upstreamEndpoint: chatCompletionsEndpoint, conversion: responsesToChatConversion}, true
+	case ChatCompletionsEndpoint:
+		return Plan{clientEndpoint: endpoint, upstreamEndpoint: ResponsesEndpoint, conversion: chatToResponsesConversion}, true
+	case ResponsesEndpoint:
+		return Plan{clientEndpoint: endpoint, upstreamEndpoint: ChatCompletionsEndpoint, conversion: responsesToChatConversion}, true
 	default:
-		return protocolPlan{}, false
+		return Plan{}, false
 	}
 }
 
-func (p protocolPlan) converts() bool {
+func (p Plan) ClientEndpoint() string {
+	return p.clientEndpoint
+}
+
+func (p Plan) UpstreamEndpoint() string {
+	return p.upstreamEndpoint
+}
+
+func (p Plan) Conversion() string {
+	return p.conversion
+}
+
+func (p Plan) Converts() bool {
 	return p.conversion != ""
 }
 
-func (p protocolPlan) convertRequest(body []byte) ([]byte, error) {
+func (p Plan) ConvertRequest(body []byte) ([]byte, error) {
 	switch p.conversion {
 	case "":
 		return body, nil
@@ -74,8 +88,8 @@ func (p protocolPlan) convertRequest(body []byte) ([]byte, error) {
 	}
 }
 
-func (p protocolPlan) convertResponse(body []byte) []byte {
-	if !p.converts() || !json.Valid(body) || gjson.GetBytes(body, "error").Exists() {
+func (p Plan) ConvertResponse(body []byte) []byte {
+	if !p.Converts() || !json.Valid(body) || gjson.GetBytes(body, "error").Exists() {
 		return body
 	}
 	switch p.conversion {
@@ -88,7 +102,7 @@ func (p protocolPlan) convertResponse(body []byte) []byte {
 	}
 }
 
-func shouldFallbackWithProtocolConversion(status int, body []byte) bool {
+func ShouldFallback(status int, body []byte) bool {
 	switch status {
 	case 404, 405, 501:
 		return true

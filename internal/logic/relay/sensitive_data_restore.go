@@ -91,7 +91,7 @@ func (r *sensitiveDataStreamRestorer) restoreSSELine(line []byte) [][]byte {
 	if r == nil {
 		return [][]byte{line}
 	}
-	payload, done, valid := sseDataPayload(line)
+	payload, done, valid := relaySSEDataPayload(line)
 	if !valid {
 		return [][]byte{line}
 	}

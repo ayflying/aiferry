@@ -188,7 +188,7 @@ func TestSensitiveDataStreamRestorerHandlesSplitPlaceholder(t *testing.T) {
 	if len(first) != 1 {
 		t.Fatalf("first response lines = %d, want 1", len(first))
 	}
-	firstPayload, _, valid := sseDataPayload(first[0])
+	firstPayload, _, valid := relaySSEDataPayload(first[0])
 	if !valid {
 		t.Fatalf("first response is not a valid SSE payload: %s", first[0])
 	}
@@ -199,7 +199,7 @@ func TestSensitiveDataStreamRestorerHandlesSplitPlaceholder(t *testing.T) {
 	if len(second) != 1 {
 		t.Fatalf("second response lines = %d, want 1", len(second))
 	}
-	secondPayload, _, valid := sseDataPayload(second[0])
+	secondPayload, _, valid := relaySSEDataPayload(second[0])
 	if !valid {
 		t.Fatalf("second response is not a valid SSE payload: %s", second[0])
 	}

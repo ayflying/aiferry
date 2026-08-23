@@ -1,4 +1,4 @@
-package relay
+package protocol
 
 func chatToolsToResponses(value any) []any {
 	result := make([]any, 0)

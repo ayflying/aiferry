@@ -17,7 +17,7 @@ type streamFailure struct {
 }
 
 func parseStreamFailure(line []byte) (streamFailure, bool) {
-	payload, done, valid := sseDataPayload(line)
+	payload, done, valid := relaySSEDataPayload(line)
 	if !valid || done {
 		return streamFailure{}, false
 	}
@@ -75,7 +75,7 @@ func statusCode(value gjson.Result) int {
 }
 
 func streamPayloadHasVisibleOutput(line []byte) bool {
-	payload, done, valid := sseDataPayload(line)
+	payload, done, valid := relaySSEDataPayload(line)
 	if !valid || done {
 		return false
 	}

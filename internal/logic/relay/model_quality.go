@@ -2,16 +2,33 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/tidwall/gjson"
 
+	"github.com/yunloli/aiferry/internal/logic/protocol"
 	"github.com/yunloli/aiferry/internal/logic/system"
 )
 
 const maxQualityTextRunes = 12000
+
+func relaySSEDataPayload(line []byte) (payload []byte, done, valid bool) {
+	text := strings.TrimSpace(string(line))
+	if !strings.HasPrefix(text, "data:") {
+		return nil, false, false
+	}
+	value := strings.TrimSpace(strings.TrimPrefix(text, "data:"))
+	if value == "[DONE]" {
+		return nil, true, true
+	}
+	if !json.Valid([]byte(value)) {
+		return nil, false, false
+	}
+	return []byte(value), false, true
+}
 
 type streamResponseCapture struct {
 	endpoint  string
@@ -29,7 +46,7 @@ func newStreamResponseCapture(endpoint string) *streamResponseCapture {
 }
 
 func (c *streamResponseCapture) Observe(line []byte) {
-	payload, done, valid := sseDataPayload(line)
+	payload, done, valid := relaySSEDataPayload(line)
 	if !valid {
 		return
 	}
@@ -37,14 +54,14 @@ func (c *streamResponseCapture) Observe(line []byte) {
 		c.completed = true
 		return
 	}
-	if c.endpoint == chatCompletionsEndpoint {
+	if c.endpoint == protocol.ChatCompletionsEndpoint {
 		if c.model == "" {
 			c.model = gjson.GetBytes(payload, "model").String()
 		}
 		c.append(gjson.GetBytes(payload, "choices.0.delta.content").String())
 		return
 	}
-	if c.endpoint != responsesEndpoint {
+	if c.endpoint != protocol.ResponsesEndpoint {
 		return
 	}
 	response := gjson.GetBytes(payload, "response")
@@ -82,9 +99,9 @@ func (c *streamResponseCapture) append(value string) {
 func captureBufferedResponse(endpoint string, body []byte) (string, string) {
 	model := gjson.GetBytes(body, "model").String()
 	switch endpoint {
-	case chatCompletionsEndpoint:
+	case protocol.ChatCompletionsEndpoint:
 		return truncateQualityText(responseContentText(gjson.GetBytes(body, "choices.0.message.content")), maxQualityTextRunes), model
-	case responsesEndpoint:
+	case protocol.ResponsesEndpoint:
 		var text strings.Builder
 		gjson.GetBytes(body, "output").ForEach(func(_, output gjson.Result) bool {
 			if output.Get("type").String() == "message" {
@@ -182,14 +199,14 @@ func inspectModelQuality(input modelQualityInput) []modelQualitySignal {
 func requestQuestionText(endpoint string, body []byte) string {
 	var text strings.Builder
 	switch endpoint {
-	case chatCompletionsEndpoint:
+	case protocol.ChatCompletionsEndpoint:
 		gjson.GetBytes(body, "messages").ForEach(func(_, message gjson.Result) bool {
 			if message.Get("role").String() == "user" {
 				text.WriteString(responseContentText(message.Get("content")))
 			}
 			return utf8.RuneCountInString(text.String()) < maxQualityTextRunes
 		})
-	case responsesEndpoint:
+	case protocol.ResponsesEndpoint:
 		input := gjson.GetBytes(body, "input")
 		if input.Type == gjson.String {
 			text.WriteString(input.String())

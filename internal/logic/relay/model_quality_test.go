@@ -1,9 +1,13 @@
 package relay
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/yunloli/aiferry/internal/logic/protocol"
+)
 
 func TestStreamResponseCaptureChat(t *testing.T) {
-	capture := newStreamResponseCapture(chatCompletionsEndpoint)
+	capture := newStreamResponseCapture(protocol.ChatCompletionsEndpoint)
 	capture.Observe([]byte("data: {\"model\":\"gpt-5\",\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}\n"))
 	capture.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n"))
 	capture.Observe([]byte("data: [DONE]\n"))
@@ -13,7 +17,7 @@ func TestStreamResponseCaptureChat(t *testing.T) {
 }
 
 func TestStreamResponseCaptureResponses(t *testing.T) {
-	capture := newStreamResponseCapture(responsesEndpoint)
+	capture := newStreamResponseCapture(protocol.ResponsesEndpoint)
 	capture.Observe([]byte("data: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-5\"}}\n"))
 	capture.Observe([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n"))
 	capture.Observe([]byte("data: {\"type\":\"response.completed\"}\n"))
@@ -36,7 +40,7 @@ func TestModelQualitySignals(t *testing.T) {
 }
 
 func TestRequestQuestionTextResponsesInputText(t *testing.T) {
-	question := requestQuestionText(responsesEndpoint, []byte(`{"input":[{"type":"input_text","text":"请分析这个问题"}]}`))
+	question := requestQuestionText(protocol.ResponsesEndpoint, []byte(`{"input":[{"type":"input_text","text":"请分析这个问题"}]}`))
 	if question != "请分析这个问题" {
 		t.Fatalf("unexpected question: %q", question)
 	}

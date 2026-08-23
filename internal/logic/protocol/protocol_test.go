@@ -1,11 +1,10 @@
-package relay
+package protocol
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/tidwall/gjson"
-	adminapi "github.com/yunloli/aiferry/api/admin"
 )
 
 func TestChatRequestToResponses(t *testing.T) {
@@ -212,23 +211,20 @@ func TestNestedToolOutputImageToResponses(t *testing.T) {
 
 func TestInvalidFileDownloadDoesNotTriggerProtocolFallback(t *testing.T) {
 	body := []byte(`{"error":{"code":"invalid_value","message":"Error while downloading file. Upstream status code: 404.","type":"invalid_request_error"}}`)
-	if shouldFallbackWithProtocolConversion(400, body) {
+	if ShouldFallback(400, body) {
 		t.Fatal("invalid file download must not trigger protocol fallback")
-	}
-	if !nonRetryableClientFailure(attemptResult{status: 400, body: body}, nil, adminapi.SystemResilienceSettingsInput{}) {
-		t.Fatal("invalid file download must stop credential and backup URL retries")
 	}
 }
 
 func TestGPTChatPrefersResponsesAndKeepsCacheOptions(t *testing.T) {
-	plan := preferredProtocolPlan(chatCompletionsEndpoint, "GPT-5.6-terra")
-	if plan.upstreamEndpoint != responsesEndpoint || plan.conversion != chatToResponsesConversion {
+	plan := PreferredPlan(ChatCompletionsEndpoint, "GPT-5.6-terra")
+	if plan.upstreamEndpoint != ResponsesEndpoint || plan.conversion != chatToResponsesConversion {
 		t.Fatalf("GPT Chat plan = %+v, want Chat to Responses conversion", plan)
 	}
-	if fallback, ok := alternateProtocolPlan(chatCompletionsEndpoint, plan); !ok || fallback.upstreamEndpoint != chatCompletionsEndpoint || fallback.conversion != "" {
+	if fallback, ok := AlternatePlan(ChatCompletionsEndpoint, plan); !ok || fallback.upstreamEndpoint != ChatCompletionsEndpoint || fallback.conversion != "" {
 		t.Fatalf("GPT fallback plan = %+v, want direct Chat", fallback)
 	}
-	body, err := plan.convertRequest([]byte(`{
+	body, err := plan.ConvertRequest([]byte(`{
   "model":"gpt-5.6-terra",
   "prompt_cache_key":"support:stable",
   "prompt_cache_options":{"mode":"implicit"},
@@ -249,8 +245,8 @@ func TestGPTChatPrefersResponsesAndKeepsCacheOptions(t *testing.T) {
 }
 
 func TestNonGPTChatKeepsDirectProtocol(t *testing.T) {
-	plan := preferredProtocolPlan(chatCompletionsEndpoint, "deepseek-v4-pro")
-	if plan.upstreamEndpoint != chatCompletionsEndpoint || plan.conversion != "" {
+	plan := PreferredPlan(ChatCompletionsEndpoint, "deepseek-v4-pro")
+	if plan.upstreamEndpoint != ChatCompletionsEndpoint || plan.conversion != "" {
 		t.Fatalf("non-GPT Chat plan = %+v, want direct Chat", plan)
 	}
 }
@@ -284,8 +280,8 @@ func TestResponsesRequestToChat(t *testing.T) {
 }
 
 func TestProtocolResponseConversionPreservesUsage(t *testing.T) {
-	chatPlan, _ := fallbackProtocolPlan(chatCompletionsEndpoint)
-	chatBody := chatPlan.convertResponse([]byte(`{
+	chatPlan, _ := fallbackPlan(ChatCompletionsEndpoint)
+	chatBody := chatPlan.ConvertResponse([]byte(`{
   "id":"resp_1","object":"response","created_at":10,"model":"gpt-test","status":"completed",
   "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],
   "usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}
@@ -297,8 +293,8 @@ func TestProtocolResponseConversionPreservesUsage(t *testing.T) {
 		t.Fatalf("prompt tokens = %d", actual)
 	}
 
-	responsePlan, _ := fallbackProtocolPlan(responsesEndpoint)
-	responseBody := responsePlan.convertResponse([]byte(`{
+	responsePlan, _ := fallbackPlan(ResponsesEndpoint)
+	responseBody := responsePlan.ConvertResponse([]byte(`{
   "id":"chat_1","object":"chat.completion","created":10,"model":"gpt-test",
   "choices":[{"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],
   "usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}
@@ -312,8 +308,8 @@ func TestProtocolResponseConversionPreservesUsage(t *testing.T) {
 }
 
 func TestProtocolStreamConversion(t *testing.T) {
-	chatPlan, _ := fallbackProtocolPlan(chatCompletionsEndpoint)
-	chatConverter := newProtocolStreamConverter(chatPlan)
+	chatPlan, _ := fallbackPlan(ChatCompletionsEndpoint)
+	chatConverter := NewStreamConverter(chatPlan)
 	chatConverter.Transform([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-test\",\"created_at\":10}}\n"))
 	chatLines := chatConverter.Transform([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n"))
 	if output := protocolStreamText(chatLines); !strings.Contains(output, "chat.completion.chunk") || !strings.Contains(output, "Hello") {
@@ -324,8 +320,8 @@ func TestProtocolStreamConversion(t *testing.T) {
 		t.Fatalf("unexpected Responses completion: %s", output)
 	}
 
-	responsePlan, _ := fallbackProtocolPlan(responsesEndpoint)
-	responseConverter := newProtocolStreamConverter(responsePlan)
+	responsePlan, _ := fallbackPlan(ResponsesEndpoint)
+	responseConverter := NewStreamConverter(responsePlan)
 	responseLines := responseConverter.Transform([]byte("data: {\"id\":\"chat_1\",\"created\":10,\"model\":\"gpt-test\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n"))
 	if output := protocolStreamText(responseLines); !strings.Contains(output, "response.created") || !strings.Contains(output, "response.output_text.delta") {
 		t.Fatalf("unexpected Chat to Responses stream: %s", output)
@@ -337,16 +333,16 @@ func TestProtocolStreamConversion(t *testing.T) {
 }
 
 func TestProtocolFallbackOnlyForUnsupportedEndpoints(t *testing.T) {
-	if !shouldFallbackWithProtocolConversion(404, nil) {
+	if !ShouldFallback(404, nil) {
 		t.Fatal("404 should trigger protocol fallback")
 	}
-	if !shouldFallbackWithProtocolConversion(400, []byte(`{"error":{"message":"Responses API is not supported"}}`)) {
+	if !ShouldFallback(400, []byte(`{"error":{"message":"Responses API is not supported"}}`)) {
 		t.Fatal("unsupported endpoint message should trigger protocol fallback")
 	}
-	if shouldFallbackWithProtocolConversion(400, []byte(`{"error":{"message":"temperature is invalid"}}`)) {
+	if ShouldFallback(400, []byte(`{"error":{"message":"temperature is invalid"}}`)) {
 		t.Fatal("ordinary validation failure must not trigger protocol fallback")
 	}
-	if shouldFallbackWithProtocolConversion(400, []byte(`{"error":{"code":"invalid_type","message":"image_url must be a string"}}`)) {
+	if ShouldFallback(400, []byte(`{"error":{"code":"invalid_type","message":"image_url must be a string"}}`)) {
 		t.Fatal("image URL validation failure must not trigger protocol fallback")
 	}
 }

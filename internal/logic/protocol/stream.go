@@ -1,4 +1,4 @@
-package relay
+package protocol
 
 import (
 	"encoding/json"
@@ -8,8 +8,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-type protocolStreamConverter struct {
-	plan           protocolPlan
+type StreamConverter struct {
+	plan           Plan
 	id             string
 	model          string
 	created        int64
@@ -21,11 +21,11 @@ type protocolStreamConverter struct {
 	usage          map[string]any
 }
 
-func newProtocolStreamConverter(plan protocolPlan) *protocolStreamConverter {
-	return &protocolStreamConverter{plan: plan, created: time.Now().Unix()}
+func NewStreamConverter(plan Plan) *StreamConverter {
+	return &StreamConverter{plan: plan, created: time.Now().Unix()}
 }
 
-func (c *protocolStreamConverter) Transform(line []byte) [][]byte {
+func (c *StreamConverter) Transform(line []byte) [][]byte {
 	payload, done, valid := sseDataPayload(line)
 	if !valid {
 		return nil
@@ -33,7 +33,7 @@ func (c *protocolStreamConverter) Transform(line []byte) [][]byte {
 	if done {
 		return c.Complete()
 	}
-	switch c.plan.conversion {
+	switch c.plan.Conversion() {
 	case chatToResponsesConversion:
 		return c.responsesToChat(payload)
 	case responsesToChatConversion:
@@ -43,12 +43,12 @@ func (c *protocolStreamConverter) Transform(line []byte) [][]byte {
 	}
 }
 
-func (c *protocolStreamConverter) Complete() [][]byte {
+func (c *StreamConverter) Complete() [][]byte {
 	if c.completed {
 		return nil
 	}
 	c.completed = true
-	switch c.plan.conversion {
+	switch c.plan.Conversion() {
 	case chatToResponsesConversion:
 		return c.completeChatStream()
 	case responsesToChatConversion:
@@ -58,7 +58,7 @@ func (c *protocolStreamConverter) Complete() [][]byte {
 	}
 }
 
-func (c *protocolStreamConverter) responsesToChat(payload []byte) [][]byte {
+func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 	c.captureResponseMetadata(payload)
 	eventType := gjson.GetBytes(payload, "type").String()
 	switch eventType {
@@ -120,7 +120,7 @@ func (c *protocolStreamConverter) responsesToChat(payload []byte) [][]byte {
 	return nil
 }
 
-func (c *protocolStreamConverter) chatToResponses(payload []byte) [][]byte {
+func (c *StreamConverter) chatToResponses(payload []byte) [][]byte {
 	c.captureChatMetadata(payload)
 	choice := gjson.GetBytes(payload, "choices.0")
 	if !choice.Exists() {
@@ -157,7 +157,7 @@ func (c *protocolStreamConverter) chatToResponses(payload []byte) [][]byte {
 	return result
 }
 
-func (c *protocolStreamConverter) completeChatStream() [][]byte {
+func (c *StreamConverter) completeChatStream() [][]byte {
 	finishReason := "stop"
 	if c.sawToolCall {
 		finishReason = "tool_calls"
@@ -169,7 +169,7 @@ func (c *protocolStreamConverter) completeChatStream() [][]byte {
 	return append(c.chatChunk(map[string]any{}, finishReason, usage), []byte("data: [DONE]\n\n"))
 }
 
-func (c *protocolStreamConverter) completeResponsesStream() [][]byte {
+func (c *StreamConverter) completeResponsesStream() [][]byte {
 	result := c.ensureResponsesTextStarted()
 	if c.contentStarted {
 		result = append(result,
@@ -188,7 +188,7 @@ func (c *protocolStreamConverter) completeResponsesStream() [][]byte {
 	return result
 }
 
-func (c *protocolStreamConverter) ensureChatRole() [][]byte {
+func (c *StreamConverter) ensureChatRole() [][]byte {
 	if c.started {
 		return nil
 	}
@@ -196,7 +196,7 @@ func (c *protocolStreamConverter) ensureChatRole() [][]byte {
 	return c.chatChunk(map[string]any{"role": "assistant"}, nil, nil)
 }
 
-func (c *protocolStreamConverter) ensureResponsesStarted() [][]byte {
+func (c *StreamConverter) ensureResponsesStarted() [][]byte {
 	if c.started {
 		return nil
 	}
@@ -207,7 +207,7 @@ func (c *protocolStreamConverter) ensureResponsesStarted() [][]byte {
 	}
 }
 
-func (c *protocolStreamConverter) ensureResponsesTextStarted() [][]byte {
+func (c *StreamConverter) ensureResponsesTextStarted() [][]byte {
 	result := c.ensureResponsesStarted()
 	if c.contentStarted {
 		return result
@@ -218,7 +218,7 @@ func (c *protocolStreamConverter) ensureResponsesTextStarted() [][]byte {
 	}))
 }
 
-func (c *protocolStreamConverter) chatChunk(delta map[string]any, finishReason any, usage any) [][]byte {
+func (c *StreamConverter) chatChunk(delta map[string]any, finishReason any, usage any) [][]byte {
 	chunk := map[string]any{
 		"id": c.chatID(), "object": "chat.completion.chunk", "created": c.created, "model": c.model,
 		"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finishReason}},
@@ -229,7 +229,7 @@ func (c *protocolStreamConverter) chatChunk(delta map[string]any, finishReason a
 	return [][]byte{sseData(chunk)}
 }
 
-func (c *protocolStreamConverter) captureResponseMetadata(payload []byte) {
+func (c *StreamConverter) captureResponseMetadata(payload []byte) {
 	response := gjson.GetBytes(payload, "response")
 	if !response.Exists() {
 		return
@@ -245,7 +245,7 @@ func (c *protocolStreamConverter) captureResponseMetadata(payload []byte) {
 	}
 }
 
-func (c *protocolStreamConverter) captureChatMetadata(payload []byte) {
+func (c *StreamConverter) captureChatMetadata(payload []byte) {
 	if c.id == "" {
 		c.id = gjson.GetBytes(payload, "id").String()
 	}
@@ -257,18 +257,18 @@ func (c *protocolStreamConverter) captureChatMetadata(payload []byte) {
 	}
 }
 
-func (c *protocolStreamConverter) chatID() string {
+func (c *StreamConverter) chatID() string {
 	if c.id != "" {
 		return c.id
 	}
 	return "chatcmpl-aiferry"
 }
 
-func (c *protocolStreamConverter) responseMessageID() string {
+func (c *StreamConverter) responseMessageID() string {
 	return "msg_aiferry"
 }
 
-func (c *protocolStreamConverter) responseOutputItem() map[string]any {
+func (c *StreamConverter) responseOutputItem() map[string]any {
 	content := make([]any, 0)
 	if c.contentStarted {
 		content = append(content, map[string]any{"type": "output_text", "text": c.outputText.String()})
@@ -276,7 +276,7 @@ func (c *protocolStreamConverter) responseOutputItem() map[string]any {
 	return map[string]any{"id": c.responseMessageID(), "type": "message", "status": "completed", "role": "assistant", "content": content}
 }
 
-func (c *protocolStreamConverter) responseObject(status string) map[string]any {
+func (c *StreamConverter) responseObject(status string) map[string]any {
 	id := c.id
 	if id == "" {
 		id = "resp_aiferry"
