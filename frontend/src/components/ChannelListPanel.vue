@@ -39,6 +39,9 @@ const emit = defineEmits<{
     <ResponsiveList>
       <template #desktop>
         <el-table v-loading="props.loading" :data="props.channels" row-key="id">
+          <el-table-column label="编号" width="78" align="center">
+            <template #default="{ row }"><span class="mono channel-id">{{ row.id }}</span></template>
+          </el-table-column>
           <el-table-column label="渠道" min-width="180">
             <template #default="{ row }">
               <div class="channel-name"><strong>{{ row.name }}</strong><span>{{ row.baseUrl }}</span></div>
@@ -100,6 +103,7 @@ const emit = defineEmits<{
               </div>
             </div>
             <dl class="mobile-record__facts">
+              <div><dt>渠道编号</dt><dd class="mono channel-id">{{ row.id }}</dd></div>
               <div><dt>渠道类型</dt><dd>{{ row.typeName }} · <span class="mono">{{ row.type }}</span></dd></div>
               <div><dt>路由</dt><dd class="mono">P{{ row.priority }} / W{{ row.weight }}</dd></div>
               <div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}</dd></div>
@@ -120,7 +124,7 @@ const emit = defineEmits<{
 
 <style scoped>
 .page-toolbar { display: flex; min-height: 36px; align-items: center; gap: 10px; margin-bottom: 18px; }.page-toolbar .spacer { flex: 1; }
-.channel-name { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.channel-name strong { font-size: 13px; }.channel-name span { overflow: hidden; color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.channel-name { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.channel-name strong { font-size: 13px; }.channel-name span { overflow: hidden; color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.channel-id { font-weight: 600; }
 .channel-status-control { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }.channel-status-control :deep(.el-switch) { flex: 0 0 auto; }
 .cost-cell { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.cost-cell small, .table-panel small { color: #7b8792; }.cost-link { display: block; width: 100%; border: 0; padding: 0; text-align: left; color: inherit; background: transparent; cursor: pointer; }.cost-link:hover span { color: #1677ff; }
 .cost-query-spinner { animation: cost-query-spin 0.9s linear infinite; }@keyframes cost-query-spin { to { transform: rotate(360deg); } }
