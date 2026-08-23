@@ -97,7 +97,11 @@ func nonRetryableClientFailure(result attemptResult, attemptErr error, settings 
 			return false
 		}
 		switch result.status {
-		case http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
+		case http.StatusNotFound, http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
+			// 404 can mean that this channel/group does not expose the requested
+			// model. Allow routing to the next candidate, but never treat it as a
+			// successful response. The configured rule still controls whether the
+			// current credential may be retried.
 			return !retryableStatusForRules(result.status, settings.RetryStatusCodes)
 		default:
 			return true

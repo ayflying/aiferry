@@ -84,10 +84,13 @@ func TestNonRetryableClientFailureStopsCredentialTraversal(t *testing.T) {
 	if !nonRetryableClientFailure(attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"code":"invalid_type","message":"image_url must be a string"}}`)}, nil, settings) {
 		t.Fatal("image URL validation failure must stop retries")
 	}
-	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity} {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusUnprocessableEntity} {
 		if !nonRetryableClientFailure(attemptResult{status: status}, nil, settings) {
 			t.Fatalf("upstream client error status %d must stop retries", status)
 		}
+	}
+	if nonRetryableClientFailure(attemptResult{status: http.StatusNotFound}, nil, settings) {
+		t.Fatal("404 model-not-found must allow failover to another configured channel")
 	}
 	if nonRetryableClientFailure(attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"message":"Responses API is not supported"}}`)}, nil, settings) {
 		t.Fatal("unsupported endpoint must retain protocol fallback")
