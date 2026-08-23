@@ -5,9 +5,9 @@ import { enabledChannelModels, sortDiscoveredModels } from './models'
 describe('model lists', () => {
   it('sorts discovered models by name without mutating the response', () => {
     const input: DiscoveredModel[] = [
-      { name: 'gpt-10', selected: false },
-      { name: 'gpt-2', selected: true },
-      { name: 'GPT-1', selected: false },
+      { name: 'gpt-10', publicName: 'gpt-10', selected: false },
+      { name: 'gpt-2', publicName: 'gpt-2', selected: true },
+      { name: 'GPT-1', publicName: 'GPT-1', selected: false },
     ]
 
     expect(sortDiscoveredModels(input).map((item) => item.name)).toEqual(['GPT-1', 'gpt-2', 'gpt-10'])

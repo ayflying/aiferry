@@ -41,6 +41,7 @@ export interface PublicModel {
 
 export interface DiscoveredModel {
   name: string
+  publicName: string
   selected: boolean
 }
 

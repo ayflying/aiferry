@@ -39,6 +39,7 @@ const discoveryChannel = ref<Channel>()
 const discoveredModels = ref<DiscoveredModel[]>([])
 const discoveryKeyword = ref('')
 const selectedModelNames = ref<string[]>([])
+const modelAliases = ref<Record<string, string>>({})
 const discoveryError = ref('')
 const testOpen = ref(false)
 const testChannel = ref<Channel>()
@@ -61,7 +62,9 @@ const usesManagementKey = computed(() => {
 })
 const visibleDiscoveredModels = computed(() => {
   const keyword = discoveryKeyword.value.trim().toLowerCase()
-  return keyword ? discoveredModels.value.filter((item) => item.name.toLowerCase().includes(keyword)) : discoveredModels.value
+  return keyword
+    ? discoveredModels.value.filter((item) => `${item.name} ${modelAliases.value[item.name] || item.publicName}`.toLowerCase().includes(keyword))
+    : discoveredModels.value
 })
 const allVisibleSelected = computed(() => visibleDiscoveredModels.value.length > 0
   && visibleDiscoveredModels.value.every((item) => selectedModelNames.value.includes(item.name)))
@@ -225,6 +228,7 @@ async function discover(channel: Channel) {
   discoveryKeyword.value = ''
   discoveredModels.value = []
   selectedModelNames.value = []
+  modelAliases.value = {}
   discoveryError.value = ''
   discoveryOpen.value = true
   discovering.value = true
@@ -232,6 +236,7 @@ async function discover(channel: Channel) {
     const models = await apiPost<DiscoveredModel[]>(`/channels/${channel.id}/models/discover`)
     discoveredModels.value = sortDiscoveredModels(models)
     selectedModelNames.value = discoveredModels.value.filter((item) => item.selected).map((item) => item.name)
+    modelAliases.value = Object.fromEntries(discoveredModels.value.map((item) => [item.name, item.publicName || item.name]))
   } catch (error) {
     discoveryError.value = describeDiscoveryError(error)
   } finally {
@@ -259,7 +264,11 @@ async function saveModelSelection() {
   if (!discoveryChannel.value) return
   applyingSelection.value = true
   try {
-    await apiPut(`/channels/${discoveryChannel.value.id}/models/selection`, { modelNames: selectedModelNames.value })
+    const models = selectedModelNames.value.map((upstreamName) => ({
+      upstreamName,
+      publicName: modelAliases.value[upstreamName]?.trim() || upstreamName,
+    }))
+    await apiPut(`/channels/${discoveryChannel.value.id}/models/selection`, { models })
     ElMessage.success(`已启用 ${selectedModelNames.value.length} 个模型`)
     discoveryOpen.value = false
     await loadChannels()
@@ -332,7 +341,7 @@ watch(activeTab, (tab) => {
     <section v-else-if="activeTab === 'groups'"><ChannelGroupListPanel :channels="store.channels" :groups="store.channelGroups" :loading="tabLoading.groups" @create="openCreateGroup" @edit="openEditGroup" @refresh="loadChannelGroups" @remove="removeGroup" /></section>
     <section v-else><ChannelTypeListPanel :loading="tabLoading.types" :status-saving="typeStatusSaving" :types="store.channelTypes" @create="openCreateType" @edit="openEditType" @refresh="loadChannelTypes" @remove="removeType" @set-status="setTypeStatus" /></section>
 
-    <el-dialog v-model="discoveryOpen" :title="`选择模型 · ${discoveryChannel?.name || ''}`" width="min(640px, 94vw)"><div v-loading="discovering" class="model-selection"><template v-if="discoveryError"><div class="discovery-error" role="alert"><strong>模型发现失败</strong><span>{{ discoveryError }}</span><el-button :icon="RefreshCw" @click="discoveryChannel && discover(discoveryChannel)">重新尝试</el-button></div></template><template v-else><div class="selection-toolbar"><el-input v-model="discoveryKeyword" clearable placeholder="搜索模型" /><el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消当前结果' : '选择当前结果' }}</el-button></div><div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div><el-checkbox-group v-if="visibleDiscoveredModels.length" v-model="selectedModelNames" class="model-check-list"><el-checkbox v-for="item in visibleDiscoveredModels" :key="item.name" :value="item.name"><code>{{ item.name }}</code></el-checkbox></el-checkbox-group><div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div></template></div><template #footer><el-button @click="discoveryOpen = false">取消</el-button><el-button type="primary" :loading="applyingSelection" :disabled="discovering || Boolean(discoveryError)" @click="saveModelSelection">确认选择</el-button></template></el-dialog>
+    <el-dialog v-model="discoveryOpen" :title="`模型映射 · ${discoveryChannel?.name || ''}`" width="min(760px, 94vw)"><div v-loading="discovering" class="model-selection"><template v-if="discoveryError"><div class="discovery-error" role="alert"><strong>模型发现失败</strong><span>{{ discoveryError }}</span><el-button :icon="RefreshCw" @click="discoveryChannel && discover(discoveryChannel)">重新尝试</el-button></div></template><template v-else><div class="mapping-hint">勾选要启用的模型，并为每个模型填写客户端看到的公开名称；公开名称用于请求路由和 `/models` 列表。</div><div class="selection-toolbar"><el-input v-model="discoveryKeyword" clearable placeholder="搜索上游或公开模型" /><el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消当前结果' : '选择当前结果' }}</el-button></div><div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div><el-checkbox-group v-if="visibleDiscoveredModels.length" v-model="selectedModelNames" class="model-check-list"><div v-for="item in visibleDiscoveredModels" :key="item.name" class="model-mapping-row"><el-checkbox :value="item.name"><code>{{ item.name }}</code></el-checkbox><el-input v-model="modelAliases[item.name]" :disabled="!selectedModelNames.includes(item.name)" maxlength="191" placeholder="公开模型名，默认同上游" /></div></el-checkbox-group><div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div></template></div><template #footer><el-button @click="discoveryOpen = false">取消</el-button><el-button type="primary" :loading="applyingSelection" :disabled="discovering || Boolean(discoveryError)" @click="saveModelSelection">保存映射</el-button></template></el-dialog>
 
     <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="loadChannels" />
     <ChannelCredentialDrawer v-model="credentialsOpen" :channel="credentialChannel" @changed="loadChannels" />
@@ -346,6 +355,6 @@ watch(activeTab, (tab) => {
 </template>
 
 <style scoped>
-.model-selection { min-height: 300px; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-check-list .el-checkbox { min-width: 0; height: 38px; margin: 0; padding: 0 10px; border-bottom: 1px solid #eef1f3; }.model-check-list .el-checkbox:last-child { border-bottom: 0; }.model-check-list code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; min-height: 220px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; padding: 20px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 14px; }.config-editor :deep(textarea) { min-height: 440px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
+.model-selection { min-height: 300px; }.mapping-hint { margin-bottom: 12px; color: #66717d; font-size: 12px; line-height: 1.5; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-mapping-row { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); gap: 12px; align-items: center; min-height: 52px; padding: 7px 10px; border-bottom: 1px solid #eef1f3; }.model-mapping-row:last-child { border-bottom: 0; }.model-mapping-row .el-checkbox { min-width: 0; margin: 0; }.model-mapping-row .el-checkbox :deep(.el-checkbox__label) { overflow: hidden; text-overflow: ellipsis; }.model-mapping-row code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; min-height: 220px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; padding: 20px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 14px; }.config-editor :deep(textarea) { min-height: 440px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
 @media (max-width: 600px) { .selection-toolbar { grid-template-columns: 1fr; } }
 </style>

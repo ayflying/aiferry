@@ -3,6 +3,8 @@ package channel
 import (
 	"reflect"
 	"testing"
+
+	adminapi "github.com/yunloli/aiferry/api/admin"
 )
 
 func TestNormalizeModelNamesSortsAndDeduplicates(t *testing.T) {
@@ -11,6 +13,41 @@ func TestNormalizeModelNamesSortsAndDeduplicates(t *testing.T) {
 
 	if got := normalizeModelNames(input); !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected model names: got %v, want %v", got, want)
+	}
+}
+
+func TestNormalizeModelMappingsSupportsAliasesAndLegacyNames(t *testing.T) {
+	mappings, err := normalizeModelMappings(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{UpstreamName: " gpt-5.6 ", PublicName: " gpt-5.6-luna "},
+		{UpstreamName: "gpt-4.1", PublicName: ""},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []modelMapping{
+		{UpstreamName: "gpt-5.6", PublicName: "gpt-5.6-luna"},
+		{UpstreamName: "gpt-4.1", PublicName: "gpt-4.1"},
+	}
+	if !reflect.DeepEqual(mappings, want) {
+		t.Fatalf("unexpected mappings: got %#v, want %#v", mappings, want)
+	}
+
+	legacy, err := normalizeModelMappings(adminapi.ModelSelectionInput{ModelNames: []string{"zeta", "alpha", "zeta"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []modelMapping{{UpstreamName: "alpha", PublicName: "alpha"}, {UpstreamName: "zeta", PublicName: "zeta"}}; !reflect.DeepEqual(legacy, want) {
+		t.Fatalf("unexpected legacy mappings: got %#v, want %#v", legacy, want)
+	}
+}
+
+func TestNormalizeModelMappingsRejectsDuplicateUpstreamModel(t *testing.T) {
+	_, err := normalizeModelMappings(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{UpstreamName: "gpt-5", PublicName: "gpt-5-main"},
+		{UpstreamName: "gpt-5", PublicName: "gpt-5-backup"},
+	}})
+	if err == nil || err.Error() != "duplicate upstream model: gpt-5" {
+		t.Fatalf("unexpected duplicate error: %v", err)
 	}
 }
 

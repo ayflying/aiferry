@@ -80,7 +80,7 @@ const emit = defineEmits<{
             <template #default="{ row }">
               <div class="table-actions">
                 <el-tooltip content="管理上游密钥"><button class="icon-button" type="button" :aria-label="`管理 ${row.name} 的上游密钥`" @click="emit('open-credentials', row)"><KeyRound :size="16" /></button></el-tooltip>
-                <el-tooltip content="发现模型"><button class="icon-button" type="button" :aria-label="`发现 ${row.name} 的模型`" @click="emit('discover', row)"><ScanSearch :size="16" /></button></el-tooltip>
+                <el-tooltip content="发现与映射模型"><button class="icon-button" type="button" :aria-label="`发现并映射 ${row.name} 的模型`" @click="emit('discover', row)"><ScanSearch :size="16" /></button></el-tooltip>
                 <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="emit('test', row)"><FlaskConical :size="16" /></button></el-tooltip>
                 <el-tooltip :content="props.queryingCostID === row.id ? '正在查询费用' : '查询费用'"><button class="icon-button" type="button" :aria-label="`${props.queryingCostID === row.id ? '正在查询' : '查询'} ${row.name} 的费用`" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)"><LoaderCircle v-if="props.queryingCostID === row.id" :size="16" class="cost-query-spinner" /><Coins v-else :size="16" /></button></el-tooltip>
                 <el-tooltip content="编辑"><button class="icon-button" type="button" :aria-label="`编辑渠道 ${row.name}`" @click="emit('edit', row)"><Pencil :size="16" /></button></el-tooltip>
@@ -112,7 +112,7 @@ const emit = defineEmits<{
             </dl>
             <div class="mobile-record__footer">
               <span class="muted">渠道操作</span>
-              <div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="emit('open-credentials', row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="emit('discover', row)">发现</el-button><el-button size="small" :icon="FlaskConical" @click="emit('test', row)">测试</el-button><el-button size="small" :icon="Coins" :loading="props.queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)">费用</el-button><el-button size="small" :icon="Pencil" @click="emit('edit', row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="emit('remove', row)">删除</el-button></div>
+              <div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="emit('open-credentials', row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="emit('discover', row)">模型</el-button><el-button size="small" :icon="FlaskConical" @click="emit('test', row)">测试</el-button><el-button size="small" :icon="Coins" :loading="props.queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)">费用</el-button><el-button size="small" :icon="Pencil" @click="emit('edit', row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="emit('remove', row)">删除</el-button></div>
             </div>
           </article>
         </MobileRecordList>

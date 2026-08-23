@@ -11,7 +11,6 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 
-	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/logic/channelgroup"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
@@ -20,6 +19,7 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/logic/user"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 const (
@@ -120,8 +120,9 @@ type PublicModelView struct {
 }
 
 type DiscoveredModel struct {
-	Name     string `json:"name"`
-	Selected bool   `json:"selected"`
+	Name       string `json:"name"`
+	PublicName string `json:"publicName"`
+	Selected   bool   `json:"selected"`
 }
 
 func New(appSvc *app.Service, typeSvc *channeltype.Service, groupSvc *channelgroup.Service, resilienceSvc *system.Service, usageSvc *usage.Service, priceCache *pricingcache.Service, userSvc *user.Service, mailSvc *mailservice.Service) *sChannel {

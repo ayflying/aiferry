@@ -104,7 +104,13 @@ type PriceRuleInput struct {
 }
 
 type ModelSelectionInput struct {
-	ModelNames []string `json:"modelNames"`
+	ModelNames []string            `json:"modelNames"`
+	Models     []ModelMappingInput `json:"models"`
+}
+
+type ModelMappingInput struct {
+	UpstreamName string `json:"upstreamName"`
+	PublicName   string `json:"publicName"`
 }
 
 type ModelTestInput struct {

@@ -51,13 +51,13 @@ func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]Disc
 	}
 	var existing []entity.ChannelModels
 	if err = dao.ChannelModels.Ctx(ctx).
-		Where(do.ChannelModels{ChannelId: channelID, Enabled: 1}).
+		Where(do.ChannelModels{ChannelId: channelID}).
 		Scan(&existing); err != nil {
-		return nil, gerror.Wrap(err, "load selected models")
+		return nil, gerror.Wrap(err, "load channel models")
 	}
-	selected := make(map[string]struct{}, len(existing))
+	existingByUpstream := make(map[string]entity.ChannelModels, len(existing))
 	for _, model := range existing {
-		selected[model.UpstreamName] = struct{}{}
+		existingByUpstream[model.UpstreamName] = model
 	}
 
 	names, err := modelNamesFromJSON(body, config.Models.ListPath, config.Models.IDPath)
@@ -66,8 +66,12 @@ func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]Disc
 	}
 	models := make([]DiscoveredModel, 0, len(names))
 	for _, name := range names {
-		_, isSelected := selected[name]
-		models = append(models, DiscoveredModel{Name: name, Selected: isSelected})
+		model, exists := existingByUpstream[name]
+		models = append(models, DiscoveredModel{
+			Name:       name,
+			PublicName: stringOrDefault(model.PublicName, name),
+			Selected:   exists && model.Enabled == 1,
+		})
 	}
 	return models, nil
 }
@@ -76,21 +80,16 @@ func (s *sChannel) SelectModels(ctx context.Context, channelID uint64, input adm
 	if _, err := s.Get(ctx, channelID); err != nil {
 		return nil, err
 	}
-	names := normalizeModelNames(input.ModelNames)
-	if len(names) > 2000 {
-		return nil, gerror.New("too many models selected")
+	mappings, err := normalizeModelMappings(input)
+	if err != nil {
+		return nil, err
 	}
-	for _, name := range names {
-		if len(name) > 191 {
-			return nil, gerror.Newf("model name is too long: %s", name)
-		}
-	}
-	selected := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		selected[name] = struct{}{}
+	selected := make(map[string]string, len(mappings))
+	for _, mapping := range mappings {
+		selected[mapping.UpstreamName] = mapping.PublicName
 	}
 
-	err := dao.ChannelModels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+	err = dao.ChannelModels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
 		var existing []entity.ChannelModels
 		if scanErr := dao.ChannelModels.Ctx(txCtx).
 			Where(dao.ChannelModels.Columns().ChannelId, channelID).
@@ -98,26 +97,29 @@ func (s *sChannel) SelectModels(ctx context.Context, channelID uint64, input adm
 			return gerror.Wrap(scanErr, "load channel models")
 		}
 		for _, model := range existing {
-			_, enabled := selected[model.UpstreamName]
-			delete(selected, model.UpstreamName)
-			if model.Enabled == boolInt(enabled) {
+			publicName, enabled := selected[model.UpstreamName]
+			if enabled {
+				delete(selected, model.UpstreamName)
+			}
+			data := do.ChannelModels{Enabled: boolInt(enabled)}
+			if enabled && model.PublicName != publicName {
+				data.PublicName = publicName
+			}
+			if model.Enabled == boolInt(enabled) && (!enabled || model.PublicName == publicName) {
 				continue
 			}
 			if _, updateErr := dao.ChannelModels.Ctx(txCtx).
 				Where(dao.ChannelModels.Columns().Id, model.Id).
-				Data(do.ChannelModels{Enabled: boolInt(enabled)}).
+				Data(data).
 				Update(); updateErr != nil {
 				return gerror.Wrap(updateErr, "update model selection")
 			}
 		}
-		for _, name := range names {
-			if _, missing := selected[name]; !missing {
-				continue
-			}
+		for upstreamName, publicName := range selected {
 			if _, insertErr := dao.ChannelModels.Ctx(txCtx).Data(do.ChannelModels{
 				ChannelId:    channelID,
-				PublicName:   name,
-				UpstreamName: name,
+				PublicName:   publicName,
+				UpstreamName: upstreamName,
 				Discovered:   1,
 				Enabled:      1,
 			}).Insert(); insertErr != nil {
@@ -134,6 +136,54 @@ func (s *sChannel) SelectModels(ctx context.Context, channelID uint64, input adm
 		return nil, err
 	}
 	return s.ListModels(ctx, channelID)
+}
+
+type modelMapping struct {
+	UpstreamName string
+	PublicName   string
+}
+
+func normalizeModelMappings(input adminapi.ModelSelectionInput) ([]modelMapping, error) {
+	items := input.Models
+	if len(items) == 0 {
+		for _, name := range normalizeModelNames(input.ModelNames) {
+			items = append(items, adminapi.ModelMappingInput{UpstreamName: name, PublicName: name})
+		}
+	}
+	if len(items) > 2000 {
+		return nil, gerror.New("too many models selected")
+	}
+	seen := make(map[string]struct{}, len(items))
+	result := make([]modelMapping, 0, len(items))
+	for _, item := range items {
+		upstreamName := strings.TrimSpace(item.UpstreamName)
+		if upstreamName == "" {
+			continue
+		}
+		if len(upstreamName) > 191 {
+			return nil, gerror.Newf("upstream model name is too long: %s", upstreamName)
+		}
+		if _, exists := seen[upstreamName]; exists {
+			return nil, gerror.Newf("duplicate upstream model: %s", upstreamName)
+		}
+		seen[upstreamName] = struct{}{}
+		publicName := strings.TrimSpace(item.PublicName)
+		if publicName == "" {
+			publicName = upstreamName
+		}
+		if len(publicName) > 191 {
+			return nil, gerror.Newf("public model name is too long: %s", publicName)
+		}
+		result = append(result, modelMapping{UpstreamName: upstreamName, PublicName: publicName})
+	}
+	return result, nil
+}
+
+func stringOrDefault(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }
 
 func (s *sChannel) ListModels(ctx context.Context, channelID uint64) ([]ModelView, error) {
