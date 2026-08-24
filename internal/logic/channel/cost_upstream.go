@@ -275,6 +275,30 @@ func (s *sChannel) queryCustomJSON(ctx context.Context, channel entity.Channels,
 	return nil
 }
 
+func (s *sChannel) querySiliconFlowBalance(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, result *CostResult) error {
+	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
+	if err != nil {
+		return err
+	}
+	body, err := s.getCostJSON(ctx, channel, credentialCipher, endpoint, config)
+	if err != nil {
+		return err
+	}
+	result.RemainingAmount, err = parseSiliconFlowBalance(body, config.RemainingPath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func parseSiliconFlowBalance(body []byte, configuredPath string) (*float64, error) {
+	balance := firstFloat(body, configuredPath, "data.totalBalance", "data.chargeBalance", "data.balance")
+	if balance == nil {
+		return nil, gerror.New("SiliconFlow balance response did not contain a supported balance field")
+	}
+	return balance, nil
+}
+
 func (s *sChannel) getCostJSON(ctx context.Context, channel entity.Channels, credentialCipher, endpoint string, config channeltype.CostConfig) ([]byte, error) {
 	return s.fetchUpstreamJSON(ctx, channel, credentialCipher, upstreamJSONRequest{
 		Method:       config.Method,

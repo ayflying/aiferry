@@ -30,6 +30,16 @@
       }
     },
     {
+      "id": 9000000000000014,
+      "name": "硅基流动",
+      "code": "siliconflow",
+      "config": {
+        "baseUrl": "https://api.siliconflow.cn/v1",
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "siliconflow_balance", "method": "GET", "path": "/user/info", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "remainingPath": "data.totalBalance", "fixedCurrency": "CNY" }
+      }
+    },
+    {
       "id": 9000000000000003,
       "name": "DeepSeek",
       "code": "deepseek",

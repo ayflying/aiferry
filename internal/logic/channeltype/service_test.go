@@ -41,6 +41,13 @@ func TestParseConfigAcceptsUsageCostType(t *testing.T) {
 	}
 }
 
+func TestParseConfigAcceptsSiliconFlowBalance(t *testing.T) {
+	config, err := ParseConfig([]byte(`{"baseUrl":"https://api.siliconflow.cn/v1","models":{"path":"/models","idPath":"id"},"costs":{"adapter":"siliconflow_balance","path":"/user/info","authType":"channel_key","remainingPath":"data.totalBalance","fixedCurrency":"cny"}}`))
+	if err != nil || config.Costs.Adapter != AdapterSiliconFlow || config.Costs.FixedCurrency != "CNY" {
+		t.Fatalf("unexpected SiliconFlow config: %+v err=%v", config.Costs, err)
+	}
+}
+
 func TestParseConfigRejectsInvalidDefaultBaseURL(t *testing.T) {
 	_, err := ParseConfig([]byte(`{"baseUrl":"ftp://example.com","models":{"path":"/models","idPath":"id"},"costs":{"adapter":"none"}}`))
 	if err == nil {

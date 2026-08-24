@@ -29,6 +29,29 @@ func TestJSONFloatPaths(t *testing.T) {
 	}
 }
 
+func TestSiliconFlowBalancePrefersTotalBalance(t *testing.T) {
+	body := []byte(`{"data":{"balance":"0.88","chargeBalance":"88.00","totalBalance":"88.88"}}`)
+	balance, err := parseSiliconFlowBalance(body, "data.totalBalance")
+	if err != nil || balance == nil || *balance != 88.88 {
+		t.Fatalf("unexpected SiliconFlow balance: %v", balance)
+	}
+}
+
+func TestSiliconFlowBalanceFallsBackToAvailableFields(t *testing.T) {
+	body := []byte(`{"data":{"balance":"0.88","chargeBalance":"88.00"}}`)
+	balance, err := parseSiliconFlowBalance(body, "data.totalBalance")
+	if err != nil || balance == nil || *balance != 88 {
+		t.Fatalf("unexpected SiliconFlow fallback balance: %v", balance)
+	}
+}
+
+func TestSiliconFlowBalanceRejectsMissingFields(t *testing.T) {
+	_, err := parseSiliconFlowBalance([]byte(`{"data":{"status":"normal"}}`), "data.totalBalance")
+	if err == nil {
+		t.Fatal("expected missing SiliconFlow balance fields to be rejected")
+	}
+}
+
 func TestResolveEndpointURL(t *testing.T) {
 	value, err := resolveEndpointURL("https://relay.example/v1", "usage")
 	if err != nil || value != "https://relay.example/v1/usage" {

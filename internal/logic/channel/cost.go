@@ -149,6 +149,8 @@ func (s *sChannel) queryCredentialCost(ctx context.Context, channel entity.Chann
 		err = s.queryNewAPI(ctx, channel, config, &result)
 	case channeltype.AdapterCustomJSON:
 		err = s.queryCustomJSON(ctx, channel, credentialCipher, config, &result)
+	case channeltype.AdapterSiliconFlow:
+		err = s.querySiliconFlowBalance(ctx, channel, credentialCipher, config, &result)
 	case channeltype.AdapterQiniuCosts:
 		err = s.queryQiniuCosts(ctx, channel, credentialCipher, config, &result)
 	case channeltype.AdapterQiniuUsage:
