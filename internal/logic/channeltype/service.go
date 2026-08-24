@@ -22,6 +22,8 @@ const (
 	AdapterSub2API     = "sub2api_usage"
 	AdapterNewAPI      = "newapi_balance"
 	AdapterCustomJSON  = "custom_json"
+	AdapterQiniuCosts  = "qiniu_costs"
+	// AdapterQiniuUsage remains supported for custom types created before 0.5.18.
 	AdapterQiniuUsage  = "qiniu_usage"
 	AdapterNewAPIRatio = "newapi_ratio"
 
@@ -46,20 +48,20 @@ type ModelConfig struct {
 }
 
 type CostConfig struct {
-	Adapter       string `json:"adapter"`
-	ValueType     string `json:"valueType"`
-	Method        string `json:"method"`
-	Path          string `json:"path"`
-	AuthType      string `json:"authType"`
-	HeaderName    string `json:"headerName"`
-	HeaderPrefix  string `json:"headerPrefix"`
-	UsedPath      string `json:"usedPath"`
-	RemainingPath string `json:"remainingPath"`
-	CurrencyPath  string `json:"currencyPath"`
-	FixedCurrency string `json:"fixedCurrency"`
-	UsagePath     string `json:"usagePath"`
-	UsageUnit     string `json:"usageUnit"`
-	UsageType     string `json:"usageType"`
+	Adapter        string `json:"adapter"`
+	ValueType      string `json:"valueType"`
+	Method         string `json:"method"`
+	Path           string `json:"path"`
+	AuthType       string `json:"authType"`
+	HeaderName     string `json:"headerName"`
+	HeaderPrefix   string `json:"headerPrefix"`
+	UsedPath       string `json:"usedPath"`
+	RemainingPath  string `json:"remainingPath"`
+	CurrencyPath   string `json:"currencyPath"`
+	FixedCurrency  string `json:"fixedCurrency"`
+	UsagePath      string `json:"usagePath"`
+	UsageUnit      string `json:"usageUnit"`
+	UsageType      string `json:"usageType"`
 	UsageDimension string `json:"usageDimension"`
 }
 

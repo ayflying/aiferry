@@ -24,10 +24,13 @@ describe('channel display helpers', () => {
     expect(channelTypeCostLabel({ config: { costs: { adapter: 'custom_adapter' } } } as never)).toBe('custom_adapter')
   })
 
-  it('labels usage adapters and qiniu usage', () => {
+  it('labels Qiniu estimated costs and legacy usage adapters', () => {
+    const qiniuCosts = { config: { costs: { adapter: 'qiniu_costs' } } } as never
+    expect(channelTypeCostLabel(qiniuCosts)).toBe('七牛预估费用')
+    expect(channelTypeQueryLabel(qiniuCosts)).toBe('费用/余额查询')
+    expect(isUsageAdapter(qiniuCosts)).toBe(false)
+    expect(channelQueryValueLabel(undefined, 'qiniu_costs')).toBe('预估费用')
     const usage = { config: { costs: { adapter: 'qiniu_usage' } } } as never
-    expect(channelTypeCostLabel(usage)).toBe('七牛用量')
-    expect(channelTypeQueryLabel(usage)).toBe('Token/积分用量查询')
     expect(isUsageAdapter(usage)).toBe(true)
     expect(channelTypeQueryLabel({ config: { costs: { adapter: 'newapi_balance' } } } as never)).toBe('费用/余额查询')
     expect(isUsageAdapter({ config: { costs: { adapter: 'sub2api_usage' } } } as never)).toBe(false)

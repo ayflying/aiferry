@@ -71,6 +71,54 @@ func qiniuUsageRange(start, end time.Time) (time.Time, time.Time) {
 	return start, end
 }
 
+func (s *sChannel) queryQiniuCosts(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, result *CostResult) error {
+	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
+	if err != nil {
+		return err
+	}
+	parsed, _ := url.Parse(endpoint)
+	values := parsed.Query()
+	values.Set("type", "day")
+	values.Set("timezone", "Asia/Shanghai")
+	parsed.RawQuery = values.Encode()
+	body, err := s.getCostJSON(ctx, channel, credentialCipher, parsed.String(), config)
+	if err != nil {
+		return err
+	}
+	total, err := parseQiniuCosts(body)
+	if err != nil {
+		return err
+	}
+	result.UsedAmount = &total
+	return nil
+}
+
+func parseQiniuCosts(body []byte) (float64, error) {
+	var payload struct {
+		Status bool   `json:"status"`
+		Error  string `json:"error"`
+		Data   struct {
+			APIKeys []struct {
+				TotalFee float64 `json:"total_fee"`
+			} `json:"api_keys"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0, gerror.Wrap(err, "decode Qiniu costs")
+	}
+	if !payload.Status {
+		if payload.Error == "" {
+			payload.Error = "unknown error"
+		}
+		return 0, gerror.New("Qiniu cost query failed: " + payload.Error)
+	}
+	var total float64
+	for _, key := range payload.Data.APIKeys {
+		total += key.TotalFee
+	}
+	return total, nil
+}
+
 func (s *sChannel) queryQiniuUsage(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, start, end time.Time, result *CostResult) error {
 	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
 	if err != nil {

@@ -26,7 +26,7 @@
       "config": {
         "baseUrl": "https://api.qnaigc.com/v1",
         "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
-        "costs": { "adapter": "qiniu_usage", "valueType": "usage", "method": "GET", "path": "https://api.qnaigc.com/v3/stat/usage", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "usageUnit": "kToken", "usageType": "Token", "usageDimension": "全部模型" }
+        "costs": { "adapter": "qiniu_costs", "method": "GET", "path": "https://api.qnaigc.com/v3/stat/usage/apikey/cost", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "fixedCurrency": "CNY" }
       }
     },
     {

@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,20 @@ func TestQiniuUsageRangeLimitsTo31Days(t *testing.T) {
 	start, limited := qiniuUsageRange(end.Add(-60*24*time.Hour), end)
 	if limited != end || start != end.Add(-31*24*time.Hour) {
 		t.Fatalf("unexpected Qiniu range: %v - %v", start, limited)
+	}
+}
+
+func TestParseQiniuCostsAggregatesAPIKeys(t *testing.T) {
+	total, err := parseQiniuCosts([]byte(`{"status":true,"data":{"api_keys":[{"total_fee":1.25},{"total_fee":2.75}]}}`))
+	if err != nil || total != 4 {
+		t.Fatalf("unexpected Qiniu costs: total=%v err=%v", total, err)
+	}
+}
+
+func TestParseQiniuCostsRejectsFailedResponse(t *testing.T) {
+	_, err := parseQiniuCosts([]byte(`{"status":false,"error":"UNAUTHENTICATED"}`))
+	if err == nil || !strings.Contains(err.Error(), "UNAUTHENTICATED") {
+		t.Fatalf("expected Qiniu error, got %v", err)
 	}
 }
 

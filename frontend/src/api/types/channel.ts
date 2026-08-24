@@ -35,7 +35,7 @@ export interface ChannelTypeModelConfig {
 }
 
 export interface ChannelTypeCostConfig {
-  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'newapi_balance' | 'custom_json' | 'qiniu_usage'
+  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'newapi_balance' | 'custom_json' | 'qiniu_costs' | 'qiniu_usage'
   valueType?: 'cost' | 'usage'
   method: string
   path: string
