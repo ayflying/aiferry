@@ -251,6 +251,40 @@ func TestNonGPTChatKeepsDirectProtocol(t *testing.T) {
 	}
 }
 
+func TestNonGPTResponsesPrefersChat(t *testing.T) {
+	plan := PreferredPlan(ResponsesEndpoint, "deepseek-v4-pro")
+	if plan.upstreamEndpoint != ChatCompletionsEndpoint || plan.conversion != responsesToChatConversion {
+		t.Fatalf("non-GPT Responses plan = %+v, want Responses to Chat conversion", plan)
+	}
+	if fallback, ok := AlternatePlan(ResponsesEndpoint, plan); !ok || fallback.upstreamEndpoint != ResponsesEndpoint || fallback.conversion != "" {
+		t.Fatalf("non-GPT Responses fallback plan = %+v, want direct Responses", fallback)
+	}
+
+	body, err := plan.ConvertRequest([]byte(`{
+  "model":"deepseek-v4-pro","stream":true,"instructions":"Follow policy",
+  "input":[{"role":"user","content":[{"type":"input_text","text":"Hello"}]}]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(body, "messages.0.role").String(); actual != "system" {
+		t.Fatalf("system role = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.content.0.text").String(); actual != "Hello" {
+		t.Fatalf("user content = %q", actual)
+	}
+}
+
+func TestGPTResponsesKeepsDirectProtocol(t *testing.T) {
+	plan := PreferredPlan(ResponsesEndpoint, "gpt-5.6-terra")
+	if plan.upstreamEndpoint != ResponsesEndpoint || plan.conversion != "" {
+		t.Fatalf("GPT Responses plan = %+v, want direct Responses", plan)
+	}
+	if fallback, ok := AlternatePlan(ResponsesEndpoint, plan); !ok || fallback.upstreamEndpoint != ChatCompletionsEndpoint || fallback.conversion != responsesToChatConversion {
+		t.Fatalf("GPT Responses fallback plan = %+v, want Responses to Chat conversion", fallback)
+	}
+}
+
 func TestResponsesRequestToChat(t *testing.T) {
 	body, err := responsesRequestToChat([]byte(`{
   "model":"gpt-test","instructions":"Follow policy",

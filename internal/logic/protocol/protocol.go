@@ -28,8 +28,9 @@ func directPlan(endpoint string) Plan {
 	return Plan{clientEndpoint: endpoint, upstreamEndpoint: endpoint}
 }
 
-func PreferredPlan(endpoint, model string) Plan {
-	if endpoint == ChatCompletionsEndpoint && isGPTModel(model) {
+func PreferredPlan(endpoint, upstreamModel string) Plan {
+	isGPT := isGPTModel(upstreamModel)
+	if (endpoint == ChatCompletionsEndpoint && isGPT) || (endpoint == ResponsesEndpoint && !isGPT) {
 		if plan, ok := fallbackPlan(endpoint); ok {
 			return plan
 		}
