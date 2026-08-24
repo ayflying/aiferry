@@ -21,7 +21,7 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	primary := protocol.PreferredPlan(endpoint, candidate.PublicName)
+	primary := preferredProtocolPlan(endpoint, candidate)
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, userID, settings, advancedConfig, primary, sensitiveDataRestorer)
 	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	if handled || attemptErr != nil || !needsFallback {
@@ -32,6 +32,11 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 		return result, handled, attemptErr
 	}
 	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, userID, settings, advancedConfig, fallback, sensitiveDataRestorer)
+}
+
+func preferredProtocolPlan(endpoint string, candidate Candidate) protocol.Plan {
+	// 协议能力由实际接收请求的上游模型决定，公开映射名仅供客户端路由使用。
+	return protocol.PreferredPlan(endpoint, candidate.UpstreamName)
 }
 
 func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocol.Plan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
