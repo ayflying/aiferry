@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { channelNameForID, channelStatusLabel, isChannelEnabled } from './channelDisplay'
-import { channelTypeCostLabel, channelTypeQueryLabel, isUsageAdapter } from './channelTypeDisplay'
+import { channelQueryValueLabel, channelTypeCostLabel, channelTypeQueryLabel, isUsageAdapter } from './channelTypeDisplay'
 
 describe('channel display helpers', () => {
   it('derives route availability from every blocking status', () => {
@@ -31,11 +31,14 @@ describe('channel display helpers', () => {
     expect(isUsageAdapter(usage)).toBe(true)
     expect(channelTypeQueryLabel({ config: { costs: { adapter: 'newapi_balance' } } } as never)).toBe('费用/余额查询')
     expect(isUsageAdapter({ config: { costs: { adapter: 'sub2api_usage' } } } as never)).toBe(false)
+    expect(channelQueryValueLabel(undefined, 'newapi_balance')).toBe('余额')
+    expect(channelQueryValueLabel(undefined, 'openai_costs')).toBe('费用')
   })
 
   it('uses an explicit usage value type for custom adapters', () => {
     const usage = { config: { costs: { adapter: 'custom_json', valueType: 'usage' } } } as never
     expect(channelTypeQueryLabel(usage)).toBe('Token/积分用量查询')
     expect(isUsageAdapter(usage)).toBe(true)
+    expect(channelQueryValueLabel('usage', 'custom_json')).toBe('用量')
   })
 })

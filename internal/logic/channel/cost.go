@@ -104,6 +104,7 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 		if err != nil {
 			return CostResult{}, err
 		}
+		applyUsageSummaryMetadata(result.Summaries, config.Costs)
 		result.applySingleSummary()
 		if notifyErr := s.notifyChannelLowBalance(ctx, channel.Id); notifyErr != nil {
 			g.Log().Warningf(ctx, "notify channel %d low balance: %v", channel.Id, notifyErr)
@@ -122,6 +123,7 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 	result.UsedAmount, result.RemainingAmount, result.Currency = cost.UsedAmount, cost.RemainingAmount, cost.Currency
 	result.Usage, result.UsageUnit, result.UsageType, result.UsageDimension = cost.Usage, cost.UsageUnit, cost.UsageType, cost.UsageDimension
 	result.Summaries = []CostSummary{costSummary(cost, channeltype.IsUsageCost(config.Costs))}
+	applyUsageSummaryMetadata(result.Summaries, config.Costs)
 	if notifyErr := s.notifyChannelLowBalance(ctx, channel.Id); notifyErr != nil {
 		g.Log().Warningf(ctx, "notify channel %d low balance: %v", channel.Id, notifyErr)
 	}
@@ -219,4 +221,23 @@ func costSummary(cost CostResult, usage bool) CostSummary {
 		summary.UsageDimension = cost.UsageDimension
 	}
 	return summary
+}
+
+func applyUsageSummaryMetadata(summaries []CostSummary, config channeltype.CostConfig) {
+	if !channeltype.IsUsageCost(config) {
+		return
+	}
+	unit := config.UsageUnit
+	if unit == "" {
+		unit = "kToken"
+	}
+	usageType := config.UsageType
+	if usageType == "" {
+		usageType = "用量"
+	}
+	for index := range summaries {
+		summaries[index].UsageUnit = unit
+		summaries[index].UsageType = usageType
+		summaries[index].UsageDimension = config.UsageDimension
+	}
 }

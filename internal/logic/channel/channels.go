@@ -43,10 +43,12 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 	for i := range rows {
 		view := s.toView(rows[i])
 		usageQuery := false
+		var costConfig channeltype.CostConfig
 		if item, ok := typeByCode[rows[i].Type]; ok {
 			view.TypeName = item.Name
 			view.CostQueryMode = item.Config.Costs.Adapter
 			view.CostQueryType = item.Config.Costs.ValueType
+			costConfig = item.Config.Costs
 			usageQuery = channeltype.IsUsageCost(item.Config.Costs)
 		} else {
 			view.TypeName = rows[i].Type
@@ -62,6 +64,7 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 		if err != nil {
 			return nil, err
 		}
+		applyUsageSummaryMetadata(view.CostSummaries, costConfig)
 		currentCost, costErr := s.currentChannelCost(ctx, rows[i].Id)
 		if costErr != nil {
 			return nil, costErr
@@ -74,10 +77,9 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 			summary := CostSummary{Currency: currentCost.Currency, UsedAmount: currentCost.Used, RemainingAmount: currentCost.Remaining}
 			if usageQuery {
 				summary.Usage = currentCost.Used
-				summary.UsageUnit = "kToken"
-				summary.UsageType = "用量"
 			}
 			view.CostSummaries = []CostSummary{summary}
+			applyUsageSummaryMetadata(view.CostSummaries, costConfig)
 		}
 		view.GroupIDs, err = s.groups.ChannelIDs(ctx, rows[i].Id)
 		if err != nil {

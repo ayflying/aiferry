@@ -29,3 +29,8 @@ export function isUsageAdapter(channelType: Pick<ChannelType, 'config'> | undefi
 export function isUsageMode(queryType?: string, queryMode?: string) {
   return queryType === 'usage' || queryMode === 'qiniu_usage'
 }
+
+export function channelQueryValueLabel(queryType?: string, queryMode?: string) {
+  if (isUsageMode(queryType, queryMode)) return '用量'
+  return queryMode === 'newapi_balance' ? '余额' : '费用'
+}

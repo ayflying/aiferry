@@ -6,7 +6,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelCredential, CostSummary } from '../api/types'
 import { showError } from '../lib/error'
 import { formatCost, formatTime, formatNumber } from '../lib/format'
-import { isUsageMode } from '../lib/channelTypeDisplay'
+import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
 
 const props = defineProps<{ modelValue: boolean; channel?: Channel }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; changed: [] }>()
@@ -25,8 +25,7 @@ const summaries = ref<CostSummary[]>([])
 const drawerSize = window.innerWidth <= 600 ? '94%' : '760px'
 const usageQuery = computed(() => isUsageMode(props.channel?.costQueryType, props.channel?.costQueryMode))
 const queryLabel = computed(() => {
-  if (usageQuery.value) return '查询用量'
-  return props.channel?.costQueryMode === 'newapi_balance' ? '查询余额' : '查询费用'
+  return `查询${channelQueryValueLabel(props.channel?.costQueryType, props.channel?.costQueryMode)}`
 })
 
 watch(() => props.modelValue, (open) => {
@@ -107,7 +106,8 @@ async function queryCosts() {
     queryDetails.value = result.credentials || []
     summaries.value = result.summaries || []
     const failures = queryDetails.value.filter((item) => item.error).length
-    ElMessage.success(failures ? `${usageQuery.value ? '用量' : '费用'}查询完成，${failures} 个密钥失败` : `${usageQuery.value ? '用量' : '费用'}查询完成`)
+    const valueLabel = channelQueryValueLabel(props.channel?.costQueryType, props.channel?.costQueryMode)
+    ElMessage.success(failures ? `${valueLabel}查询完成，${failures} 个密钥失败` : `${valueLabel}查询完成`)
     await load(false)
     emit('changed')
   } catch (error) {
