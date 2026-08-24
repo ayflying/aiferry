@@ -316,7 +316,7 @@ watch(activeTab, (tab) => {
     </div>
 
     <template v-if="activeTab === 'overview'">
-      <section class="settings-band auth-band"><ShieldCheck :size="22" /><div><strong>Casdoor 单点登录已启用</strong><span>管理端访问由统一身份与用户组策略保护。</span></div></section>
+      <section class="settings-band auth-band"><ShieldCheck :size="22" /><div><strong>Casdoor 单点登录已启用</strong><span>首次完成 Casdoor 登录后会自动创建本地用户账户。</span></div></section>
       <section class="settings-band"><Database :size="21" /><div class="settings-title"><strong>数据存储</strong><span>业务事实与用量账本</span></div><div class="settings-value"><span>{{ info?.database || '—' }}</span><small>已配置</small></div></section>
       <section class="settings-band"><HardDrive :size="21" /><div class="settings-title"><strong>缓存与临时状态</strong><span>密钥缓存、故障计数与短时冷却</span></div><div class="settings-value"><span>{{ info?.cache || '—' }}</span><small>已配置</small></div></section>
       <section class="settings-grid"><div><span>产品</span><strong>{{ info?.name || '—' }}</strong></div><div><span>发布版本</span><strong :title="info?.revision || ''">{{ info?.version ? `v${info.version}` : '—' }}</strong></div><div><span>管理模式</span><strong>{{ info?.adminMode || '—' }}</strong></div><div><span>中转 API</span><strong>{{ info?.apiVersion || '—' }}</strong></div><div><span>支持范围</span><strong>OpenAI 文本核心</strong></div></section>

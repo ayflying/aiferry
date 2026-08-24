@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gogf/gf/v2/net/ghttp"
 )
@@ -35,6 +36,22 @@ func TestAccountDisabled(t *testing.T) {
 	}
 	if accountDisabled(casdoorAccount{}) {
 		t.Fatal("empty account should not be treated as disabled")
+	}
+}
+
+func TestCasdoorUserCreateDataKeepsBlankEmailNull(t *testing.T) {
+	loggedInAt := time.Date(2026, time.August, 24, 17, 0, 0, 0, time.UTC)
+	withoutEmail := casdoorUserCreateData(casdoorAccount{Uid: "casdoor-user", Name: "User"}, "user", loggedInAt)
+	if withoutEmail.Email != nil {
+		t.Fatalf("blank email = %#v, want nil so MySQL stores NULL", withoutEmail.Email)
+	}
+	if withoutEmail.IdentitySubject != "casdoor-user" || withoutEmail.LastLoginAt != loggedInAt {
+		t.Fatalf("unexpected create data: %#v", withoutEmail)
+	}
+
+	withEmail := casdoorUserCreateData(casdoorAccount{Uid: "casdoor-user-2", Email: "  user@example.com  "}, "user", loggedInAt)
+	if withEmail.Email != "user@example.com" {
+		t.Fatalf("email = %#v, want trimmed email", withEmail.Email)
 	}
 }
 

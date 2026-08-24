@@ -36,26 +36,25 @@ func (s *sAuth) syncUser(ctx context.Context, account casdoorAccount) (SessionUs
 	if current.Id == 0 {
 		// 首次登录时创建本地镜像。Status=1 只表示本地账户刚创建且可用，
 		// 之后每次登录仍会重新检查 Casdoor 的禁用状态。
-		if _, err := dao.Users.Ctx(ctx).Data(do.Users{
-			Name:             accountName(account),
-			Email:            strings.TrimSpace(account.Email),
-			Role:             role,
-			Status:           1,
-			IdentityProvider: "casdoor",
-			IdentitySubject:  uid,
-			AvatarUrl:        account.Avatar,
-			LastLoginAt:      time.Now(),
-		}).InsertIgnore(); err != nil {
-			return SessionUser{}, gerror.Wrap(err, "create Casdoor user")
+		createData := casdoorUserCreateData(account, role, time.Now())
+		if _, err := dao.Users.Ctx(ctx).Data(createData).Insert(); err != nil {
+			// 仅把同一外部身份的并发首次登录视为可恢复情况。不能用
+			// InsertIgnore 吞掉其他唯一键冲突，否则后续会以“账户不存在”掩盖真实原因。
+			if loadErr := dao.Users.Ctx(ctx).
+				Where(columns.IdentityProvider, "casdoor").
+				Where(columns.IdentitySubject, uid).
+				Scan(&current); loadErr != nil || current.Id == 0 {
+				return SessionUser{}, gerror.Wrap(err, "create Casdoor user")
+			}
 		}
 
-		// InsertIgnore 可能因为并发登录而没有插入新行，因此必须重新查询，
-		// 不能直接假设当前请求持有刚插入的自增 ID。
-		if err := dao.Users.Ctx(ctx).
-			Where(columns.IdentityProvider, "casdoor").
-			Where(columns.IdentitySubject, uid).
-			Scan(&current); err != nil {
-			return SessionUser{}, gerror.Wrap(err, "load created Casdoor user")
+		if current.Id == 0 {
+			if err := dao.Users.Ctx(ctx).
+				Where(columns.IdentityProvider, "casdoor").
+				Where(columns.IdentitySubject, uid).
+				Scan(&current); err != nil {
+				return SessionUser{}, gerror.Wrap(err, "load created Casdoor user")
+			}
 		}
 	}
 
@@ -81,6 +80,24 @@ func (s *sAuth) syncUser(ctx context.Context, account casdoorAccount) (SessionUs
 		Role:            role,
 		AvatarURL:       account.Avatar,
 	}, nil
+}
+
+func casdoorUserCreateData(account casdoorAccount, role string, loggedInAt time.Time) do.Users {
+	data := do.Users{
+		Name:             accountName(account),
+		Role:             role,
+		Status:           1,
+		IdentityProvider: "casdoor",
+		IdentitySubject:  accountUID(account),
+		AvatarUrl:        account.Avatar,
+		LastLoginAt:      loggedInAt,
+	}
+	// email 允许为空且有唯一索引。DO 字段保持 nil 时 GoFrame 不会写入它，
+	// 因而数据库会保存 NULL，允许多个未配置邮箱的 Casdoor 账户首次登录。
+	if email := strings.TrimSpace(account.Email); email != "" {
+		data.Email = email
+	}
+	return data
 }
 
 // accountUID 选择 Casdoor 的稳定身份标识。uid 是首选，旧版本或部分部署只返回 id。
