@@ -12,9 +12,9 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/tidwall/gjson"
 
-	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/logic/upstreamerror"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 func (s *sChannel) queryOpenAICosts(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, start, end time.Time, result *CostResult) error {
@@ -64,6 +64,91 @@ func (s *sChannel) queryOpenAICosts(ctx context.Context, channel entity.Channels
 	return nil
 }
 
+func qiniuUsageRange(start, end time.Time) (time.Time, time.Time) {
+	if end.Sub(start) > 31*24*time.Hour {
+		start = end.Add(-31 * 24 * time.Hour)
+	}
+	return start, end
+}
+
+func (s *sChannel) queryQiniuUsage(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, start, end time.Time, result *CostResult) error {
+	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
+	if err != nil {
+		return err
+	}
+	start, end = qiniuUsageRange(start, end)
+	values := url.Values{}
+	values.Set("granularity", "day")
+	values.Set("start", start.Format(time.RFC3339))
+	values.Set("end", end.Format(time.RFC3339))
+	values.Set("timezone", "Asia/Shanghai")
+	parsed, _ := url.Parse(endpoint)
+	parsed.RawQuery = values.Encode()
+	body, err := s.getCostJSON(ctx, channel, credentialCipher, parsed.String(), config)
+	if err != nil {
+		return err
+	}
+	total, unit, err := parseQiniuUsage(body)
+	if err != nil {
+		return err
+	}
+	result.Currency = "TOKEN"
+	result.Usage = &total
+	result.UsageUnit = unit
+	result.UsageType = "Token"
+	result.UsageDimension = "全部模型"
+	// Existing cost snapshot columns persist the numeric usage through UsedAmount.
+	result.UsedAmount = &total
+	return nil
+}
+
+func parseQiniuUsage(body []byte) (float64, string, error) {
+	var payload struct {
+		Status bool   `json:"status"`
+		Error  string `json:"error"`
+		Data   []struct {
+			Items []struct {
+				Name  string  `json:"name"`
+				Unit  string  `json:"unit"`
+				Total float64 `json:"total"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 0, "", gerror.Wrap(err, "decode Qiniu usage")
+	}
+	if !payload.Status {
+		if payload.Error == "" {
+			payload.Error = "unknown error"
+		}
+		return 0, "", gerror.New("Qiniu usage query failed: " + payload.Error)
+	}
+	var total float64
+	unit := "kToken"
+	foundTokenItem := false
+	for _, bucket := range payload.Data {
+		for _, item := range bucket.Items {
+			if !isQiniuTokenItem(item.Name, item.Unit) {
+				continue
+			}
+			if item.Unit != "" && foundTokenItem && item.Unit != unit {
+				continue
+			}
+			total += item.Total
+			if item.Unit != "" {
+				unit = item.Unit
+			}
+			foundTokenItem = true
+		}
+	}
+	return total, unit, nil
+}
+
+func isQiniuTokenItem(name, unit string) bool {
+	value := strings.ToLower(strings.TrimSpace(name + " " + unit))
+	return strings.Contains(value, "token") || strings.Contains(value, "令牌")
+}
+
 func (s *sChannel) querySub2API(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, result *CostResult) error {
 	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Path)
 	if err != nil {
@@ -72,6 +157,23 @@ func (s *sChannel) querySub2API(ctx context.Context, channel entity.Channels, cr
 	body, err := s.getCostJSON(ctx, channel, credentialCipher, endpoint, config)
 	if err != nil {
 		return err
+	}
+	if channeltype.IsUsageCost(config) {
+		result.Usage = firstFloat(body, config.UsagePath, config.UsedPath, "usage", "total", "data.usage")
+		if result.Usage == nil {
+			return gerror.New("Sub2API usage response did not contain supported usage fields")
+		}
+		result.UsedAmount = result.Usage
+		result.UsageUnit = config.UsageUnit
+		if result.UsageUnit == "" {
+			result.UsageUnit = "kToken"
+		}
+		result.UsageType = config.UsageType
+		if result.UsageType == "" {
+			result.UsageType = "用量"
+		}
+		result.UsageDimension = config.UsageDimension
+		return nil
 	}
 	result.RemainingAmount = firstFloat(body, config.RemainingPath, "remaining", "balance", "quota.remaining")
 	result.UsedAmount = firstFloat(body, config.UsedPath, "used", "usage.total.cost", "usage.total.actual_cost", "quota.used")
@@ -93,7 +195,22 @@ func (s *sChannel) queryCustomJSON(ctx context.Context, channel entity.Channels,
 	if err != nil {
 		return err
 	}
-	if config.UsedPath != "" {
+	if channeltype.IsUsageCost(config) {
+		result.Usage = jsonFloat(body, config.UsagePath)
+		if result.Usage == nil && config.UsagePath == "" {
+			result.Usage = jsonFloat(body, config.UsedPath)
+		}
+		result.UsedAmount = result.Usage
+		result.UsageUnit = config.UsageUnit
+		if result.UsageUnit == "" {
+			result.UsageUnit = "kToken"
+		}
+		result.UsageType = config.UsageType
+		if result.UsageType == "" {
+			result.UsageType = "用量"
+		}
+		result.UsageDimension = config.UsageDimension
+	} else if config.UsedPath != "" {
 		result.UsedAmount = jsonFloat(body, config.UsedPath)
 	}
 	if config.RemainingPath != "" {
@@ -184,6 +301,9 @@ func firstFloat(body []byte, paths ...string) *float64 {
 }
 
 func jsonFloat(body []byte, path string) *float64 {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
 	value := gjson.GetBytes(body, path)
 	if !value.Exists() || (value.Type != gjson.Number && value.Type != gjson.String) {
 		return nil

@@ -60,6 +60,40 @@ func TestCostResultUsesSingleCurrencySummary(t *testing.T) {
 	}
 }
 
+func TestQiniuUsageRangeLimitsTo31Days(t *testing.T) {
+	end := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
+	start, limited := qiniuUsageRange(end.Add(-60*24*time.Hour), end)
+	if limited != end || start != end.Add(-31*24*time.Hour) {
+		t.Fatalf("unexpected Qiniu range: %v - %v", start, limited)
+	}
+}
+
+func TestParseQiniuUsageAggregatesTokenItems(t *testing.T) {
+	total, unit, err := parseQiniuUsage([]byte(`{"status":true,"data":[{"items":[{"name":"输入 Token","unit":"kToken","total":1000},{"name":"输出 Token","unit":"kToken","total":250.5}]},{"items":[{"name":"请求数","unit":"request","total":2}]}]}`))
+	if err != nil || total != 1250.5 || unit != "kToken" {
+		t.Fatalf("unexpected Qiniu usage: total=%v unit=%q err=%v", total, unit, err)
+	}
+}
+
+func TestParseQiniuUsageAcceptsEmptySuccessfulData(t *testing.T) {
+	total, unit, err := parseQiniuUsage([]byte(`{"status":true,"data":[]}`))
+	if err != nil || total != 0 || unit != "kToken" {
+		t.Fatalf("unexpected empty Qiniu usage: total=%v unit=%q err=%v", total, unit, err)
+	}
+}
+
+func TestCostResultAggregatesCredentialUsage(t *testing.T) {
+	first, second := 10.0, 4.5
+	result := CostResult{Credentials: []CredentialCostResult{
+		{Usage: &first, UsageUnit: "kToken", UsageType: "total"},
+		{Usage: &second, UsageUnit: "kToken", UsageType: "total"},
+	}}
+	result.applyUsageFromCredentials()
+	if result.Usage == nil || *result.Usage != 14.5 || result.UsageUnit != "kToken" {
+		t.Fatalf("unexpected usage aggregate: %+v", result)
+	}
+}
+
 func TestApplyTrackedCostPreservesUnknownRemainingBalance(t *testing.T) {
 	used := 3.5
 	updatedUsed, remaining, currency := applyTrackedCost(&used, nil, "", decimal.RequireFromString("1.25"))

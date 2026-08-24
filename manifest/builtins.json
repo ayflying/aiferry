@@ -20,6 +20,16 @@
       }
     },
     {
+      "id": 9000000000000013,
+      "name": "七牛云 AI",
+      "code": "qiniu",
+      "config": {
+        "baseUrl": "https://api.qnaigc.com/v1",
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "qiniu_usage", "valueType": "usage", "method": "GET", "path": "https://api.qnaigc.com/v3/stat/usage", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "usageUnit": "kToken", "usageType": "Token", "usageDimension": "全部模型" }
+      }
+    },
+    {
       "id": 9000000000000003,
       "name": "DeepSeek",
       "code": "deepseek",

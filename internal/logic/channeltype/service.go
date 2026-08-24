@@ -22,7 +22,11 @@ const (
 	AdapterSub2API     = "sub2api_usage"
 	AdapterNewAPI      = "newapi_balance"
 	AdapterCustomJSON  = "custom_json"
+	AdapterQiniuUsage  = "qiniu_usage"
 	AdapterNewAPIRatio = "newapi_ratio"
+
+	ValueTypeCost  = "cost"
+	ValueTypeUsage = "usage"
 
 	AuthNone          = "none"
 	AuthChannelKey    = "channel_key"
@@ -43,6 +47,7 @@ type ModelConfig struct {
 
 type CostConfig struct {
 	Adapter       string `json:"adapter"`
+	ValueType     string `json:"valueType"`
 	Method        string `json:"method"`
 	Path          string `json:"path"`
 	AuthType      string `json:"authType"`
@@ -52,6 +57,14 @@ type CostConfig struct {
 	RemainingPath string `json:"remainingPath"`
 	CurrencyPath  string `json:"currencyPath"`
 	FixedCurrency string `json:"fixedCurrency"`
+	UsagePath     string `json:"usagePath"`
+	UsageUnit     string `json:"usageUnit"`
+	UsageType     string `json:"usageType"`
+	UsageDimension string `json:"usageDimension"`
+}
+
+func IsUsageCost(config CostConfig) bool {
+	return config.ValueType == ValueTypeUsage || config.Adapter == AdapterQiniuUsage
 }
 
 type PricingConfig struct {
@@ -131,7 +144,7 @@ func DefaultConfig() Config {
 			AuthType: AuthChannelKey, HeaderName: "Authorization", HeaderPrefix: "Bearer ",
 		},
 		Costs: CostConfig{
-			Adapter: AdapterOpenAICosts, Method: "GET", Path: "/organization/costs",
+			Adapter: AdapterOpenAICosts, ValueType: ValueTypeCost, Method: "GET", Path: "/organization/costs",
 			AuthType: AuthManagementKey, HeaderName: "Authorization", HeaderPrefix: "Bearer ", FixedCurrency: "USD",
 		},
 		Pricing: PricingConfig{Adapter: AdapterNone, Method: "GET", AuthType: AuthChannelKey, HeaderName: "Authorization", HeaderPrefix: "Bearer "},

@@ -19,6 +19,10 @@ type CostSummary struct {
 	Currency        string   `json:"currency"`
 	UsedAmount      *float64 `json:"usedAmount"`
 	RemainingAmount *float64 `json:"remainingAmount"`
+	Usage           *float64 `json:"usage,omitempty"`
+	UsageUnit       string   `json:"usageUnit,omitempty"`
+	UsageType       string   `json:"usageType,omitempty"`
+	UsageDimension  string   `json:"usageDimension,omitempty"`
 }
 
 type credentialCostState struct {
@@ -150,7 +154,7 @@ func (s *sChannel) notifyChannelLowBalance(ctx context.Context, channelID uint64
 	return nil
 }
 
-func (s *sChannel) channelCostSummaries(ctx context.Context, channelID uint64) ([]CostSummary, error) {
+func (s *sChannel) channelCostSummaries(ctx context.Context, channelID uint64, usage ...bool) ([]CostSummary, error) {
 	states := make([]credentialCostState, 0)
 	columns := dao.ChannelCredentials.Columns()
 	if err := dao.ChannelCredentials.Ctx(ctx).
@@ -185,6 +189,11 @@ func (s *sChannel) channelCostSummaries(ctx context.Context, channelID uint64) (
 	}
 	result := make([]CostSummary, 0, len(totals))
 	for _, summary := range totals {
+		if len(usage) > 0 && usage[0] {
+			summary.Usage = summary.UsedAmount
+			summary.UsageUnit = "kToken"
+			summary.UsageType = "用量"
+		}
 		result = append(result, summary)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Currency < result[j].Currency })
@@ -214,8 +223,8 @@ func applyTrackedCost(used, remaining *float64, currency string, amount decimal.
 	return updatedUsed, remaining, currency
 }
 
-func (s *sChannel) refreshChannelCostSummary(ctx context.Context, channelID uint64) error {
-	summaries, err := s.channelCostSummaries(ctx, channelID)
+func (s *sChannel) refreshChannelCostSummary(ctx context.Context, channelID uint64, usage ...bool) error {
+	summaries, err := s.channelCostSummaries(ctx, channelID, usage...)
 	if err != nil {
 		return err
 	}

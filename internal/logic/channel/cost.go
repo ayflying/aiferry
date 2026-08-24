@@ -10,9 +10,9 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
-	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
 
 type CostResult struct {
@@ -20,6 +20,10 @@ type CostResult struct {
 	UsedAmount      *float64               `json:"usedAmount"`
 	RemainingAmount *float64               `json:"remainingAmount"`
 	Currency        string                 `json:"currency"`
+	Usage           *float64               `json:"usage"`
+	UsageUnit       string                 `json:"usageUnit"`
+	UsageType       string                 `json:"usageType"`
+	UsageDimension  string                 `json:"usageDimension"`
 	PeriodStart     *time.Time             `json:"periodStart"`
 	PeriodEnd       *time.Time             `json:"periodEnd"`
 	QueriedAt       time.Time              `json:"queriedAt"`
@@ -34,6 +38,10 @@ type CredentialCostResult struct {
 	UsedAmount      *float64  `json:"usedAmount"`
 	RemainingAmount *float64  `json:"remainingAmount"`
 	Currency        string    `json:"currency"`
+	Usage           *float64  `json:"usage"`
+	UsageUnit       string    `json:"usageUnit"`
+	UsageType       string    `json:"usageType"`
+	UsageDimension  string    `json:"usageDimension"`
 	QueriedAt       time.Time `json:"queriedAt"`
 	Error           string    `json:"error"`
 }
@@ -50,6 +58,9 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 	start, end, err := costRange(input.StartDate, input.EndDate)
 	if err != nil {
 		return CostResult{}, err
+	}
+	if config.Costs.Adapter == channeltype.AdapterQiniuUsage {
+		start, end = qiniuUsageRange(start, end)
 	}
 	result := CostResult{
 		Mode: config.Costs.Adapter, Currency: defaultCostCurrency(config.Costs), PeriodStart: &start, PeriodEnd: &end, QueriedAt: time.Now(),
@@ -85,10 +96,11 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 		if !hasSuccessfulCostResult(result.Credentials) {
 			return CostResult{}, gerror.New("all upstream credential cost queries failed")
 		}
-		if err = s.refreshChannelCostSummary(ctx, channel.Id); err != nil {
+		result.applyUsageFromCredentials()
+		if err = s.refreshChannelCostSummary(ctx, channel.Id, channeltype.IsUsageCost(config.Costs)); err != nil {
 			return CostResult{}, err
 		}
-		result.Summaries, err = s.channelCostSummaries(ctx, channel.Id)
+		result.Summaries, err = s.channelCostSummaries(ctx, channel.Id, channeltype.IsUsageCost(config.Costs))
 		if err != nil {
 			return CostResult{}, err
 		}
@@ -108,7 +120,8 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 		return CostResult{}, err
 	}
 	result.UsedAmount, result.RemainingAmount, result.Currency = cost.UsedAmount, cost.RemainingAmount, cost.Currency
-	result.Summaries = []CostSummary{{Currency: cost.Currency, UsedAmount: cost.UsedAmount, RemainingAmount: cost.RemainingAmount}}
+	result.Usage, result.UsageUnit, result.UsageType, result.UsageDimension = cost.Usage, cost.UsageUnit, cost.UsageType, cost.UsageDimension
+	result.Summaries = []CostSummary{costSummary(cost, channeltype.IsUsageCost(config.Costs))}
 	if notifyErr := s.notifyChannelLowBalance(ctx, channel.Id); notifyErr != nil {
 		g.Log().Warningf(ctx, "notify channel %d low balance: %v", channel.Id, notifyErr)
 	}
@@ -134,6 +147,8 @@ func (s *sChannel) queryCredentialCost(ctx context.Context, channel entity.Chann
 		err = s.queryNewAPI(ctx, channel, config, &result)
 	case channeltype.AdapterCustomJSON:
 		err = s.queryCustomJSON(ctx, channel, credentialCipher, config, &result)
+	case channeltype.AdapterQiniuUsage:
+		err = s.queryQiniuUsage(ctx, channel, credentialCipher, config, start, end, &result)
 	default:
 		err = gerror.New("cost query is not configured")
 	}
@@ -148,6 +163,10 @@ func costCredentialResult(credentialID uint64, keyPrefix string, shared bool, co
 	}
 	detail.UsedAmount = cost.UsedAmount
 	detail.RemainingAmount = cost.RemainingAmount
+	detail.Usage = cost.Usage
+	detail.UsageUnit = cost.UsageUnit
+	detail.UsageType = cost.UsageType
+	detail.UsageDimension = cost.UsageDimension
 	return detail
 }
 
@@ -160,6 +179,21 @@ func hasSuccessfulCostResult(results []CredentialCostResult) bool {
 	return false
 }
 
+func (r *CostResult) applyUsageFromCredentials() {
+	for _, item := range r.Credentials {
+		if item.Error == "" && item.Usage != nil {
+			if r.Usage == nil {
+				value := 0.0
+				r.Usage = &value
+			}
+			*r.Usage += *item.Usage
+			r.UsageUnit = item.UsageUnit
+			r.UsageType = item.UsageType
+			r.UsageDimension = item.UsageDimension
+		}
+	}
+}
+
 func (r *CostResult) applySingleSummary() {
 	if len(r.Summaries) != 1 {
 		r.UsedAmount = nil
@@ -170,4 +204,19 @@ func (r *CostResult) applySingleSummary() {
 	r.UsedAmount = r.Summaries[0].UsedAmount
 	r.RemainingAmount = r.Summaries[0].RemainingAmount
 	r.Currency = r.Summaries[0].Currency
+	r.Usage = r.Summaries[0].Usage
+	r.UsageUnit = r.Summaries[0].UsageUnit
+	r.UsageType = r.Summaries[0].UsageType
+	r.UsageDimension = r.Summaries[0].UsageDimension
+}
+
+func costSummary(cost CostResult, usage bool) CostSummary {
+	summary := CostSummary{Currency: cost.Currency, UsedAmount: cost.UsedAmount, RemainingAmount: cost.RemainingAmount}
+	if usage {
+		summary.Usage = cost.Usage
+		summary.UsageUnit = cost.UsageUnit
+		summary.UsageType = cost.UsageType
+		summary.UsageDimension = cost.UsageDimension
+	}
+	return summary
 }

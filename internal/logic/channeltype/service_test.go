@@ -29,6 +29,16 @@ func TestParseConfigNormalizesDefaults(t *testing.T) {
 	if config.BaseURL != "https://api.openai.com/v1" || config.Models.Method != "GET" || config.Models.AuthType != AuthChannelKey || config.Costs.Adapter != AdapterNone {
 		t.Fatalf("unexpected normalized config: %+v", config)
 	}
+	if config.Costs.ValueType != ValueTypeCost {
+		t.Fatalf("cost query value type should default to cost: %+v", config.Costs)
+	}
+}
+
+func TestParseConfigAcceptsUsageCostType(t *testing.T) {
+	config, err := ParseConfig([]byte(`{"models":{"path":"/models","idPath":"id"},"costs":{"adapter":"custom_json","valueType":"usage","path":"/usage","usagePath":"data.total","usageUnit":"积分"}}`))
+	if err != nil || config.Costs.ValueType != ValueTypeUsage || !IsUsageCost(config.Costs) {
+		t.Fatalf("unexpected usage config: %+v err=%v", config.Costs, err)
+	}
 }
 
 func TestParseConfigRejectsInvalidDefaultBaseURL(t *testing.T) {

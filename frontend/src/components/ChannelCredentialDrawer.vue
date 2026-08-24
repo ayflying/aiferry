@@ -5,7 +5,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelCredential, CostSummary } from '../api/types'
 import { showError } from '../lib/error'
-import { formatCost, formatTime } from '../lib/format'
+import { formatCost, formatTime, formatNumber } from '../lib/format'
+import { isUsageMode } from '../lib/channelTypeDisplay'
 
 const props = defineProps<{ modelValue: boolean; channel?: Channel }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; changed: [] }>()
@@ -22,6 +23,11 @@ const rows = ref<ChannelCredential[]>([])
 const queryDetails = ref<ChannelCostResult['credentials']>([])
 const summaries = ref<CostSummary[]>([])
 const drawerSize = window.innerWidth <= 600 ? '94%' : '760px'
+const usageQuery = computed(() => isUsageMode(props.channel?.costQueryType, props.channel?.costQueryMode))
+const queryLabel = computed(() => {
+  if (usageQuery.value) return '查询用量'
+  return props.channel?.costQueryMode === 'newapi_balance' ? '查询余额' : '查询费用'
+})
 
 watch(() => props.modelValue, (open) => {
   if (open) void load(true)
@@ -101,11 +107,11 @@ async function queryCosts() {
     queryDetails.value = result.credentials || []
     summaries.value = result.summaries || []
     const failures = queryDetails.value.filter((item) => item.error).length
-    ElMessage.success(failures ? `费用查询完成，${failures} 个密钥失败` : '费用查询完成')
+    ElMessage.success(failures ? `${usageQuery.value ? '用量' : '费用'}查询完成，${failures} 个密钥失败` : `${usageQuery.value ? '用量' : '费用'}查询完成`)
     await load(false)
     emit('changed')
   } catch (error) {
-    showError(error, '查询上游费用失败')
+    showError(error, usageQuery.value ? '查询上游用量失败' : '查询上游费用失败')
   } finally {
     querying.value = false
   }
@@ -134,14 +140,15 @@ function costDetail(item: ChannelCredential) {
         <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" placeholder="追加上游推理密钥" @keyup.enter="addCredential" />
         <el-button type="primary" :icon="Plus" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">追加</el-button>
       </div>
-      <el-button :icon="Coins" :loading="querying" :disabled="channel?.costQueryMode === 'none'" @click="queryCosts">查询余额</el-button>
+      <el-button :icon="Coins" :loading="querying" :disabled="channel?.costQueryMode === 'none'" @click="queryCosts">{{ queryLabel }}</el-button>
     </div>
 
     <div v-if="summaries.length" class="cost-summary-grid">
       <div v-for="summary in summaries" :key="summary.currency" class="summary-item">
         <strong>{{ summary.currency }}</strong>
-        <span v-if="summary.usedAmount !== undefined">已用 {{ formatCost(summary.usedAmount, summary.currency) }}</span>
-        <span v-if="summary.remainingAmount !== undefined">余额 {{ formatCost(summary.remainingAmount, summary.currency) }}</span>
+        <span v-if="!usageQuery && summary.usedAmount !== undefined">已用 {{ formatCost(summary.usedAmount, summary.currency) }}</span>
+        <span v-if="!usageQuery && summary.remainingAmount !== undefined">余额 {{ formatCost(summary.remainingAmount, summary.currency) }}</span>
+        <span v-if="summary.usage !== undefined || (usageQuery && summary.usedAmount !== undefined)">{{ summary.usageType || '用量' }} {{ formatNumber(summary.usage ?? summary.usedAmount) }} {{ summary.usageUnit || 'kToken' }}<small v-if="summary.usageDimension"> · {{ summary.usageDimension }}</small></span>
       </div>
     </div>
 
@@ -149,7 +156,7 @@ function costDetail(item: ChannelCredential) {
       <el-table :data="rows" row-key="id" size="small">
         <el-table-column label="上游密钥" min-width="145"><template #default="{ row }"><span class="mono key-prefix"><KeyRound :size="14" />{{ row.keyPrefix }}</span></template></el-table-column>
         <el-table-column label="状态" min-width="156"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="autoDisabledDetail(row)" placement="top-start"><div class="credential-status"><span class="status-dot warning">自动禁用</span><small v-if="row.autoDisabledAt">{{ formatTime(row.autoDisabledAt) }}</small></div></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
-        <el-table-column label="费用与余额" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else><span v-if="row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="row.lastCostRemaining !== undefined">余额 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small><span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined" class="muted">尚未查询</span></template></div></template></el-table-column>
+        <el-table-column :label="usageQuery ? '用量与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else><span v-if="!usageQuery && row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="!usageQuery && row.lastCostRemaining !== undefined">余额 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><span v-if="usageQuery && (row.lastCostUsage !== undefined || row.lastCostUsed !== undefined)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small><span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined && row.lastCostUsage === undefined" class="muted">尚未查询</span></template></div></template></el-table-column>
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
         <el-table-column label="操作" width="62" align="center"><template #default="{ row }"><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></template></el-table-column>
       </el-table>

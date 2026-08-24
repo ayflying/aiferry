@@ -35,7 +35,8 @@ export interface ChannelTypeModelConfig {
 }
 
 export interface ChannelTypeCostConfig {
-  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'newapi_balance' | 'custom_json'
+  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'newapi_balance' | 'custom_json' | 'qiniu_usage'
+  valueType?: 'cost' | 'usage'
   method: string
   path: string
   authType: 'none' | 'channel_key' | 'management_key'
@@ -45,6 +46,10 @@ export interface ChannelTypeCostConfig {
   remainingPath: string
   currencyPath: string
   fixedCurrency: string
+  usagePath?: string
+  usageUnit?: string
+  usageType?: string
+  usageDimension?: string
 }
 
 export interface ChannelTypePricingConfig {
@@ -139,6 +144,7 @@ export interface Channel {
   healthCheckModelId: number
   autoDisableEnabled: boolean
   costQueryMode: string
+  costQueryType?: 'cost' | 'usage'
   costQueryConfig: CostQueryConfig
   advancedConfig: ChannelAdvancedConfig
   enabledModelCount: number
@@ -154,6 +160,10 @@ export interface Channel {
   lastCostRemaining?: number
   lastCostCurrency: string
   lastCostAt?: string
+  lastCostUsage?: number
+  lastCostUsageUnit?: string
+  lastCostUsageType?: string
+  lastCostUsageDimension?: string
   costSummaries: CostSummary[]
   groupIds: number[]
   createdAt: string
@@ -163,6 +173,10 @@ export interface CostSummary {
   currency: string
   usedAmount?: number
   remainingAmount?: number
+  usage?: number
+  usageUnit?: string
+  usageType?: string
+  usageDimension?: string
 }
 
 export interface ChannelCredential {
@@ -177,6 +191,10 @@ export interface ChannelCredential {
   lastCostRemaining?: number
   lastCostCurrency: string
   lastCostAt?: string
+  lastCostUsage?: number
+  lastCostUsageUnit?: string
+  lastCostUsageType?: string
+  lastCostUsageDimension?: string
   createdAt: string
 }
 
@@ -189,6 +207,10 @@ export interface ChannelCredentialCost {
   currency: string
   queriedAt: string
   error: string
+  usage?: number
+  usageUnit?: string
+  usageType?: string
+  usageDimension?: string
 }
 
 export interface ChannelCostResult {
@@ -197,6 +219,10 @@ export interface ChannelCostResult {
   remainingAmount?: number
   currency: string
   queriedAt: string
+  usage?: number
+  usageUnit?: string
+  usageType?: string
+  usageDimension?: string
   summaries: CostSummary[]
   credentials: ChannelCredentialCost[]
 }

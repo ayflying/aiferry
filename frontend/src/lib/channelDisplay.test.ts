@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { channelNameForID, channelStatusLabel, isChannelEnabled } from './channelDisplay'
-import { channelTypeCostLabel } from './channelTypeDisplay'
+import { channelTypeCostLabel, channelTypeQueryLabel, isUsageAdapter } from './channelTypeDisplay'
 
 describe('channel display helpers', () => {
   it('derives route availability from every blocking status', () => {
@@ -22,5 +22,20 @@ describe('channel display helpers', () => {
   it('uses a readable label for known and custom cost adapters', () => {
     expect(channelTypeCostLabel({ config: { costs: { adapter: 'newapi_balance' } } } as never)).toBe('NewAPI 余额')
     expect(channelTypeCostLabel({ config: { costs: { adapter: 'custom_adapter' } } } as never)).toBe('custom_adapter')
+  })
+
+  it('labels usage adapters and qiniu usage', () => {
+    const usage = { config: { costs: { adapter: 'qiniu_usage' } } } as never
+    expect(channelTypeCostLabel(usage)).toBe('七牛用量')
+    expect(channelTypeQueryLabel(usage)).toBe('Token/积分用量查询')
+    expect(isUsageAdapter(usage)).toBe(true)
+    expect(channelTypeQueryLabel({ config: { costs: { adapter: 'newapi_balance' } } } as never)).toBe('费用/余额查询')
+    expect(isUsageAdapter({ config: { costs: { adapter: 'sub2api_usage' } } } as never)).toBe(false)
+  })
+
+  it('uses an explicit usage value type for custom adapters', () => {
+    const usage = { config: { costs: { adapter: 'custom_json', valueType: 'usage' } } } as never
+    expect(channelTypeQueryLabel(usage)).toBe('Token/积分用量查询')
+    expect(isUsageAdapter(usage)).toBe(true)
   })
 })

@@ -144,13 +144,24 @@ func normalizeCostConfig(config *CostConfig) error {
 	if config.Adapter == "" {
 		config.Adapter = AdapterNone
 	}
+	config.ValueType = strings.TrimSpace(config.ValueType)
+	if config.ValueType == "" {
+		config.ValueType = ValueTypeCost
+	}
 	config.Method = normalizeMethod(config.Method)
 	config.Path = strings.TrimSpace(config.Path)
 	config.AuthType = normalizeAuth(config.AuthType)
 	config.HeaderName = normalizeHeader(config.HeaderName, config.AuthType)
 	config.FixedCurrency = strings.ToUpper(strings.TrimSpace(config.FixedCurrency))
+	config.UsagePath = strings.TrimSpace(config.UsagePath)
+	config.UsageUnit = strings.TrimSpace(config.UsageUnit)
+	config.UsageType = strings.TrimSpace(config.UsageType)
+	config.UsageDimension = strings.TrimSpace(config.UsageDimension)
 	if !validCostAdapter(config.Adapter) {
 		return gerror.New("unsupported costs.adapter")
+	}
+	if config.ValueType != ValueTypeCost && config.ValueType != ValueTypeUsage {
+		return gerror.New("unsupported costs.valueType")
 	}
 	if config.Adapter == AdapterNone {
 		return nil
@@ -164,8 +175,11 @@ func normalizeCostConfig(config *CostConfig) error {
 	if !validAuth(config.AuthType) {
 		return gerror.New("unsupported costs.authType")
 	}
-	if config.Adapter == AdapterCustomJSON && config.UsedPath == "" && config.RemainingPath == "" {
+	if config.Adapter == AdapterCustomJSON && config.ValueType == ValueTypeCost && config.UsedPath == "" && config.RemainingPath == "" {
 		return gerror.New("custom_json costs require usedPath or remainingPath")
+	}
+	if config.Adapter == AdapterCustomJSON && config.ValueType == ValueTypeUsage && config.UsagePath == "" && config.UsedPath == "" {
+		return gerror.New("custom_json usage requires usagePath or usedPath")
 	}
 	return nil
 }
@@ -197,5 +211,5 @@ func validAuth(value string) bool {
 }
 
 func validCostAdapter(value string) bool {
-	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterNewAPI || value == AdapterCustomJSON
+	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterNewAPI || value == AdapterCustomJSON || value == AdapterQiniuUsage
 }

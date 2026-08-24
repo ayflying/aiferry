@@ -42,9 +42,12 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 	}
 	for i := range rows {
 		view := s.toView(rows[i])
+		usageQuery := false
 		if item, ok := typeByCode[rows[i].Type]; ok {
 			view.TypeName = item.Name
 			view.CostQueryMode = item.Config.Costs.Adapter
+			view.CostQueryType = item.Config.Costs.ValueType
+			usageQuery = channeltype.IsUsageCost(item.Config.Costs)
 		} else {
 			view.TypeName = rows[i].Type
 		}
@@ -55,7 +58,7 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 		view.ActiveCredentialCount, _ = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: rows[i].Id, Status: 1}).Count()
 		view.HasAPIKey = view.CredentialCount > 0
 		view.CredentialsUnavailable = view.CredentialCount == 0 || view.ActiveCredentialCount == 0
-		view.CostSummaries, err = s.channelCostSummaries(ctx, rows[i].Id)
+		view.CostSummaries, err = s.channelCostSummaries(ctx, rows[i].Id, usageQuery)
 		if err != nil {
 			return nil, err
 		}
@@ -68,9 +71,13 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 		view.LastCostCurrency = currentCost.Currency
 		view.LastCostAt = currentCost.At
 		if len(view.CostSummaries) == 0 && currentCost.Currency != "" {
-			view.CostSummaries = []CostSummary{{
-				Currency: currentCost.Currency, UsedAmount: currentCost.Used, RemainingAmount: currentCost.Remaining,
-			}}
+			summary := CostSummary{Currency: currentCost.Currency, UsedAmount: currentCost.Used, RemainingAmount: currentCost.Remaining}
+			if usageQuery {
+				summary.Usage = currentCost.Used
+				summary.UsageUnit = "kToken"
+				summary.UsageType = "用量"
+			}
+			view.CostSummaries = []CostSummary{summary}
 		}
 		view.GroupIDs, err = s.groups.ChannelIDs(ctx, rows[i].Id)
 		if err != nil {

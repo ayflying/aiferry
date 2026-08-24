@@ -3,7 +3,8 @@ import { Coins, FlaskConical, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, S
 
 import type { Channel } from '../api/types'
 import { channelStatusLabel, isChannelEnabled } from '../lib/channelDisplay'
-import { formatCost, formatLatency, formatTime } from '../lib/format'
+import { formatCost, formatLatency, formatNumber, formatTime } from '../lib/format'
+import { isUsageMode } from '../lib/channelTypeDisplay'
 import MobileRecordList from './MobileRecordList.vue'
 import ResponsiveList from './ResponsiveList.vue'
 
@@ -65,11 +66,11 @@ const emit = defineEmits<{
           <el-table-column label="路由" width="108"><template #default="{ row }"><span class="mono">P{{ row.priority }} / W{{ row.weight }}</span></template></el-table-column>
           <el-table-column label="模型" width="100"><template #default="{ row }">{{ row.enabledModelCount }} / {{ row.discoveredModels }}</template></el-table-column>
           <el-table-column label="最近测试" min-width="130"><template #default="{ row }"><span v-if="row.lastTestStatus" class="status-dot" :class="row.lastTestStatus">{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : '失败' }}</span><span v-else class="muted">未测试</span></template></el-table-column>
-          <el-table-column label="上游费用 / 余额" min-width="168">
+          <el-table-column label="上游费用 / 用量" min-width="168">
             <template #default="{ row }">
               <button class="cost-link" type="button" @click="emit('open-credentials', row)">
                 <div v-if="row.costSummaries?.length" class="cost-cell">
-                  <template v-for="summary in row.costSummaries" :key="summary.currency"><span v-if="summary.usedAmount !== undefined">{{ summary.currency }} 已用 {{ formatCost(summary.usedAmount, summary.currency) }}</span><span v-if="summary.remainingAmount !== undefined">{{ summary.currency }} 余额 {{ formatCost(summary.remainingAmount, summary.currency) }}</span></template>
+                  <template v-for="summary in row.costSummaries" :key="summary.currency"><span v-if="!isUsageMode(row.costQueryType, row.costQueryMode) && summary.usedAmount !== undefined">{{ summary.currency }} 已用 {{ formatCost(summary.usedAmount, summary.currency) }}</span><span v-if="!isUsageMode(row.costQueryType, row.costQueryMode) && summary.remainingAmount !== undefined">{{ summary.currency }} 余额 {{ formatCost(summary.remainingAmount, summary.currency) }}</span><span v-if="summary.usage !== undefined">{{ summary.usageType || '用量' }} {{ formatNumber(summary.usage) }} {{ summary.usageUnit || '' }}</span></template>
                   <small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small>
                 </div>
                 <span v-else class="muted">查看明细</span>
@@ -82,7 +83,7 @@ const emit = defineEmits<{
                 <el-tooltip content="管理上游密钥"><button class="icon-button" type="button" :aria-label="`管理 ${row.name} 的上游密钥`" @click="emit('open-credentials', row)"><KeyRound :size="16" /></button></el-tooltip>
                 <el-tooltip content="发现与映射模型"><button class="icon-button" type="button" :aria-label="`发现并映射 ${row.name} 的模型`" @click="emit('discover', row)"><ScanSearch :size="16" /></button></el-tooltip>
                 <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="emit('test', row)"><FlaskConical :size="16" /></button></el-tooltip>
-                <el-tooltip :content="props.queryingCostID === row.id ? '正在查询费用' : '查询费用'"><button class="icon-button" type="button" :aria-label="`${props.queryingCostID === row.id ? '正在查询' : '查询'} ${row.name} 的费用`" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)"><LoaderCircle v-if="props.queryingCostID === row.id" :size="16" class="cost-query-spinner" /><Coins v-else :size="16" /></button></el-tooltip>
+                <el-tooltip :content="props.queryingCostID === row.id ? '正在查询' : (isUsageMode(row.costQueryType, row.costQueryMode) ? '查询用量' : '查询费用')"><button class="icon-button" type="button" :aria-label="`${props.queryingCostID === row.id ? '正在查询' : '查询'} ${row.name} 的费用或用量`" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)"><LoaderCircle v-if="props.queryingCostID === row.id" :size="16" class="cost-query-spinner" /><Coins v-else :size="16" /></button></el-tooltip>
                 <el-tooltip content="编辑"><button class="icon-button" type="button" :aria-label="`编辑渠道 ${row.name}`" @click="emit('edit', row)"><Pencil :size="16" /></button></el-tooltip>
                 <el-tooltip content="删除"><button class="icon-button danger" type="button" :aria-label="`删除渠道 ${row.name}`" @click="emit('remove', row)"><Trash2 :size="16" /></button></el-tooltip>
               </div>
@@ -108,11 +109,11 @@ const emit = defineEmits<{
               <div><dt>路由</dt><dd class="mono">P{{ row.priority }} / W{{ row.weight }}</dd></div>
               <div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}</dd></div>
               <div><dt>最近测试</dt><dd>{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : row.lastTestStatus ? '失败' : '未测试' }}</dd></div>
-              <div class="mobile-record__wide"><dt>上游费用 / 余额</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="row.costSummaries?.length"><template v-for="summary in row.costSummaries" :key="summary.currency">{{ summary.currency }} 已用 {{ summary.usedAmount === undefined ? '—' : formatCost(summary.usedAmount, summary.currency) }} · 余额 {{ summary.remainingAmount === undefined ? '—' : formatCost(summary.remainingAmount, summary.currency) }} </template></span><span v-else class="muted">查看明细</span></button></dd></div>
+              <div class="mobile-record__wide"><dt>上游费用 / 用量</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="row.costSummaries?.length"><template v-for="summary in row.costSummaries" :key="summary.currency"><span v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">{{ summary.currency }} 已用 {{ summary.usedAmount === undefined ? '—' : formatCost(summary.usedAmount, summary.currency) }} · 余额 {{ summary.remainingAmount === undefined ? '—' : formatCost(summary.remainingAmount, summary.currency) }}</span><span v-if="summary.usage !== undefined">{{ summary.usageType || '用量' }} {{ formatNumber(summary.usage) }} {{ summary.usageUnit || '' }}</span> </template></span><span v-else class="muted">查看明细</span></button></dd></div>
             </dl>
             <div class="mobile-record__footer">
               <span class="muted">渠道操作</span>
-              <div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="emit('open-credentials', row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="emit('discover', row)">模型</el-button><el-button size="small" :icon="FlaskConical" @click="emit('test', row)">测试</el-button><el-button size="small" :icon="Coins" :loading="props.queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)">费用</el-button><el-button size="small" :icon="Pencil" @click="emit('edit', row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="emit('remove', row)">删除</el-button></div>
+              <div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="emit('open-credentials', row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="emit('discover', row)">模型</el-button><el-button size="small" :icon="FlaskConical" @click="emit('test', row)">测试</el-button><el-button size="small" :icon="Coins" :loading="props.queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)">{{ isUsageMode(row.costQueryType, row.costQueryMode) ? '用量' : '费用' }}</el-button><el-button size="small" :icon="Pencil" @click="emit('edit', row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="emit('remove', row)">删除</el-button></div>
             </div>
           </article>
         </MobileRecordList>

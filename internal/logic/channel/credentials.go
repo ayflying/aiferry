@@ -15,6 +15,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -32,6 +33,10 @@ type CredentialView struct {
 	LastCostRemaining      *float64   `json:"lastCostRemaining"`
 	LastCostCurrency       string     `json:"lastCostCurrency"`
 	LastCostAt             *time.Time `json:"lastCostAt"`
+	LastCostUsage          *float64   `json:"lastCostUsage,omitempty"`
+	LastCostUsageUnit      string     `json:"lastCostUsageUnit,omitempty"`
+	LastCostUsageType      string     `json:"lastCostUsageType,omitempty"`
+	LastCostUsageDimension string     `json:"lastCostUsageDimension,omitempty"`
 	CreatedAt              time.Time  `json:"createdAt"`
 }
 
@@ -97,7 +102,12 @@ func (s *sChannel) createCredentialTx(ctx context.Context, channelID uint64, val
 }
 
 func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]CredentialView, error) {
-	if _, err := s.Get(ctx, channelID); err != nil {
+	channel, err := s.Get(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	_, channelTypeConfig, err := s.types.GetByCode(ctx, channel.Type)
+	if err != nil {
 		return nil, err
 	}
 	rows := make([]credentialRow, 0)
@@ -109,7 +119,7 @@ func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]Cre
 		if err := s.ensureCredentialMetadata(ctx, &row); err != nil {
 			return nil, err
 		}
-		views = append(views, credentialView(row))
+		views = append(views, credentialView(row, channelTypeConfig.Costs))
 	}
 	return views, nil
 }
@@ -312,7 +322,7 @@ func (s *sChannel) newCredentialData(value string) (do.ChannelCredentials, error
 	}, nil
 }
 
-func credentialView(row credentialRow) CredentialView {
+func credentialView(row credentialRow, config channeltype.CostConfig) CredentialView {
 	view := CredentialView{
 		Id: row.Id, KeyPrefix: row.KeyPrefix, Status: row.Status, AutoDisabledReason: row.AutoDisabledReason,
 		AutoDisabledStatusCode: row.AutoDisabledStatusCode, LastCostUsed: row.LastCostUsed, LastCostRemaining: row.LastCostRemaining,
@@ -321,6 +331,18 @@ func credentialView(row credentialRow) CredentialView {
 	if row.AutoDisabledAt != nil {
 		view.AutoDisabled = true
 		view.AutoDisabledAt = row.AutoDisabledAt
+	}
+	if channeltype.IsUsageCost(config) && row.LastCostUsed != nil {
+		view.LastCostUsage = row.LastCostUsed
+		view.LastCostUsageUnit = config.UsageUnit
+		if view.LastCostUsageUnit == "" {
+			view.LastCostUsageUnit = "kToken"
+		}
+		view.LastCostUsageType = config.UsageType
+		if view.LastCostUsageType == "" {
+			view.LastCostUsageType = "用量"
+		}
+		view.LastCostUsageDimension = config.UsageDimension
 	}
 	return view
 }
