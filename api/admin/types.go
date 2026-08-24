@@ -157,20 +157,21 @@ type PriceSourceInput struct {
 }
 
 type SystemResilienceSettingsInput struct {
-	RetryStatusCodes              string   `json:"retryStatusCodes"`
-	StreamFirstByteTimeoutSeconds int      `json:"streamFirstByteTimeoutSeconds"`
-	StreamIdleTimeoutSeconds      int      `json:"streamIdleTimeoutSeconds"`
-	NonStreamTimeoutSeconds       int      `json:"nonStreamTimeoutSeconds"`
-	HealthCheckEnabled            bool     `json:"healthCheckEnabled"`
-	HealthCheckMode               string   `json:"healthCheckMode" v:"in:passive,all"`
-	HealthCheckIntervalMinutes    int      `json:"healthCheckIntervalMinutes"`
-	RecoveryEnabled               bool     `json:"recoveryEnabled"`
-	AutoDisableEnabled            bool     `json:"autoDisableEnabled"`
-	AutoDisableFailureThreshold   int      `json:"autoDisableFailureThreshold"`
-	DisableLatencySeconds         int      `json:"disableLatencySeconds"`
-	DisableStatusCodes            string   `json:"disableStatusCodes"`
-	FailureKeywords               []string `json:"failureKeywords"`
-	ModelQualityDetectionEnabled  bool     `json:"modelQualityDetectionEnabled"`
+	RetryStatusCodes               string   `json:"retryStatusCodes"`
+	StreamFirstByteTimeoutSeconds  int      `json:"streamFirstByteTimeoutSeconds"`
+	StreamIdleTimeoutSeconds       int      `json:"streamIdleTimeoutSeconds"`
+	NonStreamTimeoutSeconds        int      `json:"nonStreamTimeoutSeconds"`
+	HealthCheckEnabled             bool     `json:"healthCheckEnabled"`
+	HealthCheckMode                string   `json:"healthCheckMode" v:"in:passive,all"`
+	HealthCheckIntervalMinutes     int      `json:"healthCheckIntervalMinutes"`
+	RecoveryEnabled                bool     `json:"recoveryEnabled"`
+	AutoDisableEnabled             bool     `json:"autoDisableEnabled"`
+	AutoDisableNotificationEnabled bool     `json:"autoDisableNotificationEnabled"`
+	AutoDisableFailureThreshold    int      `json:"autoDisableFailureThreshold"`
+	DisableLatencySeconds          int      `json:"disableLatencySeconds"`
+	DisableStatusCodes             string   `json:"disableStatusCodes"`
+	FailureKeywords                []string `json:"failureKeywords"`
+	ModelQualityDetectionEnabled   bool     `json:"modelQualityDetectionEnabled"`
 }
 
 type ModelQualitySettingsInput struct {

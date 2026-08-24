@@ -105,7 +105,7 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 		return false, nil
 	}
 	if input.ChannelCredentialID > 0 {
-		return s.disableCredential(ctx, settings, input)
+		return s.disableCredential(ctx, channel, settings, input)
 	}
 	matched, err := s.recordAutoDisableFailure(ctx, input.ChannelID, 0, settings.AutoDisableFailureThreshold)
 	if err != nil {
@@ -115,12 +115,14 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 		return false, nil
 	}
 
+	reason := autoDisableReason(input)
+	source := autoDisableSource(input.Source)
 	data := do.Channels{
 		Status:                 0,
 		AutoDisabledAt:         gtime.Now(),
-		AutoDisabledReason:     autoDisableReason(input),
+		AutoDisabledReason:     reason,
 		AutoDisabledStatusCode: gdb.Raw("NULL"),
-		AutoDisabledSource:     autoDisableSource(input.Source),
+		AutoDisabledSource:     source,
 	}
 	if input.Status > 0 {
 		data.AutoDisabledStatusCode = input.Status
@@ -134,10 +136,17 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 	}
 	s.resetRecoverySchedule(ctx, RecoveryTargetChannel, input.ChannelID)
 	s.clearTransient(ctx, input.ChannelID)
+	s.notifyAutoDisableTransition(ctx, settings, AutoDisableNotification{
+		ChannelID:   channel.Id,
+		ChannelName: channel.Name,
+		Reason:      reason,
+		Source:      source,
+		StatusCode:  notificationStatusCode(input.Status),
+	})
 	return true, nil
 }
 
-func (s *sSystem) disableCredential(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) (bool, error) {
+func (s *sSystem) disableCredential(ctx context.Context, channel entity.Channels, settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) (bool, error) {
 	var credential entity.ChannelCredentials
 	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: input.ChannelCredentialID, ChannelId: input.ChannelID}).Scan(&credential); err != nil {
 		return false, gerror.Wrap(err, "load channel credential for automatic disable")
@@ -152,12 +161,14 @@ func (s *sSystem) disableCredential(ctx context.Context, settings adminapi.Syste
 	if !matched {
 		return false, nil
 	}
+	reason := autoDisableReason(input)
+	source := autoDisableSource(input.Source)
 	data := do.ChannelCredentials{
 		Status:                 0,
 		AutoDisabledAt:         gtime.Now(),
-		AutoDisabledReason:     autoDisableReason(input),
+		AutoDisabledReason:     reason,
 		AutoDisabledStatusCode: gdb.Raw("NULL"),
-		AutoDisabledSource:     autoDisableSource(input.Source),
+		AutoDisabledSource:     source,
 	}
 	if input.Status > 0 {
 		data.AutoDisabledStatusCode = input.Status
@@ -171,6 +182,15 @@ func (s *sSystem) disableCredential(ctx context.Context, settings adminapi.Syste
 	}
 	s.resetRecoverySchedule(ctx, RecoveryTargetCredential, credential.Id)
 	s.clearCredentialTransient(ctx, credential.Id)
+	s.notifyAutoDisableTransition(ctx, settings, AutoDisableNotification{
+		ChannelID:           channel.Id,
+		ChannelName:         channel.Name,
+		CredentialID:        credential.Id,
+		CredentialKeyPrefix: credential.KeyPrefix,
+		Reason:              reason,
+		Source:              source,
+		StatusCode:          notificationStatusCode(input.Status),
+	})
 	return true, nil
 }
 
@@ -207,6 +227,14 @@ func (s *sSystem) RecoverIfAllowed(ctx context.Context, channelID uint64) (bool,
 	}
 	s.clearRecoverySchedule(ctx, RecoveryTargetChannel, channelID)
 	s.clearTransient(ctx, channelID)
+	s.notifyAutoDisableTransition(ctx, settings, AutoDisableNotification{
+		Recovered:   true,
+		ChannelID:   channel.Id,
+		ChannelName: channel.Name,
+		Reason:      channel.AutoDisabledReason,
+		Source:      channel.AutoDisabledSource,
+		StatusCode:  channel.AutoDisabledStatusCode,
+	})
 	return true, nil
 }
 
@@ -240,6 +268,16 @@ func (s *sSystem) RecoverCredentialIfAllowed(ctx context.Context, credentialID u
 	}
 	s.clearRecoverySchedule(ctx, RecoveryTargetCredential, credential.Id)
 	s.clearCredentialTransient(ctx, credential.Id)
+	s.notifyAutoDisableTransition(ctx, settings, AutoDisableNotification{
+		Recovered:           true,
+		ChannelID:           credential.ChannelId,
+		ChannelName:         s.autoDisableNotificationChannelName(ctx, credential.ChannelId),
+		CredentialID:        credential.Id,
+		CredentialKeyPrefix: credential.KeyPrefix,
+		Reason:              credential.AutoDisabledReason,
+		Source:              credential.AutoDisabledSource,
+		StatusCode:          credential.AutoDisabledStatusCode,
+	})
 	return true, nil
 }
 

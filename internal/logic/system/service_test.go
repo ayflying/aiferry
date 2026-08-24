@@ -1,11 +1,45 @@
 package system
 
 import (
+	"context"
+	"reflect"
 	"testing"
 	"time"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 )
+
+type autoDisableNotifierStub struct {
+	notifications []AutoDisableNotification
+}
+
+func (s *autoDisableNotifierStub) NotifyAutoDisableTransition(_ context.Context, notification AutoDisableNotification) {
+	s.notifications = append(s.notifications, notification)
+}
+
+func TestAutoDisableNotificationDefaultsToDisabledAndHonorsSwitch(t *testing.T) {
+	settings, err := decodeSettings([]byte(`{}`))
+	if err != nil {
+		t.Fatalf("decode default resilience settings: %v", err)
+	}
+	if settings.AutoDisableNotificationEnabled {
+		t.Fatal("legacy resilience settings must not enable administrator email notifications")
+	}
+
+	notifier := &autoDisableNotifierStub{}
+	systemSvc := &sSystem{autoDisableNotifier: notifier}
+	notification := AutoDisableNotification{ChannelID: 42, ChannelName: "主渠道"}
+	systemSvc.notifyAutoDisableTransition(context.Background(), settings, notification)
+	if len(notifier.notifications) != 0 {
+		t.Fatal("notification switch must suppress delivery when disabled")
+	}
+
+	settings.AutoDisableNotificationEnabled = true
+	systemSvc.notifyAutoDisableTransition(context.Background(), settings, notification)
+	if !reflect.DeepEqual(notifier.notifications, []AutoDisableNotification{notification}) {
+		t.Fatalf("unexpected notifications: %#v", notifier.notifications)
+	}
+}
 
 func TestNormalizeStatusCodeRules(t *testing.T) {
 	normalized, rules, err := normalizeStatusCodeRules("429, 500-503,401,429")

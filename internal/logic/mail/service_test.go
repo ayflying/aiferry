@@ -2,11 +2,39 @@ package mail
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/user"
 )
+
+func TestRenderAutoDisableTransition(t *testing.T) {
+	notification := system.AutoDisableNotification{
+		ChannelID:           42,
+		ChannelName:         "主渠道",
+		CredentialID:        7,
+		CredentialKeyPrefix: "sk-live...abcd",
+		Reason:              "status_code=429, daily usage limit exceeded",
+		Source:              system.AutoDisableSourceRelayRequest,
+		StatusCode:          429,
+	}
+	subject, body := renderAutoDisableTransition("AiFerry", notification)
+	if subject != "AiFerry 渠道密钥已自动禁用：主渠道" {
+		t.Fatalf("unexpected disable subject: %q", subject)
+	}
+	for _, fragment := range []string{"渠道 主渠道（ID：42）", "上游密钥 sk-live...abcd（ID：7）", "转发请求", "429", "daily usage limit exceeded"} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("disabled email body is missing %q: %q", fragment, body)
+		}
+	}
+
+	notification.Recovered = true
+	subject, body = renderAutoDisableTransition("AiFerry", notification)
+	if subject != "AiFerry 渠道密钥已自动恢复：主渠道" || !strings.Contains(body, "已通过探测并自动恢复启用") {
+		t.Fatalf("unexpected recovery email: %q %q", subject, body)
+	}
+}
 
 func TestRenderTemplates(t *testing.T) {
 	settings := system.MailDeliverySettings{MailSettings: system.MailSettings{

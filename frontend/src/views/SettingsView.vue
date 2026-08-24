@@ -39,9 +39,10 @@ const form = reactive({
   healthCheckEnabled: false,
   healthCheckMode: 'passive' as SystemResilienceSettings['healthCheckMode'],
   healthCheckIntervalMinutes: 5,
-  recoveryEnabled: true,
-  autoDisableEnabled: true,
-  autoDisableFailureThreshold: 3,
+	recoveryEnabled: true,
+	autoDisableEnabled: true,
+	autoDisableNotificationEnabled: false,
+	autoDisableFailureThreshold: 3,
   disableLatencySeconds: 120,
   disableStatusCodes: '401,429',
   failureKeywordsText: '',
@@ -200,9 +201,10 @@ async function saveReliability() {
       healthCheckEnabled: form.healthCheckEnabled,
       healthCheckMode: form.healthCheckMode,
       healthCheckIntervalMinutes: form.healthCheckIntervalMinutes,
-      recoveryEnabled: form.recoveryEnabled,
-      autoDisableEnabled: form.autoDisableEnabled,
-      autoDisableFailureThreshold: form.autoDisableFailureThreshold,
+	  recoveryEnabled: form.recoveryEnabled,
+	  autoDisableEnabled: form.autoDisableEnabled,
+	  autoDisableNotificationEnabled: form.autoDisableNotificationEnabled,
+	  autoDisableFailureThreshold: form.autoDisableFailureThreshold,
       disableLatencySeconds: form.disableLatencySeconds,
       disableStatusCodes: form.disableStatusCodes,
       failureKeywords: form.failureKeywordsText.split('\n').map((item) => item.trim()).filter(Boolean),
@@ -333,7 +335,7 @@ watch(activeTab, (tab) => {
       <section class="settings-section"><div class="section-heading"><div><h2>故障转移</h2><span>可恢复失败会按路由顺序尝试所有可用渠道</span></div><Gauge :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="可故障转移状态码"><el-input v-model="form.retryStatusCodes" placeholder="401,429,500-599" /></el-form-item><p class="field-hint">状态码支持逗号分隔和包含范围，例如 401,429,500-599。所有可用渠道都失败后，客户端会收到可重试响应。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>超时配置</h2><span>请求超时会按现有故障转移与密钥级冷却规则处理。</span></div></div><el-form label-position="top" class="settings-form"><div class="timeout-grid"><el-form-item label="流式首字节超时"><el-input-number v-model="form.streamFirstByteTimeoutSeconds" :min="1" :max="120" controls-position="right" /><p class="field-hint">等待首个数据块的最大时间，范围 1-120 秒。</p></el-form-item><el-form-item label="流式静默超时"><el-input-number v-model="form.streamIdleTimeoutSeconds" :min="0" :max="600" controls-position="right" /><p class="field-hint">数据块之间的最大间隔，范围 0-600 秒，填 0 禁用。</p></el-form-item><el-form-item label="非流式超时"><el-input-number v-model="form.nonStreamTimeoutSeconds" :min="60" :max="1200" controls-position="right" /><p class="field-hint">非流式请求的总超时时间，范围 60-1200 秒。</p></el-form-item></div></el-form></section>
       <section class="settings-section probe-settings"><div class="section-heading"><div><h2>后台渠道探测</h2><span>使用已启用模型执行最小请求，不保存提示词或响应正文。</span></div><el-switch v-model="form.healthCheckEnabled" /></div><div class="probe-controls"><div class="probe-interval"><strong>检查间隔</strong><el-input-number v-model="form.healthCheckIntervalMinutes" :disabled="!form.healthCheckEnabled" :min="1" :max="1440" controls-position="right" /><small>分钟</small></div><div class="probe-option"><div><strong>仅被动恢复</strong><span>只探测自动禁用的渠道</span></div><el-switch :model-value="form.healthCheckMode === 'passive'" :disabled="!form.healthCheckEnabled" @update:model-value="form.healthCheckMode = $event ? 'passive' : 'all'" /></div><div class="probe-option"><div><strong>成功后自动恢复</strong><span>探测成功时恢复自动禁用渠道</span></div><el-switch v-model="form.recoveryEnabled" /></div></div></section>
-      <section class="settings-section"><div class="section-heading"><div><h2>上游异常自动下线</h2><span>同一上游密钥连续命中规则后才会停止参与路由，并保存触发原因。</span></div><el-switch v-model="form.autoDisableEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="连续失败阈值"><el-input-number v-model="form.autoDisableFailureThreshold" :disabled="!form.autoDisableEnabled" :min="1" :max="20" controls-position="right" /></el-form-item><el-form-item label="慢响应阈值（秒）"><el-input-number v-model="form.disableLatencySeconds" :disabled="!form.autoDisableEnabled" :min="1" :max="3600" controls-position="right" /></el-form-item><el-form-item label="自动禁用状态码"><el-input v-model="form.disableStatusCodes" :disabled="!form.autoDisableEnabled" placeholder="401,429" /></el-form-item></div><el-form-item label="失败关键词"><el-input v-model="form.failureKeywordsText" :disabled="!form.autoDisableEnabled" type="textarea" :rows="10" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><p class="field-hint">同一上游密钥连续命中任一禁用规则达到阈值才会自动下线；任意一次成功会清零。关键词不区分大小写；状态码支持逗号分隔和包含范围。</p></el-form></section>
+	  <section class="settings-section"><div class="section-heading"><div><h2>上游异常自动下线</h2><span>同一上游密钥连续命中规则后才会停止参与路由，并保存触发原因。</span></div><el-switch v-model="form.autoDisableEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="连续失败阈值"><el-input-number v-model="form.autoDisableFailureThreshold" :disabled="!form.autoDisableEnabled" :min="1" :max="20" controls-position="right" /></el-form-item><el-form-item label="慢响应阈值（秒）"><el-input-number v-model="form.disableLatencySeconds" :disabled="!form.autoDisableEnabled" :min="1" :max="3600" controls-position="right" /></el-form-item><el-form-item label="自动禁用状态码"><el-input v-model="form.disableStatusCodes" :disabled="!form.autoDisableEnabled" placeholder="401,429" /></el-form-item></div><el-form-item label="失败关键词"><el-input v-model="form.failureKeywordsText" :disabled="!form.autoDisableEnabled" type="textarea" :rows="10" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><div class="probe-option"><div><strong>管理员邮件通知</strong><span>渠道或其上游密钥自动禁用、探测成功自动恢复时，通知所有启用的管理员邮箱。</span></div><el-switch v-model="form.autoDisableNotificationEnabled" :disabled="!form.autoDisableEnabled" /></div><p class="field-hint">同一上游密钥连续命中任一禁用规则达到阈值才会自动下线；任意一次成功会清零。关键词不区分大小写；状态码支持逗号分隔和包含范围。</p></el-form></section>
     </template>
 
     <ModelQualityObservationPanel

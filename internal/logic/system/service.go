@@ -13,9 +13,9 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
-	"github.com/yunloli/aiferry/internal/logic/app"
 )
 
 const (
@@ -25,7 +25,8 @@ const (
 )
 
 type sSystem struct {
-	app *app.Service
+	app                 *app.Service
+	autoDisableNotifier AutoDisableNotifier
 }
 
 type statusCodeRange struct {
@@ -39,19 +40,20 @@ func New(appSvc *app.Service) *sSystem {
 
 func DefaultResilienceSettings() adminapi.SystemResilienceSettingsInput {
 	return adminapi.SystemResilienceSettingsInput{
-		RetryStatusCodes:              "401,403,404,408,429,500-599",
-		StreamFirstByteTimeoutSeconds: 60,
-		StreamIdleTimeoutSeconds:      180,
-		NonStreamTimeoutSeconds:       600,
-		HealthCheckEnabled:            false,
-		HealthCheckMode:               "passive",
-		HealthCheckIntervalMinutes:    5,
-		RecoveryEnabled:               true,
-		AutoDisableEnabled:            true,
-		AutoDisableFailureThreshold:   3,
-		DisableLatencySeconds:         120,
-		DisableStatusCodes:            "401,429",
-		ModelQualityDetectionEnabled:  false,
+		RetryStatusCodes:               "401,403,404,408,429,500-599",
+		StreamFirstByteTimeoutSeconds:  60,
+		StreamIdleTimeoutSeconds:       180,
+		NonStreamTimeoutSeconds:        600,
+		HealthCheckEnabled:             false,
+		HealthCheckMode:                "passive",
+		HealthCheckIntervalMinutes:     5,
+		RecoveryEnabled:                true,
+		AutoDisableEnabled:             true,
+		AutoDisableNotificationEnabled: false,
+		AutoDisableFailureThreshold:    3,
+		DisableLatencySeconds:          120,
+		DisableStatusCodes:             "401,429",
+		ModelQualityDetectionEnabled:   false,
 		FailureKeywords: []string{
 			"Your credit balance is too low",
 			"This organization has been disabled.",

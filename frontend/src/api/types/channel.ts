@@ -235,9 +235,10 @@ export interface SystemResilienceSettings {
   healthCheckEnabled: boolean
   healthCheckMode: 'passive' | 'all'
   healthCheckIntervalMinutes: number
-  recoveryEnabled: boolean
-  autoDisableEnabled: boolean
-  autoDisableFailureThreshold: number
+	recoveryEnabled: boolean
+	autoDisableEnabled: boolean
+	autoDisableNotificationEnabled: boolean
+	autoDisableFailureThreshold: number
   disableLatencySeconds: number
   disableStatusCodes: string
   failureKeywords: string[]

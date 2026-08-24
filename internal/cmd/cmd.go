@@ -74,6 +74,7 @@ var (
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc, firewallSvc)
 				s               = g.Server()
 			)
+			system.SetAutoDisableNotifier(systemSvc, mailSvc)
 			if err = priceCache.Load(ctx); err != nil {
 				return err
 			}
