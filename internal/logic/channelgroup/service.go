@@ -139,7 +139,7 @@ func (s *sChannelGroup) replaceMembers(ctx context.Context, groupID uint64, chan
 }
 
 func (s *sChannelGroup) view(ctx context.Context, row entity.ChannelGroups) (View, error) {
-	ids, err := s.ChannelIDs(ctx, row.Id)
+	ids, err := s.memberChannelIDs(ctx, row.Id)
 	if err != nil {
 		return View{}, err
 	}
@@ -147,6 +147,15 @@ func (s *sChannelGroup) view(ctx context.Context, row entity.ChannelGroups) (Vie
 	view.CreatedAt = row.CreatedAt
 	view.UpdatedAt = row.UpdatedAt
 	return view, nil
+}
+
+func (s *sChannelGroup) memberChannelIDs(ctx context.Context, groupID uint64) ([]uint64, error) {
+	ids := make([]uint64, 0)
+	err := dao.ChannelGroupMembers.Ctx(ctx).
+		Fields(dao.ChannelGroupMembers.Columns().ChannelId).
+		Where(dao.ChannelGroupMembers.Columns().ChannelGroupId, groupID).
+		Scan(&ids)
+	return ids, gerror.Wrap(err, "list channel group members")
 }
 
 func normalizeStatus(value int) int {

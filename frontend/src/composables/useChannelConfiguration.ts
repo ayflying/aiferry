@@ -135,6 +135,7 @@ export function useChannelConfiguration(options: Options) {
       else await apiPost('/channel-groups', payload)
       ElMessage.success(editingGroup.value ? '渠道分组已更新' : '渠道分组已添加')
       groupDrawerOpen.value = false
+      options.tabLoaded.channels = false
       await options.loadChannelGroups()
     } catch (error) {
       showError(error, '保存渠道分组失败')
