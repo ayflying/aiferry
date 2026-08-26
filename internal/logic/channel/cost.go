@@ -94,7 +94,7 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 			}
 		}
 		if !hasSuccessfulCostResult(result.Credentials) {
-			return CostResult{}, gerror.New("all upstream credential cost queries failed")
+			return CostResult{}, allCredentialCostQueryError(result.Credentials)
 		}
 		result.applyUsageFromCredentials()
 		if err = s.refreshChannelCostSummary(ctx, channel.Id, channeltype.IsUsageCost(config.Costs)); err != nil {
@@ -185,6 +185,48 @@ func hasSuccessfulCostResult(results []CredentialCostResult) bool {
 		}
 	}
 	return false
+}
+
+func allCredentialCostQueryError(results []CredentialCostResult) error {
+	details := make([]string, 0, len(results))
+	for _, item := range results {
+		if item.Error == "" {
+			continue
+		}
+		keyPrefix := strings.TrimSpace(item.KeyPrefix)
+		if keyPrefix == "" {
+			keyPrefix = "未标识密钥"
+		}
+		details = append(details, keyPrefix+"："+localizedCostQueryError(item.Error))
+	}
+	if len(details) == 0 {
+		return gerror.New("所有上游密钥的费用/余额查询均失败，未返回可用的上游错误详情")
+	}
+	return gerror.New("所有上游密钥的费用/余额查询均失败：" + strings.Join(details, "；"))
+}
+
+func localizedCostQueryError(message string) string {
+	message = strings.TrimSpace(message)
+	switch {
+	case strings.Contains(message, "HTTP 401"):
+		return "上游接口返回 HTTP 401，密钥无效、已过期或没有余额查询权限"
+	case strings.Contains(message, "HTTP 403"):
+		return "上游接口返回 HTTP 403，当前密钥没有余额查询权限"
+	case strings.Contains(message, "HTTP 404"):
+		return "上游接口返回 HTTP 404，渠道配置的余额查询地址不存在"
+	case strings.Contains(message, "HTTP 429"):
+		return "上游接口返回 HTTP 429，请求过于频繁或账户已触发限流"
+	case strings.Contains(message, "HTTP 5"):
+		return "上游服务异常，请稍后重试"
+	case strings.Contains(message, "context deadline exceeded"):
+		return "请求上游接口超时，请检查渠道网络、代理或上游服务状态"
+	case strings.Contains(message, "请求上游费用/余额接口失败"):
+		return "无法连接上游费用/余额接口，请检查渠道网络、代理或上游服务状态"
+	case strings.Contains(message, "上游费用/余额接口返回了无效 JSON"):
+		return "上游接口返回格式异常，无法解析费用或余额"
+	default:
+		return "上游费用/余额查询失败：" + message
+	}
 }
 
 func (r *CostResult) applyUsageFromCredentials() {

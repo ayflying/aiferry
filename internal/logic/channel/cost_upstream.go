@@ -294,7 +294,7 @@ func (s *sChannel) querySiliconFlowBalance(ctx context.Context, channel entity.C
 func parseSiliconFlowBalance(body []byte, configuredPath string) (*float64, error) {
 	balance := firstFloat(body, configuredPath, "data.totalBalance", "data.chargeBalance", "data.balance")
 	if balance == nil {
-		return nil, gerror.New("SiliconFlow balance response did not contain a supported balance field")
+		return nil, gerror.New("硅基流动余额响应中未找到可识别的余额字段")
 	}
 	return balance, nil
 }
@@ -307,12 +307,12 @@ func (s *sChannel) getCostJSON(ctx context.Context, channel entity.Channels, cre
 		HeaderName:   config.HeaderName,
 		HeaderPrefix: config.HeaderPrefix,
 		BodyLimit:    4 << 20,
-		RequestError: "create cost query request",
-		FetchError:   "query upstream cost",
-		ReadError:    "read upstream cost response",
-		InvalidError: "upstream cost query returned invalid JSON",
+		RequestError: "创建上游费用/余额查询请求失败",
+		FetchError:   "请求上游费用/余额接口失败",
+		ReadError:    "读取上游费用/余额接口响应失败",
+		InvalidError: "上游费用/余额接口返回了无效 JSON",
 		StatusError: func(status int, body []byte) error {
-			return gerror.Newf("upstream cost query returned HTTP %d: %s", status, upstreamerror.Message(body, http.StatusText(status)))
+			return gerror.Newf("上游费用/余额接口返回 HTTP %d：%s", status, upstreamerror.Message(body, http.StatusText(status)))
 		},
 	})
 }

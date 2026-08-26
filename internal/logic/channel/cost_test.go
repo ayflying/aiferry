@@ -98,6 +98,23 @@ func TestCostResultUsesSingleCurrencySummary(t *testing.T) {
 	}
 }
 
+func TestAllCredentialCostQueryErrorExplainsFailedCredentialsInChinese(t *testing.T) {
+	err := allCredentialCostQueryError([]CredentialCostResult{
+		{KeyPrefix: "sk-sili...", Error: "上游费用/余额接口返回 HTTP 401：invalid api key"},
+		{KeyPrefix: "sk-back...", Error: "请求上游费用/余额接口失败: context deadline exceeded"},
+	})
+	message := err.Error()
+	for _, expected := range []string{
+		"所有上游密钥的费用/余额查询均失败",
+		"sk-sili...：上游接口返回 HTTP 401，密钥无效、已过期或没有余额查询权限",
+		"sk-back...：请求上游接口超时，请检查渠道网络、代理或上游服务状态",
+	} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("expected %q in %q", expected, message)
+		}
+	}
+}
+
 func TestQiniuUsageRangeLimitsTo31Days(t *testing.T) {
 	end := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
 	start, limited := qiniuUsageRange(end.Add(-60*24*time.Hour), end)
