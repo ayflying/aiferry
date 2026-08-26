@@ -8,6 +8,7 @@ const costAdapterLabels: Record<string, string> = {
   custom_json: '自定义 JSON',
   qiniu_costs: '七牛预估费用',
   siliconflow_balance: '硅基流动余额',
+  openrouter_credits: 'OpenRouter 余额',
   qiniu_usage: '七牛用量',
 }
 
@@ -35,5 +36,5 @@ export function isUsageMode(queryType?: string, queryMode?: string) {
 export function channelQueryValueLabel(queryType?: string, queryMode?: string) {
   if (isUsageMode(queryType, queryMode)) return '用量'
   if (queryMode === 'qiniu_costs') return '预估费用'
-  return queryMode === 'newapi_balance' || queryMode === 'siliconflow_balance' ? '余额' : '费用'
+  return queryMode === 'newapi_balance' || queryMode === 'siliconflow_balance' || queryMode === 'openrouter_credits' ? '余额' : '费用'
 }

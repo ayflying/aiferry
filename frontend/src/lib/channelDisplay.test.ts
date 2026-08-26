@@ -22,6 +22,7 @@ describe('channel display helpers', () => {
   it('uses a readable label for known and custom cost adapters', () => {
     expect(channelTypeCostLabel({ config: { costs: { adapter: 'newapi_balance' } } } as never)).toBe('NewAPI 余额')
     expect(channelTypeCostLabel({ config: { costs: { adapter: 'siliconflow_balance' } } } as never)).toBe('硅基流动余额')
+    expect(channelTypeCostLabel({ config: { costs: { adapter: 'openrouter_credits' } } } as never)).toBe('OpenRouter 余额')
     expect(channelTypeCostLabel({ config: { costs: { adapter: 'custom_adapter' } } } as never)).toBe('custom_adapter')
   })
 
@@ -37,6 +38,7 @@ describe('channel display helpers', () => {
     expect(isUsageAdapter({ config: { costs: { adapter: 'sub2api_usage' } } } as never)).toBe(false)
     expect(channelQueryValueLabel(undefined, 'newapi_balance')).toBe('余额')
     expect(channelQueryValueLabel(undefined, 'siliconflow_balance')).toBe('余额')
+    expect(channelQueryValueLabel(undefined, 'openrouter_credits')).toBe('余额')
     expect(channelQueryValueLabel(undefined, 'openai_costs')).toBe('费用')
   })
 

@@ -24,6 +24,7 @@ const (
 	AdapterCustomJSON  = "custom_json"
 	AdapterQiniuCosts  = "qiniu_costs"
 	AdapterSiliconFlow = "siliconflow_balance"
+	AdapterOpenRouter  = "openrouter_credits"
 	// AdapterQiniuUsage remains supported for custom types created before 0.5.18.
 	AdapterQiniuUsage  = "qiniu_usage"
 	AdapterNewAPIRatio = "newapi_ratio"

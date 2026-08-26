@@ -51,6 +51,17 @@
       }
     },
     {
+      "id": 9000000000000016,
+      "name": "OpenRouter",
+      "code": "openrouter",
+      "config": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "openrouter_credits", "method": "GET", "path": "/credits", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer ", "fixedCurrency": "USD" },
+        "pricing": { "adapter": "none" }
+      }
+    },
+    {
       "id": 9000000000000003,
       "name": "DeepSeek",
       "code": "deepseek",

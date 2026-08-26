@@ -211,5 +211,5 @@ func validAuth(value string) bool {
 }
 
 func validCostAdapter(value string) bool {
-	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterNewAPI || value == AdapterCustomJSON || value == AdapterQiniuCosts || value == AdapterSiliconFlow || value == AdapterQiniuUsage
+	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterNewAPI || value == AdapterCustomJSON || value == AdapterQiniuCosts || value == AdapterSiliconFlow || value == AdapterOpenRouter || value == AdapterQiniuUsage
 }

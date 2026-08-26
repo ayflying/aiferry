@@ -48,6 +48,13 @@ func TestParseConfigAcceptsSiliconFlowBalance(t *testing.T) {
 	}
 }
 
+func TestParseConfigAcceptsOpenRouterCredits(t *testing.T) {
+	config, err := ParseConfig([]byte(`{"baseUrl":"https://openrouter.ai/api/v1","models":{"path":"/models","listPath":"data","idPath":"id"},"costs":{"adapter":"openrouter_credits","path":"/credits","authType":"channel_key","fixedCurrency":"usd"}}`))
+	if err != nil || config.Costs.Adapter != AdapterOpenRouter || config.Costs.FixedCurrency != "USD" {
+		t.Fatalf("unexpected OpenRouter config: %+v err=%v", config.Costs, err)
+	}
+}
+
 func TestParseConfigRejectsInvalidDefaultBaseURL(t *testing.T) {
 	_, err := ParseConfig([]byte(`{"baseUrl":"ftp://example.com","models":{"path":"/models","idPath":"id"},"costs":{"adapter":"none"}}`))
 	if err == nil {

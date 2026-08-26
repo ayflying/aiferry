@@ -52,6 +52,20 @@ func TestSiliconFlowBalanceRejectsMissingFields(t *testing.T) {
 	}
 }
 
+func TestParseOpenRouterCreditsCalculatesRemainingBalance(t *testing.T) {
+	used, remaining, err := parseOpenRouterCredits([]byte(`{"data":{"total_credits":12.5,"total_usage":3.75}}`))
+	if err != nil || used == nil || remaining == nil || *used != 3.75 || *remaining != 8.75 {
+		t.Fatalf("unexpected OpenRouter credits: used=%v remaining=%v err=%v", used, remaining, err)
+	}
+}
+
+func TestParseOpenRouterCreditsRejectsIncompleteResponse(t *testing.T) {
+	_, _, err := parseOpenRouterCredits([]byte(`{"data":{"total_credits":12.5}}`))
+	if err == nil {
+		t.Fatal("expected incomplete OpenRouter credits response to be rejected")
+	}
+}
+
 func TestResolveEndpointURL(t *testing.T) {
 	value, err := resolveEndpointURL("https://relay.example/v1", "usage")
 	if err != nil || value != "https://relay.example/v1/usage" {
