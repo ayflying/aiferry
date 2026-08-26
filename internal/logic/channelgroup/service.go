@@ -109,9 +109,19 @@ func (s *sChannelGroup) Delete(ctx context.Context, id uint64) error {
 }
 
 func (s *sChannelGroup) ChannelIDs(ctx context.Context, channelID uint64) ([]uint64, error) {
-	ids := make([]uint64, 0)
-	err := dao.ChannelGroupMembers.Ctx(ctx).Fields(dao.ChannelGroupMembers.Columns().ChannelGroupId).Where(dao.ChannelGroupMembers.Columns().ChannelId, channelID).Scan(&ids)
-	return ids, gerror.Wrap(err, "list channel group memberships")
+	rows := make([]entity.ChannelGroupMembers, 0)
+	err := dao.ChannelGroupMembers.Ctx(ctx).
+		Fields(dao.ChannelGroupMembers.Columns().ChannelGroupId).
+		Where(dao.ChannelGroupMembers.Columns().ChannelId, channelID).
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "list channel group memberships")
+	}
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ChannelGroupId)
+	}
+	return ids, nil
 }
 
 func (s *sChannelGroup) SetChannelIDs(ctx context.Context, channelID uint64, groupIDs []uint64) error {
@@ -150,12 +160,19 @@ func (s *sChannelGroup) view(ctx context.Context, row entity.ChannelGroups) (Vie
 }
 
 func (s *sChannelGroup) memberChannelIDs(ctx context.Context, groupID uint64) ([]uint64, error) {
-	ids := make([]uint64, 0)
+	rows := make([]entity.ChannelGroupMembers, 0)
 	err := dao.ChannelGroupMembers.Ctx(ctx).
 		Fields(dao.ChannelGroupMembers.Columns().ChannelId).
 		Where(dao.ChannelGroupMembers.Columns().ChannelGroupId, groupID).
-		Scan(&ids)
-	return ids, gerror.Wrap(err, "list channel group members")
+		Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "list channel group members")
+	}
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ChannelId)
+	}
+	return ids, nil
 }
 
 func normalizeStatus(value int) int {
