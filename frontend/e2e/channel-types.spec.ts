@@ -19,6 +19,7 @@ test('manages channel types and selects one when adding a channel', async ({ con
   await expect(typePanel.getByText('Sub2API', { exact: true })).toBeVisible()
   await expect(typePanel.getByText('OpenCode Go', { exact: true })).toBeVisible()
   await expect(typePanel.getByText('OpenRouter', { exact: true })).toBeVisible()
+  await expect(typePanel.getByText('智谱 AI', { exact: true })).toBeVisible()
   await typePanel.getByRole('button', { name: '添加渠道类型' }).click()
   await expect(page.getByRole('heading', { name: '添加渠道类型' })).toBeVisible()
   await expect(page.locator('.config-editor textarea')).toHaveValue(/"models"/)
@@ -41,4 +42,5 @@ test('manages channel types and selects one when adding a channel', async ({ con
   await expect(typeOptions.getByText('Sub2API (sub2api)', { exact: true })).toBeVisible()
   await expect(typeOptions.getByText('OpenCode Go (opencode_go)', { exact: true })).toBeVisible()
   await expect(typeOptions.getByText('OpenRouter (openrouter)', { exact: true })).toBeVisible()
+  await expect(typeOptions.getByText('智谱 AI (zhipu)', { exact: true })).toBeVisible()
 })

@@ -62,6 +62,17 @@
       }
     },
     {
+      "id": 9000000000000017,
+      "name": "智谱 AI",
+      "code": "zhipu",
+      "config": {
+        "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" }
+      }
+    },
+    {
       "id": 9000000000000003,
       "name": "DeepSeek",
       "code": "deepseek",
