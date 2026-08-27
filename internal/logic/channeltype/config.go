@@ -14,6 +14,15 @@ const httpMethodGet = "GET"
 func ParseConfig(raw []byte) (Config, error) {
 	config := DefaultConfig()
 	if value := bytes.TrimSpace(raw); len(value) > 0 && string(value) != "null" {
+		var supplied struct {
+			Endpoints json.RawMessage `json:"endpoints"`
+		}
+		if err := json.Unmarshal(value, &supplied); err != nil {
+			return Config{}, gerror.Wrap(err, "invalid channel type JSON")
+		}
+		if supplied.Endpoints != nil {
+			config.Endpoints = make(map[string]EndpointConfig)
+		}
 		decoder := json.NewDecoder(bytes.NewReader(value))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&config); err != nil {

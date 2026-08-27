@@ -285,6 +285,17 @@ func TestGPTResponsesKeepsDirectProtocol(t *testing.T) {
 	}
 }
 
+func TestPreferredResponsesPlanDoesNotDependOnModelName(t *testing.T) {
+	chat := PreferredResponsesPlan(ChatCompletionsEndpoint)
+	if chat.upstreamEndpoint != ResponsesEndpoint || chat.conversion != chatToResponsesConversion {
+		t.Fatalf("Chat plan = %+v, want Chat to Responses conversion", chat)
+	}
+	responses := PreferredResponsesPlan(ResponsesEndpoint)
+	if responses.upstreamEndpoint != ResponsesEndpoint || responses.conversion != "" {
+		t.Fatalf("Responses plan = %+v, want direct Responses", responses)
+	}
+}
+
 func TestResponsesRequestToChat(t *testing.T) {
 	body, err := responsesRequestToChat([]byte(`{
   "model":"gpt-test","instructions":"Follow policy",

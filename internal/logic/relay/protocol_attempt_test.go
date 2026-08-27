@@ -54,6 +54,28 @@ func TestPreferredProtocolPlanUsesUpstreamModel(t *testing.T) {
 			upstreamEndpoint: protocol.ResponsesEndpoint,
 			converts:         false,
 		},
+		{
+			name:         "Zhipu Responses address uses native Responses for GLM",
+			clientEndpoint: protocol.ResponsesEndpoint,
+			candidate: Candidate{
+				ChannelType:  "zhipu",
+				BaseURL:      "https://open.bigmodel.cn/api/v1",
+				UpstreamName: "glm-5.3",
+			},
+			upstreamEndpoint: protocol.ResponsesEndpoint,
+			converts:         false,
+		},
+		{
+			name:         "Zhipu Responses address converts Chat for GLM",
+			clientEndpoint: protocol.ChatCompletionsEndpoint,
+			candidate: Candidate{
+				ChannelType:  "zhipu",
+				BaseURL:      "https://open.bigmodel.cn/api/v1/",
+				UpstreamName: "glm-5.3",
+			},
+			upstreamEndpoint: protocol.ResponsesEndpoint,
+			converts:         true,
+		},
 	}
 
 	for _, test := range tests {

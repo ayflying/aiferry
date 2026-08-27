@@ -77,6 +77,20 @@ func TestParseConfigUsesOpenAIDefaultsForEmptyInput(t *testing.T) {
 	}
 }
 
+func TestParseConfigReplacesDefaultEndpoints(t *testing.T) {
+	config, err := ParseConfig([]byte(`{
+    "models":{"path":"/models","idPath":"id"},
+    "costs":{"adapter":"none"},
+    "endpoints":{"chatCompletions":{"method":"POST","path":"/chat/completions","requestBody":"json","supportsStream":true,"authType":"channel_key"}}
+  }`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Endpoints) != 1 || config.Endpoints["chatCompletions"].Path != "/chat/completions" {
+		t.Fatalf("unexpected endpoint override: %+v", config.Endpoints)
+	}
+}
+
 func TestParseConfigRejectsInvalidEndpoint(t *testing.T) {
 	_, err := ParseConfig([]byte(`{"endpoints":{"custom":{"method":"PATCH","path":"/custom","requestBody":"json","authType":"channel_key"}}}`))
 	if err == nil {

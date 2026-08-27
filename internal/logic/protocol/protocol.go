@@ -38,6 +38,20 @@ func PreferredPlan(endpoint, upstreamModel string) Plan {
 	return directPlan(endpoint)
 }
 
+// PreferredResponsesPlan uses an upstream that natively implements Responses.
+// It lets Chat Completions clients reach that upstream through the existing
+// conversion without relying on an OpenAI-style model name.
+func PreferredResponsesPlan(endpoint string) Plan {
+	switch endpoint {
+	case ChatCompletionsEndpoint:
+		return Plan{clientEndpoint: endpoint, upstreamEndpoint: ResponsesEndpoint, conversion: chatToResponsesConversion}
+	case ResponsesEndpoint:
+		return directPlan(endpoint)
+	default:
+		return directPlan(endpoint)
+	}
+}
+
 func AlternatePlan(endpoint string, primary Plan) (Plan, bool) {
 	if primary.Converts() {
 		return directPlan(endpoint), true

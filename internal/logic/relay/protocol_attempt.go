@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -35,8 +36,15 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 }
 
 func preferredProtocolPlan(endpoint string, candidate Candidate) protocol.Plan {
+	if candidate.ChannelType == "zhipu" && isZhipuResponsesBaseURL(candidate.BaseURL) {
+		return protocol.PreferredResponsesPlan(endpoint)
+	}
 	// 协议能力由实际接收请求的上游模型决定，公开映射名仅供客户端路由使用。
 	return protocol.PreferredPlan(endpoint, candidate.UpstreamName)
+}
+
+func isZhipuResponsesBaseURL(baseURL string) bool {
+	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "https://open.bigmodel.cn/api/v1")
 }
 
 func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocol.Plan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
