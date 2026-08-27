@@ -25,22 +25,35 @@ if [ ! -f "$HOME/.docker/config.json" ] || \
   exit 3
 fi
 
-echo "Generating GoFrame service interfaces"
-gf gen service
-go run ./hack/patch-generated-service.go
-go test ./...
+echo "Waiting for GitHub Actions to publish $image:$version"
+published=false
+for attempt in $(seq 1 120); do
+  if docker pull "$image:$version"; then
+    published=true
+    break
+  fi
+  echo "Image is not published yet (attempt $attempt/120)"
+  sleep 10
+done
+if [ "$published" != true ]; then
+  echo "GitHub Actions did not publish $image:$version in time" >&2
+  exit 1
+fi
 
-echo "Building $image:$version on the remote build server"
-docker build \
-  --build-arg "VERSION=$version" \
-  --build-arg "VCS_REF=$revision" \
-  --tag "$image:$version" \
-  --tag "$image:latest" \
-  .
+published_revision="$(docker image inspect "$image:$version" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+if [ "$published_revision" != "$revision" ]; then
+  echo "published image revision does not match requested release" >&2
+  exit 1
+fi
 
-echo "Pushing $image:$version and $image:latest"
-docker push "$image:$version"
-docker push "$image:latest"
+echo "Pulling latest tag published by GitHub Actions"
+docker pull "$image:latest"
+version_image_id="$(docker image inspect "$image:$version" --format '{{.Id}}')"
+latest_image_id="$(docker image inspect "$image:latest" --format '{{.Id}}')"
+if [ "$version_image_id" != "$latest_image_id" ]; then
+  echo "published version and latest image tags do not match" >&2
+  exit 1
+fi
 
 install -d "$deploy_dir"
 compose_file="$deploy_dir/docker-compose.yml"
