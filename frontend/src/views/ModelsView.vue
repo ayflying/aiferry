@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Braces, Coins, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { ModelBillingMode, PriceRule, PriceSource, PublicModel } from '../api/types'
+import type { APIKey, ModelBillingMode, PriceRule, PriceSource, PublicModel } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
@@ -72,7 +72,15 @@ async function load() {
       models.value = items
       sources.value = priceSources
     } else {
-      models.value = await apiGet<PublicModel[]>('/public-models')
+      const [publicModels, apiKeys] = await Promise.all([
+        apiGet<PublicModel[]>('/public-models'),
+        apiGet<APIKey[]>('/api-keys'),
+      ])
+      // 模型价格页只展示当前用户通过至少一个 API Key 可调用的模型。
+      // 空的 allowedModels 表示该 Key 不限制模型，因此可以看到全部公开模型。
+      const unrestricted = apiKeys.some((key) => key.status === 1 && key.allowedModels.length === 0)
+      const allowed = new Set(apiKeys.filter((key) => key.status === 1).flatMap((key) => key.allowedModels))
+      models.value = unrestricted ? publicModels : publicModels.filter((model) => allowed.has(model.publicName))
       sources.value = []
     }
     if (!syncTargetExists(priceSyncTarget.value)) priceSyncTarget.value = defaultSyncTarget()
