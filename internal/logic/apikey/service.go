@@ -46,19 +46,21 @@ type View struct {
 }
 
 type AuthKey struct {
-	Id               uint64     `json:"id" orm:"id"`
-	UserId           uint64     `json:"userId" orm:"user_id"`
-	Name             string     `json:"name" orm:"name"`
-	KeyHash          string     `json:"keyHash" orm:"key_hash"`
-	Status           int        `json:"status" orm:"status"`
-	SpendLimit       *float64   `json:"spendLimit" orm:"spend_limit"`
-	DailySpendLimit  *float64   `json:"dailySpendLimit" orm:"daily_spend_limit"`
-	SpentAmount      float64    `json:"spentAmount" orm:"spent_amount"`
-	DailySpentAmount float64    `json:"dailySpentAmount" orm:"daily_spent_amount"`
-	DailySpendDate   *time.Time `json:"dailySpendDate" orm:"daily_spend_date"`
-	AllowedModels    []string   `json:"allowedModels"`
-	ChannelGroupIDs  []uint64   `json:"channelGroupIds"`
-	ExpiresAt        *time.Time `json:"expiresAt" orm:"expires_at"`
+	Id                  uint64     `json:"id" orm:"id"`
+	UserId              uint64     `json:"userId" orm:"user_id"`
+	Name                string     `json:"name" orm:"name"`
+	KeyHash             string     `json:"keyHash" orm:"key_hash"`
+	Status              int        `json:"status" orm:"status"`
+	SpendLimit          *float64   `json:"spendLimit" orm:"spend_limit"`
+	DailySpendLimit     *float64   `json:"dailySpendLimit" orm:"daily_spend_limit"`
+	SpentAmount         float64    `json:"spentAmount" orm:"spent_amount"`
+	DailySpentAmount    float64    `json:"dailySpentAmount" orm:"daily_spent_amount"`
+	DailySpendDate      *time.Time `json:"dailySpendDate" orm:"daily_spend_date"`
+	AllowedModels       []string   `json:"allowedModels"`
+	ChannelGroupIDs     []uint64   `json:"channelGroupIds"`
+	UserRole            string     `json:"userRole"`
+	UserChannelGroupIDs []uint64   `json:"userChannelGroupIds"`
+	ExpiresAt           *time.Time `json:"expiresAt" orm:"expires_at"`
 }
 
 type Created struct {

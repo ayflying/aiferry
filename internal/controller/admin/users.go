@@ -11,6 +11,8 @@ func (c *Controller) registerUserRoutes(group *ghttp.RouterGroup) {
 	group.GET("/users", c.listUsers)
 	group.PUT("/users/{id}/balance", c.updateUserBalance)
 	group.DELETE("/users/{id}", c.deleteUser)
+	group.GET("/users/{id}/channel-groups", c.listUserChannelGroups)
+	group.PUT("/users/{id}/channel-groups", c.updateUserChannelGroups)
 }
 
 func (c *Controller) listUsers(r *ghttp.Request) {
@@ -39,4 +41,17 @@ func (c *Controller) deleteUser(r *ghttp.Request) {
 		return
 	}
 	respond(r, map[string]any{}, c.users.Delete(r.Context(), routeID(r), operator.Id))
+}
+
+func (c *Controller) listUserChannelGroups(r *ghttp.Request) {
+	data, err := c.users.ListChannelGroupIDs(r.Context(), routeID(r))
+	respond(r, data, err)
+}
+
+func (c *Controller) updateUserChannelGroups(r *ghttp.Request) {
+	var input adminapi.UserChannelGroupInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, map[string]any{}, c.users.ReplaceChannelGroupIDs(r.Context(), routeID(r), input.ChannelGroupIDs))
 }

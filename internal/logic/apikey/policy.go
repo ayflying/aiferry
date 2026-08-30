@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 func (s *sAPIKey) replacePolicy(ctx context.Context, keyID uint64, models []string, groupIDs []uint64) error {
@@ -61,7 +63,33 @@ func (s *sAPIKey) populateAuthPolicy(ctx context.Context, key *AuthKey) error {
 		return err
 	}
 	key.ChannelGroupIDs, err = listGroupIDs(ctx, key.Id)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.populateUserPolicy(ctx, key)
+}
+
+func (s *sAPIKey) populateUserPolicy(ctx context.Context, key *AuthKey) error {
+	userColumns := dao.Users.Columns()
+	var user entity.Users
+	if err := dao.Users.Ctx(ctx).
+		Fields(userColumns.Role).
+		Where(userColumns.Id, key.UserId).
+		Scan(&user); err != nil {
+		return gerror.Wrap(err, "load user role")
+	}
+	key.UserRole = user.Role
+	ids := make([]uint64, 0)
+	if err := g.DB().Model("user_channel_groups").
+		Ctx(ctx).
+		Fields("channel_group_id").
+		Where("user_id", key.UserId).
+		Order("channel_group_id").
+		Scan(&ids); err != nil {
+		return gerror.Wrap(err, "load user channel groups")
+	}
+	key.UserChannelGroupIDs = ids
+	return nil
 }
 
 func listModels(ctx context.Context, keyID uint64) ([]string, error) {

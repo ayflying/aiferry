@@ -26,6 +26,8 @@ type (
 		Debit(ctx context.Context, id uint64, amount decimal.Decimal) error
 		Credit(ctx context.Context, id uint64, amount decimal.Decimal) error
 		Delete(ctx context.Context, id uint64, operatorID uint64) error
+		ListChannelGroupIDs(ctx context.Context, id uint64) ([]uint64, error)
+		ReplaceChannelGroupIDs(ctx context.Context, id uint64, groupIDs []uint64) error
 	}
 )
 

@@ -240,6 +240,10 @@ type SystemInformationInput struct {
 	PublicHomepageEnabled bool   `json:"publicHomepageEnabled"`
 }
 
+type UserChannelGroupInput struct {
+	ChannelGroupIDs []uint64 `json:"channelGroupIds"`
+}
+
 type MailSettingsInput struct {
 	Enabled                  bool    `json:"enabled"`
 	ChannelAlertEnabled      *bool   `json:"channelAlertEnabled"`

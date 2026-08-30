@@ -11,6 +11,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/shopspring/decimal"
 
 	"github.com/yunloli/aiferry/internal/dao"
@@ -307,6 +308,42 @@ func (s *sUser) Delete(ctx context.Context, id, operatorID uint64) error {
 		_ = s.app.Redis.Del(ctx, cacheKeys...).Err()
 	}
 	return nil
+}
+
+func (s *sUser) ListChannelGroupIDs(ctx context.Context, id uint64) ([]uint64, error) {
+	if _, err := s.find(ctx, id); err != nil {
+		return nil, err
+	}
+	ids := make([]uint64, 0)
+	if err := g.DB().Model("user_channel_groups").
+		Ctx(ctx).
+		Fields("channel_group_id").
+		Where("user_id", id).
+		Order("channel_group_id").
+		Scan(&ids); err != nil {
+		return nil, gerror.Wrap(err, "list user channel groups")
+	}
+	return ids, nil
+}
+
+func (s *sUser) ReplaceChannelGroupIDs(ctx context.Context, id uint64, groupIDs []uint64) error {
+	if _, err := s.find(ctx, id); err != nil {
+		return err
+	}
+	return dao.ChannelGroups.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+		if _, err := g.DB().Model("user_channel_groups").Ctx(txCtx).Where("user_id", id).Delete(); err != nil {
+			return gerror.Wrap(err, "clear user channel groups")
+		}
+		for _, groupID := range groupIDs {
+			if groupID == 0 {
+				continue
+			}
+			if _, err := g.DB().Model("user_channel_groups").Ctx(txCtx).Data(g.Map{"user_id": id, "channel_group_id": groupID}).Insert(); err != nil {
+				return gerror.Wrap(err, "insert user channel group")
+			}
+		}
+		return nil
+	})
 }
 
 func (s *sUser) find(ctx context.Context, id uint64) (entity.Users, error) {

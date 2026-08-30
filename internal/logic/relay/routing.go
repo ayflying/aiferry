@@ -66,7 +66,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 		if groupErr != nil {
 			return nil, groupErr
 		}
-		if !keyAllowsGroups(key, groupIDs) {
+		if !keyAllowsGroupPolicy(key, groupIDs, s.app.Config.IsAdminRole(key.UserRole), key.UserChannelGroupIDs) {
 			continue
 		}
 		hasCredential, credentialErr := s.channels.HasAvailableCredential(ctx, candidate.ChannelID)
@@ -180,11 +180,25 @@ func keyAllowsModel(key apikey.AuthKey, model string) bool {
 	return len(key.AllowedModels) == 0 || containsString(key.AllowedModels, model)
 }
 func keyAllowsGroups(key apikey.AuthKey, groupIDs []uint64) bool {
-	if len(key.ChannelGroupIDs) == 0 {
+	// 该包装已废弃，改为下面带用户上下文的新版判定；
+	// 保留以兼容既有测试，并始终委托给完整判定。
+	return keyAllowsGroupPolicy(key, groupIDs, false, key.UserChannelGroupIDs)
+}
+
+// keyAllowsGroupPolicy 按用户维度判定渠道分组访问权限：
+//   - 渠道未配置任何激活分组（groupIDs 为空）视为公共渠道，所有用户可用；
+//   - 管理员可访问全部渠道；
+//   - 渠道已分组时，仅当用户加入了其中至少一个分组才可访问；
+//   - 用户可加入多个分组（userGroupIDs 为多值集合）。
+func keyAllowsGroupPolicy(key apikey.AuthKey, groupIDs []uint64, isAdmin bool, userGroupIDs []uint64) bool {
+	if isAdmin {
+		return true
+	}
+	if len(groupIDs) == 0 {
 		return true
 	}
 	for _, groupID := range groupIDs {
-		for _, allowed := range key.ChannelGroupIDs {
+		for _, allowed := range userGroupIDs {
 			if allowed == groupID {
 				return true
 			}

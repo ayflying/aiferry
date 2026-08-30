@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { CircleDollarSign, Pencil, RefreshCw, Trash2, UserRound, UsersRound } from '@lucide/vue'
+import { CircleDollarSign, Pencil, RefreshCw, ShieldCheck, Trash2, UserRound, UsersRound } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPut } from '../api/client'
-import type { AccountProfile, ManagedUser } from '../api/types'
+import type { AccountProfile, ManagedUser, ChannelGroup } from '../api/types'
 import { showError } from '../lib/error'
 import { formatCost, formatNumber, formatTime } from '../lib/format'
 import { useAuthStore } from '../stores/auth'
@@ -16,12 +16,18 @@ const loading = ref(false)
 const saving = ref(false)
 const users = ref<ManagedUser[]>([])
 const balanceDialog = ref(false)
+const groupDialog = ref(false)
+const allGroups = ref<ChannelGroup[]>([])
 const selected = ref<ManagedUser>()
 const form = reactive({ balance: 0 })
+const selectedGroupIDs = ref<number[]>([])
 
 async function load() {
   loading.value = true
-  try { users.value = await apiGet<ManagedUser[]>('/users') } catch (error) { showError(error, '加载用户失败') } finally { loading.value = false }
+  try {
+    users.value = await apiGet<ManagedUser[]>('/users')
+    allGroups.value = await apiGet<ChannelGroup[]>('/channel-groups')
+  } catch (error) { showError(error, '加载用户失败') } finally { loading.value = false }
 }
 
 function openBalance(user: ManagedUser) {
@@ -43,11 +49,36 @@ async function saveBalance() {
 
 async function remove(user: ManagedUser) {
   try {
-    await ElMessageBox.confirm(`删除“${user.nickname}”后将永久清理其用量记录、API 密钥及授权策略，无法恢复。`, '删除用户', { type: 'warning', confirmButtonText: '删除用户', cancelButtonText: '取消' })
+    await ElMessageBox.confirm(`删除"${user.nickname}"后将永久清理其用量记录、API 密钥及授权策略，无法恢复。`, '删除用户', { type: 'warning', confirmButtonText: '删除用户', cancelButtonText: '取消' })
     await apiDelete<Record<string, never>>(`/users/${user.id}`)
     ElMessage.success('用户及关联数据已删除')
     await load()
   } catch (error) { if (error !== 'cancel') showError(error, '删除用户失败') }
+}
+
+async function openGroups(user: ManagedUser) {
+  selected.value = user
+  selectedGroupIDs.value = []
+  try {
+    const ids = await apiGet<number[]>(`/users/${user.id}/channel-groups`)
+    selectedGroupIDs.value = ids
+    groupDialog.value = true
+  } catch (error) { showError(error, '加载用户渠道分组失败') }
+}
+
+async function saveGroups() {
+  if (!selected.value) return
+  saving.value = true
+  try {
+    await apiPut<Record<string, never>>(`/users/${selected.value.id}/channel-groups`, { channelGroupIds: selectedGroupIDs.value })
+    ElMessage.success('用户渠道分组已更新')
+    groupDialog.value = false
+    await load()
+  } catch (error) { showError(error, '保存用户渠道分组失败') } finally { saving.value = false }
+}
+
+function groupName(id: number): string {
+  return allGroups.value.find(g => g.id === id)?.name || `分组 #${id}`
 }
 
 onMounted(load)
@@ -65,13 +96,13 @@ onMounted(load)
         <el-table-column label="访问密钥" width="110" align="right"><template #default="{ row }">{{ formatNumber(row.apiKeyCount) }}</template></el-table-column>
         <el-table-column label="近 30 天调用" min-width="130" align="right"><template #default="{ row }"><div class="usage-cell"><strong>{{ formatNumber(row.usage.requests) }}</strong><small>{{ formatCost(row.usage.estimatedCost) }}</small></div></template></el-table-column>
         <el-table-column label="最近登录" min-width="170"><template #default="{ row }">{{ formatTime(row.lastLoginAt) }}</template></el-table-column>
-        <el-table-column label="操作" width="100" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="CircleDollarSign" label="修改余额" @click="openBalance(row)" /><TableActionButton v-if="row.id !== auth.user?.id" :icon="Trash2" label="删除用户" danger @click="remove(row)" /></div></template></el-table-column>
+        <el-table-column label="操作" width="120" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="CircleDollarSign" label="修改余额" @click="openBalance(row)" /><TableActionButton :icon="ShieldCheck" label="渠道分组" @click="openGroups(row)" /><TableActionButton v-if="row.id !== auth.user?.id" :icon="Trash2" label="删除用户" danger @click="remove(row)" /></div></template></el-table-column>
         </el-table></template>
         <template #mobile><MobileRecordList :loading="loading">
           <article v-for="row in users" :key="row.id" class="mobile-record">
             <div class="mobile-record__header"><div class="user-cell"><el-avatar :size="34" :src="row.avatarUrl || undefined"><UserRound :size="16" /></el-avatar><div class="mobile-record__title"><strong>{{ row.nickname }}</strong><small>{{ row.role === 'admin' ? '管理员' : '用户' }} · {{ row.email || '未绑定邮箱' }}</small></div></div><span class="mono">{{ formatCost(row.balance) }}</span></div>
             <dl class="mobile-record__facts"><div><dt>访问密钥</dt><dd>{{ formatNumber(row.apiKeyCount) }}</dd></div><div><dt>近 30 天调用</dt><dd>{{ formatNumber(row.usage.requests) }} · {{ formatCost(row.usage.estimatedCost) }}</dd></div><div class="mobile-record__wide"><dt>最近登录</dt><dd>{{ formatTime(row.lastLoginAt) }}</dd></div></dl>
-            <div class="mobile-record__footer"><span class="muted">账户余额</span><div class="mobile-record__actions"><el-button size="small" :icon="CircleDollarSign" @click="openBalance(row)">修改余额</el-button><el-button v-if="row.id !== auth.user?.id" size="small" :icon="Trash2" type="danger" plain @click="remove(row)">删除</el-button></div></div>
+            <div class="mobile-record__footer"><span class="muted">账户余额</span><div class="mobile-record__actions"><el-button size="small" :icon="CircleDollarSign" @click="openBalance(row)">修改余额</el-button><el-button size="small" :icon="ShieldCheck" @click="openGroups(row)">渠道分组</el-button><el-button v-if="row.id !== auth.user?.id" size="small" :icon="Trash2" type="danger" plain @click="remove(row)">删除</el-button></div></div>
           </article>
         </MobileRecordList></template>
       </ResponsiveList>
@@ -82,9 +113,20 @@ onMounted(load)
       <el-form label-position="top"><el-form-item label="账户余额（USD）"><el-input-number v-model="form.balance" :min="0" :precision="6" :controls="false" style="width: 100%" /></el-form-item></el-form>
       <template #footer><el-button @click="balanceDialog = false">取消</el-button><el-button type="primary" :icon="Pencil" :loading="saving" @click="saveBalance">保存余额</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="groupDialog" title="用户渠道分组" width="min(480px, 92vw)">
+      <p v-if="selected" class="dialog-hint">为 <strong>{{ selected.nickname }}</strong> 分配渠道分组。用户加入分组后即可使用该分组下的渠道；管理员不受分组限制。</p>
+      <el-checkbox-group v-model="selectedGroupIDs" class="group-checkboxes">
+        <el-checkbox v-for="g in allGroups.filter(g => g.status === 1)" :key="g.id" :value="g.id" :label="g.name" :title="g.description || g.name" />
+      </el-checkbox-group>
+      <p v-if="!allGroups.filter(g => g.status === 1).length" class="muted dialog-hint">暂无可用渠道分组，请先在渠道分组页面创建。</p>
+      <template #footer><el-button @click="groupDialog = false">取消</el-button><el-button type="primary" :icon="Pencil" :loading="saving" @click="saveGroups">保存分组</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .user-cell { display: flex; align-items: center; gap: 9px; }.user-cell div, .usage-cell { display: flex; flex-direction: column; gap: 2px; }.user-cell strong { color: #15202b; font-size: 12px; }.user-cell small, .usage-cell small { color: #7b8792; font-size: 10px; }.usage-cell { align-items: flex-end; font-family: 'JetBrains Mono', monospace; font-size: 11px; }.empty-state svg { display: block; margin: 0 auto 10px; color: #7b8792; }.empty-state span { display: block; }
+.dialog-hint { margin: 0 0 14px; font-size: 12px; color: #5e6c7a; line-height: 1.5; }
+.group-checkboxes { display: flex; flex-direction: column; gap: 8px; }
 </style>
