@@ -77,12 +77,30 @@ func (s *sAPIKey) List(ctx context.Context) ([]View, error) {
 	if !ok {
 		return nil, gerror.New("authenticated user is required")
 	}
+	return s.listForUser(ctx, current.Id)
+}
+
+// ListForUser returns a user's keys for an administrator's usage-log filter.
+func (s *sAPIKey) ListForUser(ctx context.Context, userID uint64) ([]View, error) {
+	current, ok := auth.CurrentUser(ctx)
+	if !ok {
+		return nil, gerror.New("authenticated user is required")
+	}
+	if !s.app.Config.IsAdminRole(current.Role) {
+		return nil, gerror.New("无权查看其他用户的访问密钥")
+	}
+	if userID == 0 {
+		return nil, gerror.New("用户不能为空")
+	}
+	return s.listForUser(ctx, userID)
+}
+
+func (s *sAPIKey) listForUser(ctx context.Context, userID uint64) ([]View, error) {
 	columns := dao.ApiKeys.Columns()
-	// 访问密钥列表只返回当前登录用户自己的密钥，管理员也不例外。
 	rows := make([]View, 0)
 	query := dao.ApiKeys.Ctx(ctx).
 		Fields(columns.Id, columns.UserId, columns.Name, columns.KeyPrefix, columns.KeyCipher, columns.Status, columns.SpendLimit, columns.DailySpendLimit, columns.SpentAmount, columns.DailySpentAmount, columns.DailySpendDate, columns.ExpiresAt, columns.LastUsedAt, columns.CreatedAt).
-		Where(columns.UserId, current.Id).
+		Where(columns.UserId, userID).
 		OrderDesc(columns.Id)
 	err := query.Scan(&rows)
 	if err != nil {

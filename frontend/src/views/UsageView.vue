@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RefreshCw, Search } from '@lucide/vue'
 import { apiGet } from '../api/client'
-import type { BillingItem, UsageLog, UsagePage, UserOption } from '../api/types'
+import type { APIKey, BillingItem, UsageLog, UsagePage, UserOption } from '../api/types'
 import ChannelCredentialDisplay from '../components/ChannelCredentialDisplay.vue'
 import UsageDetailDialog from '../components/UsageDetailDialog.vue'
 import MobileRecordList from '../components/MobileRecordList.vue'
@@ -22,6 +22,7 @@ const filters = reactive({ model: '', userId: undefined as number | undefined, c
 const users = ref<UserOption[]>([])
 const usersLoaded = ref(false)
 const isAdmin = computed(() => auth.user?.isAdmin === true)
+const selectedUserId = computed(() => filters.userId ?? auth.user?.id)
 const usageItems = computed(() => page.value.items ?? [])
 const selectedUsage = ref<UsageLog>()
 const detailOpen = ref(false)
@@ -35,7 +36,10 @@ async function load() {
 }
 
 async function loadSupport() {
-  const support = [store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys()]
+  const support: Promise<unknown>[] = []
+  if (!isAdmin.value) {
+    support.push(store.apiKeys.length ? Promise.resolve() : store.loadAPIKeys())
+  }
   if (isAdmin.value) {
     support.push(store.channels.length ? Promise.resolve() : store.loadChannels())
     if (!usersLoaded.value) {
@@ -45,10 +49,20 @@ async function loadSupport() {
       }))
     }
   }
+  if (selectedUserId.value && (filters.userId !== undefined || isAdmin.value)) {
+    support.push(apiGet<APIKey[]>(`/api-keys`, { userId: selectedUserId.value }).then((items) => {
+      store.apiKeys = items ?? []
+    }))
+  }
   await Promise.all(support)
 }
 
 function search() { filters.page = 1; load() }
+
+watch(() => filters.userId, () => {
+  filters.apiKeyId = undefined
+  search()
+})
 function changePage(value: number) { filters.page = value; load() }
 function changePageSize(value: number) { filters.pageSize = value; filters.page = 1; load() }
 function todayRange(): [Date, Date] {
@@ -102,7 +116,10 @@ function openUsageDetail(row: UsageLog) {
   selectedUsage.value = row
   detailOpen.value = true
 }
-onMounted(load)
+onMounted(() => {
+  if (isAdmin.value && auth.user?.id) filters.userId = auth.user.id
+  load()
+})
 </script>
 
 <template>
@@ -111,7 +128,7 @@ onMounted(load)
       <div class="toolbar-group">
         <el-date-picker v-model="timeRange" type="datetimerange" range-separator="至" start-placeholder="开始时间" end-placeholder="结束时间" :clearable="false" :editable="false" style="width: min(100%, 352px)" @change="changeTimeRange" />
         <el-input v-model="filters.model" clearable placeholder="模型名称" style="width: 200px" @keyup.enter="search" />
-        <el-select v-if="isAdmin" v-model="filters.userId" clearable filterable placeholder="全部用户" style="width: 160px"><el-option v-for="item in users" :key="item.id" :label="item.nickname" :value="item.id" /></el-select>
+        <el-select v-if="isAdmin" v-model="filters.userId" filterable placeholder="选择用户" style="width: 160px"><el-option v-for="item in users" :key="item.id" :label="item.nickname" :value="item.id" /></el-select>
         <el-select v-if="isAdmin" v-model="filters.channelId" clearable placeholder="全部渠道" style="width: 160px"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select>
         <el-select v-model="filters.apiKeyId" clearable placeholder="全部密钥" style="width: 160px"><el-option v-for="item in store.apiKeys" :key="item.id" :label="item.name" :value="item.id" /></el-select>
         <el-button type="primary" :icon="Search" @click="search">查询</el-button>

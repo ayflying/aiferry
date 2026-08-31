@@ -223,7 +223,14 @@ func (c *Controller) deletePriceRule(r *ghttp.Request) {
 }
 
 func (c *Controller) listAPIKeys(r *ghttp.Request) {
-	data, err := c.apiKeys.List(r.Context())
+	userID := r.GetQuery("userId").Uint64()
+	var data []apikey.View
+	var err error
+	if userID > 0 {
+		data, err = c.apiKeys.ListForUser(r.Context(), userID)
+	} else {
+		data, err = c.apiKeys.List(r.Context())
+	}
 	respond(r, data, err)
 }
 
@@ -272,7 +279,9 @@ func (c *Controller) listUsage(r *ghttp.Request) {
 	}
 	userID := r.GetQuery("userId").Uint64()
 	isAdmin := c.auth.IsAdmin(current)
-	if !isAdmin {
+	if userID == 0 {
+		userID = current.Id
+	} else if !isAdmin && userID != current.Id {
 		userID = current.Id
 	}
 	startAt, endAt, err := c.usage.ParseLogRange(r.Context(), r.GetQuery("startAt").String(), r.GetQuery("endAt").String())
