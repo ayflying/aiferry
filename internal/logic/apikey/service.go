@@ -77,14 +77,13 @@ func (s *sAPIKey) List(ctx context.Context) ([]View, error) {
 	if !ok {
 		return nil, gerror.New("authenticated user is required")
 	}
-	rows := make([]View, 0)
 	columns := dao.ApiKeys.Columns()
+	// 访问密钥列表只返回当前登录用户自己的密钥，管理员也不例外。
+	rows := make([]View, 0)
 	query := dao.ApiKeys.Ctx(ctx).
 		Fields(columns.Id, columns.UserId, columns.Name, columns.KeyPrefix, columns.KeyCipher, columns.Status, columns.SpendLimit, columns.DailySpendLimit, columns.SpentAmount, columns.DailySpentAmount, columns.DailySpendDate, columns.ExpiresAt, columns.LastUsedAt, columns.CreatedAt).
+		Where(columns.UserId, current.Id).
 		OrderDesc(columns.Id)
-	if !s.app.Config.IsAdminRole(current.Role) {
-		query = query.Where(columns.UserId, current.Id)
-	}
 	err := query.Scan(&rows)
 	if err != nil {
 		return nil, gerror.Wrap(err, "list API keys")
