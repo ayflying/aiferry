@@ -8,8 +8,17 @@ import (
 
 func ParseJSONUsage(body []byte) TokenUsage {
 	input := optionalUint(body, "usage.input_tokens", "usage.prompt_tokens", "response.usage.input_tokens")
-	cached := optionalUint(body, "usage.input_tokens_details.cached_tokens", "usage.prompt_tokens_details.cached_tokens", "response.usage.input_tokens_details.cached_tokens")
+	cached := optionalUint(body,
+		"usage.input_tokens_details.cached_tokens",
+		"usage.prompt_tokens_details.cached_tokens",
+		"response.usage.input_tokens_details.cached_tokens",
+		// DeepSeek reports cache hits at the top level of usage.
+		"usage.prompt_cache_hit_tokens",
+		"response.usage.prompt_cache_hit_tokens",
+	)
 	cacheWrite := optionalUint(body, "usage.cache_write_tokens", "usage.cache_creation_input_tokens", "usage.cache_creation_tokens", "usage.input_tokens_details.cache_write_tokens", "usage.prompt_tokens_details.cache_write_tokens", "usage.input_tokens_details.cache_creation_tokens", "usage.prompt_tokens_details.cache_creation_tokens")
+	// DeepSeek reports cache misses at the top level of usage.
+	cacheMiss := optionalUint(body, "usage.prompt_cache_miss_tokens", "response.usage.prompt_cache_miss_tokens")
 	imageInput := optionalUint(body, "usage.image_tokens", "usage.input_tokens_details.image_tokens", "usage.prompt_tokens_details.image_tokens")
 	audioInput := optionalUint(body, "usage.audio_tokens", "usage.input_tokens_details.audio_tokens", "usage.prompt_tokens_details.audio_tokens")
 	output := optionalUint(body, "usage.output_tokens", "usage.completion_tokens", "response.usage.output_tokens")
@@ -19,7 +28,7 @@ func ParseJSONUsage(body []byte) TokenUsage {
 		value := *input + *output
 		total = &value
 	}
-	return TokenUsage{Input: input, CachedInput: cached, CacheWrite: cacheWrite, ImageInput: imageInput, AudioInput: audioInput, Output: output, AudioOutput: audioOutput, Total: total}
+	return TokenUsage{Input: input, CachedInput: cached, CacheWrite: cacheWrite, CacheMiss: cacheMiss, ImageInput: imageInput, AudioInput: audioInput, Output: output, AudioOutput: audioOutput, Total: total}
 }
 
 func ParseSSEUsage(line []byte, target *TokenUsage) {
@@ -49,5 +58,5 @@ func optionalUint(body []byte, paths ...string) *uint64 {
 }
 
 func hasTokenUsage(tokens TokenUsage) bool {
-	return tokens.Input != nil || tokens.CachedInput != nil || tokens.CacheWrite != nil || tokens.ImageInput != nil || tokens.AudioInput != nil || tokens.Output != nil || tokens.AudioOutput != nil
+	return tokens.Input != nil || tokens.CachedInput != nil || tokens.CacheWrite != nil || tokens.CacheMiss != nil || tokens.ImageInput != nil || tokens.AudioInput != nil || tokens.Output != nil || tokens.AudioOutput != nil
 }

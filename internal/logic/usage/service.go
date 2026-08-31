@@ -22,6 +22,7 @@ type TokenUsage struct {
 	Input       *uint64 `json:"input"`
 	CachedInput *uint64 `json:"cachedInput"`
 	CacheWrite  *uint64 `json:"cacheWrite"`
+	CacheMiss   *uint64 `json:"cacheMiss"`
 	ImageInput  *uint64 `json:"imageInput"`
 	AudioInput  *uint64 `json:"audioInput"`
 	Output      *uint64 `json:"output"`

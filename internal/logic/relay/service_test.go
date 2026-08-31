@@ -33,6 +33,13 @@ func TestParseJSONUsageVariants(t *testing.T) {
 	if tokens.CachedInput == nil || *tokens.CachedInput != 12 || tokens.CacheWrite == nil || *tokens.CacheWrite != 8 {
 		t.Fatalf("GPT-5.6 cache usage was not parsed: %+v", tokens)
 	}
+	tokens = parseJSONUsage([]byte(`{"usage":{"prompt_tokens":100,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20,"completion_tokens":15,"total_tokens":115}}`))
+	if tokens.CachedInput == nil || *tokens.CachedInput != 80 {
+		t.Fatalf("DeepSeek prompt_cache_hit_tokens was not parsed: %+v", tokens)
+	}
+	if tokens.CacheMiss == nil || *tokens.CacheMiss != 20 {
+		t.Fatalf("DeepSeek prompt_cache_miss_tokens was not parsed: %+v", tokens)
+	}
 }
 
 func TestPromptCachePolicyUsesSystemKeyUnlessPassthroughEnabled(t *testing.T) {
