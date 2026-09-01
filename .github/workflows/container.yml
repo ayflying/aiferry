@@ -18,6 +18,7 @@ env:
 jobs:
   container:
     runs-on: ubuntu-latest
+    environment: pro
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
