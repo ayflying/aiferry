@@ -93,3 +93,30 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+
+      - name: 安装部署依赖
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends curl jq
+
+      - name: 通过 Portainer 触发线上部署
+        if: github.ref == 'refs/heads/main'
+        env:
+          PORTAINER_URL_SECRET: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_URL_VAR: ${{ vars.PORTAINER_URL }}
+          PORTAINER_KEY_SECRET: ${{ secrets.PORTAINER_KEY }}
+          PORTAINER_KEY_VAR: ${{ vars.PORTAINER_KEY }}
+          ENDPOINT_NAME_SECRET: ${{ secrets.ENDPOINT_NAME }}
+          ENDPOINT_NAME_VAR: ${{ vars.ENDPOINT_NAME }}
+          STACK_NAME_SECRET: ${{ secrets.STACK_NAME }}
+          STACK_NAME_VAR: ${{ vars.STACK_NAME }}
+        run: |
+          PORTAINER_URL="${PORTAINER_URL_SECRET:-${PORTAINER_URL_VAR}}"
+          PORTAINER_KEY="${PORTAINER_KEY_SECRET:-${PORTAINER_KEY_VAR}}"
+          ENDPOINT_NAME="${ENDPOINT_NAME_SECRET:-${ENDPOINT_NAME_VAR:-yunloli}}"
+          STACK_NAME="${STACK_NAME_SECRET:-${STACK_NAME_VAR:-aiferry}}"
+          # 未配置 Portainer 凭据时仅完成构建推送，不阻塞流水线。
+          if [ -z "${PORTAINER_URL}" ] || [ -z "${PORTAINER_KEY}" ]; then
+            echo "未配置 PORTAINER_URL / PORTAINER_KEY，跳过自动部署（仅构建推送镜像）"
+            exit 0
+          fi
+          export PORTAINER_URL PORTAINER_KEY ENDPOINT_NAME STACK_NAME
+          sh hack/deploy-portainer.sh
