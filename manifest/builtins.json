@@ -127,7 +127,8 @@
 		"baseUrl": "https://api.xiaomimimo.com/v1",
         "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
         "costs": { "adapter": "none" },
-        "pricing": { "adapter": "none" }
+        "pricing": { "adapter": "none" },
+        "audio": { "adapter": "chat" }
       }
 	},
 	{

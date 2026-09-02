@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -115,6 +116,68 @@ func TestTestPayloadBuildsTTSAndASRRequests(t *testing.T) {
 	// 最小 WAV 必须是合法 RIFF/WAVE 头，上游才能解析。
 	if string(request.Content[0:4]) != "RIFF" || string(request.Content[8:12]) != "WAVE" {
 		t.Fatalf("asr sample is not a valid WAV: %x", request.Content[:12])
+	}
+}
+
+func TestChatAdapterPayloadConvertsTTSAndASR(t *testing.T) {
+	// TTS：标准 speech payload 转为 chat completions 承载。
+	path, chatPayload := chatAdapterPayload("tts", "mimo-v2.5-tts", map[string]any{"input": "你好", "voice": "Chloe"})
+	if path != "/chat/completions" {
+		t.Fatalf("unexpected chat adapter path: %q", path)
+	}
+	body, err := json.Marshal(chatPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err = json.Unmarshal(body, &value); err != nil {
+		t.Fatal(err)
+	}
+	if value["model"] != "mimo-v2.5-tts" {
+		t.Fatalf("chat adapter lost model: %#v", value)
+	}
+	messages, ok := value["messages"].([]any)
+	if !ok || len(messages) != 2 {
+		t.Fatalf("unexpected chat adapter messages: %#v", value["messages"])
+	}
+	assistant, _ := messages[1].(map[string]any)
+	if assistant["content"] != "你好" {
+		t.Fatalf("chat adapter lost speech text: %#v", assistant)
+	}
+	audio, _ := value["audio"].(map[string]any)
+	if audio == nil || audio["voice"] != "Chloe" || audio["format"] != "wav" {
+		t.Fatalf("unexpected chat adapter audio params: %#v", value["audio"])
+	}
+
+	// ASR：multipart payload 的 WAV 内容被 base64 后经 input_audio 传入。
+	_, _, _ = testPayload("asr", "mimo-v2.5-asr", false)
+	asrPath, asrChat := chatAdapterPayload("asr", "mimo-v2.5-asr", asrTestPayload("mimo-v2.5-asr"))
+	if asrPath != "/chat/completions" {
+		t.Fatalf("unexpected chat adapter asr path: %q", asrPath)
+	}
+	asrBody, err := json.Marshal(asrChat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asrValue struct {
+		Messages []struct {
+			Content []struct {
+				Type       string `json:"type"`
+				InputAudio struct {
+					Data string `json:"data"`
+				} `json:"input_audio"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err = json.Unmarshal(asrBody, &asrValue); err != nil {
+		t.Fatal(err)
+	}
+	if len(asrValue.Messages) != 1 || len(asrValue.Messages[0].Content) != 1 || asrValue.Messages[0].Content[0].Type != "input_audio" {
+		t.Fatalf("unexpected chat adapter asr messages: %s", asrBody)
+	}
+	data := asrValue.Messages[0].Content[0].InputAudio.Data
+	if !json.Valid([]byte(asrBody)) || !bytes.HasPrefix([]byte(data), []byte("data:audio/wav;base64,")) {
+		t.Fatalf("unexpected chat adapter asr data url prefix")
 	}
 }
 

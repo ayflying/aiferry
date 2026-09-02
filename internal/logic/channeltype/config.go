@@ -16,12 +16,16 @@ func ParseConfig(raw []byte) (Config, error) {
 	if value := bytes.TrimSpace(raw); len(value) > 0 && string(value) != "null" {
 		var supplied struct {
 			Endpoints json.RawMessage `json:"endpoints"`
+			Audio     json.RawMessage `json:"audio"`
 		}
 		if err := json.Unmarshal(value, &supplied); err != nil {
 			return Config{}, gerror.Wrap(err, "invalid channel type JSON")
 		}
 		if supplied.Endpoints != nil {
 			config.Endpoints = make(map[string]EndpointConfig)
+		}
+		if supplied.Audio != nil {
+			config.Audio = AudioConfig{}
 		}
 		decoder := json.NewDecoder(bytes.NewReader(value))
 		decoder.DisallowUnknownFields()
@@ -40,6 +44,14 @@ func ParseConfig(raw []byte) (Config, error) {
 	}
 	if err := normalizeEndpointConfigs(config.Endpoints); err != nil {
 		return Config{}, err
+	}
+	config.Audio.Adapter = strings.ToLower(strings.TrimSpace(config.Audio.Adapter))
+	switch config.Audio.Adapter {
+	case "", AudioAdapterOpenAI:
+		config.Audio.Adapter = AudioAdapterOpenAI
+	case AudioAdapterChat:
+	default:
+		return Config{}, gerror.Newf("unsupported audio adapter %q (expected openai or chat)", config.Audio.Adapter)
 	}
 	pricing, err := ParsePricingConfig(config.Pricing)
 	if err != nil {

@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime"
@@ -18,6 +19,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/logic/apikey"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
@@ -26,6 +28,8 @@ const (
 	// TTS 输出与 ASR 输入都按 24 MiB 封顶，覆盖长文本语音与常见音频上传。
 	maxAudioRequestBody = 24 << 20
 	audioUpstreamTTL    = 180 * time.Second
+	// chat 型适配下 base64 后的音频输入上限（MiMo 官方限制 10 MB）。
+	maxChatAudioBase64Input = 10 << 20
 )
 
 type audioUpstreamResult struct {
@@ -48,7 +52,8 @@ func (s *sRelay) HandleAudioTranscriptions(ctx context.Context, incomingHeaders 
 // audioRequest 抽象 TTS/ASR 两类请求的共性行为：模型提取与上游请求体重建。
 type audioRequest interface {
 	RequestedModel(body []byte) (string, error)
-	UpstreamBody(body []byte, upstreamModel string, incomingHeaders http.Header) ([]byte, string, error)
+	// UpstreamBody 按 upstreamModel 与适配器重建上游请求体，返回 (body, contentType, upstreamPath)。
+	UpstreamBody(body []byte, upstreamModel string, incomingHeaders http.Header, adapter string) ([]byte, string, string, error)
 }
 
 type audioSpeechHandler struct{}
@@ -64,18 +69,50 @@ func (audioSpeechHandler) RequestedModel(body []byte) (string, error) {
 	return model, nil
 }
 
-func (audioSpeechHandler) UpstreamBody(body []byte, upstreamModel string, incomingHeaders http.Header) ([]byte, string, error) {
-	// TTS 请求体是纯 JSON，仅需把公开模型名替换为上游名。
+func (audioSpeechHandler) UpstreamBody(body []byte, upstreamModel string, incomingHeaders http.Header, adapter string) ([]byte, string, string, error) {
+	if adapter == channeltype.AudioAdapterChat {
+		// chat 型适配：目标文本放 assistant 消息，风格指令放 user 消息，音频经 choices[0].message.audio.data 返回。
+		var payload struct {
+			Model string `json:"model"`
+			Input string `json:"input"`
+			Voice string `json:"voice"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return nil, "", "", gerror.New("speech request body must be a JSON object")
+		}
+		text := payload.Input
+		if strings.TrimSpace(text) == "" {
+			text = "模型测试"
+		}
+		voice := payload.Voice
+		if strings.TrimSpace(voice) == "" {
+			voice = "mimo_default"
+		}
+		chatPayload := map[string]any{
+			"model": upstreamModel,
+			"messages": []map[string]any{
+				{"role": "user", "content": "请以自然的语气朗读以下内容。"},
+				{"role": "assistant", "content": text},
+			},
+			"audio": map[string]any{"format": "wav", "voice": voice},
+		}
+		encoded, err := json.Marshal(chatPayload)
+		if err != nil {
+			return nil, "", "", gerror.Wrap(err, "encode chat-adapted speech request")
+		}
+		return encoded, "application/json", "/chat/completions", nil
+	}
+	// 标准适配：TTS 请求体是纯 JSON，仅需把公开模型名替换为上游名。
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, "", gerror.New("speech request body must be a JSON object")
+		return nil, "", "", gerror.New("speech request body must be a JSON object")
 	}
 	payload["model"] = upstreamModel
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return nil, "", gerror.Wrap(err, "encode speech request")
+		return nil, "", "", gerror.Wrap(err, "encode speech request")
 	}
-	return encoded, "application/json", nil
+	return encoded, "application/json", "/audio/speech", nil
 }
 
 type audioTranscriptionHandler struct {
@@ -91,15 +128,18 @@ func (h audioTranscriptionHandler) RequestedModel(body []byte) (string, error) {
 	return strings.TrimSpace(string(content)), nil
 }
 
-func (h audioTranscriptionHandler) UpstreamBody(body []byte, upstreamModel string, incomingHeaders http.Header) ([]byte, string, error) {
+func (h audioTranscriptionHandler) UpstreamBody(body []byte, upstreamModel string, incomingHeaders http.Header, adapter string) ([]byte, string, string, error) {
+	if adapter == channeltype.AudioAdapterChat {
+		return h.chatAdaptedBody(body, upstreamModel)
+	}
 	fileName, fileContent, err := h.audioFile(body)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	buffer := &bytes.Buffer{}
 	writer := multipart.NewWriter(buffer)
 	if err = writer.WriteField("model", upstreamModel); err != nil {
-		return nil, "", gerror.Wrap(err, "encode transcriptions request")
+		return nil, "", "", gerror.Wrap(err, "encode transcriptions request")
 	}
 	part, err := writer.CreateFormFile("file", fileName)
 	if err == nil {
@@ -109,9 +149,50 @@ func (h audioTranscriptionHandler) UpstreamBody(body []byte, upstreamModel strin
 		err = writer.Close()
 	}
 	if err != nil {
-		return nil, "", gerror.Wrap(err, "encode transcriptions request")
+		return nil, "", "", gerror.Wrap(err, "encode transcriptions request")
 	}
-	return buffer.Bytes(), writer.FormDataContentType(), nil
+	return buffer.Bytes(), writer.FormDataContentType(), "/audio/transcriptions", nil
+}
+
+// chatAdaptedBody 把 multipart 转写请求转为 chat completions 承载的 JSON：音频 base64 后经 input_audio 传入。
+func (h audioTranscriptionHandler) chatAdaptedBody(body []byte, upstreamModel string) ([]byte, string, string, error) {
+	fileName, fileContent, err := h.audioFile(body)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if len(fileContent) > maxChatAudioBase64Input {
+		return nil, "", "", gerror.New("audio file exceeds the chat-adapted transcription limit")
+	}
+	mimeType := "audio/wav"
+	lowerName := strings.ToLower(fileName)
+	switch {
+	case strings.HasSuffix(lowerName, ".mp3"):
+		mimeType = "audio/mpeg"
+	case strings.HasSuffix(lowerName, ".wav"):
+		mimeType = "audio/wav"
+	default:
+		if len(fileContent) >= 4 && string(fileContent[:4]) == "RIFF" {
+			mimeType = "audio/wav"
+		} else {
+			mimeType = "audio/mpeg"
+		}
+	}
+	chatPayload := map[string]any{
+		"model": upstreamModel,
+		"messages": []map[string]any{
+			{"role": "user", "content": []map[string]any{
+				{"type": "input_audio", "input_audio": map[string]string{
+					"data": "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(fileContent),
+				}},
+			}},
+		},
+		"asr_options": map[string]any{"language": "auto"},
+	}
+	encoded, err := json.Marshal(chatPayload)
+	if err != nil {
+		return nil, "", "", gerror.Wrap(err, "encode chat-adapted transcription request")
+	}
+	return encoded, "application/json", "/chat/completions", nil
 }
 
 func (h audioTranscriptionHandler) audioFile(body []byte) (string, []byte, error) {
@@ -251,7 +332,12 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 	if strings.TrimSpace(upstreamModel) == "" {
 		upstreamModel = candidate.PublicName
 	}
-	upstreamBody, contentType, err := handler.UpstreamBody(body, upstreamModel, incomingHeaders)
+	adapter, adapterErr := s.channels.AudioAdapterFor(ctx, candidate.ChannelType)
+	if adapterErr != nil {
+		g.Log().Warningf(ctx, "resolve audio adapter for channel %s: %v", candidate.ChannelType, adapterErr)
+		adapter = channeltype.AudioAdapterOpenAI
+	}
+	upstreamBody, contentType, upstreamPath, err := handler.UpstreamBody(body, upstreamModel, incomingHeaders, adapter)
 	if err != nil {
 		return attemptResult{errorMessage: err.Error()}, false
 	}
@@ -261,7 +347,7 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, audioUpstreamTTL)
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, candidate.BaseURL+audioEndpointPath(handler), bytes.NewReader(upstreamBody))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, candidate.BaseURL+upstreamPath, bytes.NewReader(upstreamBody))
 	if err != nil {
 		return attemptResult{errorMessage: gerror.Wrap(err, "create audio upstream request").Error()}, false
 	}
@@ -284,7 +370,7 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 		return attemptResult{errorMessage: err.Error()}, false
 	}
 	resp, err := client.Do(req)
-	result := attemptResult{upstreamEndpoint: audioEndpointPath(handler)}
+	result := attemptResult{upstreamEndpoint: upstreamPath}
 	result.latency = time.Since(startedAt)
 	if err != nil {
 		result.errorMessage = gerror.Wrap(err, "call audio upstream").Error()
@@ -303,6 +389,18 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 		result.errorMessage = upstreamError(responseBody, resp.Status)
 		return result, false
 	}
+	// chat 型适配下 TTS 响应是 chat completion JSON，音频 base64 藏在 choices[0].message.audio.data，
+	// 需还原为标准 /audio/speech 期望的二进制音频体。
+	if _, isSpeech := handler.(audioSpeechHandler); isSpeech && adapter == channeltype.AudioAdapterChat {
+		responseBody, err = chatAudioToBinary(responseBody)
+		if err != nil {
+			result.errorMessage = err.Error()
+			return result, false
+		}
+		contentType = "audio/wav"
+		result.headers = result.headers.Clone()
+		result.headers.Set("Content-Type", contentType)
+	}
 	// 音频响应直接回写客户端：TTS 是二进制流，ASR 是 JSON 转写结果。
 	copyResponseHeaders(writer.Header(), result.headers)
 	writer.WriteHeader(resp.StatusCode)
@@ -313,13 +411,6 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 	result.body = responseBody
 	result.wroteBytes = true
 	return result, true
-}
-
-func audioEndpointPath(handler audioRequest) string {
-	if _, ok := handler.(audioTranscriptionHandler); ok {
-		return "/audio/transcriptions"
-	}
-	return "/audio/speech"
 }
 
 func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, clientIP, endpoint, requestedModel string, startedAt time.Time, result attemptResult) error {
@@ -368,4 +459,20 @@ func audioCost(billingDetails *usage.BillingBreakdown) *decimal.Decimal {
 	}
 	cost := billingDetails.Cost()
 	return &cost
+}
+
+// chatAudioToBinary 从 chat 型 TTS 响应中提取 base64 音频并还原为二进制。
+func chatAudioToBinary(body []byte) ([]byte, error) {
+	audioData := gjson.GetBytes(body, "choices.0.message.audio.data").String()
+	if audioData == "" {
+		return nil, gerror.New("chat-adapted speech response does not contain audio data")
+	}
+	if comma := strings.Index(audioData, ","); strings.HasPrefix(audioData, "data:") && comma >= 0 {
+		audioData = audioData[comma+1:]
+	}
+	decoded, err := base64.StdEncoding.DecodeString(audioData)
+	if err != nil {
+		return nil, gerror.Wrap(err, "decode chat-adapted speech audio")
+	}
+	return decoded, nil
 }

@@ -109,8 +109,22 @@ type Config struct {
 	Models    ModelConfig               `json:"models"`
 	Costs     CostConfig                `json:"costs"`
 	Pricing   PricingConfig             `json:"pricing"`
+	Audio     AudioConfig               `json:"audio"`
 	Endpoints map[string]EndpointConfig `json:"endpoints"`
 }
+
+// AudioConfig 声明渠道的音频接口形态：
+// adapter "openai"（默认）走标准 /audio/speech、/audio/transcriptions；
+// adapter "chat" 表示上游没有独立音频端点，TTS/ASR 通过 chat completions 承载（如小米 MiMo）。
+type AudioConfig struct {
+	Adapter string `json:"adapter"`
+}
+
+// 音频适配器取值。
+const (
+	AudioAdapterOpenAI = "openai"
+	AudioAdapterChat   = "chat"
+)
 
 type View struct {
 	Id        uint64    `json:"id"`
@@ -152,6 +166,7 @@ func DefaultConfig() Config {
 			AuthType: AuthManagementKey, HeaderName: "Authorization", HeaderPrefix: "Bearer ", FixedCurrency: "USD",
 		},
 		Pricing: PricingConfig{Adapter: AdapterNone, Method: "GET", AuthType: AuthChannelKey, HeaderName: "Authorization", HeaderPrefix: "Bearer "},
+		Audio:   AudioConfig{Adapter: AudioAdapterOpenAI},
 		Endpoints: map[string]EndpointConfig{
 			"chatCompletions":       defaultEndpoint("POST", "/chat/completions", "json", true),
 			"responses":             defaultEndpoint("POST", "/responses", "json", true),

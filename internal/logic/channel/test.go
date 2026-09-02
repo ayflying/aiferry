@@ -3,6 +3,7 @@ package channel
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -159,6 +160,9 @@ func buildTestRequest(ctx context.Context, url string, payload any) (*http.Reque
 
 func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
 	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream)
+	if typeConfig.Audio.Adapter == channeltype.AudioAdapterChat {
+		path, payload = chatAdapterPayload(endpoint, model.UpstreamName, payload)
+	}
 	req, err := buildTestRequest(ctx, baseURL+path, payload)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
@@ -335,6 +339,55 @@ type asrMultipartRequest struct {
 	Model    string
 	Filename string
 	Content  []byte
+}
+
+// chatAdapterPayload 把标准 TTS/ASR 测试请求转换为 chat completions 承载的等价请求，
+// 供 audio.adapter = "chat" 的渠道类型（如小米 MiMo）使用。返回的 payload 一律为 JSON。
+func chatAdapterPayload(endpoint, model string, payload any) (string, any) {
+	switch endpoint {
+	case "tts":
+		text, voice := "模型测试", "mimo_default"
+		if values, ok := payload.(map[string]any); ok {
+			if value, exists := values["input"].(string); exists && value != "" {
+				text = value
+			}
+			if value, exists := values["voice"].(string); exists && value != "" {
+				voice = value
+			}
+		}
+		return "/chat/completions", map[string]any{
+			"model": model,
+			"messages": []map[string]any{
+				{"role": "user", "content": "请以自然的语气朗读以下内容。"},
+				{"role": "assistant", "content": text},
+			},
+			"audio": map[string]any{"format": "wav", "voice": voice},
+		}
+	case "asr":
+		audioBase64 := ""
+		filename := "aiferry-test.wav"
+		if request, ok := payload.(asrMultipartRequest); ok {
+			audioBase64 = base64.StdEncoding.EncodeToString(request.Content)
+			if request.Filename != "" {
+				filename = request.Filename
+			}
+		}
+		mimeType := "audio/wav"
+		if strings.HasSuffix(strings.ToLower(filename), ".mp3") {
+			mimeType = "audio/mpeg"
+		}
+		return "/chat/completions", map[string]any{
+			"model": model,
+			"messages": []map[string]any{
+				{"role": "user", "content": []map[string]any{
+					{"type": "input_audio", "input_audio": map[string]string{"data": "data:" + mimeType + ";base64," + audioBase64}},
+				}},
+			},
+			"asr_options": map[string]any{"language": "auto"},
+		}
+	default:
+		return "/chat/completions", payload
+	}
 }
 
 // asrTestPayload 构造最小 WAV（44 字节头 + 1 个静音采样），足以让上游校验通过并返回转写结果。
