@@ -148,6 +148,8 @@ export interface Channel {
   costQueryConfig: CostQueryConfig
   advancedConfig: ChannelAdvancedConfig
   enabledModelCount: number
+  healthyModelCount: number
+  disabledModelCount: number
   discoveredModels: number
   credentialCount: number
   activeCredentialCount: number

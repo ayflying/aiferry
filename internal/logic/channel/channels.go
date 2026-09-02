@@ -56,6 +56,11 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 		view.DiscoveredModels, _ = dao.ChannelModels.Ctx(ctx).Where(dao.ChannelModels.Columns().ChannelId, rows[i].Id).Count()
 		view.EnabledModelCount, _ = dao.ChannelModels.Ctx(ctx).
 			Where(do.ChannelModels{ChannelId: rows[i].Id, Enabled: 1}).Count()
+		modelColumns := dao.ChannelModels.Columns()
+		view.HealthyModelCount, _ = dao.ChannelModels.Ctx(ctx).
+			Where(do.ChannelModels{ChannelId: rows[i].Id, Enabled: 1}).
+			WhereNull(modelColumns.AutoDisabledAt).Count()
+		view.DisabledModelCount = view.EnabledModelCount - view.HealthyModelCount
 		view.CredentialCount, _ = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: rows[i].Id}).Count()
 		view.ActiveCredentialCount, _ = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: rows[i].Id, Status: 1}).Count()
 		view.HasAPIKey = view.CredentialCount > 0

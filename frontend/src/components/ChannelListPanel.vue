@@ -64,7 +64,7 @@ const emit = defineEmits<{
             </template>
           </el-table-column>
           <el-table-column label="路由" width="108"><template #default="{ row }"><span class="mono">P{{ row.priority }} / W{{ row.weight }}</span></template></el-table-column>
-          <el-table-column label="模型" width="100"><template #default="{ row }">{{ row.enabledModelCount }} / {{ row.discoveredModels }}</template></el-table-column>
+          <el-table-column label="模型" width="120"><template #default="{ row }">{{ row.enabledModelCount }} / {{ row.discoveredModels }}<span v-if="row.disabledModelCount > 0" class="model-disabled-count" title="被自动禁用的模型数">（禁 {{ row.disabledModelCount }}）</span></template></el-table-column>
           <el-table-column label="最近测试" min-width="130"><template #default="{ row }"><span v-if="row.lastTestStatus" class="status-dot" :class="row.lastTestStatus">{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : '失败' }}</span><span v-else class="muted">未测试</span></template></el-table-column>
           <el-table-column label="上游费用 / 余额 / 用量" min-width="168">
             <template #default="{ row }">
@@ -107,7 +107,7 @@ const emit = defineEmits<{
               <div><dt>渠道编号</dt><dd class="mono channel-id">{{ row.id }}</dd></div>
               <div><dt>渠道类型</dt><dd>{{ row.typeName }} · <span class="mono">{{ row.type }}</span></dd></div>
               <div><dt>路由</dt><dd class="mono">P{{ row.priority }} / W{{ row.weight }}</dd></div>
-              <div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}</dd></div>
+              <div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}<span v-if="row.disabledModelCount > 0">（被禁用 {{ row.disabledModelCount }}）</span></dd></div>
               <div><dt>最近测试</dt><dd>{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : row.lastTestStatus ? '失败' : '未测试' }}</dd></div>
               <div class="mobile-record__wide"><dt>上游费用 / 余额 / 用量</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="row.costSummaries?.length"><template v-for="summary in row.costSummaries" :key="summary.currency"><span v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">{{ summary.currency }} 已用 {{ summary.usedAmount === undefined ? '—' : formatCost(summary.usedAmount, summary.currency) }} · 余额 {{ summary.remainingAmount === undefined ? '—' : formatCost(summary.remainingAmount, summary.currency) }}</span><span v-if="summary.usage !== undefined">{{ summary.usageType || '用量' }} {{ formatNumber(summary.usage) }} {{ summary.usageUnit || '' }}</span> </template></span><span v-else class="muted">查看明细</span></button></dd></div>
             </dl>
@@ -129,6 +129,7 @@ const emit = defineEmits<{
 .channel-status-control { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }.channel-status-control :deep(.el-switch) { flex: 0 0 auto; }
 .cost-cell { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.cost-cell small, .table-panel small { color: #7b8792; }.cost-link { display: block; width: 100%; border: 0; padding: 0; text-align: left; color: inherit; background: transparent; cursor: pointer; }.cost-link:hover span { color: #1677ff; }
 .cost-query-spinner { animation: cost-query-spin 0.9s linear infinite; }@keyframes cost-query-spin { to { transform: rotate(360deg); } }
+.model-disabled-count { color: #c83e4d; font-size: 11px; }
 @media (max-width: 600px) { .page-toolbar { align-items: flex-start; flex-wrap: wrap; }.page-toolbar .spacer { display: none; } }
 @media (prefers-reduced-motion: reduce) { .cost-query-spinner { animation: none; } }
 </style>

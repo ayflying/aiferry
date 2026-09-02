@@ -12,6 +12,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -246,6 +247,13 @@ func (s *sChannel) UpdateModel(ctx context.Context, id uint64, input adminapi.Mo
 		PublicName:   publicName,
 		UpstreamName: strings.TrimSpace(input.UpstreamName),
 		Enabled:      boolInt(input.Enabled),
+	}
+	// 手动重新启用模型时重置健康评分并清除禁用标记，给它一个全新的开始。
+	if boolInt(input.Enabled) == 1 {
+		modelData.HealthScore = system.ModelHealthInitialScore
+		modelData.AutoDisabledAt = gdb.Raw("NULL")
+		modelData.AutoDisabledReason = gdb.Raw("NULL")
+		modelData.AutoDisabledSource = gdb.Raw("NULL")
 	}
 	err := dao.ChannelModels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
 		if _, updateErr := dao.ChannelModels.Ctx(txCtx).Where(dao.ChannelModels.Columns().Id, id).Data(modelData).Update(); updateErr != nil {

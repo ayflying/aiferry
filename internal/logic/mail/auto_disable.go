@@ -34,12 +34,23 @@ func renderAutoDisableTransition(systemName string, notification system.AutoDisa
 		target = "渠道密钥"
 		detail += fmt.Sprintf("的上游密钥 %s（ID：%d）", notificationCredentialName(notification.CredentialKeyPrefix), notification.CredentialID)
 	}
+	if notification.ModelID > 0 {
+		target = "渠道模型"
+		detail += fmt.Sprintf("的模型 %s（ID：%d）", notificationModelName(notification.ModelName), notification.ModelID)
+	}
 	if notification.Recovered {
 		return fmt.Sprintf("%s %s已自动恢复：%s", systemName, target, notificationChannelName(notification.ChannelName)),
 			fmt.Sprintf("%s 已通过探测并自动恢复启用。\n\n上次禁用来源：%s\n上次禁用状态码：%s\n上次禁用原因：%s", detail, notificationSource(notification.Source), notificationStatusCode(notification.StatusCode), notificationReason(notification.Reason))
 	}
 	return fmt.Sprintf("%s %s已自动禁用：%s", systemName, target, notificationChannelName(notification.ChannelName)),
 		fmt.Sprintf("%s 已因上游异常被自动禁用。\n\n触发来源：%s\n状态码：%s\n触发原因：%s", detail, notificationSource(notification.Source), notificationStatusCode(notification.StatusCode), notificationReason(notification.Reason))
+}
+
+func notificationModelName(value string) string {
+	if name := strings.TrimSpace(value); name != "" {
+		return name
+	}
+	return "未命名模型"
 }
 
 func notificationChannelName(value string) string {

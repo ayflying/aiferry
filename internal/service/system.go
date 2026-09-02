@@ -17,6 +17,9 @@ type (
 	ISystem interface {
 		DisableIfNeeded(ctx context.Context, input AutoDisableInput) (bool, error)
 		DisableIfNeededWithSettings(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) (bool, error)
+		ApplyModelHealthScore(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, input ModelDisableInput) (bool, error)
+		ResetModelHealthScore(ctx context.Context, modelID uint64) error
+		RecoverModelIfAllowed(ctx context.Context, modelID uint64) (bool, error)
 		RecoverIfAllowed(ctx context.Context, channelID uint64) (bool, error)
 		RecoverCredentialIfAllowed(ctx context.Context, credentialID uint64) (bool, error)
 		GetBase(ctx context.Context) (BaseSettings, error)

@@ -102,6 +102,7 @@ func (s *sRelay) Models(ctx context.Context, key apikey.AuthKey) (ModelList, err
 	err := dao.ChannelModels.Ctx(ctx).
 		Fields(modelColumns.ChannelId, modelColumns.PublicName).
 		Where(modelColumns.Enabled, 1).
+		WhereNull(modelColumns.AutoDisabledAt).
 		Scan(&rows)
 	if err != nil {
 		return ModelList{}, gerror.Wrap(err, "list public models")

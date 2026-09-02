@@ -7,6 +7,7 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/model/do"
 )
 
@@ -45,6 +46,15 @@ func (s *sChannel) SetStatus(ctx context.Context, channelID uint64, status int) 
 			AutoDisabledSource:     gdb.Raw("NULL"),
 		}).Update(); err != nil {
 			return gerror.Wrap(err, "recover channel credentials")
+		}
+		// 手动启用渠道时同步恢复其被自动禁用的模型并重置健康评分。
+		if _, err := dao.ChannelModels.Ctx(txCtx).Where(do.ChannelModels{ChannelId: channelID}).Data(do.ChannelModels{
+			HealthScore:        system.ModelHealthInitialScore,
+			AutoDisabledAt:     gdb.Raw("NULL"),
+			AutoDisabledReason: gdb.Raw("NULL"),
+			AutoDisabledSource: gdb.Raw("NULL"),
+		}).Update(); err != nil {
+			return gerror.Wrap(err, "recover channel models")
 		}
 		return nil
 	})

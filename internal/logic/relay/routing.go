@@ -22,6 +22,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 	if err := dao.ChannelModels.Ctx(ctx).
 		Where(modelColumns.Enabled, 1).
 		Where(modelColumns.PublicName, model).
+		WhereNull(modelColumns.AutoDisabledAt).
 		Scan(&models); err != nil {
 		return nil, gerror.Wrap(err, "load model routes")
 	}
@@ -218,11 +219,12 @@ func containsString(values []string, target string) bool {
 func (s *sRelay) maybeAutoDisable(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, candidate Candidate, result attemptResult) {
 	_, _ = s.resilience.DisableIfNeededWithSettings(ctx, settings, system.AutoDisableInput{
 		ChannelID: candidate.ChannelID, ChannelCredentialID: candidate.ChannelCredentialID,
-		Source:   system.AutoDisableSourceRelayRequest,
-		Status:   result.status,
-		Latency:  result.latency,
-		Message:  result.errorMessage,
-		TimedOut: result.timedOut,
+		ChannelModelID: candidate.ChannelModelID,
+		Source:         system.AutoDisableSourceRelayRequest,
+		Status:         result.status,
+		Latency:        result.latency,
+		Message:        result.errorMessage,
+		TimedOut:       result.timedOut,
 	})
 }
 

@@ -8,6 +8,10 @@ export interface ChannelModel {
   upstreamName: string
   discovered: number
   enabled: number
+  healthScore: number
+  autoDisabled: boolean
+  autoDisabledAt?: string
+  autoDisabledReason: string
   inputPrice?: number
   cachedInputPrice?: number
   cacheWritePrice?: number

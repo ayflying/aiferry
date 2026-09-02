@@ -29,6 +29,7 @@ type RecoveryTarget string
 const (
 	RecoveryTargetChannel    RecoveryTarget = "channel"
 	RecoveryTargetCredential RecoveryTarget = "credential"
+	RecoveryTargetModel      RecoveryTarget = "model"
 )
 
 type recoveryState struct {

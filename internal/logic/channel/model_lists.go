@@ -133,31 +133,38 @@ func loadModelPrices(ctx context.Context, names []string) (map[string]modelPrice
 
 func modelViewFromEntity(model entity.ChannelModels, channelName string, price modelPriceView) ModelView {
 	view := ModelView{
-		Id:                model.Id,
-		ChannelId:         model.ChannelId,
-		ChannelName:       channelName,
-		PublicName:        model.PublicName,
-		UpstreamName:      model.UpstreamName,
-		Discovered:        model.Discovered,
-		Enabled:           model.Enabled,
-		InputPrice:        price.InputPrice,
-		CachedInputPrice:  price.CachedInputPrice,
-		CacheWritePrice:   price.CacheWritePrice,
-		OutputPrice:       price.OutputPrice,
-		ImageInputPrice:   price.ImageInputPrice,
-		AudioInputPrice:   price.AudioInputPrice,
-		AudioOutputPrice:  price.AudioOutputPrice,
-		RequestPrice:      price.RequestPrice,
-		BillingMode:       modelBillingMode(price),
-		LastTestEndpoint:  model.LastTestEndpoint,
-		LastTestStatus:    model.LastTestStatus,
-		LastTestLatencyMs: model.LastTestLatencyMs,
-		LastTestError:     model.LastTestError,
-		UpdatedAt:         model.UpdatedAt,
+		Id:                 model.Id,
+		ChannelId:          model.ChannelId,
+		ChannelName:        channelName,
+		PublicName:         model.PublicName,
+		UpstreamName:       model.UpstreamName,
+		Discovered:         model.Discovered,
+		Enabled:            model.Enabled,
+		HealthScore:        model.HealthScore,
+		AutoDisabled:       model.AutoDisabledAt != nil,
+		AutoDisabledReason: model.AutoDisabledReason,
+		InputPrice:         price.InputPrice,
+		CachedInputPrice:   price.CachedInputPrice,
+		CacheWritePrice:    price.CacheWritePrice,
+		OutputPrice:        price.OutputPrice,
+		ImageInputPrice:    price.ImageInputPrice,
+		AudioInputPrice:    price.AudioInputPrice,
+		AudioOutputPrice:   price.AudioOutputPrice,
+		RequestPrice:       price.RequestPrice,
+		BillingMode:        modelBillingMode(price),
+		LastTestEndpoint:   model.LastTestEndpoint,
+		LastTestStatus:     model.LastTestStatus,
+		LastTestLatencyMs:  model.LastTestLatencyMs,
+		LastTestError:      model.LastTestError,
+		UpdatedAt:          model.UpdatedAt,
 	}
 	if !model.LastTestAt.IsZero() {
 		lastTestAt := model.LastTestAt
 		view.LastTestAt = &lastTestAt
+	}
+	if model.AutoDisabledAt != nil {
+		autoDisabledAt := *model.AutoDisabledAt
+		view.AutoDisabledAt = &autoDisabledAt
 	}
 	return view
 }

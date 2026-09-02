@@ -79,6 +79,7 @@ func (s *sChannel) runRegularHealthChecks(ctx context.Context, mode string) {
 func (s *sChannel) runRecoveryChecks(ctx context.Context, mode string) {
 	s.runChannelRecoveryChecks(ctx, mode)
 	s.runCredentialRecoveryChecks(ctx, mode)
+	s.runModelRecoveryChecks(ctx, mode)
 }
 
 func (s *sChannel) runChannelRecoveryChecks(ctx context.Context, mode string) {
@@ -169,8 +170,59 @@ func (s *sChannel) runCredentialRecoveryChecks(ctx context.Context, mode string)
 	}
 }
 
-func loadHealthCheckModelIDs(ctx context.Context, channels []entity.Channels) (map[uint64]uint64, error) {
-	result := make(map[uint64]uint64)
+// runModelRecoveryChecks 定期测试被自动禁用的模型；测试成功会清除模型禁用标记
+// 并重置健康评分（见 TestModel 内的 RecoverModelIfAllowed）。
+func (s *sChannel) runModelRecoveryChecks(ctx context.Context, mode string) {
+	columns := dao.ChannelModels.Columns()
+	models := make([]entity.ChannelModels, 0)
+	model := dao.ChannelModels.Ctx(ctx).
+		Fields(columns.Id, columns.ChannelId, columns.AutoDisabledAt).
+		Where(columns.Enabled, 1).
+		WhereNotNull(columns.AutoDisabledAt).
+		OrderAsc(columns.Id)
+	if mode == "passive" {
+		model = model.Where(columns.AutoDisabledSource, system.AutoDisableSourceRelayRequest)
+	}
+	if err := model.Scan(&models); err != nil {
+		g.Log().Warningf(ctx, "load model recovery checks: %v", err)
+		return
+	}
+	if len(models) == 0 {
+		return
+	}
+	channelIDs := make(map[uint64]struct{}, len(models))
+	for _, item := range models {
+		channelIDs[item.ChannelId] = struct{}{}
+	}
+	channels, err := loadActiveHealthChannels(ctx, sortedModelIDs(channelIDs))
+	if err != nil {
+		g.Log().Warningf(ctx, "load model recovery channels: %v", err)
+		return
+	}
+	activeChannels := make(map[uint64]struct{}, len(channels))
+	for _, channel := range channels {
+		activeChannels[channel.Id] = struct{}{}
+	}
+	for _, item := range models {
+		if _, active := activeChannels[item.ChannelId]; !active {
+			continue
+		}
+		started, err := s.resilience.BeginRecoveryAttempt(ctx, system.RecoveryTargetModel, item.Id, *item.AutoDisabledAt)
+		if err != nil {
+			g.Log().Warningf(ctx, "schedule model %d recovery: %v", item.Id, err)
+			continue
+		}
+		if !started {
+			continue
+		}
+		testCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		result, testErr := s.TestModel(testCtx, adminapi.ModelTestInput{ModelID: item.Id, Endpoint: "auto"}, usage.SystemUserID)
+		cancel()
+		s.resilience.FinishRecoveryAttempt(ctx, system.RecoveryTargetModel, item.Id, testErr == nil && result.Success)
+	}
+}
+
+func loadHealthCheckModelIDs(ctx context.Context, channels []entity.Channels) (map[uint64]uint64, error) {	result := make(map[uint64]uint64)
 	if len(channels) == 0 {
 		return result, nil
 	}

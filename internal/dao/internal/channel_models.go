@@ -21,44 +21,52 @@ type ChannelModelsDao struct {
 
 // ChannelModelsColumns defines and stores column names for the table channel_models.
 type ChannelModelsColumns struct {
-	Id                string //
-	ChannelId         string //
-	PublicName        string //
-	UpstreamName      string //
-	Discovered        string //
-	Enabled           string //
-	InputPrice        string //
-	CachedInputPrice  string //
-	OutputPrice       string //
-	LastTestEndpoint  string //
-	LastTestStatus    string //
-	LastTestLatencyMs string //
-	LastTestError     string //
-	LastTestAt        string //
-	CreatedAt         string //
-	UpdatedAt         string //
-	DeletedAt         string //
+	Id                 string //
+	ChannelId          string //
+	PublicName         string //
+	UpstreamName       string //
+	Discovered         string //
+	Enabled            string //
+	InputPrice         string //
+	CachedInputPrice   string //
+	OutputPrice        string //
+	HealthScore        string //
+	AutoDisabledAt     string //
+	AutoDisabledReason string //
+	AutoDisabledSource string //
+	LastTestEndpoint   string //
+	LastTestStatus     string //
+	LastTestLatencyMs  string //
+	LastTestError      string //
+	LastTestAt         string //
+	CreatedAt          string //
+	UpdatedAt          string //
+	DeletedAt          string //
 }
 
 // channelModelsColumns holds the columns for the table channel_models.
 var channelModelsColumns = ChannelModelsColumns{
-	Id:                "id",
-	ChannelId:         "channel_id",
-	PublicName:        "public_name",
-	UpstreamName:      "upstream_name",
-	Discovered:        "discovered",
-	Enabled:           "enabled",
-	InputPrice:        "input_price",
-	CachedInputPrice:  "cached_input_price",
-	OutputPrice:       "output_price",
-	LastTestEndpoint:  "last_test_endpoint",
-	LastTestStatus:    "last_test_status",
-	LastTestLatencyMs: "last_test_latency_ms",
-	LastTestError:     "last_test_error",
-	LastTestAt:        "last_test_at",
-	CreatedAt:         "created_at",
-	UpdatedAt:         "updated_at",
-	DeletedAt:         "deleted_at",
+	Id:                 "id",
+	ChannelId:          "channel_id",
+	PublicName:         "public_name",
+	UpstreamName:       "upstream_name",
+	Discovered:         "discovered",
+	Enabled:            "enabled",
+	InputPrice:         "input_price",
+	CachedInputPrice:   "cached_input_price",
+	OutputPrice:        "output_price",
+	HealthScore:        "health_score",
+	AutoDisabledAt:     "auto_disabled_at",
+	AutoDisabledReason: "auto_disabled_reason",
+	AutoDisabledSource: "auto_disabled_source",
+	LastTestEndpoint:   "last_test_endpoint",
+	LastTestStatus:     "last_test_status",
+	LastTestLatencyMs:  "last_test_latency_ms",
+	LastTestError:      "last_test_error",
+	LastTestAt:         "last_test_at",
+	CreatedAt:          "created_at",
+	UpdatedAt:          "updated_at",
+	DeletedAt:          "deleted_at",
 }
 
 // NewChannelModelsDao creates and returns a new DAO object for table data access.

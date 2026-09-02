@@ -26,6 +26,7 @@ const (
 type AutoDisableInput struct {
 	ChannelID           uint64
 	ChannelCredentialID uint64
+	ChannelModelID      uint64
 	Source              string
 	Status              int
 	Latency             time.Duration
@@ -103,6 +104,18 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 	}
 	if channel.AutoDisableEnabled != 1 || channel.Status == 0 {
 		return false, nil
+	}
+	// 模型维度：非账号级失败只影响单个模型健康评分，不再直接禁用渠道。
+	// 账号级失败（余额耗尽、配额用尽、组织停用等）影响整个渠道，继续走渠道禁用。
+	if input.ChannelModelID > 0 && !IsAccountLevelFailure(input.Message) {
+		return s.ApplyModelHealthScore(ctx, settings, ModelDisableInput{
+			ChannelID: input.ChannelID,
+			ModelID:   input.ChannelModelID,
+			Source:    input.Source,
+			Status:    input.Status,
+			Message:   input.Message,
+			TimedOut:  input.TimedOut,
+		})
 	}
 	if input.ChannelCredentialID > 0 {
 		return s.disableCredential(ctx, channel, settings, input)

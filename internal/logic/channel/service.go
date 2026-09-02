@@ -65,6 +65,8 @@ type View struct {
 	AdvancedConfig         AdvancedConfig `json:"advancedConfig"`
 	EnabledModelCount      int            `json:"enabledModelCount"`
 	DiscoveredModels       int            `json:"discoveredModels"`
+	HealthyModelCount      int            `json:"healthyModelCount"`
+	DisabledModelCount     int            `json:"disabledModelCount"`
 	CredentialCount        int            `json:"credentialCount"`
 	ActiveCredentialCount  int            `json:"activeCredentialCount"`
 	CredentialsUnavailable bool           `json:"credentialsUnavailable"`
@@ -89,6 +91,10 @@ type ModelView struct {
 	UpstreamName      string     `json:"upstreamName" orm:"upstream_name"`
 	Discovered        int        `json:"discovered" orm:"discovered"`
 	Enabled           int        `json:"enabled" orm:"enabled"`
+	HealthScore       int        `json:"healthScore" orm:"health_score"`
+	AutoDisabled      bool       `json:"autoDisabled"`
+	AutoDisabledAt    *time.Time `json:"autoDisabledAt"`
+	AutoDisabledReason string    `json:"autoDisabledReason"`
 	InputPrice        *float64   `json:"inputPrice" orm:"input_price"`
 	CachedInputPrice  *float64   `json:"cachedInputPrice" orm:"cached_input_price"`
 	CacheWritePrice   *float64   `json:"cacheWritePrice" orm:"cache_write_price"`

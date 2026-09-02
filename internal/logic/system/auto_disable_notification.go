@@ -16,6 +16,8 @@ type AutoDisableNotification struct {
 	ChannelName         string
 	CredentialID        uint64
 	CredentialKeyPrefix string
+	ModelID             uint64
+	ModelName           string
 	Reason              string
 	Source              string
 	StatusCode          uint
