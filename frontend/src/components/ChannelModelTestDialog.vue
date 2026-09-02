@@ -128,7 +128,8 @@ function changePageSize(value: number | string) {
 }
 
 async function runTest(model: ChannelModel, quiet = false) {
-  if (isTesting(model) || (!quiet && (running.value || hasActiveTests.value))) return
+  // 手动测试只锁定当前模型；其他模型可以并行测试，避免单个慢模型阻塞整个列表。
+  if (isTesting(model)) return
   startTesting(model)
   try {
     const result = await apiPost<ModelTestResult>('/models/test', {
@@ -248,14 +249,14 @@ async function deleteFailedModels() {
     <div class="test-settings">
       <div class="setting-field">
         <label>端点类型</label>
-        <el-select v-model="endpoint" :disabled="running || hasActiveTests">
+        <el-select v-model="endpoint" :disabled="running">
           <el-option v-for="item in endpointOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
         <small>选择模型测试端点；自动检测会按兼容端点依次尝试。</small>
       </div>
       <div class="setting-field">
         <label>流式模式</label>
-        <el-switch v-model="stream" :disabled="running || hasActiveTests" active-text="已启用" inactive-text="已禁用" />
+        <el-switch v-model="stream" :disabled="running" active-text="已启用" inactive-text="已禁用" />
         <small>为支持流式响应的测试端点启用 stream。</small>
       </div>
     </div>
@@ -263,29 +264,29 @@ async function deleteFailedModels() {
     <section class="model-test-section">
       <div class="test-section-heading">
         <div><h3>渠道模型</h3><p>选择模型后可单独测试，也可逐个测试全部已启用模型。</p></div>
-        <el-input v-model="keyword" clearable placeholder="筛选模型..." :disabled="running || hasActiveTests" class="model-filter" />
+        <el-input v-model="keyword" clearable placeholder="筛选模型..." :disabled="running" class="model-filter" />
       </div>
       <div class="test-actions">
-        <el-button type="primary" :loading="running" :disabled="running || hasActiveTests || !enabledModels.length" @click="testAll">{{ batchButtonText }}</el-button>
+        <el-button type="primary" :loading="running" :disabled="running || !enabledModels.length" @click="testAll">{{ batchButtonText }}</el-button>
         <span class="result-chip success"><CircleCheck :size="15" /> 测试通过（{{ successCount }}）</span>
         <el-button v-if="failedModels.length" plain type="danger" :icon="Trash2" :disabled="running || hasActiveTests" @click="deleteFailedModels">删除失败模型（{{ failedModels.length }}）</el-button>
       </div>
 
       <div v-loading="loading" class="test-table-wrap">
         <el-table v-if="pagedModels.length" :data="pagedModels" :show-header="false" size="small" class="test-model-table" height="360">
-          <el-table-column width="44" align="center"><template #default="{ row }"><el-radio v-model="selectedModelID" :value="row.id" :disabled="hasActiveTests" :aria-label="`选择 ${row.publicName}`" /></template></el-table-column>
+          <el-table-column width="44" align="center"><template #default="{ row }"><el-radio v-model="selectedModelID" :value="row.id" :disabled="running" :aria-label="`选择 ${row.publicName}`" /></template></el-table-column>
           <el-table-column min-width="260"><template #default="{ row }"><div class="model-name"><strong>{{ row.publicName }}</strong><small v-if="row.upstreamName !== row.publicName">{{ row.upstreamName }}</small></div></template></el-table-column>
           <el-table-column width="110" align="center"><template #default="{ row }"><el-tooltip :content="row.autoDisabled ? `已自动禁用：${row.autoDisabledReason || '健康评分降至 0'}` : `健康评分 ${row.healthScore}/100`" placement="top"><span class="health-score" :class="healthScoreClass(row)">{{ row.autoDisabled ? '已禁用' : `${row.healthScore}分` }}</span></el-tooltip></template></el-table-column>
           <el-table-column width="104"><template #default="{ row }"><span v-if="statusOf(row) === 'testing'" class="test-status testing"><LoaderCircle :size="15" class="spinner" />测试中...</span><span v-else-if="statusOf(row) === 'success'" class="test-status success">成功</span><span v-else-if="statusOf(row) === 'failed'" class="test-status failed">失败</span><span v-else class="test-status idle">未测试</span></template></el-table-column>
           <el-table-column min-width="235"><template #default="{ row }"><div v-if="statusOf(row) === 'testing'" class="test-outcome testing"><span>测试中...</span><small>{{ endpointOf(row) }}</small></div><div v-else-if="statusOf(row) === 'success'" class="test-outcome"><span>{{ formatLatency(latencyOf(row)) }}</span><small>{{ endpointOf(row) }}</small></div><div v-else-if="statusOf(row) === 'failed'" class="test-outcome failed"><span>{{ messageOf(row) }}</span><el-popover v-if="messageOf(row)" trigger="hover" placement="top" :width="360"><template #reference><button class="detail-button" type="button"><Info :size="15" />详情</button></template><p class="error-detail">{{ messageOf(row) }}</p></el-popover></div><span v-else class="muted">—</span></template></el-table-column>
-          <el-table-column width="54" align="center"><template #default="{ row }"><el-tooltip :content="isTesting(row) ? '测试中' : '测试此模型'"><button class="icon-button" type="button" :aria-label="`${isTesting(row) ? '正在测试' : '测试'} ${row.publicName}`" :disabled="running || hasActiveTests" @click="runTest(row)"><LoaderCircle v-if="isTesting(row)" :size="17" class="spinner" /><Gauge v-else :size="17" /></button></el-tooltip></template></el-table-column>
+          <el-table-column width="54" align="center"><template #default="{ row }"><el-tooltip :content="isTesting(row) ? '测试中' : '测试此模型'"><button class="icon-button" type="button" :aria-label="`${isTesting(row) ? '正在测试' : '测试'} ${row.publicName}`" :disabled="isTesting(row)" @click="runTest(row)"><LoaderCircle v-if="isTesting(row)" :size="17" class="spinner" /><Gauge v-else :size="17" /></button></el-tooltip></template></el-table-column>
         </el-table>
         <div v-else-if="!loading" class="test-empty"><CircleAlert :size="18" /><span>{{ enabledModels.length ? '没有匹配的模型' : '当前渠道没有已启用模型' }}</span></div>
       </div>
       <div class="test-pagination"><span>总计：{{ filteredModels.length }}</span><span>每页行数</span><el-select :model-value="pageSize" size="small" class="page-size" @update:model-value="changePageSize"><el-option :value="20" label="20" /><el-option :value="30" label="30" /><el-option :value="50" label="50" /></el-select><el-pagination background layout="prev, pager, next" :current-page="page" :page-size="pageSize" :total="filteredModels.length" @current-change="page = $event" /></div>
     </section>
 
-    <template #footer><el-button :disabled="hasActiveTests" @click="visible = false">关闭</el-button><el-button type="primary" :disabled="!selectedModelID || running || hasActiveTests" @click="testSelected">{{ hasActiveTests ? '测试中...' : '测试选中模型' }}</el-button></template>
+    <template #footer><el-button :disabled="running" @click="visible = false">关闭</el-button><el-button type="primary" :disabled="!selectedModelID || running || isTesting(enabledModels.find((item) => item.id === selectedModelID) as ChannelModel)" @click="testSelected">{{ selectedModelID && isTesting(enabledModels.find((item) => item.id === selectedModelID) as ChannelModel) ? '测试中...' : '测试选中模型' }}</el-button></template>
   </el-dialog>
 </template>
 
