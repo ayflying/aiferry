@@ -64,6 +64,7 @@ export interface UsageLog {
   requestedModel: string
   upstreamModel: string
   reasoningEffort: string
+  modelHealthScore?: number | null
   httpStatus: number
   isStream: number
   inputTokens?: number

@@ -145,6 +145,7 @@ type LogView struct {
 	RequestedModel         string            `json:"requestedModel" orm:"requested_model"`
 	UpstreamModel          string            `json:"upstreamModel" orm:"upstream_model"`
 	ReasoningEffort        string            `json:"reasoningEffort" orm:"reasoning_effort"`
+	ModelHealthScore       *int              `json:"modelHealthScore,omitempty" orm:"-"`
 	HttpStatus             uint              `json:"httpStatus" orm:"http_status"`
 	IsStream               int               `json:"isStream" orm:"is_stream"`
 	InputTokens            *uint64           `json:"inputTokens" orm:"input_tokens"`

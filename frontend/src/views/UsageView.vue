@@ -93,6 +93,12 @@ function latencyTone(value: number | undefined | null, fastMs: number, slowMs: n
 }
 function firstTokenTone(row: UsageLog) { return latencyTone(row.firstTokenMs, 3_000, 10_000) }
 function totalLatencyTone(row: UsageLog) { return latencyTone(row.durationMs, 5_000, 15_000) }
+// 模型健康评分分色：与渠道模型测试弹窗一致（≥80 绿、≥50 黄、<50 红）
+function modelHealthTone(score: number) {
+  if (score >= 80) return 'latency-fast'
+  if (score >= 50) return 'latency-medium'
+  return 'latency-slow'
+}
 function modelPriceSummary(row: UsageLog) {
   const details = row.billingDetails
   if (!details) return '无价格快照'
@@ -149,7 +155,7 @@ onMounted(() => {
       <ResponsiveList>
         <template #desktop><el-table v-loading="loading" :data="usageItems" row-key="id">
         <el-table-column label="时间" min-width="230"><template #default="{ row }"><div class="time-cell"><strong>{{ formatTime(row.createdAt) }}</strong><small>{{ formatIPLocation(row.ipLocation) }}</small></div></template></el-table-column>
-        <el-table-column label="模型" min-width="160"><template #default="{ row }"><div class="request-cell"><strong>{{ row.requestedModel }}</strong><small>推理强度：{{ formatReasoningEffort(row.reasoningEffort) }}</small></div></template></el-table-column>
+        <el-table-column label="模型" min-width="160"><template #default="{ row }"><div class="request-cell"><strong>{{ row.requestedModel }}</strong><small>强度减少长度：{{ formatReasoningEffort(row.reasoningEffort) }}<template v-if="row.modelHealthScore != null"> · 健康分 <span :class="modelHealthTone(row.modelHealthScore)">{{ row.modelHealthScore }}</span></template></small></div></template></el-table-column>
         <el-table-column v-if="isAdmin" label="用户" min-width="130"><template #default="{ row }">{{ row.userName || `#${row.userId}` }}</template></el-table-column>
         <el-table-column :label="isAdmin ? '渠道 / 密钥' : '访问密钥'" min-width="190"><template #default="{ row }"><ChannelCredentialDisplay v-if="isAdmin" class="request-cell" :channel-name="row.channelName" :credential-index="row.channelCredentialIndex" :api-key-name="row.apiKeyName" /><div v-else class="request-cell"><span>{{ row.apiKeyName || '—' }}</span></div></template></el-table-column>
         <el-table-column label="状态" width="86"><template #default="{ row }"><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag></template></el-table-column>
@@ -162,7 +168,7 @@ onMounted(() => {
         <template #mobile><MobileRecordList :loading="loading">
           <article v-for="row in usageItems" :key="row.id" class="mobile-record">
             <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.requestedModel }}</strong><small>{{ formatTime(row.createdAt) }} · {{ formatIPLocation(row.ipLocation) }}</small></div><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag></div>
-            <dl class="mobile-record__facts"><div><dt>{{ isAdmin ? '渠道 / 密钥' : '访问密钥' }}</dt><dd><ChannelCredentialDisplay v-if="isAdmin" class="request-cell" :channel-name="row.channelName" :credential-index="row.channelCredentialIndex" :api-key-name="row.apiKeyName" /><span v-else>{{ row.apiKeyName || '—' }}</span></dd></div><div v-if="isAdmin"><dt>用户</dt><dd>{{ row.userName || `#${row.userId}` }}</dd></div><div><dt>Token</dt><dd class="mono">入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</dd></div><div><dt>请求缓存</dt><dd class="mono" :class="{ muted: row.cachedInputTokens == null }">{{ cacheStatus(row) }}</dd></div><div><dt>估算成本</dt><dd :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</dd></div><div><dt>{{ row.isStream ? '流式速度' : '响应耗时' }}</dt><dd>{{ row.isStream ? formatTokenSpeed(row.outputTokens, row.durationMs) : formatUsageDuration(row.durationMs) }}</dd></div><div><dt>推理强度</dt><dd>{{ formatReasoningEffort(row.reasoningEffort) }}</dd></div></dl>
+            <dl class="mobile-record__facts"><div><dt>{{ isAdmin ? '渠道 / 密钥' : '访问密钥' }}</dt><dd><ChannelCredentialDisplay v-if="isAdmin" class="request-cell" :channel-name="row.channelName" :credential-index="row.channelCredentialIndex" :api-key-name="row.apiKeyName" /><span v-else>{{ row.apiKeyName || '—' }}</span></dd></div><div v-if="isAdmin"><dt>用户</dt><dd>{{ row.userName || `#${row.userId}` }}</dd></div><div><dt>Token</dt><dd class="mono">入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</dd></div><div><dt>请求缓存</dt><dd class="mono" :class="{ muted: row.cachedInputTokens == null }">{{ cacheStatus(row) }}</dd></div><div><dt>估算成本</dt><dd :class="row.estimatedCost == null ? 'muted' : 'mono'">{{ formatCost(row.estimatedCost) }}</dd></div><div><dt>{{ row.isStream ? '流式速度' : '响应耗时' }}</dt><dd>{{ row.isStream ? formatTokenSpeed(row.outputTokens, row.durationMs) : formatUsageDuration(row.durationMs) }}</dd></div><div><dt>强度减少长度</dt><dd>{{ formatReasoningEffort(row.reasoningEffort) }}<template v-if="row.modelHealthScore != null"> · 健康分 {{ row.modelHealthScore }}</template></dd></div></dl>
             <div class="mobile-record__footer"><span class="muted">{{ row.isStream ? '流式响应' : '非流式响应' }}</span><el-button size="small" @click="openUsageDetail(row)">{{ isSuccessful(row) ? '查看计费详情' : '查看失败日志' }}</el-button></div>
           </article>
         </MobileRecordList></template>

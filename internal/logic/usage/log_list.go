@@ -113,6 +113,10 @@ func populateUsageLogReferences(ctx context.Context, items []LogView) error {
 	if err != nil {
 		return err
 	}
+	modelHealthScores, err := loadUsageModelHealthScores(ctx, items)
+	if err != nil {
+		return err
+	}
 	apiKeyNames, err := loadUsageAPIKeyNames(ctx, usageReferenceIDs(apiKeyIDSet))
 	if err != nil {
 		return err
@@ -128,6 +132,10 @@ func populateUsageLogReferences(ctx context.Context, items []LogView) error {
 			item.ChannelName = "已删除渠道"
 		}
 		item.ChannelCredentialIndex = credentialIndexes[item.ChannelCredentialId]
+		if score, ok := modelHealthScores[index]; ok {
+			scoreCopy := score
+			item.ModelHealthScore = &scoreCopy
+		}
 		item.APIKeyName = apiKeyNames[item.APIKeyId]
 		if item.APIKeyName == "" {
 			item.APIKeyName = "系统测试"
@@ -165,6 +173,45 @@ func loadUsageCredentialIndexes(ctx context.Context, channelIDs []uint64) (map[u
 		indexes[credential.Id] = perChannel[credential.ChannelId]
 	}
 	return indexes, nil
+}
+
+func loadUsageModelHealthScores(ctx context.Context, items []LogView) (map[int]int, error) {
+	type modelKey struct {
+		channelID    uint64
+		upstreamName string
+	}
+	channelIDSet := make(map[uint64]struct{}, len(items))
+	keySeen := make(map[modelKey]struct{}, len(items))
+	for _, item := range items {
+		if item.ChannelId == 0 || item.UpstreamModel == "" {
+			continue
+		}
+		channelIDSet[item.ChannelId] = struct{}{}
+		keySeen[modelKey{channelID: item.ChannelId, upstreamName: item.UpstreamModel}] = struct{}{}
+	}
+	if len(channelIDSet) == 0 {
+		return map[int]int{}, nil
+	}
+	channelIDs := usageReferenceIDs(channelIDSet)
+	columns := dao.ChannelModels.Columns()
+	models := make([]entity.ChannelModels, 0, len(channelIDSet))
+	if err := dao.ChannelModels.Ctx(ctx).
+		Fields(columns.Id, columns.ChannelId, columns.UpstreamName, columns.HealthScore).
+		WhereIn(columns.ChannelId, channelIDs).
+		Scan(&models); err != nil {
+		return nil, gerror.Wrap(err, "load usage log model health scores")
+	}
+	scoreByKey := make(map[modelKey]int, len(models))
+	for _, model := range models {
+		scoreByKey[modelKey{channelID: model.ChannelId, upstreamName: model.UpstreamName}] = model.HealthScore
+	}
+	result := make(map[int]int, len(items))
+	for index, item := range items {
+		if score, ok := scoreByKey[modelKey{channelID: item.ChannelId, upstreamName: item.UpstreamModel}]; ok {
+			result[index] = score
+		}
+	}
+	return result, nil
 }
 
 func loadUsageAPIKeyNames(ctx context.Context, apiKeyIDs []uint64) (map[uint64]string, error) {
