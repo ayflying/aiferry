@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -15,16 +16,33 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-// 模型健康评分常量：初始 100 分；真实转发成功 +1、模型测试成功 +5（上限 100）；
-// 失败 -20，扣到 0 自动禁用该模型。账号级错误（余额/配额/组织停用）直接禁用渠道。
+// 模型健康评分常量：初始 100 分；模型测试成功 +5（上限 100）；
+// 真实转发成功按响应耗时分级加分，越快加分越多；失败 -20，扣到 0 自动禁用该模型。
+// 账号级错误（余额/配额/组织停用）直接禁用渠道。
 const (
 	ModelHealthInitialScore   = 100
 	ModelHealthMaxScore       = 100
-	ModelHealthRelaySuccess   = 1
 	ModelHealthTestSuccess    = 5
 	ModelHealthFailurePenalty = 20
 	ModelHealthDisableScore   = 0
 )
+
+// ModelHealthRelaySuccessByLatency 返回真实转发成功后的健康分增量。
+// 以端到端上游响应耗时为依据：更快的模型恢复/积累信誉更快，慢模型仍可恢复但更慢。
+func ModelHealthRelaySuccessByLatency(latency time.Duration) int {
+	switch {
+	case latency <= time.Second:
+		return 5
+	case latency <= 3*time.Second:
+		return 4
+	case latency <= 10*time.Second:
+		return 3
+	case latency <= 30*time.Second:
+		return 2
+	default:
+		return 1
+	}
+}
 
 type ModelDisableInput struct {
 	ChannelID uint64
@@ -34,6 +52,7 @@ type ModelDisableInput struct {
 	Status    int
 	Message   string
 	TimedOut  bool
+	Latency   time.Duration
 }
 
 // IsAccountLevelFailure 判断错误是否属于账号级问题。这类问题影响渠道内所有模型，
@@ -113,7 +132,7 @@ func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.S
 	if input.TimedOut || input.Status >= 400 || (input.Status == 0 && input.Message != "") {
 		newScore -= ModelHealthFailurePenalty
 	} else {
-		newScore = min(newScore+ModelHealthRelaySuccess, ModelHealthMaxScore)
+		newScore = min(newScore+ModelHealthRelaySuccessByLatency(input.Latency), ModelHealthMaxScore)
 	}
 	newScore = max(newScore, ModelHealthDisableScore)
 	data := do.ChannelModels{HealthScore: newScore}

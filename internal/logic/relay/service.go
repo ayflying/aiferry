@@ -231,6 +231,14 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			}
 			if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut {
 				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
+				// 成功请求按上游响应速度加分：响应越快，模型健康分增长越多。
+				_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{
+					ChannelID: candidate.ChannelID,
+					ModelID:   candidate.ChannelModelID,
+					Source:    system.AutoDisableSourceRelayRequest,
+					Status:    result.status,
+					Latency:   result.latency,
+				})
 			}
 			if !isStream {
 				responseBody := result.body

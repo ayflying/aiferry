@@ -2,7 +2,29 @@ package system
 
 import (
 	"testing"
+	"time"
 )
+
+func TestModelHealthRelaySuccessByLatency(t *testing.T) {
+	cases := []struct {
+		name    string
+		latency time.Duration
+		want    int
+	}{
+		{name: "极快", latency: 500 * time.Millisecond, want: 5},
+		{name: "较快", latency: 2 * time.Second, want: 4},
+		{name: "正常", latency: 8 * time.Second, want: 3},
+		{name: "较慢", latency: 20 * time.Second, want: 2},
+		{name: "很慢", latency: 45 * time.Second, want: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ModelHealthRelaySuccessByLatency(tc.latency); got != tc.want {
+				t.Fatalf("ModelHealthRelaySuccessByLatency(%s) = %d, want %d", tc.latency, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestIsAccountLevelFailure(t *testing.T) {
 	cases := []struct {

@@ -115,6 +115,7 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 			Status:    input.Status,
 			Message:   input.Message,
 			TimedOut:  input.TimedOut,
+			Latency:   input.Latency,
 		})
 	}
 	if input.ChannelCredentialID > 0 {
