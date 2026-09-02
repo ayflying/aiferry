@@ -31,6 +31,8 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/responses", c.proxy("/responses"))
 	group.POST("/embeddings", c.proxy("/embeddings"))
 	group.POST("/images/generations", c.proxy("/images/generations"))
+	group.POST("/audio/speech", c.audioProxy("/audio/speech"))
+	group.POST("/audio/transcriptions", c.audioProxy("/audio/transcriptions"))
 	group.POST("/video/generations", c.videoGenerations)
 	group.GET("/video/generations/:task_id/content", c.videoTaskContent)
 	group.GET("/video/generations/:task_id", c.videoTask)
@@ -103,6 +105,51 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 				return
 			}
 			writeError(r, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		r.Exit()
+	}
+}
+
+// audioProxy 代理 /audio/speech 与 /audio/transcriptions：请求体同步缓冲，
+// 上游 2xx 响应（TTS 二进制音频 / ASR JSON 转写）由 relay 层直接写出客户端。
+func (c *Controller) audioProxy(endpoint string) ghttp.HandlerFunc {
+	return func(r *ghttp.Request) {
+		clientRelease, limited := c.admitClient(r)
+		if limited {
+			return
+		}
+		defer clientRelease()
+		key, ok := c.authenticate(r)
+		if !ok {
+			return
+		}
+		keyRelease, limited := c.admitAPIKey(r, key)
+		if limited {
+			return
+		}
+		defer keyRelease()
+		body, err := io.ReadAll(io.LimitReader(r.Body, (24<<20)+1))
+		if err != nil {
+			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+			return
+		}
+		var relayErr error
+		if endpoint == "/audio/transcriptions" {
+			relayErr = c.relay.HandleAudioTranscriptions(r.Context(), r.Header, clientIP(r), endpoint, body, r.Header.Get("Content-Type"), key, r.Response.RawWriter())
+		} else {
+			relayErr = c.relay.HandleAudioSpeech(r.Context(), r.Header, clientIP(r), endpoint, body, key, r.Response.RawWriter())
+		}
+		if relayErr != nil {
+			if relaysvc.IsRetryableAvailabilityError(relayErr) {
+				writeRetryableAvailabilityError(r)
+				return
+			}
+			if user.IsInsufficientBalance(relayErr) {
+				writeError(r, http.StatusPaymentRequired, "insufficient_balance", relayErr.Error())
+				return
+			}
+			writeError(r, http.StatusBadRequest, "invalid_request_error", relayErr.Error())
 			return
 		}
 		r.Exit()
