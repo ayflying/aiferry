@@ -3,9 +3,11 @@ package channel
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -120,14 +122,47 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	return result, nil
 }
 
+// buildTestRequest 按 payload 类型构造测试请求：asrMultipartRequest 走 multipart 表单，其余走 JSON。
+func buildTestRequest(ctx context.Context, url string, payload any) (*http.Request, error) {
+	if asr, ok := payload.(asrMultipartRequest); ok {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		_ = writer.WriteField("model", asr.Model)
+		part, err := writer.CreateFormFile("file", asr.Filename)
+		if err == nil {
+			_, err = part.Write(asr.Content)
+		}
+		if err == nil {
+			err = writer.Close()
+		}
+		if err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body.Bytes()))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		return req, nil
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
+
 func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
 	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream)
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(body))
+	req, err := buildTestRequest(ctx, baseURL+path, payload)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}
-	req.Header.Set("Content-Type", "application/json")
 	if err = s.setConfiguredHeaders(ctx, req, channel, credential.APIKeyCipher, typeConfig.Models.AuthType, typeConfig.Models.HeaderName, typeConfig.Models.HeaderPrefix); err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, err
 	}
@@ -212,6 +247,10 @@ func testEndpoints(endpoint, model string) []string {
 	}
 	modelName := strings.ToLower(strings.TrimSpace(model))
 	switch {
+	case containsAny(modelName, "tts", "speech"):
+		return []string{"tts"}
+	case containsAny(modelName, "asr", "whisper", "transcribe", "stt"):
+		return []string{"asr"}
 	case strings.Contains(modelName, "image"):
 		return []string{"images"}
 	case strings.Contains(modelName, "embedding"):
@@ -221,6 +260,15 @@ func testEndpoints(endpoint, model string) []string {
 	default:
 		return []string{"chat", "responses", "embeddings"}
 	}
+}
+
+func containsAny(model string, keywords ...string) bool {
+	for _, keyword := range keywords {
+		if strings.Contains(model, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func canTryAlternativeEndpoint(result TestResult) bool {
@@ -240,6 +288,15 @@ func canTryAlternativeEndpoint(result TestResult) bool {
 
 func testPayload(endpoint, model string, stream bool) (string, any, bool) {
 	switch endpoint {
+	case "tts":
+		return "/audio/speech", map[string]any{
+			"model":           model,
+			"input":           "模型测试",
+			"voice":           "alloy",
+			"response_format": "mp3",
+		}, false
+	case "asr":
+		return "/audio/transcriptions", asrTestPayload(model), false
 	case "responses":
 		payload := map[string]any{
 			"model":             model,
@@ -271,6 +328,50 @@ func testPayload(endpoint, model string, stream bool) (string, any, bool) {
 		}
 		return "/chat/completions", payload, stream
 	}
+}
+
+// asrMultipartRequest 描述 ASR 测试的 multipart 表单：最小合法 WAV + 模型名。
+type asrMultipartRequest struct {
+	Model    string
+	Filename string
+	Content  []byte
+}
+
+// asrTestPayload 构造最小 WAV（44 字节头 + 1 个静音采样），足以让上游校验通过并返回转写结果。
+func asrTestPayload(model string) asrMultipartRequest {
+	return asrMultipartRequest{
+		Model:    model,
+		Filename: "aiferry-test.wav",
+		Content:  minimalWAV(),
+	}
+}
+
+// minimalWAV 返回单声道 8kHz 16bit 的 1 采样静音 WAV。
+func minimalWAV() []byte {
+	const (
+		channels   = 1
+		sampleRate = 8000
+		bitsPerSam = 16
+	)
+	data := []byte{0x00, 0x00}
+	byteRate := sampleRate * channels * bitsPerSam / 8
+	blockAlign := channels * bitsPerSam / 8
+	buffer := bytes.NewBuffer(nil)
+	buffer.WriteString("RIFF")
+	binary.Write(buffer, binary.LittleEndian, uint32(36+len(data)))
+	buffer.WriteString("WAVE")
+	buffer.WriteString("fmt ")
+	binary.Write(buffer, binary.LittleEndian, uint32(16))
+	binary.Write(buffer, binary.LittleEndian, uint16(1))
+	binary.Write(buffer, binary.LittleEndian, uint16(channels))
+	binary.Write(buffer, binary.LittleEndian, uint32(sampleRate))
+	binary.Write(buffer, binary.LittleEndian, uint32(byteRate))
+	binary.Write(buffer, binary.LittleEndian, uint16(blockAlign))
+	binary.Write(buffer, binary.LittleEndian, uint16(bitsPerSam))
+	buffer.WriteString("data")
+	binary.Write(buffer, binary.LittleEndian, uint32(len(data)))
+	buffer.Write(data)
+	return buffer.Bytes()
 }
 
 func parseTestUsage(body []byte, stream bool) usage.TokenUsage {

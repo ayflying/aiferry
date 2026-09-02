@@ -20,6 +20,18 @@ func TestTestEndpointsUsesModelCapabilitiesForAutoMode(t *testing.T) {
 	if endpoints = testEndpoints("auto", "text-embedding-3-large"); len(endpoints) != 1 || endpoints[0] != "embeddings" {
 		t.Fatalf("embedding models should use the embeddings endpoint: %#v", endpoints)
 	}
+	if endpoints = testEndpoints("auto", "mimo-v2.5-tts"); len(endpoints) != 1 || endpoints[0] != "tts" {
+		t.Fatalf("TTS models should use the tts endpoint: %#v", endpoints)
+	}
+	if endpoints = testEndpoints("auto", "mimo-v2.5-tts-voicedesign"); len(endpoints) != 1 || endpoints[0] != "tts" {
+		t.Fatalf("TTS voicedesign variants should use the tts endpoint: %#v", endpoints)
+	}
+	if endpoints = testEndpoints("auto", "mimo-v2.5-asr"); len(endpoints) != 1 || endpoints[0] != "asr" {
+		t.Fatalf("ASR models should use the asr endpoint: %#v", endpoints)
+	}
+	if endpoints = testEndpoints("auto", "whisper-large-v3"); len(endpoints) != 1 || endpoints[0] != "asr" {
+		t.Fatalf("whisper models should use the asr endpoint: %#v", endpoints)
+	}
 	if endpoints = testEndpoints("responses", "gpt-5.6-luna"); len(endpoints) != 1 || endpoints[0] != "responses" {
 		t.Fatalf("explicit endpoint should not expand: %#v", endpoints)
 	}
@@ -69,6 +81,40 @@ func TestTestPayloadUsesImageGenerationEndpoint(t *testing.T) {
 	}
 	if value["model"] != "gpt-image-2" || value["prompt"] == "" || value["size"] != "1024x1024" {
 		t.Fatalf("unexpected image test payload: %#v", value)
+	}
+}
+
+func TestTestPayloadBuildsTTSAndASRRequests(t *testing.T) {
+	path, payload, streamed := testPayload("tts", "mimo-v2.5-tts", true)
+	if path != "/audio/speech" || streamed {
+		t.Fatalf("tts testing should use the non-streaming speech endpoint: path=%q streamed=%t", path, streamed)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err = json.Unmarshal(body, &value); err != nil {
+		t.Fatal(err)
+	}
+	if value["model"] != "mimo-v2.5-tts" || value["input"] == "" || value["voice"] == "" {
+		t.Fatalf("unexpected tts test payload: %#v", value)
+	}
+
+	path, asrPayload, streamed := testPayload("asr", "mimo-v2.5-asr", true)
+	if path != "/audio/transcriptions" || streamed {
+		t.Fatalf("asr testing should use the non-streaming transcriptions endpoint: path=%q streamed=%t", path, streamed)
+	}
+	request, ok := asrPayload.(asrMultipartRequest)
+	if !ok {
+		t.Fatalf("asr payload should be multipart: %#v", asrPayload)
+	}
+	if request.Model != "mimo-v2.5-asr" || len(request.Content) < 44 {
+		t.Fatalf("unexpected asr multipart payload: model=%q contentBytes=%d", request.Model, len(request.Content))
+	}
+	// 最小 WAV 必须是合法 RIFF/WAVE 头，上游才能解析。
+	if string(request.Content[0:4]) != "RIFF" || string(request.Content[8:12]) != "WAVE" {
+		t.Fatalf("asr sample is not a valid WAV: %x", request.Content[:12])
 	}
 }
 

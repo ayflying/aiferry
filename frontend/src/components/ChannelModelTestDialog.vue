@@ -38,6 +38,8 @@ const endpointOptions = [
   { label: 'Responses', value: 'responses' },
   { label: 'Embeddings', value: 'embeddings' },
   { label: '图像生成', value: 'images' },
+  { label: '语音合成 (TTS)', value: 'tts' },
+  { label: '语音识别 (ASR)', value: 'asr' },
 ]
 const enabledModels = computed(() => enabledChannelModels(models.value))
 const filteredModels = computed(() => {
