@@ -24,3 +24,4 @@ bin
 .env
 !manifest/config/
 !manifest/config/config.yaml
+web/
