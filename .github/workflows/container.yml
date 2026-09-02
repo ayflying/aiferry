@@ -7,8 +7,9 @@ on:
     tags:
       - "**"
 
+# 跳过版本号自动递增提交，避免循环触发
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -17,11 +18,31 @@ env:
 
 jobs:
   container:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
     environment: pro
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
+
+      - name: 自动递增版本号
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "VERSION 格式无效：$version" >&2
+            exit 1
+          fi
+          IFS='.' read -r major minor patch <<< "$version"
+          new_version="${major}.${minor}.$((patch + 1))"
+          echo "$new_version" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to ${new_version} [skip ci]"
+          git push
+          echo "版本已递增：${version} → ${new_version}"
 
       - name: 设置 Go
         uses: actions/setup-go@v5
