@@ -2,7 +2,9 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -93,7 +95,33 @@ func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Ser
 	return &sRelay{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc, locations: locationSvc}
 }
 
+// modelsListCacheKey 复用历史键名 aiferry:models:list 并嵌入路由版本号：
+// 所有渠道/模型/分组写路径都会递增 aiferry:routes:version，版本号变化后
+// 旧列表键自然失效。短 TTL 兜底防止版本号丢失。
+const modelsListCacheTTL = 60 * time.Second
+
 func (s *sRelay) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
+	version := s.routeCacheVersion(ctx)
+	cacheKey := fmt.Sprintf("aiferry:models:list:%d:%d", key.Id, version)
+	if cached, err := s.app.Redis.Get(ctx, cacheKey).Bytes(); err == nil {
+		var list ModelList
+		if json.Unmarshal(cached, &list) == nil {
+			return list, nil
+		}
+	}
+	list, err := s.computeModels(ctx, key)
+	if err != nil {
+		return ModelList{}, err
+	}
+	if encoded, err := json.Marshal(list); err == nil {
+		_ = s.app.Redis.Set(ctx, cacheKey, encoded, modelsListCacheTTL).Err()
+	}
+	return list, nil
+}
+
+// computeModels 逐模型解析可用渠道候选，得出该密钥可见的模型列表。
+// routeCached 命中缓存时每个模型只消耗 1 次 Redis 读，无数据库查询。
+func (s *sRelay) computeModels(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
 	modelColumns := dao.ChannelModels.Columns()
 	rows := make([]struct {
 		ChannelId  uint64 `orm:"channel_id"`
@@ -131,7 +159,7 @@ func (s *sRelay) Models(ctx context.Context, key apikey.AuthKey) (ModelList, err
 		if len(key.AllowedModels) > 0 && !containsString(key.AllowedModels, name) {
 			continue
 		}
-		candidates, routeErr := s.route(ctx, name, key)
+		candidates, routeErr := s.routeCached(ctx, name, key)
 		if routeErr != nil {
 			return ModelList{}, routeErr
 		}
@@ -172,7 +200,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	if !keyAllowsModel(key, requestedModel) {
 		return gerror.New("API key is not allowed to use model " + requestedModel)
 	}
-	candidates, err := s.route(ctx, requestedModel, key)
+	candidates, err := s.routeCached(ctx, requestedModel, key)
 	if err != nil {
 		return err
 	}

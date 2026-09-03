@@ -62,7 +62,7 @@ func (s *sRelay) createVideo(ctx context.Context, incomingHeaders http.Header, b
 	if !keyAllowsModel(key, requestedModel) {
 		return 0, nil, nil, gerror.New("API key is not allowed to use model " + requestedModel)
 	}
-	candidates, err := s.route(ctx, requestedModel, key)
+	candidates, err := s.routeCached(ctx, requestedModel, key)
 	if err != nil {
 		return 0, nil, nil, err
 	}

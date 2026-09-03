@@ -253,7 +253,7 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 	if !keyAllowsModel(key, requestedModel) {
 		return gerror.New("API key is not allowed to use model " + requestedModel)
 	}
-	candidates, err := s.route(ctx, requestedModel, key)
+	candidates, err := s.routeCached(ctx, requestedModel, key)
 	if err != nil {
 		return err
 	}
