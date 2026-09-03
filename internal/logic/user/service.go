@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/mail"
 	"strings"
@@ -179,7 +180,23 @@ func (s *sUser) UpdateBalance(ctx context.Context, id uint64, balance float64) (
 	return s.Profile(ctx, id)
 }
 
+// 余额存在性缓存：计费模型的每个转发请求都会执行一次 CheckBalance 的
+// COUNT 查询，高并发下压力显著。这里用 2 秒 TTL 的 Redis 标记缓存"用户
+// 余额>0"的判定结果；余额扣减与充值写路径会立即失效缓存。真正的防负
+// 余额由 Debit 的 SELECT ... FOR UPDATE 事务兜底，缓存窗口内最坏情况是
+// 用户余额刚耗尽后仍可再发 2 秒内的少量请求（随后在扣费事务中被拒），
+// 属可接受的准确性权衡。
+const balanceCacheTTL = 2 * time.Second
+
+func balanceCacheKey(id uint64) string {
+	return fmt.Sprintf("aiferry:balance-ok:%d", id)
+}
+
 func (s *sUser) CheckBalance(ctx context.Context, id uint64) error {
+	exists, err := s.app.Redis.Exists(ctx, balanceCacheKey(id)).Result()
+	if err == nil && exists > 0 {
+		return nil
+	}
 	count, err := dao.Users.Ctx(ctx).
 		Where(dao.Users.Columns().Id, id).
 		WhereGT(dao.Users.Columns().Balance, 0).
@@ -190,7 +207,12 @@ func (s *sUser) CheckBalance(ctx context.Context, id uint64) error {
 	if count == 0 {
 		return ErrInsufficientBalance
 	}
+	_ = s.app.Redis.Set(ctx, balanceCacheKey(id), 1, balanceCacheTTL).Err()
 	return nil
+}
+
+func (s *sUser) invalidateBalanceCache(ctx context.Context, id uint64) {
+	_ = s.app.Redis.Del(ctx, balanceCacheKey(id)).Err()
 }
 
 func (s *sUser) Debit(ctx context.Context, id uint64, amount decimal.Decimal) error {
@@ -251,6 +273,7 @@ func (s *sUser) Credit(ctx context.Context, id uint64, amount decimal.Decimal) e
 			Update(); err != nil {
 			return gerror.Wrap(err, "credit user balance")
 		}
+		s.invalidateBalanceCache(txCtx, account.Id)
 		return nil
 	})
 }

@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	mathrand "math/rand/v2"
 	"strings"
 	"time"
@@ -98,6 +100,7 @@ func (s *sChannel) createCredentialTx(ctx context.Context, channelID uint64, val
 	if _, err = dao.ChannelCredentials.Ctx(ctx).Data(data).Insert(); err != nil {
 		return gerror.Wrap(err, "create initial channel credential")
 	}
+	s.invalidateCredentialCache(ctx)
 	return nil
 }
 
@@ -145,8 +148,7 @@ func (s *sChannel) SetCredentialStatus(ctx context.Context, channelID, credentia
 	return s.invalidateRoutes(ctx)
 }
 
-func (s *sChannel) DeleteCredential(ctx context.Context, channelID, credentialID uint64) error {
-	credential, err := s.credentialByID(ctx, channelID, credentialID)
+func (s *sChannel) DeleteCredential(ctx context.Context, channelID, credentialID uint64) error {	credential, err := s.credentialByID(ctx, channelID, credentialID)
 	if err != nil {
 		return err
 	}
@@ -175,6 +177,41 @@ func isMissingCredentialBindingError(err error) bool {
 	return errors.Is(err, sql.ErrNoRows)
 }
 
+// 凭证绑定缓存：SelectCredential 首次尝试（excluded==nil）会查询
+// api_key_channel_credentials 确定密钥的固定绑定凭证。绑定关系本身只在
+// 首次使用或重试切换时变化，属低频写，用 60 秒 TTL 缓存消除热路径查询。
+// 绑定写入路径（bindFirstCredential/replaceCredentialBinding）会主动失效。
+const credentialBindingCacheTTL = 60 * time.Second
+
+func credentialBindingCacheKey(apiKeyID, channelID uint64) string {
+	return fmt.Sprintf("aiferry:credential-binding:%d:%d", apiKeyID, channelID)
+}
+
+func (s *sChannel) readCredentialBindingCache(ctx context.Context, apiKeyID, channelID uint64) (entity.ApiKeyChannelCredentials, bool) {
+	encoded, err := s.app.Redis.Get(ctx, credentialBindingCacheKey(apiKeyID, channelID)).Bytes()
+	if err != nil {
+		return entity.ApiKeyChannelCredentials{}, false
+	}
+	var binding entity.ApiKeyChannelCredentials
+	if err := json.Unmarshal(encoded, &binding); err != nil || binding.ApiKeyId != apiKeyID {
+		_ = s.app.Redis.Del(ctx, credentialBindingCacheKey(apiKeyID, channelID)).Err()
+		return entity.ApiKeyChannelCredentials{}, false
+	}
+	return binding, true
+}
+
+func (s *sChannel) writeCredentialBindingCache(ctx context.Context, apiKeyID, channelID uint64, binding entity.ApiKeyChannelCredentials) {
+	encoded, err := json.Marshal(binding)
+	if err != nil {
+		return
+	}
+	_ = s.app.Redis.Set(ctx, credentialBindingCacheKey(apiKeyID, channelID), encoded, credentialBindingCacheTTL).Err()
+}
+
+func (s *sChannel) invalidateCredentialBinding(ctx context.Context, apiKeyID, channelID uint64) {
+	_ = s.app.Redis.Del(ctx, credentialBindingCacheKey(apiKeyID, channelID)).Err()
+}
+
 func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID uint64, excluded map[uint64]struct{}) (RouteCredential, error) {
 	credentials, err := s.availableCredentials(ctx, channelID, excluded)
 	if err != nil {
@@ -185,8 +222,16 @@ func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID uin
 	}
 	var binding entity.ApiKeyChannelCredentials
 	if excluded == nil {
-		if err = dao.ApiKeyChannelCredentials.Ctx(ctx).Where(do.ApiKeyChannelCredentials{ApiKeyId: apiKeyID, ChannelId: channelID}).Scan(&binding); err != nil && !isMissingCredentialBindingError(err) {
-			return RouteCredential{}, gerror.Wrap(err, "load channel credential binding")
+		cached, cachedOK := s.readCredentialBindingCache(ctx, apiKeyID, channelID)
+		if cachedOK {
+			binding = cached
+		} else {
+			if err = dao.ApiKeyChannelCredentials.Ctx(ctx).Where(do.ApiKeyChannelCredentials{ApiKeyId: apiKeyID, ChannelId: channelID}).Scan(&binding); err != nil && !isMissingCredentialBindingError(err) {
+				return RouteCredential{}, gerror.Wrap(err, "load channel credential binding")
+			}
+			if binding.ChannelCredentialId > 0 {
+				s.writeCredentialBindingCache(ctx, apiKeyID, channelID, binding)
+			}
 		}
 		if binding.ChannelCredentialId > 0 {
 			for _, credential := range credentials {
@@ -229,12 +274,73 @@ func (s *sChannel) CredentialForTest(ctx context.Context, channelID, credentialI
 
 func (s *sChannel) clearCredentialTransient(ctx context.Context, credentialID uint64) {
 	_ = s.app.Redis.Del(ctx, system.CredentialFailureKey(credentialID), system.CredentialCooldownKey(credentialID)).Err()
+	s.invalidateCredentialCache(ctx)
+}
+
+// 凭证可用性缓存：channel_credentials 表的可用密钥池在稳定状态下很少变化，
+// 而转发热路径每个候选渠道都会调用 availableCredentials 扫描一次数据库。
+// 采用"版本号嵌入缓存键"失效策略（与路由缓存一致）：写路径递增
+// aiferry:credentials:version，版本号变化后旧键自然失效；TTL 仅作兜底。
+// 缓存只存 status=1 的原始凭证行，冷却排除与重试排除（excluded）在每次
+// 请求时实时执行，保证禁用恢复与负载均衡行为不变。
+const (
+	credentialCacheVersionKey = "aiferry:credentials:version"
+	credentialCacheTTL        = 5 * time.Minute
+)
+
+type credentialCacheEntry struct {
+	Credentials []credentialRow `json:"credentials"`
+}
+
+func credentialCacheKey(channelID uint64, version int64) string {
+	return fmt.Sprintf("aiferry:credentials:%d:%d", channelID, version)
+}
+
+func (s *sChannel) credentialCacheVersion(ctx context.Context) int64 {
+	version, err := s.app.Redis.Get(ctx, credentialCacheVersionKey).Int64()
+	if err != nil {
+		return 0
+	}
+	return version
+}
+
+func (s *sChannel) invalidateCredentialCache(ctx context.Context) {
+	_ = s.app.Redis.Incr(ctx, credentialCacheVersionKey).Err()
+}
+
+func (s *sChannel) readCredentialCache(ctx context.Context, channelID uint64, version int64) ([]credentialRow, bool) {
+	encoded, err := s.app.Redis.Get(ctx, credentialCacheKey(channelID, version)).Bytes()
+	if err != nil {
+		return nil, false
+	}
+	var entry credentialCacheEntry
+	if err := json.Unmarshal(encoded, &entry); err != nil {
+		_ = s.app.Redis.Del(ctx, credentialCacheKey(channelID, version)).Err()
+		return nil, false
+	}
+	return entry.Credentials, true
+}
+
+func (s *sChannel) writeCredentialCache(ctx context.Context, channelID uint64, version int64, rows []credentialRow) {
+	if len(rows) == 0 {
+		return
+	}
+	encoded, err := json.Marshal(credentialCacheEntry{Credentials: rows})
+	if err != nil {
+		return
+	}
+	_ = s.app.Redis.Set(ctx, credentialCacheKey(channelID, version), encoded, credentialCacheTTL).Err()
 }
 
 func (s *sChannel) availableCredentials(ctx context.Context, channelID uint64, excluded map[uint64]struct{}) ([]credentialRow, error) {
-	rows := make([]credentialRow, 0)
-	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID, Status: 1}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
-		return nil, gerror.Wrap(err, "list available channel credentials")
+	version := s.credentialCacheVersion(ctx)
+	rows, ok := s.readCredentialCache(ctx, channelID, version)
+	if !ok {
+		rows = make([]credentialRow, 0)
+		if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID, Status: 1}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
+			return nil, gerror.Wrap(err, "list available channel credentials")
+		}
+		s.writeCredentialCache(ctx, channelID, version, rows)
 	}
 	available := make([]credentialRow, 0, len(rows))
 	for _, row := range rows {
@@ -268,6 +374,9 @@ func (s *sChannel) bindFirstCredential(ctx context.Context, apiKeyID, channelID 
 		return credentialRow{}, gerror.Wrap(err, "create channel credential binding")
 	}
 	if inserted, _ := result.RowsAffected(); inserted > 0 {
+		s.writeCredentialBindingCache(ctx, apiKeyID, channelID, entity.ApiKeyChannelCredentials{
+			ApiKeyId: apiKeyID, ChannelId: channelID, ChannelCredentialId: selected.Id,
+		})
 		return selected, nil
 	}
 
@@ -275,6 +384,7 @@ func (s *sChannel) bindFirstCredential(ctx context.Context, apiKeyID, channelID 
 	if err = dao.ApiKeyChannelCredentials.Ctx(ctx).Where(do.ApiKeyChannelCredentials{ApiKeyId: apiKeyID, ChannelId: channelID}).Scan(&binding); err != nil {
 		return credentialRow{}, gerror.Wrap(err, "load concurrent channel credential binding")
 	}
+	s.writeCredentialBindingCache(ctx, apiKeyID, channelID, binding)
 	for _, credential := range available {
 		if credential.Id == binding.ChannelCredentialId {
 			return credential, nil
@@ -293,6 +403,9 @@ func (s *sChannel) replaceCredentialBinding(ctx context.Context, apiKeyID, chann
 		Update(); err != nil {
 		return gerror.Wrap(err, "update channel credential binding")
 	}
+	s.writeCredentialBindingCache(ctx, apiKeyID, channelID, entity.ApiKeyChannelCredentials{
+		ApiKeyId: apiKeyID, ChannelId: channelID, ChannelCredentialId: credentialID,
+	})
 	return nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/redis/go-redis/v9"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/config"
@@ -139,10 +140,11 @@ type View struct {
 
 type sChannelType struct {
 	builtins *config.BuiltinRegistry
+	redis    *redis.Client
 }
 
-func New(builtins *config.BuiltinRegistry) *sChannelType {
-	return &sChannelType{builtins: builtins}
+func New(builtins *config.BuiltinRegistry, redisClient *redis.Client) *sChannelType {
+	return &sChannelType{builtins: builtins, redis: redisClient}
 }
 
 func ValidateBuiltins(builtins *config.BuiltinRegistry) error {
@@ -240,11 +242,37 @@ func (s *sChannelType) Get(ctx context.Context, id uint64) (entity.ChannelTypes,
 	return row, config, err
 }
 
+// 自定义渠道类型缓存：非内置类型 GetByCode 默认查库，而音频转发热路径
+// （AudioAdapterFor）每请求都会调用。自定义类型极少变更，用 5 分钟 TTL
+// 缓存；写路径（Create/Update/SetStatus/Delete）主动失效，TTL 兜底。
+const customTypeCacheTTL = 5 * time.Minute
+
+func customTypeCacheKey(code string) string {
+	return "aiferry:channel-type:" + code
+}
+
+func (s *sChannelType) invalidateCustomType(ctx context.Context, code string) {
+	if s.redis == nil {
+		return
+	}
+	_ = s.redis.Del(ctx, customTypeCacheKey(code)).Err()
+}
+
 func (s *sChannelType) GetByCode(ctx context.Context, code string) (entity.ChannelTypes, Config, error) {
 	if item, exists := s.builtins.ChannelTypeByCode(code); exists {
 		row := builtinEntity(item)
 		parsed, err := ParseConfig([]byte(row.ConfigJson))
 		return row, parsed, err
+	}
+	if s.redis != nil {
+		if encoded, err := s.redis.Get(ctx, customTypeCacheKey(code)).Bytes(); err == nil {
+			var row entity.ChannelTypes
+			if err := json.Unmarshal(encoded, &row); err == nil && row.Id != 0 {
+				config, parseErr := ParseConfig([]byte(row.ConfigJson))
+				return row, config, parseErr
+			}
+			_ = s.redis.Del(ctx, customTypeCacheKey(code)).Err()
+		}
 	}
 	var row entity.ChannelTypes
 	if err := dao.ChannelTypes.Ctx(ctx).
@@ -257,7 +285,15 @@ func (s *sChannelType) GetByCode(ctx context.Context, code string) (entity.Chann
 		return row, Config{}, gerror.New("channel type not found")
 	}
 	config, err := ParseConfig([]byte(row.ConfigJson))
-	return row, config, err
+	if err != nil {
+		return row, Config{}, err
+	}
+	if s.redis != nil {
+		if encoded, err := json.Marshal(row); err == nil {
+			_ = s.redis.Set(ctx, customTypeCacheKey(code), encoded, customTypeCacheTTL).Err()
+		}
+	}
+	return row, config, nil
 }
 
 func (s *sChannelType) Create(ctx context.Context, input adminapi.ChannelTypeInput) (uint64, error) {
@@ -322,6 +358,7 @@ func (s *sChannelType) SetStatus(ctx context.Context, id uint64, status int) err
 	if _, err := dao.ChannelTypes.Ctx(ctx).Where(dao.ChannelTypes.Columns().Id, id).Data(do.ChannelTypes{Status: normalizeStatus(status)}).Update(); err != nil {
 		return gerror.Wrap(err, "update channel type status")
 	}
+	s.invalidateCustomType(ctx, current.Code)
 	return nil
 }
 

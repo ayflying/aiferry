@@ -12,7 +12,7 @@ func TestGetByCodeUsesBuiltinConfiguration(t *testing.T) {
 	builtins := &config.BuiltinRegistry{ChannelTypes: []config.BuiltinChannelType{{
 		ID: 42, Name: "OpenAI", Code: "openai", Config: json.RawMessage(`{"models":{"path":"/models","idPath":"id"},"costs":{"adapter":"none"}}`),
 	}}}
-	row, parsed, err := New(builtins).GetByCode(context.Background(), "openai")
+	row, parsed, err := New(builtins, nil).GetByCode(context.Background(), "openai")
 	if err != nil {
 		t.Fatal(err)
 	}

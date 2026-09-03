@@ -48,7 +48,7 @@ func TestChannelGroupMembershipRoundTripIntegration(t *testing.T) {
 	}
 	channelIDs := []uint64{channels[0].ID, channels[1].ID}
 
-	service := New()
+	service := New(nil)
 	input := adminapi.ChannelGroupInput{
 		Name:        "integration channel group",
 		Code:        fmt.Sprintf("integration-%d", time.Now().UnixNano()),

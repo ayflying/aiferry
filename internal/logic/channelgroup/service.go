@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/redis/go-redis/v9"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
@@ -29,9 +30,21 @@ type View struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
-type sChannelGroup struct{}
+type sChannelGroup struct {
+	redis *redis.Client
+}
 
-func New() *sChannelGroup { return &sChannelGroup{} }
+func New(redisClient *redis.Client) *sChannelGroup { return &sChannelGroup{redis: redisClient} }
+
+// invalidateRoutes 递增路由缓存版本号。路由候选缓存中包含渠道分组 ID 与
+// 分组状态（channelGroupIDs），分组创建/更新/删除/成员变更后必须失效，
+// 否则转发侧最长 30 分钟内仍使用旧分组归属路由请求。
+func (s *sChannelGroup) invalidateRoutes(ctx context.Context) {
+	if s.redis == nil {
+		return
+	}
+	_ = s.redis.Incr(ctx, "aiferry:routes:version").Err()
+}
 
 func (s *sChannelGroup) List(ctx context.Context) ([]View, error) {
 	var rows []entity.ChannelGroups
@@ -79,7 +92,7 @@ func (s *sChannelGroup) Update(ctx context.Context, id uint64, input adminapi.Ch
 	if strings.TrimSpace(input.Code) != current.Code {
 		return gerror.New("channel group code cannot be changed")
 	}
-	return dao.ChannelGroups.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+	err := dao.ChannelGroups.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
 		if _, err := dao.ChannelGroups.Ctx(txCtx).Where(dao.ChannelGroups.Columns().Id, id).Data(do.ChannelGroups{
 			Name: strings.TrimSpace(input.Name), Description: strings.TrimSpace(input.Description), Status: normalizeStatus(input.Status),
 		}).Update(); err != nil {
@@ -87,6 +100,10 @@ func (s *sChannelGroup) Update(ctx context.Context, id uint64, input adminapi.Ch
 		}
 		return s.replaceMembers(txCtx, id, input.ChannelIDs)
 	})
+	if err == nil {
+		s.invalidateRoutes(ctx)
+	}
+	return err
 }
 
 func (s *sChannelGroup) Delete(ctx context.Context, id uint64) error {
@@ -133,6 +150,7 @@ func (s *sChannelGroup) SetChannelIDs(ctx context.Context, channelID uint64, gro
 			return gerror.Wrap(err, "add channel group membership")
 		}
 	}
+	s.invalidateRoutes(ctx)
 	return nil
 }
 
