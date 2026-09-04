@@ -17,8 +17,24 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
 
-func (s *sChannel) syncPricesFromPayload(ctx context.Context, endpoint string, config channeltype.PricingConfig, body []byte) (int, error) {
-	rules, err := syncedRulesFromJSON(body, config)
+// matchModelsForRule 把上游价格条目匹配到本地模型。先按完整名称精确匹配
+// （UpstreamName 或 PublicName）；未命中且名称带厂商前缀（如
+// z-ai/glm-5.3-flash）时，退回用最后一个 / 之后的后缀匹配。上游价格源
+// 普遍带 org/ 前缀而本地模型名通常没有，精确匹配失败时按后缀兜底即可
+// 命中 glm-5.3-flash 这类本地模型。
+func matchModelsForRule(byName map[string][]entity.ChannelModels, ruleModel string) []entity.ChannelModels {
+	if models, exists := byName[ruleModel]; exists {
+		return models
+	}
+	if slash := strings.LastIndex(ruleModel, "/"); slash >= 0 {
+		if suffix := strings.TrimSpace(ruleModel[slash+1:]); suffix != "" {
+			return byName[suffix]
+		}
+	}
+	return nil
+}
+
+func (s *sChannel) syncPricesFromPayload(ctx context.Context, endpoint string, config channeltype.PricingConfig, body []byte) (int, error) {	rules, err := syncedRulesFromJSON(body, config)
 	if err != nil {
 		return 0, err
 	}
@@ -42,7 +58,7 @@ func (s *sChannel) saveSyncedPriceRules(ctx context.Context, endpoint string, ru
 	canonicalModelIDs := make(map[string]uint64)
 	for _, rule := range rules {
 		seen := make(map[string]struct{})
-		for _, model := range byName[rule.Model] {
+		for _, model := range matchModelsForRule(byName, rule.Model) {
 			if _, exists := seen[model.PublicName]; exists {
 				continue
 			}
