@@ -3,6 +3,7 @@ package system
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -45,14 +46,25 @@ func ModelHealthRelaySuccessByLatency(latency time.Duration) int {
 }
 
 type ModelDisableInput struct {
-	ChannelID uint64
-	ModelID   uint64
-	ModelName string
-	Source    string
-	Status    int
-	Message   string
-	TimedOut  bool
-	Latency   time.Duration
+	ChannelID           uint64
+	ChannelCredentialID uint64
+	ModelID             uint64
+	ModelName           string
+	Source              string
+	Status              int
+	Message             string
+	TimedOut            bool
+	Latency             time.Duration
+}
+
+// isCredentialScopedFailure 判断失败是否可归因于单个密钥/账号级问题（余额耗尽、配额用尽、鉴权失败）。
+// 这类失败换一把密钥即可恢复，不应拖垮模型健康分。HTTP 402 几乎总是"密钥没费用"，
+// 但上游文案千差万别，单独按状态码兜底。
+func isCredentialScopedFailure(input ModelDisableInput) bool {
+	if input.Status == http.StatusPaymentRequired {
+		return true
+	}
+	return IsAccountLevelFailure(input.Message)
 }
 
 // IsAccountLevelFailure 判断错误是否属于账号级问题。这类问题影响渠道内所有模型，
@@ -74,9 +86,21 @@ func IsAccountLevelFailure(message string) bool {
 		"usage limit exceeded",
 		"billing",
 		"arrears",
+		"payment required",
+		"insufficient balance",
+		"insufficient credit",
+		"quota exceeded",
+		"quota exhausted",
+		"exceeded your quota",
 		"已欠费",
+		"欠费",
 		"余额不足",
+		"余额耗尽",
 		"账户余额",
+		"额度不足",
+		"额度已用尽",
+		"额度用尽",
+		"无可用额度",
 		"令牌无效",
 		"令牌已过期",
 		"无效的令牌",
@@ -138,6 +162,18 @@ func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.S
 	data := do.ChannelModels{HealthScore: newScore}
 	disabled := false
 	if newScore <= ModelHealthDisableScore && model.AutoDisabledAt == nil {
+		// 密钥级失败（欠费、配额用尽、鉴权失败）扣分扣到 0 时，若渠道排除当前失败密钥
+		// 后仍有其他可用密钥，说明模型本身没问题：改为立即禁用失败密钥并把模型分数
+		// 重置回初始值，而不是禁用模型导致整个渠道的模型被逐个拖垮。
+		if input.ChannelCredentialID > 0 && isCredentialScopedFailure(input) {
+			diverted, err := s.divertModelDisableToCredential(ctx, settings, model, input)
+			if err != nil {
+				return false, err
+			}
+			if diverted {
+				return true, nil
+			}
+		}
 		disabled = true
 		reason := modelDisableReason(input)
 		source := autoDisableSource(input.Source)
@@ -253,4 +289,74 @@ func (s *sSystem) scheduleChannelCloseIfAllModelsDown(ctx context.Context, chann
 func (s *sSystem) clearModelRouteCache(ctx context.Context) {
 	_ = s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()
 	_ = s.app.Redis.Del(ctx, "aiferry:models:list").Err()
+}
+
+// divertModelDisableToCredential 将模型禁用转移为密钥禁用：渠道排除当前失败密钥后
+// 仍存在可用密钥时，立即禁用失败密钥并把模型健康分重置回初始值。
+// 返回 true 表示已完成转移，调用方不再禁用模型。
+func (s *sSystem) divertModelDisableToCredential(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, model entity.ChannelModels, input ModelDisableInput) (bool, error) {
+	hasSpare, err := s.hasAvailableCredentialExcept(ctx, input.ChannelID, input.ChannelCredentialID)
+	if err != nil {
+		return false, err
+	}
+	if !hasSpare {
+		return false, nil
+	}
+	var channel entity.Channels
+	if err := dao.Channels.Ctx(ctx).Where(do.Channels{Id: input.ChannelID}).Scan(&channel); err != nil {
+		return false, gerror.Wrap(err, "load channel for credential divert")
+	}
+	if channel.Id == 0 {
+		return false, nil
+	}
+	var credential entity.ChannelCredentials
+	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: input.ChannelCredentialID}).Scan(&credential); err != nil {
+		return false, gerror.Wrap(err, "load channel credential for credential divert")
+	}
+	if credential.Id == 0 {
+		return false, nil
+	}
+	if credential.Status == 1 {
+		// 扣分到 0 本身已代表该密钥连续多次失败，直接禁用，不再走阈值计数。
+		if _, err := s.disableCredentialNow(ctx, channel, settings, credential, AutoDisableInput{
+			ChannelID:           input.ChannelID,
+			ChannelCredentialID: input.ChannelCredentialID,
+			ChannelModelID:      input.ModelID,
+			Source:              input.Source,
+			Status:              input.Status,
+			Latency:             input.Latency,
+			Message:             input.Message,
+			TimedOut:            input.TimedOut,
+		}); err != nil {
+			return false, err
+		}
+	}
+	if _, err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: model.Id}).Data(do.ChannelModels{
+		HealthScore:        ModelHealthInitialScore,
+		AutoDisabledAt:     gdb.Raw("NULL"),
+		AutoDisabledReason: gdb.Raw("NULL"),
+		AutoDisabledSource: gdb.Raw("NULL"),
+	}).Update(); err != nil {
+		return false, gerror.Wrap(err, "reset model health score after credential divert")
+	}
+	s.clearModelRouteCache(ctx)
+	return true, nil
+}
+
+// hasAvailableCredentialExcept 判断渠道是否存在指定密钥之外的其他可用密钥（启用且不在冷却中）。
+func (s *sSystem) hasAvailableCredentialExcept(ctx context.Context, channelID, credentialID uint64) (bool, error) {
+	rows := make([]entity.ChannelCredentials, 0)
+	if err := dao.ChannelCredentials.Ctx(ctx).
+		Where(do.ChannelCredentials{ChannelId: channelID, Status: 1}).
+		Where(dao.ChannelCredentials.Columns().Id+" <> ?", credentialID).
+		Scan(&rows); err != nil {
+		return false, gerror.Wrap(err, "list spare channel credentials")
+	}
+	for _, row := range rows {
+		if cooling, _ := s.app.Redis.Exists(ctx, CredentialCooldownKey(row.Id)).Result(); cooling > 0 {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
 }

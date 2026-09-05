@@ -109,13 +109,14 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 	// 账号级失败（余额耗尽、配额用尽、组织停用等）影响整个渠道，继续走渠道禁用。
 	if input.ChannelModelID > 0 && !IsAccountLevelFailure(input.Message) {
 		return s.ApplyModelHealthScore(ctx, settings, ModelDisableInput{
-			ChannelID: input.ChannelID,
-			ModelID:   input.ChannelModelID,
-			Source:    input.Source,
-			Status:    input.Status,
-			Message:   input.Message,
-			TimedOut:  input.TimedOut,
-			Latency:   input.Latency,
+			ChannelID:           input.ChannelID,
+			ChannelCredentialID: input.ChannelCredentialID,
+			ModelID:             input.ChannelModelID,
+			Source:              input.Source,
+			Status:              input.Status,
+			Message:             input.Message,
+			TimedOut:            input.TimedOut,
+			Latency:             input.Latency,
 		})
 	}
 	if input.ChannelCredentialID > 0 {
@@ -175,6 +176,12 @@ func (s *sSystem) disableCredential(ctx context.Context, channel entity.Channels
 	if !matched {
 		return false, nil
 	}
+	return s.disableCredentialNow(ctx, channel, settings, credential, input)
+}
+
+// disableCredentialNow 立即禁用渠道密钥（跳过连续失败阈值计数）。
+// 供两条路径复用：达到失败阈值后的常规禁用、模型扣分到 0 时密钥级失败的转移禁用。
+func (s *sSystem) disableCredentialNow(ctx context.Context, channel entity.Channels, settings adminapi.SystemResilienceSettingsInput, credential entity.ChannelCredentials, input AutoDisableInput) (bool, error) {
 	reason := autoDisableReason(input)
 	source := autoDisableSource(input.Source)
 	data := do.ChannelCredentials{

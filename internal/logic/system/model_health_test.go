@@ -37,6 +37,10 @@ func TestIsAccountLevelFailure(t *testing.T) {
 		{name: "组织停用", message: "This organization has been disabled.", want: true},
 		{name: "令牌无效", message: "无效的令牌（请求头已经携带令牌）", want: true},
 		{name: "无效API密钥", message: "Incorrect API key provided", want: true},
+		{name: "余额不足英文变体", message: "Error: Insufficient balance, please recharge", want: true},
+		{name: "配额耗尽变体", message: "quota exhausted for this token", want: true},
+		{name: "额度已用尽", message: "该令牌额度已用尽，请充值后重试", want: true},
+		{name: "欠费提示", message: "账户已欠费，请及时充值", want: true},
 		{name: "普通模型错误", message: "model not found for this endpoint", want: false},
 		{name: "上游超时", message: "context deadline exceeded", want: false},
 		{name: "服务器错误", message: "500 Internal Server Error", want: false},
@@ -46,6 +50,30 @@ func TestIsAccountLevelFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := IsAccountLevelFailure(tc.message); got != tc.want {
 				t.Fatalf("IsAccountLevelFailure(%q) = %v, want %v", tc.message, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsCredentialScopedFailure(t *testing.T) {
+	cases := []struct {
+		name  string
+		input ModelDisableInput
+		want  bool
+	}{
+		{name: "余额不足", input: ModelDisableInput{Message: "insufficient_quota"}, want: true},
+		{name: "欠费变体", input: ModelDisableInput{Message: "该令牌额度已用尽"}, want: true},
+		{name: "402状态码", input: ModelDisableInput{Status: 402, Message: "402 Payment Required"}, want: true},
+		{name: "402未知文案", input: ModelDisableInput{Status: 402, Message: "upstream billing error"}, want: true},
+		{name: "模型不存在", input: ModelDisableInput{Status: 404, Message: "model not found"}, want: false},
+		{name: "限流", input: ModelDisableInput{Status: 429, Message: "rate limit exceeded"}, want: false},
+		{name: "网关错误", input: ModelDisableInput{Status: 502, Message: "bad gateway"}, want: false},
+		{name: "空输入", input: ModelDisableInput{}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isCredentialScopedFailure(tc.input); got != tc.want {
+				t.Fatalf("isCredentialScopedFailure(%+v) = %v, want %v", tc.input, got, tc.want)
 			}
 		})
 	}
