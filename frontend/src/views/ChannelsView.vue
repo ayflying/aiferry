@@ -48,6 +48,7 @@ const credentialsOpen = ref(false)
 const credentialChannel = ref<Channel>()
 const healthCheckModels = ref<ChannelModel[]>([])
 const queryingCostID = ref<number>()
+const queryingQuotaID = ref<number>()
 const channelStatusSaving = ref<Record<number, boolean>>({})
 const quotaOpen = ref(false)
 const quotaLoading = ref(false)
@@ -325,6 +326,7 @@ async function queryCost(channel: Channel) {
 
 async function queryQuota(channel: Channel, forceRefresh = false) {
   if (quotaLoading.value) return
+  queryingQuotaID.value = channel.id
   quotaChannel.value = channel
   quotaOpen.value = true
   quotaLoading.value = true
@@ -336,6 +338,7 @@ async function queryQuota(channel: Channel, forceRefresh = false) {
     quotaError.value = error instanceof Error ? error.message : String(error)
   } finally {
     quotaLoading.value = false
+    queryingQuotaID.value = undefined
   }
 }
 
@@ -372,7 +375,7 @@ watch(activeTab, (tab) => {
 
 <template>
   <div class="page-stack">
-    <section v-if="activeTab === 'channels'"><ChannelListPanel :channels="store.channels" :loading="tabLoading.channels" :querying-cost-i-d="queryingCostID" :status-saving="channelStatusSaving" @create="openCreate" @discover="discover" @edit="openEdit" @open-credentials="openCredentials" @query-cost="queryCost" @refresh="loadChannels" @remove="remove" @set-status="setChannelStatus" @test="openTest" /></section>
+    <section v-if="activeTab === 'channels'"><ChannelListPanel :channels="store.channels" :loading="tabLoading.channels" :querying-cost-i-d="queryingCostID" :querying-quota-i-d="queryingQuotaID" :status-saving="channelStatusSaving" @create="openCreate" @discover="discover" @edit="openEdit" @open-credentials="openCredentials" @query-cost="queryCost" @query-quota="queryQuota" @refresh="loadChannels" @remove="remove" @set-status="setChannelStatus" @test="openTest" /></section>
     <section v-else-if="activeTab === 'groups'"><ChannelGroupListPanel :channels="store.channels" :groups="store.channelGroups" :loading="tabLoading.groups" @create="openCreateGroup" @edit="openEditGroup" @refresh="loadChannelGroups" @remove="removeGroup" /></section>
     <section v-else><ChannelTypeListPanel :loading="tabLoading.types" :status-saving="typeStatusSaving" :types="store.channelTypes" @create="openCreateType" @edit="openEditType" @refresh="loadChannelTypes" @remove="removeType" @set-status="setTypeStatus" /></section>
 
