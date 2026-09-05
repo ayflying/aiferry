@@ -36,6 +36,7 @@ type UsageLogs struct {
 	DurationMs          any //
 	FirstTokenMs        any //
 	Attempts            any //
+	AttemptFlowJson     any //
 	ErrorMessage        any //
 	CreatedAt           any //
 }

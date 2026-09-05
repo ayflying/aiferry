@@ -41,6 +41,7 @@ func (s *sUsage) listUsageLogs(ctx context.Context, input LogFilter) (LogPage, e
 	}
 	for index := range items {
 		items[index].BillingDetails = ParseBillingBreakdown(items[index].BillingDetailsJSON)
+		items[index].AttemptFlow = ParseAttemptFlow(items[index].AttemptFlowJSON)
 	}
 	s.reconstructLegacyBillingDetails(ctx, items)
 	s.populateIPLocations(items)

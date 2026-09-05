@@ -89,6 +89,7 @@ type attemptResult struct {
 	responseText       string
 	responseModel      string
 	streamCompleted    bool
+	attemptFlow        []usage.AttemptFlowStep
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, locationSvc *iplocation.Service) *sRelay {
@@ -222,6 +223,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		last                attemptResult
 		lastCandidate       Candidate
 		attempts            int
+		attemptFlow         []usage.AttemptFlowStep
 		excludedCredentials = make(map[uint64]struct{})
 	)
 	for index := range candidates {
@@ -231,6 +233,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			if outcome.attempts > 0 {
 				last = outcome.result
 				lastCandidate = outcome.candidate
+				attemptFlow = append(attemptFlow, outcome.result.attemptFlow...)
 			}
 			if !outcome.handled {
 				break
@@ -244,6 +247,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 				excludedCredentials[candidate.ChannelCredentialID] = struct{}{}
 				continue
 			}
+			result.attemptFlow = attemptFlow
 			if recordErr := s.record(ctx, requestID, key, candidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, result); recordErr != nil {
 				if !result.wroteBytes && errors.Is(recordErr, ErrUpstreamUsageNotBillable) {
 					last = failedAttemptResult(result, recordErr.Error())
@@ -281,6 +285,7 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	}
 	if attempts > 0 {
 		last = failedAttemptResult(last, "All eligible channels failed")
+		last.attemptFlow = attemptFlow
 		if recordErr := s.record(ctx, requestID, key, lastCandidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, last); recordErr != nil {
 			g.Log().Errorf(ctx, "record failed request %s: %v", requestID, recordErr)
 		}

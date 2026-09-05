@@ -71,6 +71,7 @@ func (s *sRelay) record(ctx context.Context, requestID string, key apikey.AuthKe
 		DurationMs:          time.Since(startedAt).Milliseconds(),
 		FirstTokenMs:        result.firstTokenMs,
 		Attempts:            attempts,
+		AttemptFlow:         result.attemptFlow,
 		ErrorMessage:        recordError,
 	}); err != nil {
 		g.Log().Errorf(ctx, "record usage %s: %v", requestID, err)

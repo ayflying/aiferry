@@ -46,6 +46,7 @@ type UsageLogsColumns struct {
 	DurationMs          string //
 	FirstTokenMs        string //
 	Attempts            string //
+	AttemptFlowJson     string //
 	ErrorMessage        string //
 	CreatedAt           string //
 }
@@ -77,6 +78,7 @@ var usageLogsColumns = UsageLogsColumns{
 	DurationMs:          "duration_ms",
 	FirstTokenMs:        "first_token_ms",
 	Attempts:            "attempts",
+	AttemptFlowJson:     "attempt_flow_json",
 	ErrorMessage:        "error_message",
 	CreatedAt:           "created_at",
 }

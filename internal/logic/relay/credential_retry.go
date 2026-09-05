@@ -8,6 +8,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/logic/protocol"
+	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
 type channelAttempt struct {
@@ -15,6 +16,7 @@ type channelAttempt struct {
 	result    attemptResult
 	handled   bool
 	attempts  int
+	flow      []usage.AttemptFlowStep
 }
 
 // attemptChannel keeps retries inside one channel until no usable upstream key
@@ -30,6 +32,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 				last.result.errorMessage = err.Error()
 				last.result.body = openAIError("upstream_error", err.Error())
 			}
+			last.result.attemptFlow = last.flow
 			return last
 		}
 		current := candidate
@@ -44,13 +47,15 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			}
 			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, startedAt, userID, settings, sensitiveDataRestorer)
 			result.latency = time.Since(attemptStartedAt)
-			last = channelAttempt{candidate: current, result: result, attempts: last.attempts + 1}
+			flow := append(last.flow, usage.AttemptFlowStep{ChannelName: current.ChannelName, DurationMs: result.latency.Milliseconds(), FirstTokenMs: result.firstTokenMs})
+			last = channelAttempt{candidate: current, result: result, attempts: last.attempts + 1, flow: flow}
 			if attemptErr != nil {
 				last.result = failedAttemptResult(last.result, attemptErr.Error())
 				last.result.timedOut = isUpstreamTimeout(attemptErr)
 			}
 			if attemptCompleted(last.result, attemptErr) || nonRetryableClientFailure(last.result, attemptErr, settings) {
 				last.handled = true
+				last.result.attemptFlow = last.flow
 				return last
 			}
 		}

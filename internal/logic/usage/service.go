@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -41,6 +42,12 @@ type PriceRates struct {
 	Request     *float64
 }
 
+type AttemptFlowStep struct {
+	ChannelName  string `json:"channelName"`
+	DurationMs   int64  `json:"durationMs"`
+	FirstTokenMs *int64 `json:"firstTokenMs,omitempty"`
+}
+
 type RecordInput struct {
 	RequestID           string
 	UserID              uint64
@@ -63,6 +70,7 @@ type RecordInput struct {
 	DurationMs          int64
 	FirstTokenMs        *int64
 	Attempts            int
+	AttemptFlow         []AttemptFlowStep
 	ErrorMessage        string
 }
 
@@ -158,6 +166,8 @@ type LogView struct {
 	DurationMs             uint64            `json:"durationMs" orm:"duration_ms"`
 	FirstTokenMs           *uint64           `json:"firstTokenMs" orm:"first_token_ms"`
 	Attempts               uint              `json:"attempts" orm:"attempts"`
+	AttemptFlowJSON        string            `json:"-" orm:"attempt_flow_json"`
+	AttemptFlow            []AttemptFlowStep `json:"attemptFlow" orm:"-"`
 	ErrorMessage           string            `json:"errorMessage" orm:"error_message"`
 	CreatedAt              time.Time         `json:"createdAt" orm:"created_at"`
 }
@@ -257,6 +267,13 @@ func (s *sUsage) Record(ctx context.Context, input RecordInput) error {
 	}
 	if input.FirstTokenMs != nil {
 		data.FirstTokenMs = *input.FirstTokenMs
+	}
+	if len(input.AttemptFlow) > 0 {
+		encoded, err := json.Marshal(input.AttemptFlow)
+		if err != nil {
+			return gerror.Wrap(err, "encode attempt flow")
+		}
+		data.AttemptFlowJson = string(encoded)
 	}
 	_, err := dao.UsageLogs.Ctx(ctx).Data(data).Insert()
 	return gerror.Wrap(err, "record usage")

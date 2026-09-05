@@ -275,6 +275,7 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 	var (
 		last          attemptResult
 		lastCandidate Candidate
+		attemptFlow   []usage.AttemptFlowStep
 		handled       bool
 	)
 	for index := range candidates {
@@ -287,7 +288,10 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 		}
 		candidate.ChannelCredentialID = credential.ID
 		candidate.APIKeyCipher = credential.APIKeyCipher
+		attemptStartedAt := time.Now()
 		result, attemptHandled := s.attemptAudioUpstream(ctx, writer, incomingHeaders, body, candidate, handler, startedAt, settings)
+		result.latency = time.Since(attemptStartedAt)
+		attemptFlow = append(attemptFlow, usage.AttemptFlowStep{ChannelName: candidate.ChannelName, DurationMs: result.latency.Milliseconds()})
 		if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" {
 			// 成功请求按上游响应速度加分，与 chat 链路保持一致。
 			_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{
@@ -305,6 +309,7 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 			break
 		}
 	}
+	last.attemptFlow = attemptFlow
 	if last.status == 0 && last.errorMessage != "" {
 		// 凭据选择等前置失败也记录用量日志，保持失败可追溯。
 		s.recordAudioUsage(ctx, requestID, key, lastCandidate, clientIP, endpoint, requestedModel, startedAt, last)
@@ -445,7 +450,8 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 		EstimatedCost:       audioCost(billingDetails),
 		BillingDetails:      billingDetails,
 		DurationMs:          time.Since(startedAt).Milliseconds(),
-		Attempts:            1,
+		Attempts:            len(result.attemptFlow),
+		AttemptFlow:         result.attemptFlow,
 		ErrorMessage:        recordError,
 	}); err != nil {
 		g.Log().Errorf(ctx, "record audio usage %s: %v", requestID, err)

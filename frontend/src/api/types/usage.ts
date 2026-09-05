@@ -48,6 +48,12 @@ export interface Dashboard {
   recentCost: RecentCostDistribution
 }
 
+export interface AttemptFlowStep {
+  channelName: string
+  durationMs: number
+  firstTokenMs?: number
+}
+
 export interface UsageLog {
   id: number
   requestId: string
@@ -76,6 +82,7 @@ export interface UsageLog {
   durationMs: number
   firstTokenMs?: number
   attempts: number
+  attemptFlow?: AttemptFlowStep[]
   errorMessage: string
   createdAt: string
 }

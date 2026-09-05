@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BillingItem, UsageLog } from '../api/types'
-import { formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
+import { formatLatency, formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 import { channelCredentialReference } from '../lib/usage'
 
@@ -48,6 +48,7 @@ const billingModeLabel = computed(() => {
   }
 })
 const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '历史价格快照复原' : '调用时价格快照')
+const attemptFlow = computed(() => props.usage?.attemptFlow ?? [])
 
 function itemUnitPrice(item: BillingItem) {
   const currency = billingDetails.value?.currency
@@ -83,7 +84,8 @@ function billingSummary() {
       <div class="detail-summary">
         <div><span>模型价格</span><strong>{{ billingDetails ? billingSourceLabel : '未保存价格快照' }}</strong></div>
         <div><span>总 Token</span><strong>{{ formatNumber(usage.totalTokens) }}</strong></div>
-        <div><span>响应耗时</span><strong>{{ usage.durationMs }} ms</strong></div>
+        <div><span>首针耗时</span><strong>{{ formatLatency(usage.firstTokenMs) }}</strong></div>
+        <div><span>总耗时</span><strong>{{ formatLatency(usage.durationMs) }}</strong></div>
       </div>
 
       <section class="detail-section">
@@ -127,6 +129,19 @@ function billingSummary() {
         <p v-else class="empty-billing">该历史记录未保存模型价格快照，无法展示当次调用的模型价格。</p>
       </section>
 
+      <section v-if="attemptFlow.length" class="detail-section flow-section">
+        <h3>调用流程</h3>
+        <div class="attempt-flow" aria-label="上游渠道调用流程">
+          <template v-for="(step, index) in attemptFlow" :key="`${step.channelName}-${index}`">
+            <div class="flow-step">
+              <strong>{{ step.channelName || '未知渠道' }}</strong>
+              <small>耗时 {{ formatLatency(step.durationMs) }}<template v-if="step.firstTokenMs != null"> · 首针 {{ formatLatency(step.firstTokenMs) }}</template></small>
+            </div>
+            <span v-if="index < attemptFlow.length - 1" class="flow-arrow" aria-hidden="true">→</span>
+          </template>
+        </div>
+      </section>
+
       <section class="detail-section result-section">
         <h3>{{ isSuccess ? '处理结果' : '失败日志' }}</h3>
         <p v-if="isSuccess" class="result-message">{{ resultMessage }}</p>
@@ -159,6 +174,12 @@ function billingSummary() {
 .billing-item-name { display: flex; flex-direction: column; gap: 3px; }
 .formula-value { display: inline-block; color: #40505f; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .empty-billing { margin: 0; color: #66717d; font-size: 13px; }
+.flow-section { overflow-x: auto; }
+.attempt-flow { display: flex; align-items: center; gap: 10px; min-width: max-content; padding: 12px; background: #f5f7fa; border: 1px solid #dce2e7; }
+.flow-step { display: flex; min-width: 132px; flex-direction: column; gap: 5px; padding: 10px 12px; background: #fff; border: 1px solid #cbd5df; border-radius: 6px; }
+.flow-step strong { color: #15202b; font-size: 13px; }
+.flow-step small { color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: nowrap; }
+.flow-arrow { color: #7f8b97; font-size: 20px; font-weight: 700; }
 .result-section { padding-bottom: 0; }
 .result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }
 .failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
