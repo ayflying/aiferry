@@ -48,6 +48,7 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 			view.TypeName = item.Name
 			view.CostQueryMode = item.Config.Costs.Adapter
 			view.CostQueryType = item.Config.Costs.ValueType
+			view.QuotaSupported = item.Config.Quota.Adapter != "" && item.Config.Quota.Adapter != channeltype.AdapterNone
 			costConfig = item.Config.Costs
 			usageQuery = channeltype.IsUsageCost(item.Config.Costs)
 		} else {

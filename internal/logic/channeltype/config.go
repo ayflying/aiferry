@@ -42,6 +42,9 @@ func ParseConfig(raw []byte) (Config, error) {
 	if err := normalizeCostConfig(&config.Costs); err != nil {
 		return Config{}, err
 	}
+	if err := normalizeQuotaConfig(&config.Quota); err != nil {
+		return Config{}, err
+	}
 	if err := normalizeEndpointConfigs(config.Endpoints); err != nil {
 		return Config{}, err
 	}
@@ -76,8 +79,45 @@ func normalizeBaseURL(value *string) error {
 	return nil
 }
 
-func normalizeEndpointConfigs(configs map[string]EndpointConfig) error {
-	if len(configs) == 0 {
+// normalizeQuotaConfig 校验套餐额度查询配置。启用 adapter 时默认 GET 请求、
+// 智谱用量接口路径与 channel_key 认证（额度接口总是使用渠道推理密钥）。
+func normalizeQuotaConfig(config *QuotaConfig) error {
+	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
+	switch config.Adapter {
+	case "", AdapterNone:
+		config.Adapter = AdapterNone
+		*config = QuotaConfig{Adapter: AdapterNone}
+		return nil
+	case AdapterZhipuQuota:
+	default:
+		return gerror.Newf("unsupported quota adapter %q (expected none or %s)", config.Adapter, AdapterZhipuQuota)
+	}
+	config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
+	if config.Method == "" {
+		config.Method = httpMethodGet
+	}
+	if config.Method != httpMethodGet {
+		return gerror.New("quota adapter only supports the GET method")
+	}
+	config.Path = strings.TrimSpace(config.Path)
+	if config.Path == "" {
+		config.Path = "/api/monitor/usage/quota/limit"
+	}
+	if !strings.HasPrefix(config.Path, "/") {
+		return gerror.New("quota path must be an absolute path")
+	}
+	config.AuthType = normalizeAuth(config.AuthType)
+	if config.AuthType == AuthNone {
+		config.AuthType = AuthChannelKey
+	}
+	config.HeaderName = normalizeHeader(config.HeaderName, config.AuthType)
+	if !validAuth(config.AuthType) {
+		return gerror.Newf("unsupported quota authType for %s", config.Adapter)
+	}
+	return nil
+}
+
+func normalizeEndpointConfigs(configs map[string]EndpointConfig) error {	if len(configs) == 0 {
 		return gerror.New("endpoints must not be empty")
 	}
 	for name, config := range configs {

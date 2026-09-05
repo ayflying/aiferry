@@ -26,6 +26,7 @@ const (
 	AdapterQiniuCosts  = "qiniu_costs"
 	AdapterSiliconFlow = "siliconflow_balance"
 	AdapterOpenRouter  = "openrouter_credits"
+	AdapterZhipuQuota  = "zhipu_coding_plan"
 	// AdapterQiniuUsage remains supported for custom types created before 0.5.18.
 	AdapterQiniuUsage  = "qiniu_usage"
 	AdapterNewAPIRatio = "newapi_ratio"
@@ -111,7 +112,22 @@ type Config struct {
 	Costs     CostConfig                `json:"costs"`
 	Pricing   PricingConfig             `json:"pricing"`
 	Audio     AudioConfig               `json:"audio"`
+	Quota     QuotaConfig               `json:"quota"`
 	Endpoints map[string]EndpointConfig `json:"endpoints"`
+}
+
+// QuotaConfig 声明渠道类型的套餐额度查询能力（如 GLM Coding Plan 的
+// 5 小时窗口、每周窗口与 MCP 月度调用）。adapter 留空或 "none" 表示不支持。
+// quota.Path 相对渠道 API 根地址的 host 根解析（如根地址为
+// https://open.bigmodel.cn/api/coding/paas/v4，路径 /api/monitor/usage/quota/limit
+// 解析为 https://open.bigmodel.cn/api/monitor/usage/quota/limit）。
+type QuotaConfig struct {
+	Adapter      string `json:"adapter"`
+	Method       string `json:"method"`
+	Path         string `json:"path"`
+	AuthType     string `json:"authType"`
+	HeaderName   string `json:"headerName"`
+	HeaderPrefix string `json:"headerPrefix"`
 }
 
 // AudioConfig 声明渠道的音频接口形态：

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Coins, FlaskConical, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from '@lucide/vue'
+import { Coins, FlaskConical, Gauge, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from '@lucide/vue'
 
 import type { Channel } from '../api/types'
 import { channelStatusLabel, isChannelEnabled } from '../lib/channelDisplay'
@@ -12,6 +12,7 @@ const props = defineProps<{
   channels: Channel[]
   loading: boolean
   queryingCostID?: number
+  queryingQuotaID?: number
   statusSaving: Record<number, boolean>
 }>()
 
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   edit: [channel: Channel]
   'open-credentials': [channel: Channel]
   queryCost: [channel: Channel]
+  queryQuota: [channel: Channel]
   refresh: []
   remove: [channel: Channel]
   'set-status': [channel: Channel, enabled: boolean]
@@ -113,7 +115,7 @@ const emit = defineEmits<{
             </dl>
             <div class="mobile-record__footer">
               <span class="muted">渠道操作</span>
-              <div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="emit('open-credentials', row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="emit('discover', row)">模型</el-button><el-button size="small" :icon="FlaskConical" @click="emit('test', row)">测试</el-button><el-button size="small" :icon="Coins" :loading="props.queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)">{{ channelQueryValueLabel(row.costQueryType, row.costQueryMode) }}</el-button><el-button size="small" :icon="Pencil" @click="emit('edit', row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="emit('remove', row)">删除</el-button></div>
+              <div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="emit('open-credentials', row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="emit('discover', row)">模型</el-button><el-button size="small" :icon="FlaskConical" @click="emit('test', row)">测试</el-button><el-button size="small" :icon="Coins" :loading="props.queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)">{{ channelQueryValueLabel(row.costQueryType, row.costQueryMode) }}</el-button><el-button v-if="row.quotaSupported" size="small" :icon="Gauge" :loading="props.queryingQuotaID === row.id" :disabled="props.queryingQuotaID !== undefined" @click="emit('queryQuota', row)">额度</el-button><el-button size="small" :icon="Pencil" @click="emit('edit', row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="emit('remove', row)">删除</el-button></div>
             </div>
           </article>
         </MobileRecordList>

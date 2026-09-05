@@ -25,3 +25,5 @@ bin
 !manifest/config/
 !manifest/config/config.yaml
 web/
+frontend/node_modules/
+frontend/components.d.ts

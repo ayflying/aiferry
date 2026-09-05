@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { Channel, ChannelCostResult, ChannelInput, ChannelModel, DiscoveredModel } from '../api/types'
+import type { Channel, ChannelCostResult, ChannelInput, ChannelModel, ChannelQuotaResult, DiscoveredModel } from '../api/types'
 import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
 import ChannelGroupListPanel from '../components/ChannelGroupListPanel.vue'
@@ -49,6 +49,11 @@ const credentialChannel = ref<Channel>()
 const healthCheckModels = ref<ChannelModel[]>([])
 const queryingCostID = ref<number>()
 const channelStatusSaving = ref<Record<number, boolean>>({})
+const quotaOpen = ref(false)
+const quotaLoading = ref(false)
+const quotaChannel = ref<Channel>()
+const quotaError = ref('')
+const quotaResult = ref<ChannelQuotaResult | null>(null)
 
 const drawerSize = window.innerWidth <= 600 ? '94%' : '620px'
 const typeDrawerSize = window.innerWidth <= 600 ? '94%' : '680px'
@@ -318,6 +323,22 @@ async function queryCost(channel: Channel) {
   }
 }
 
+async function queryQuota(channel: Channel, forceRefresh = false) {
+  if (quotaLoading.value) return
+  quotaChannel.value = channel
+  quotaOpen.value = true
+  quotaLoading.value = true
+  quotaError.value = ''
+  try {
+    quotaResult.value = await apiGet<ChannelQuotaResult>(`/channels/${channel.id}/quota${forceRefresh ? '?refresh=1' : ''}`)
+  } catch (error) {
+    quotaResult.value = null
+    quotaError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    quotaLoading.value = false
+  }
+}
+
 async function setChannelStatus(channel: Channel, enabled: boolean) {
   if (channelStatusSaving.value[channel.id]) return
   channelStatusSaving.value[channel.id] = true
@@ -358,6 +379,7 @@ watch(activeTab, (tab) => {
     <ChannelModelMappingDialog v-model="discoveryOpen" :channel-name="discoveryChannel?.name || ''" :discovering="discovering" :discovery-error="discoveryError" :applying="applyingSelection" :discovered-models="discoveredModels" v-model:selected-model-names="selectedModelNames" v-model:discovery-keyword="discoveryKeyword" v-model:model-mappings="modelMappings" @retry="discoveryChannel && discover(discoveryChannel)" @add-mapping="addModelMapping" @remove-mapping="removeModelMapping" @save="saveModelSelection" />
 
     <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="loadChannels" />
+    <ChannelQuotaDialog v-model="quotaOpen" :channel-name="quotaChannel?.name || ''" :loading="quotaLoading" :error="quotaError" :result="quotaResult" @refresh="quotaChannel && queryQuota(quotaChannel, true)" />
     <ChannelCredentialDrawer v-model="credentialsOpen" :channel="credentialChannel" @changed="loadChannels" />
 
     <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form v-loading="channelFormLoading" label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型" @change="applyDefaultBaseURL"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" :placeholder="selectedChannelType?.config.baseUrl || 'https://api.openai.com/v1'" /></el-form-item><el-form-item v-if="!editingId" label="首个推理密钥（可选）"><el-input v-model="form.apiKey" type="password" show-password placeholder="sk-... 或上游密钥；本地服务（如 Ollama）可留空" autocomplete="new-password" /></el-form-item><el-form-item v-if="usesManagementKey" label="上游管理密钥（可选）"><el-input v-model="form.managementKey" type="password" show-password :placeholder="editingId ? '留空则清除；不修改请勿聚焦' : '用于渠道类型声明的管理接口'" autocomplete="new-password" /></el-form-item><el-form-item label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><ChannelRouteCoverageSettings v-model:priority="form.priority" v-model:weight="form.weight" v-model:backup-base-urls="form.advancedConfig.backupBaseUrls" v-model:health-check-model-id="form.healthCheckModelId" v-model:auto-disable-enabled="form.autoDisableEnabled" :editing="Boolean(editingId)" :models="healthCheckModelOptions" /><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :editing="Boolean(editingId)" :has-proxy="editingChannel?.hasProxy === true" @clear-proxy="clearProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>

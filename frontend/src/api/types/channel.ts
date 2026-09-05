@@ -85,11 +85,21 @@ export interface ChannelTypeEndpointConfig {
   headerPrefix: string
 }
 
+export interface ChannelTypeQuotaConfig {
+  adapter: 'none' | 'zhipu_coding_plan'
+  method: string
+  path: string
+  authType: 'none' | 'channel_key' | 'management_key'
+  headerName: string
+  headerPrefix: string
+}
+
 export interface ChannelTypeConfig {
   baseUrl: string
   models: ChannelTypeModelConfig
   costs: ChannelTypeCostConfig
   pricing: ChannelTypePricingConfig
+  quota?: ChannelTypeQuotaConfig
   endpoints: Record<string, ChannelTypeEndpointConfig>
 }
 
@@ -145,6 +155,7 @@ export interface Channel {
   autoDisableEnabled: boolean
   costQueryMode: string
   costQueryType?: 'cost' | 'usage'
+  quotaSupported: boolean
   costQueryConfig: CostQueryConfig
   advancedConfig: ChannelAdvancedConfig
   enabledModelCount: number
@@ -227,6 +238,24 @@ export interface ChannelCostResult {
   usageDimension?: string
   summaries: CostSummary[]
   credentials: ChannelCredentialCost[]
+}
+
+export interface ChannelQuotaWindow {
+  kind: 'five_hour' | 'weekly' | 'mcp'
+  label: string
+  usedPercent: number
+  used?: number
+  total?: number
+  remaining?: number
+  nextResetAt?: string
+}
+
+export interface ChannelQuotaResult {
+  mode: string
+  level: string
+  windows: ChannelQuotaWindow[]
+  queriedAt: string
+  cached: boolean
 }
 
 export interface SystemResilienceSettings {

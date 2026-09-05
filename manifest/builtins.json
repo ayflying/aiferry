@@ -63,10 +63,25 @@
     },
     {
       "id": 9000000000000017,
-      "name": "智谱 AI",
+      "name": "智谱 Coding Plan",
       "code": "zhipu",
       "config": {
         "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" },
+        "quota": { "adapter": "zhipu_coding_plan", "method": "GET", "path": "/api/monitor/usage/quota/limit", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "" },
+        "endpoints": {
+          "chatCompletions": { "method": "POST", "path": "/chat/completions", "requestBody": "json", "supportsStream": true, "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " }
+        }
+      }
+    },
+    {
+      "id": 9000000000000018,
+      "name": "智谱 API",
+      "code": "zhipu_api",
+      "config": {
+        "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
         "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
         "costs": { "adapter": "none" },
         "pricing": { "adapter": "none" },

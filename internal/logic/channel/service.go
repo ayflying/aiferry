@@ -62,6 +62,7 @@ type View struct {
 	AutoDisableEnabled     bool           `json:"autoDisableEnabled"`
 	CostQueryMode          string         `json:"costQueryMode"`
 	CostQueryType          string         `json:"costQueryType"`
+	QuotaSupported         bool           `json:"quotaSupported"`
 	AdvancedConfig         AdvancedConfig `json:"advancedConfig"`
 	EnabledModelCount      int            `json:"enabledModelCount"`
 	DiscoveredModels       int            `json:"discoveredModels"`

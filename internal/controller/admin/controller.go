@@ -80,6 +80,7 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.PUT("/channels/{id}/models/selection", c.selectChannelModels)
 	group.DELETE("/channels/{id}/models/failed", c.deleteFailedChannelModels)
 	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
+	group.GET("/channels/{id}/quota", c.queryChannelQuota)
 	c.registerPriceRoutes(group)
 	group.GET("/models", c.listModels)
 	group.PUT("/models/{id}", c.updateModel)
@@ -193,6 +194,11 @@ func (c *Controller) queryChannelCost(r *ghttp.Request) {
 	if err == nil {
 		c.channels.InvalidateListCache(r.Context())
 	}
+	respond(r, data, err)
+}
+
+func (c *Controller) queryChannelQuota(r *ghttp.Request) {
+	data, err := c.channels.QueryQuota(r.Context(), routeID(r), r.GetQuery("refresh").Bool())
 	respond(r, data, err)
 }
 
