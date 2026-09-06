@@ -51,7 +51,7 @@ function resetLabel(window: ChannelQuotaWindow) {
 </script>
 
 <template>
-  <el-dialog v-model="open" :title="`套餐额度 · ${channelName}`" width="460px">
+  <el-dialog v-model="open" :title="`套餐额度 · ${channelName}`" width="min(460px, 94vw)">
     <div v-loading="props.loading" class="quota-dialog__body">
       <el-alert v-if="props.error" :title="props.error" type="error" :closable="false" show-icon />
       <template v-else-if="props.result">
