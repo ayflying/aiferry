@@ -256,6 +256,8 @@ export interface ChannelQuotaResult {
   windows: ChannelQuotaWindow[]
   queriedAt: string
   cached: boolean
+  /** 多密钥合并查询中失败密钥的明细；为空表示全部成功 */
+  partialErrors?: string[]
 }
 
 export interface SystemResilienceSettings {

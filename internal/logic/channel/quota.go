@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -45,6 +46,8 @@ type QuotaView struct {
 	Windows   []QuotaWindow `json:"windows"`
 	QueriedAt time.Time     `json:"queriedAt"`
 	Cached    bool          `json:"cached"`
+	// PartialErrors 记录多密钥合并查询中失败的密钥明细；为空表示全部成功。
+	PartialErrors []string `json:"partialErrors,omitempty"`
 }
 
 // QueryQuota 查询渠道上游的套餐额度（如智谱 GLM Coding Plan 的积分窗口）。
@@ -101,25 +104,133 @@ func (s *sChannel) writeQuotaCache(ctx context.Context, channelID uint64, view Q
 	_ = s.app.Redis.Set(ctx, fmt.Sprintf("aiferry:channel-quota:%d", channelID), encoded, quotaCacheTTL).Err()
 }
 
-// fetchQuota 先按类型配置的认证头（裸 key）请求上游；若返回 401 则回退
-// Bearer 前缀重试一次，兼容个别上游账号对 Authorization 头的差异要求。
+// fetchQuota 并发查询渠道全部上游密钥的套餐额度并合并视图：同一套餐的
+// 百分比窗口取平均，MCP 调用次数累加，重置时间取最早，档位去重后拼接。
+// 部分密钥查询失败时仍返回成功部分，失败明细附在 PartialErrors 中。
 func (s *sChannel) fetchQuota(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig) (QuotaView, error) {
 	endpoint, err := resolveHostURL(channel.BaseUrl, config.Path)
 	if err != nil {
 		return QuotaView{}, err
 	}
-	view, err := s.fetchQuotaWithPrefix(ctx, channel, config, endpoint, config.HeaderPrefix)
-	if err == nil || !isQuotaUnauthorized(err) || config.HeaderPrefix == "Bearer " {
-		return view, err
-	}
-	return s.fetchQuotaWithPrefix(ctx, channel, config, endpoint, "Bearer ")
-}
-
-func (s *sChannel) fetchQuotaWithPrefix(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, endpoint, headerPrefix string) (QuotaView, error) {
-	cipher, err := s.firstCredentialCipher(ctx, channel.Id)
+	ciphers, err := s.credentialCiphers(ctx, channel.Id)
 	if err != nil {
 		return QuotaView{}, err
 	}
+	views := make([]QuotaView, len(ciphers))
+	failed := make([]string, len(ciphers))
+	var wg sync.WaitGroup
+	for index, credential := range ciphers {
+		wg.Add(1)
+		go func(index int, credential quotaCredential) {
+			defer wg.Done()
+			view, err := s.fetchQuotaWithCredential(ctx, channel, config, endpoint, credential.Cipher)
+			if err != nil {
+				failed[index] = err.Error()
+				return
+			}
+			views[index] = view
+		}(index, credential)
+	}
+	wg.Wait()
+
+	success := make([]QuotaView, 0, len(ciphers))
+	failures := make([]string, 0, len(ciphers))
+	for index := range ciphers {
+		if failed[index] != "" {
+			failures = append(failures, fmt.Sprintf("密钥 %s：%s", ciphers[index].Prefix, failed[index]))
+			continue
+		}
+		success = append(success, views[index])
+	}
+	if len(success) == 0 {
+		return QuotaView{}, gerror.New(strings.Join(failures, "；"))
+	}
+	view := mergeQuotaViews(success)
+	view.PartialErrors = failures
+	return view, nil
+}
+
+// fetchQuotaWithCredential 先按类型配置的认证头（裸 key）请求上游；若返回
+// 401 则回退 Bearer 前缀重试一次，兼容个别上游账号对 Authorization 头的差异要求。
+func (s *sChannel) fetchQuotaWithCredential(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, endpoint, cipher string) (QuotaView, error) {
+	view, err := s.fetchQuotaWithPrefix(ctx, channel, config, endpoint, config.HeaderPrefix, cipher)
+	if err == nil || !isQuotaUnauthorized(err) || config.HeaderPrefix == "Bearer " {
+		return view, err
+	}
+	return s.fetchQuotaWithPrefix(ctx, channel, config, endpoint, "Bearer ", cipher)
+}
+
+// mergeQuotaViews 合并多个密钥的套餐额度：百分比窗口按 kind 分组取平均
+// （多账号共享套餐额度时，平均值最能代表整体水位），MCP 调用次数累加，
+// 重置时间取最早（任何一个账号重置都意味着部分额度恢复），档位去重拼接。
+func mergeQuotaViews(views []QuotaView) QuotaView {
+	merged := QuotaView{QueriedAt: time.Now()}
+	levels := make([]string, 0, len(views))
+	seenLevels := make(map[string]struct{}, len(views))
+	orders := make([]string, 0, 3)
+	percentSums := make(map[string]float64, 3)
+	percentCounts := make(map[string]int, 3)
+	usedCounts := make(map[string]*float64, 3)
+	totalCounts := make(map[string]*float64, 3)
+	remainCounts := make(map[string]*float64, 3)
+	resetTimes := make(map[string]*time.Time, 3)
+	labels := make(map[string]string, 3)
+	for _, view := range views {
+		if view.Level != "" {
+			if _, seen := seenLevels[view.Level]; !seen {
+				seenLevels[view.Level] = struct{}{}
+				levels = append(levels, view.Level)
+			}
+		}
+		for _, window := range view.Windows {
+			if _, ok := percentSums[window.Kind]; !ok {
+				orders = append(orders, window.Kind)
+			}
+			percentSums[window.Kind] += window.UsedPercent
+			percentCounts[window.Kind]++
+			usedCounts[window.Kind] = addQuotaValue(usedCounts[window.Kind], window.Used)
+			totalCounts[window.Kind] = addQuotaValue(totalCounts[window.Kind], window.Total)
+			remainCounts[window.Kind] = addQuotaValue(remainCounts[window.Kind], window.Remaining)
+			resetTimes[window.Kind] = earliestQuotaTime(resetTimes[window.Kind], window.NextResetAt)
+			labels[window.Kind] = window.Label
+		}
+	}
+	merged.Level = strings.Join(levels, " / ")
+	for _, kind := range orders {
+		merged.Windows = append(merged.Windows, QuotaWindow{
+			Kind: kind, Label: labels[kind],
+			UsedPercent: percentSums[kind] / float64(percentCounts[kind]),
+			Used:        usedCounts[kind], Total: totalCounts[kind], Remaining: remainCounts[kind],
+			NextResetAt: resetTimes[kind],
+		})
+	}
+	return merged
+}
+
+func addQuotaValue(base *float64, value *float64) *float64 {
+	if value == nil {
+		return base
+	}
+	if base == nil {
+		merged := *value
+		return &merged
+	}
+	sum := *base + *value
+	return &sum
+}
+
+func earliestQuotaTime(base, value *time.Time) *time.Time {
+	if value == nil {
+		return base
+	}
+	if base == nil || value.Before(*base) {
+		merged := *value
+		return &merged
+	}
+	return base
+}
+
+func (s *sChannel) fetchQuotaWithPrefix(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, endpoint, headerPrefix, cipher string) (QuotaView, error) {
 	body, err := s.fetchUpstreamJSON(ctx, channel, cipher, upstreamJSONRequest{
 		Method:       config.Method,
 		Endpoint:     endpoint,
@@ -141,17 +252,30 @@ func (s *sChannel) fetchQuotaWithPrefix(ctx context.Context, channel entity.Chan
 	return parseQuotaResponse(config.Adapter, body)
 }
 
-// firstCredentialCipher 返回渠道首个上游密钥的密文（与费用查询一致，
-// 包含已停用密钥，便于检查被自动禁用渠道的剩余额度）。
-func (s *sChannel) firstCredentialCipher(ctx context.Context, channelID uint64) (string, error) {
+type quotaCredential struct {
+	Prefix string
+	Cipher string
+}
+
+// credentialCiphers 返回渠道全部上游密钥（与费用查询一致，包含已停用密钥，
+// 便于检查被自动禁用渠道的剩余额度），按 ID 升序保证结果顺序稳定。
+func (s *sChannel) credentialCiphers(ctx context.Context, channelID uint64) ([]quotaCredential, error) {
 	rows := make([]credentialRow, 0, 1)
-	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID}).OrderAsc(dao.ChannelCredentials.Columns().Id).Limit(1).Scan(&rows); err != nil {
-		return "", gerror.Wrap(err, "list channel credentials for quota query")
+	if err := dao.ChannelCredentials.Ctx(ctx).Fields(dao.ChannelCredentials.Columns().Id, dao.ChannelCredentials.Columns().KeyPrefix, dao.ChannelCredentials.Columns().ApiKeyCipher).Where(do.ChannelCredentials{ChannelId: channelID}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
+		return nil, gerror.Wrap(err, "list channel credentials for quota query")
 	}
 	if len(rows) == 0 {
-		return "", gerror.New("channel has no upstream credential")
+		return nil, gerror.New("channel has no upstream credential")
 	}
-	return rows[0].ApiKeyCipher, nil
+	credentials := make([]quotaCredential, 0, len(rows))
+	for _, row := range rows {
+		prefix := row.KeyPrefix
+		if prefix == "" {
+			prefix = fmt.Sprintf("#%d", row.Id)
+		}
+		credentials = append(credentials, quotaCredential{Prefix: prefix, Cipher: row.ApiKeyCipher})
+	}
+	return credentials, nil
 }
 
 func parseQuotaResponse(adapter string, body []byte) (QuotaView, error) {

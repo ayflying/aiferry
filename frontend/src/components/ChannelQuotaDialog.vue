@@ -60,6 +60,15 @@ function resetLabel(window: ChannelQuotaWindow) {
           <small v-if="props.result.cached" class="muted">1 分钟内缓存，点击刷新可强制更新</small>
           <small v-else class="muted">{{ formatTime(props.result.queriedAt) }}</small>
         </div>
+        <el-alert
+          v-if="props.result.partialErrors?.length"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`有 ${props.result.partialErrors.length} 把密钥查询失败，以下为成功密钥的合并结果`"
+        >
+          <div v-for="message in props.result.partialErrors" :key="message" class="quota-dialog__partial">{{ message }}</div>
+        </el-alert>
         <div v-for="window in props.result.windows" :key="window.kind" class="quota-window">
           <div class="quota-window__header"><strong>{{ window.label }}</strong><span class="muted">{{ resetLabel(window) }}</span></div>
           <el-progress :percentage="Math.min(100, Math.max(0, window.usedPercent))" :color="windowColor(window)" :stroke-width="14" />
@@ -78,6 +87,7 @@ function resetLabel(window: ChannelQuotaWindow) {
 <style scoped>
 .quota-dialog__body { display: flex; min-height: 120px; flex-direction: column; gap: 16px; }
 .quota-dialog__meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.quota-dialog__partial { font-size: 12px; margin-top: 4px; }
 .quota-window { display: flex; flex-direction: column; gap: 6px; }
 .quota-window__header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .quota-window__header strong { font-size: 13px; }
