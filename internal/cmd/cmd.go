@@ -110,6 +110,9 @@ var (
 				relayCtrl.Register(group)
 			})
 			s.BindHandler("GET:/*path", func(r *ghttp.Request) {
+				// index.html 必须每次回源校验，否则发版后手机 WebView 会因启发式缓存
+				// 继续引用旧 hash 的 JS 分包，出现"已修复但客户端仍是旧版"的问题。
+				r.Response.Header().Set("Cache-Control", "no-cache")
 				path := filepath.Join(cfg.WebRoot, filepath.Clean("/"+r.GetRouter("path").String()))
 				if filepath.IsAbs(path) && filepath.Clean(path) != filepath.Clean(cfg.WebRoot) {
 					r.Response.ServeFile(path)
