@@ -35,11 +35,11 @@ function windowColor(window: ChannelQuotaWindow) {
 }
 
 function windowDetail(window: ChannelQuotaWindow) {
-  if (window.kind === 'mcp') {
+  if (window.used !== undefined || window.total !== undefined || window.remaining !== undefined) {
     const used = window.used === undefined ? '—' : Math.round(window.used)
     const total = window.total === undefined ? '—' : Math.round(window.total)
     const remaining = window.remaining === undefined ? '—' : Math.round(window.remaining)
-    return `已用 ${used} / ${total} 次，剩余 ${remaining} 次`
+    return `已用 ${used} / ${total}，剩余 ${remaining}（${window.usedPercent}%）`
   }
   return `已用 ${window.usedPercent}%`
 }

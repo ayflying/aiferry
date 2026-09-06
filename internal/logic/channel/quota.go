@@ -309,7 +309,10 @@ func parseQuotaResponse(adapter string, body []byte) (QuotaView, error) {
 	tokenLimits := make([]int, 0, len(payload.Data.Limits))
 	for index, item := range payload.Data.Limits {
 		switch item.Type {
-		case "TOKENS_LIMIT":
+		// TOKENS_LIMIT 是按次数/token 计费的老套餐窗口；CREDIT_LIMIT 是
+		// 积分制新套餐窗口（带 usage/currentValue/remaining 数值），窗口
+		// 语义相同（unit=3&number=5 为 5 小时，unit=6&number=1 为每周）。
+		case "TOKENS_LIMIT", "CREDIT_LIMIT":
 			tokenLimits = append(tokenLimits, index)
 		case "TIME_LIMIT":
 			view.Windows = append(view.Windows, QuotaWindow{
@@ -335,6 +338,7 @@ func parseQuotaResponse(adapter string, body []byte) (QuotaView, error) {
 		view.Windows = append(view.Windows, QuotaWindow{
 			Kind: kinds[position], Label: labels[position],
 			UsedPercent: quotaPercent(item.Percentage),
+			Used:        item.CurrentValue, Total: item.Usage, Remaining: item.Remaining,
 			NextResetAt: quotaResetTime(item.NextResetTime),
 		})
 	}

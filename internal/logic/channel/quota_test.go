@@ -79,6 +79,34 @@ func TestMergeQuotaViewsMultipleCredentials(t *testing.T) {
 	}
 }
 
+func TestParseQuotaResponseCreditLimit(t *testing.T) {
+	// 积分制新套餐：窗口类型为 CREDIT_LIMIT，带完整数值（5cec7a63 实测响应）。
+	body := []byte(`{"code":200,"msg":"操作成功","data":{"limits":[` +
+		`{"type":"CREDIT_LIMIT","unit":3,"number":5,"usage":12000,"currentValue":265,"remaining":11734,"percentage":2,"nextResetTime":1788663578110},` +
+		`{"type":"CREDIT_LIMIT","unit":6,"number":1,"usage":60000,"currentValue":10,"remaining":59990,"percentage":1,"nextResetTime":1789200000000}` +
+		`],"level":"pro"},"success":true}`)
+	view, err := parseQuotaResponse("zhipu_coding_plan", body)
+	if err != nil {
+		t.Fatalf("parseQuotaResponse error: %v", err)
+	}
+	if view.Level != "pro" {
+		t.Fatalf("Level = %q, want pro", view.Level)
+	}
+	if len(view.Windows) != 2 {
+		t.Fatalf("windows = %d, want 2", len(view.Windows))
+	}
+	fiveHour, weekly := view.Windows[0], view.Windows[1]
+	if fiveHour.Kind != QuotaWindowFiveHour || weekly.Kind != QuotaWindowWeekly {
+		t.Fatalf("kinds = %s/%s, want five_hour/weekly", fiveHour.Kind, weekly.Kind)
+	}
+	if fiveHour.Used == nil || *fiveHour.Used != 265 || fiveHour.Total == nil || *fiveHour.Total != 12000 || fiveHour.Remaining == nil || *fiveHour.Remaining != 11734 {
+		t.Fatalf("five hour values = %v/%v/%v, want 265/12000/11734", fiveHour.Used, fiveHour.Total, fiveHour.Remaining)
+	}
+	if fiveHour.UsedPercent != 2 || weekly.UsedPercent != 1 {
+		t.Fatalf("percents = %v/%v, want 2/1", fiveHour.UsedPercent, weekly.UsedPercent)
+	}
+}
+
 func TestMergeQuotaViewsPartialFailureMessage(t *testing.T) {
 	ciphers := []quotaCredential{{Prefix: "ab****ef"}, {Prefix: "cd****gh"}}
 	failures := []string{"HTTP 401: unauthorized", ""}
