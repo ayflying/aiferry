@@ -46,14 +46,17 @@ func New(ctx context.Context, cfg config.App) (*sApp, error) {
 		return nil, gerror.Wrap(err, "connect Redis")
 	}
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          200,
-		MaxIdleConnsPerHost:   32,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 180 * time.Second,
+		Proxy:               http.ProxyFromEnvironment,
+		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        200,
+		MaxIdleConnsPerHost: 32,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		// 长文本生成（长上下文分镜/写作）上游非流式首包普遍超过 180s，
+		// 触发 http2: timeout awaiting response headers 后以 502 回源。
+		// 提高到 600s 覆盖重负载场景；流式请求本就不受此限制（响应头秒回）。
+		ResponseHeaderTimeout: 600 * time.Second,
 	}
 	directTransport := transport.Clone()
 	directTransport.Proxy = nil
