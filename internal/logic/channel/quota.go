@@ -51,8 +51,10 @@ type QuotaView struct {
 }
 
 // QueryQuota 查询渠道上游的套餐额度（如智谱 GLM Coding Plan 的积分窗口）。
-// 结果按渠道缓存一分钟，重复点击不会重复请求上游；refresh 为 true 时绕过缓存强制查询。
-func (s *sChannel) QueryQuota(ctx context.Context, channelID uint64, refresh bool) (QuotaView, error) {
+// credentialID 为 0 时并发查询全部密钥并合并视图，结果按渠道缓存一分钟，
+// 重复点击不会重复请求上游，refresh 为 true 时绕过缓存强制查询；
+// credentialID 非零时只查询该密钥，不合并、不缓存（管理端即时诊断操作）。
+func (s *sChannel) QueryQuota(ctx context.Context, channelID, credentialID uint64, refresh bool) (QuotaView, error) {
 	channel, err := s.Get(ctx, channelID)
 	if err != nil {
 		return QuotaView{}, err
@@ -63,6 +65,9 @@ func (s *sChannel) QueryQuota(ctx context.Context, channelID uint64, refresh boo
 	}
 	if config.Quota.Adapter == "" || config.Quota.Adapter == channeltype.AdapterNone {
 		return QuotaView{}, gerror.New("该渠道类型不支持套餐额度查询")
+	}
+	if credentialID > 0 {
+		return s.queryCredentialQuota(ctx, channel, config.Quota, credentialID)
 	}
 	if !refresh {
 		if view, ok := s.readQuotaCache(ctx, channel.Id); ok {
@@ -76,6 +81,20 @@ func (s *sChannel) QueryQuota(ctx context.Context, channelID uint64, refresh boo
 	}
 	s.writeQuotaCache(ctx, channel.Id, view)
 	return view, nil
+}
+
+// queryCredentialQuota 查询单把上游密钥的套餐额度。密钥级查询是逐密钥
+// 排查额度问题的诊断入口，结果不与其他密钥合并，也不写渠道级缓存。
+func (s *sChannel) queryCredentialQuota(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, credentialID uint64) (QuotaView, error) {
+	credential, err := s.credentialByID(ctx, channel.Id, credentialID)
+	if err != nil {
+		return QuotaView{}, err
+	}
+	endpoint, err := resolveHostURL(channel.BaseUrl, config.Path)
+	if err != nil {
+		return QuotaView{}, err
+	}
+	return s.fetchQuotaWithCredential(ctx, channel, config, endpoint, credential.ApiKeyCipher)
 }
 
 func (s *sChannel) readQuotaCache(ctx context.Context, channelID uint64) (QuotaView, bool) {

@@ -198,7 +198,7 @@ func (c *Controller) queryChannelCost(r *ghttp.Request) {
 }
 
 func (c *Controller) queryChannelQuota(r *ghttp.Request) {
-	data, err := c.channels.QueryQuota(r.Context(), routeID(r), r.GetQuery("refresh").Bool())
+	data, err := c.channels.QueryQuota(r.Context(), routeID(r), r.GetQuery("credentialId").Uint64(), r.GetQuery("refresh").Bool())
 	respond(r, data, err)
 }
 

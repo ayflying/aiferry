@@ -25,7 +25,8 @@ type (
 		Update(ctx context.Context, id uint64, input adminapi.ChannelInput) error
 		Delete(ctx context.Context, id uint64) error
 		QueryCost(ctx context.Context, channelID uint64, input adminapi.CostQueryInput) (CostResult, error)
-		QueryQuota(ctx context.Context, channelID uint64, refresh bool) (QuotaView, error)
+		// credentialID 非零时只查询该密钥的额度（不合并、不缓存），见 quota.go。
+		QueryQuota(ctx context.Context, channelID, credentialID uint64, refresh bool) (QuotaView, error)
 		// RestoreCostQueryDisabledCredentials restores only credentials that were
 		// previously disabled by the removed balance-query rule. Cost data is for
 		// display and notification, not proof that a credential is unusable.
