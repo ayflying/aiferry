@@ -88,6 +88,12 @@ var (
 			s.SetFileServerEnabled(true)
 			s.SetIndexFolder(false)
 			s.SetIndexFiles([]string{"index.html"})
+			// 根路径由内置静态服务直接命中 index.html，不经过下方 SPA 兜底处理器，
+			// 必须单独加 no-cache，否则发版后浏览器仍用缓存的旧 index.html 引用旧 JS。
+			s.BindHandler("GET:/", func(r *ghttp.Request) {
+				r.Response.Header().Set("Cache-Control", "no-cache")
+				r.Response.ServeFile(filepath.Join(cfg.WebRoot, "index.html"))
+			})
 			s.BindHandler("GET:/healthz", func(r *ghttp.Request) {
 				r.Response.WriteJson(map[string]any{
 					"status":   "ok",
