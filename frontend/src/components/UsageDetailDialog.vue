@@ -84,7 +84,7 @@ function billingSummary() {
       <div class="detail-summary">
         <div><span>模型价格</span><strong>{{ billingDetails ? billingSourceLabel : '未保存价格快照' }}</strong></div>
         <div><span>总 Token</span><strong>{{ formatNumber(usage.totalTokens) }}</strong></div>
-        <div><span>首针耗时</span><strong>{{ formatLatency(usage.firstTokenMs) }}</strong></div>
+        <div><span>首字耗时</span><strong>{{ formatLatency(usage.firstTokenMs) }}</strong></div>
         <div><span>总耗时</span><strong>{{ formatLatency(usage.durationMs) }}</strong></div>
       </div>
 
@@ -135,7 +135,7 @@ function billingSummary() {
           <template v-for="(step, index) in attemptFlow" :key="`${step.channelName}-${index}`">
             <div class="flow-step">
               <strong>{{ step.channelName || '未知渠道' }}</strong>
-              <small>耗时 {{ formatLatency(step.durationMs) }}<template v-if="step.firstTokenMs != null"> · 首针 {{ formatLatency(step.firstTokenMs) }}</template></small>
+              <small>耗时 {{ formatLatency(step.durationMs) }}<template v-if="step.firstTokenMs != null"> · 首字 {{ formatLatency(step.firstTokenMs) }}</template></small>
             </div>
             <span v-if="index < attemptFlow.length - 1" class="flow-arrow" aria-hidden="true">→</span>
           </template>
