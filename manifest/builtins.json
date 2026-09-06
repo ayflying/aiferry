@@ -113,6 +113,44 @@
       }
     },
     {
+      "id": 9000000000000019,
+      "name": "火山方舟 Coding Plan",
+      "code": "volcengine_ark_coding",
+      "config": {
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "models": {
+          "method": "GET",
+          "path": "/models",
+          "listPath": "data",
+          "idPath": "id",
+          "authType": "channel_key",
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer "
+        },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" }
+      }
+    },
+    {
+      "id": 9000000000000020,
+      "name": "火山方舟 Agent Plan",
+      "code": "volcengine_ark_agent",
+      "config": {
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "models": {
+          "method": "GET",
+          "path": "/models",
+          "listPath": "data",
+          "idPath": "id",
+          "authType": "channel_key",
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer "
+        },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" }
+      }
+    },
+    {
       "id": 9000000000000005,
       "name": "MiniMax",
       "code": "minimax",
