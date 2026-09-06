@@ -339,9 +339,21 @@ func parseQuotaResponse(adapter string, body []byte) (QuotaView, error) {
 		})
 	}
 	if len(view.Windows) == 0 {
-		return QuotaView{}, gerror.New("上游未返回可用的套餐额度窗口，请确认账号已订阅套餐")
+		// 解析成功但没有任何可识别窗口：多为团队版席位或套餐变体返回了
+		// 不同结构。附上截断的原始响应便于定位上游真实返回内容。
+		return QuotaView{}, gerror.Newf("上游未返回可用的套餐额度窗口，原始响应：%s", quotaRawSnippet(body))
 	}
 	return view, nil
+}
+
+// quotaRawSnippet 把上游原始响应压缩为单行并截断到 500 字节，用于错误诊断，
+// 避免把完整响应刷进界面。
+func quotaRawSnippet(body []byte) string {
+	compact := strings.Join(strings.Fields(string(body)), " ")
+	if len(compact) > 500 {
+		return compact[:500] + "…"
+	}
+	return compact
 }
 
 func quotaPercent(value *float64) float64 {
