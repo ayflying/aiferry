@@ -252,18 +252,35 @@ async function discover(channel: Channel) {
   discoveryOpen.value = true
   discovering.value = true
   try {
-    const [models, channelModels] = await Promise.all([
+    // discover 在渠道无 /models 接口时会失败，用 allSettled 保证已保存模型仍能加载展示。
+    const [discovered, saved] = await Promise.allSettled([
       apiPost<DiscoveredModel[]>(`/channels/${channel.id}/models/discover`),
       apiGet<ChannelModel[]>(`/channels/${channel.id}/models`),
     ])
-    discoveredModels.value = sortDiscoveredModels(models)
-    selectedModelNames.value = discoveredModels.value.filter((item) => item.selected).map((item) => item.name)
+    if (discovered.status === 'rejected') {
+      discoveryUnsupported.value = discoveryErrorUnsupported(discovered.reason)
+      discoveryError.value = discoveryUnsupported.value ? '' : describeDiscoveryError(discovered.reason)
+    }
+    discoveredModels.value = sortDiscoveredModels(discovered.status === 'fulfilled' ? discovered.value : [])
+    const channelModels = saved.status === 'fulfilled' ? saved.value : []
+    // 已保存但不在上游列表里的模型即此前手动添加的自定义模型，恢复显示并保持勾选。
+    const discoveredNames = new Set(discoveredModels.value.map((item) => item.name))
+    const restored = new Map<string, DiscoveredModel>()
+    for (const item of channelModels) {
+      if (item.enabled !== 1 || discoveredNames.has(item.upstreamName)) continue
+      if (restored.has(item.upstreamName)) continue
+      restored.set(item.upstreamName, { name: item.upstreamName, publicName: item.upstreamName, selected: true, custom: true })
+    }
+    customModels.value = [...restored.values()]
+    selectedModelNames.value = [
+      ...discoveredModels.value.filter((item) => item.selected).map((item) => item.name),
+      ...[...restored.keys()],
+    ]
     modelMappings.value = channelModels
       .filter((item) => item.enabled === 1 && item.publicName !== item.upstreamName)
       .map((item) => ({ id: item.id, upstreamName: item.upstreamName, publicName: item.publicName }))
   } catch (error) {
-    discoveryUnsupported.value = discoveryErrorUnsupported(error)
-    discoveryError.value = discoveryUnsupported.value ? '' : describeDiscoveryError(error)
+    showError(error, '加载渠道模型失败')
   } finally {
     discovering.value = false
   }

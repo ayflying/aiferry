@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import type { BillingItem, UsageLog } from '../api/types'
 import { formatLatency, formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
