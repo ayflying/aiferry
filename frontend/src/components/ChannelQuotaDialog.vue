@@ -35,13 +35,15 @@ function windowColor(window: ChannelQuotaWindow) {
 }
 
 function windowDetail(window: ChannelQuotaWindow) {
+  // 百分比统一保留两位小数，避免超长小数串（如 4.554234857142856%）。
+  const percent = window.usedPercent.toFixed(2)
   if (window.used !== undefined || window.total !== undefined || window.remaining !== undefined) {
     const used = window.used === undefined ? '—' : Math.round(window.used)
     const total = window.total === undefined ? '—' : Math.round(window.total)
     const remaining = window.remaining === undefined ? '—' : Math.round(window.remaining)
-    return `已用 ${used} / ${total}，剩余 ${remaining}（${window.usedPercent}%）`
+    return `已用 ${used} / ${total}，剩余 ${remaining}（${percent}%）`
   }
-  return `已用 ${window.usedPercent}%`
+  return `已用 ${percent}%`
 }
 
 function resetLabel(window: ChannelQuotaWindow) {
