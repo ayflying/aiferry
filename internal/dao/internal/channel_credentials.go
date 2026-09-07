@@ -26,6 +26,7 @@ type ChannelCredentialsColumns struct {
 	KeyPrefix              string //
 	KeyHash                string //
 	ApiKeyCipher           string //
+	ManagementKeyCipher    string //
 	Status                 string //
 	AutoDisabledAt         string //
 	AutoDisabledReason     string //
@@ -47,6 +48,7 @@ var channelCredentialsColumns = ChannelCredentialsColumns{
 	KeyPrefix:              "key_prefix",
 	KeyHash:                "key_hash",
 	ApiKeyCipher:           "api_key_cipher",
+	ManagementKeyCipher:    "management_key_cipher",
 	Status:                 "status",
 	AutoDisabledAt:         "auto_disabled_at",
 	AutoDisabledReason:     "auto_disabled_reason",

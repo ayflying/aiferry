@@ -193,6 +193,18 @@ func (s *sChannel) setConfiguredHeaders(ctx context.Context, req *http.Request, 
 	return nil
 }
 
+// withCredentialManagementKey 返回一个注入了凭证级管理密钥的渠道副本：
+// 凭证配置了自己的管理密钥时覆盖渠道级值，否则保持渠道级作回退。
+// channel 值类型传递，副本不会影响调用方的原对象。
+func withCredentialManagementKey(channel entity.Channels, credentialManagementKeyCipher string) entity.Channels {
+	if credentialManagementKeyCipher == "" {
+		return channel
+	}
+	managed := channel
+	managed.ManagementKeyCipher = credentialManagementKeyCipher
+	return managed
+}
+
 func boolStatus(value int) int {
 	if value == 0 {
 		return 0

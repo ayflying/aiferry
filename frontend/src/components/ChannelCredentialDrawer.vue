@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { CircleAlert, Coins, Gauge, KeyRound, Plus, Trash2 } from '@lucide/vue'
+import { CircleAlert, Coins, Gauge, KeyRound, Plus, Settings2, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelCredential, CostSummary } from '../api/types'
@@ -19,6 +19,7 @@ const loading = ref(false)
 const adding = ref(false)
 const querying = ref(false)
 const credentialValue = ref('')
+const credentialManagementValue = ref('')
 const rows = ref<ChannelCredential[]>([])
 const queryDetails = ref<ChannelCostResult['credentials']>([])
 const summaries = ref<CostSummary[]>([])
@@ -55,8 +56,11 @@ async function addCredential() {
   if (!props.channel || !credentialValue.value.trim()) return
   adding.value = true
   try {
-    await apiPost(`/channels/${props.channel.id}/credentials`, { apiKey: credentialValue.value.trim() })
+    const payload: Record<string, string> = { apiKey: credentialValue.value.trim() }
+    if (credentialManagementValue.value.trim()) payload.managementKey = credentialManagementValue.value.trim()
+    await apiPost(`/channels/${props.channel.id}/credentials`, payload)
     credentialValue.value = ''
+    credentialManagementValue.value = ''
     ElMessage.success('上游密钥已追加')
     await load(true)
     emit('changed')
@@ -64,6 +68,40 @@ async function addCredential() {
     showError(error, '追加上游密钥失败')
   } finally {
     adding.value = false
+  }
+}
+
+// setManagementKey 为单把凭证设置管理密钥（按上游账号独立查询用量）；
+// 传空白时确认后清除该凭证的管理密钥，回退渠道级共享。
+async function setManagementKey(item: ChannelCredential) {
+  if (!props.channel) return
+  let value: string
+  try {
+    const result = await ElMessageBox.prompt(
+      item.hasManagementKey
+        ? `该密钥已配置管理密钥，输入新值将覆盖；留空并确认则清除，清除后回退渠道级管理密钥。`
+        : `为该上游账号配置管理密钥（用于查询该账号的用量/余额），留空取消。`,
+      `管理密钥 · ${item.keyPrefix}`,
+      {
+        type: 'warning',
+        confirmButtonText: '保存',
+        cancelButtonText: '取消',
+        inputPlaceholder: item.hasManagementKey ? '已配置（输入新值覆盖，留空清除）' : '粘贴上游管理密钥',
+        inputType: 'password',
+        inputValue: '',
+      },
+    )
+    value = (result.value || '').trim()
+  } catch (error) {
+    if (error !== 'cancel') showError(error, '打开管理密钥输入失败')
+    return
+  }
+  try {
+    await apiPut(`/channels/${props.channel.id}/credentials/${item.id}/management-key`, { managementKey: value })
+    item.hasManagementKey = value !== ''
+    ElMessage.success(value ? '管理密钥已保存' : '管理密钥已清除，回退渠道级')
+  } catch (error) {
+    showError(error, '保存管理密钥失败')
   }
 }
 
@@ -138,6 +176,7 @@ function costDetail(item: ChannelCredential) {
     <div class="credential-toolbar">
       <div class="credential-add">
         <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" placeholder="追加上游推理密钥" @keyup.enter="addCredential" />
+        <el-input v-model="credentialManagementValue" type="password" show-password autocomplete="new-password" placeholder="管理密钥（可选，按账号查用量）" @keyup.enter="addCredential" />
         <el-button type="primary" :icon="Plus" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">追加</el-button>
       </div>
       <el-button :icon="Coins" :loading="querying" :disabled="channel?.costQueryMode === 'none'" @click="queryCosts">{{ queryLabel }}</el-button>
@@ -154,11 +193,11 @@ function costDetail(item: ChannelCredential) {
 
     <div v-loading="loading" class="credential-table">
       <el-table :data="rows" row-key="id" size="small">
-        <el-table-column label="上游密钥" min-width="145"><template #default="{ row }"><span class="mono key-prefix"><KeyRound :size="14" />{{ row.keyPrefix }}</span></template></el-table-column>
+        <el-table-column label="上游密钥" min-width="145"><template #default="{ row }"><span class="mono key-prefix"><KeyRound :size="14" />{{ row.keyPrefix }}<el-tooltip v-if="row.hasManagementKey" content="已配置该账号的管理密钥"><span class="mgmt-badge">管</span></el-tooltip></span></template></el-table-column>
         <el-table-column label="状态" min-width="156"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="autoDisabledDetail(row)" placement="top-start"><div class="credential-status"><span class="status-dot warning">自动禁用</span><small v-if="row.autoDisabledAt">{{ formatTime(row.autoDisabledAt) }}</small></div></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
         <el-table-column :label="usageQuery ? '用量与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else><span v-if="!usageQuery && row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="!usageQuery && row.lastCostRemaining !== undefined">余额 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><span v-if="usageQuery && (row.lastCostUsage !== undefined || row.lastCostUsed !== undefined)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small><span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined && row.lastCostUsage === undefined" class="muted">尚未查询</span></template></div></template></el-table-column>
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
-        <el-table-column label="操作" width="94" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip v-if="props.quotaSupported" content="查询该密钥的套餐额度"><button class="icon-button" type="button" :aria-label="`查询 ${row.keyPrefix} 额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
+        <el-table-column label="操作" width="118" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询该密钥的套餐额度"><button class="icon-button" type="button" :aria-label="`查询 ${row.keyPrefix} 额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
       </el-table>
       <div v-if="!loading && !rows.length" class="credential-empty"><CircleAlert :size="18" /><span>当前渠道没有可管理的上游密钥</span></div>
     </div>
@@ -171,5 +210,5 @@ function costDetail(item: ChannelCredential) {
 </template>
 
 <style scoped>
-.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.row-actions { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }.shared-balance strong { color: #15202b; }@media (max-width: 600px) { .credential-toolbar { align-items: stretch; flex-direction: column; }.credential-add { width: 100%; }.credential-table { overflow-x: auto; }.credential-table :deep(.el-table) { min-width: 650px; } }
+.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.mgmt-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; padding: 0 5px; border: 1px solid #b8d4ea; border-radius: 4px; color: #2a6f9e; background: #eef6fc; font-size: 10px; line-height: 16px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.row-actions { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }.shared-balance strong { color: #15202b; }@media (max-width: 600px) { .credential-toolbar { align-items: stretch; flex-direction: column; }.credential-add { width: 100%; flex-wrap: wrap; }.credential-table { overflow-x: auto; }.credential-table :deep(.el-table) { min-width: 650px; } }
 </style>

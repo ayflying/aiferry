@@ -112,6 +112,67 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 		return result, nil
 	}
 
+	if config.Costs.AuthType == channeltype.AuthManagementKey {
+		// 管理密钥认证：按凭证分组查询。每个上游账号（apikey）是独立账户，
+		// 配置了凭证级管理密钥就用自己的账号查；未配置的凭证共享渠道级
+		// 管理密钥余额，整渠道只查一次并标记 shared，避免重复扣风控额度。
+		result.Credentials = make([]CredentialCostResult, 0)
+		rows := make([]credentialRow, 0)
+		if err = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channel.Id}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
+			return CostResult{}, gerror.Wrap(err, "list channel credentials for cost query")
+		}
+		sharedQueried := false
+		anyConfigured := false
+		for _, credential := range rows {
+			if credential.ManagementKeyCipher != "" {
+				anyConfigured = true
+				cost, queryErr := s.queryCredentialCost(ctx, withCredentialManagementKey(channel, credential.ManagementKeyCipher), config.Costs, start, end, "")
+				detail := costCredentialResult(credential.Id, credential.KeyPrefix, false, cost, queryErr)
+				result.Credentials = append(result.Credentials, detail)
+				if queryErr != nil {
+					continue
+				}
+				if saveErr := s.saveCredentialCostResult(ctx, credential.Id, cost); saveErr != nil {
+					return CostResult{}, saveErr
+				}
+				continue
+			}
+			// 未配置凭证级管理密钥：渠道级回退，只查一次。
+			if !sharedQueried {
+				sharedQueried = true
+				cost, queryErr := s.queryCredentialCost(ctx, channel, config.Costs, start, end, "")
+				detail := costCredentialResult(0, "管理密钥共享余额", true, cost, queryErr)
+				result.Credentials = append(result.Credentials, detail)
+			}
+		}
+		if len(rows) == 0 {
+			// 渠道还没有任何凭证：维持旧行为，用渠道级管理密钥查共享余额。
+			anyConfigured = true
+			cost, queryErr := s.queryCredentialCost(ctx, channel, config.Costs, start, end, "")
+			result.Credentials = append(result.Credentials, costCredentialResult(0, "管理密钥共享余额", true, cost, queryErr))
+		}
+		if !anyConfigured {
+			return CostResult{}, gerror.New("channel type requires a management key")
+		}
+		if !hasSuccessfulCostResult(result.Credentials) {
+			return CostResult{}, allCredentialCostQueryError(result.Credentials)
+		}
+		result.applyUsageFromCredentials()
+		if err = s.refreshChannelCostSummary(ctx, channel.Id, channeltype.IsUsageCost(config.Costs)); err != nil {
+			return CostResult{}, err
+		}
+		result.Summaries, err = s.channelCostSummaries(ctx, channel.Id, channeltype.IsUsageCost(config.Costs))
+		if err != nil {
+			return CostResult{}, err
+		}
+		applyUsageSummaryMetadata(result.Summaries, config.Costs)
+		result.applySingleSummary()
+		if notifyErr := s.notifyChannelLowBalance(ctx, channel.Id); notifyErr != nil {
+			g.Log().Warningf(ctx, "notify channel %d low balance: %v", channel.Id, notifyErr)
+		}
+		return result, nil
+	}
+
 	cost, queryErr := s.queryCredentialCost(ctx, channel, config.Costs, start, end, "")
 	if queryErr != nil {
 		return CostResult{}, queryErr

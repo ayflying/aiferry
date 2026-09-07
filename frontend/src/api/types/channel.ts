@@ -195,6 +195,7 @@ export interface CostSummary {
 export interface ChannelCredential {
   id: number
   keyPrefix: string
+  hasManagementKey?: boolean
   status: number
   autoDisabled: boolean
   autoDisabledAt?: string

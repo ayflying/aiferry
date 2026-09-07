@@ -26,7 +26,12 @@ type ChannelInput struct {
 }
 
 type ChannelCredentialInput struct {
-	APIKey string `json:"apiKey" v:"required|length:1,4096"`
+	APIKey        string  `json:"apiKey" v:"required|length:1,4096"`
+	ManagementKey *string `json:"managementKey"`
+}
+
+type ChannelCredentialManagementKeyInput struct {
+	ManagementKey *string `json:"managementKey"`
 }
 
 type ChannelCredentialStatusInput struct {

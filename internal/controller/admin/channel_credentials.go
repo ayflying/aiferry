@@ -12,6 +12,7 @@ func (c *Controller) registerChannelCredentialRoutes(group *ghttp.RouterGroup) {
 	group.GET("/channels/{id}/credentials", c.listChannelCredentials)
 	group.POST("/channels/{id}/credentials", c.createChannelCredential)
 	group.PUT("/channels/{id}/credentials/{credentialId}/status", c.updateChannelCredentialStatus)
+	group.PUT("/channels/{id}/credentials/{credentialId}/management-key", c.updateChannelCredentialManagementKey)
 	group.DELETE("/channels/{id}/credentials/{credentialId}", c.deleteChannelCredential)
 }
 
@@ -35,6 +36,14 @@ func (c *Controller) updateChannelCredentialStatus(r *ghttp.Request) {
 		return
 	}
 	respond(r, map[string]any{}, c.channels.SetCredentialStatus(r.Context(), routeID(r), credentialRouteID(r), input))
+}
+
+func (c *Controller) updateChannelCredentialManagementKey(r *ghttp.Request) {
+	var input adminapi.ChannelCredentialManagementKeyInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, map[string]any{}, c.channels.SetCredentialManagementKey(r.Context(), routeID(r), credentialRouteID(r), input))
 }
 
 func (c *Controller) deleteChannelCredential(r *ghttp.Request) {

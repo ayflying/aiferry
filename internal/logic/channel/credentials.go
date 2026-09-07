@@ -24,9 +24,10 @@ import (
 )
 
 type CredentialView struct {
-	Id                     uint64     `json:"id"`
-	KeyPrefix              string     `json:"keyPrefix"`
-	Status                 int        `json:"status"`
+	Id                 uint64     `json:"id"`
+	KeyPrefix          string     `json:"keyPrefix"`
+	HasManagementKey   bool       `json:"hasManagementKey"`
+	Status             int        `json:"status"`
 	AutoDisabled           bool       `json:"autoDisabled"`
 	AutoDisabledAt         *time.Time `json:"autoDisabledAt"`
 	AutoDisabledReason     string     `json:"autoDisabledReason"`
@@ -48,12 +49,13 @@ type RouteCredential struct {
 }
 
 type credentialRow struct {
-	Id                     uint64     `orm:"id"`
-	ChannelId              uint64     `orm:"channel_id"`
-	KeyPrefix              string     `orm:"key_prefix"`
-	KeyHash                string     `orm:"key_hash"`
-	ApiKeyCipher           string     `orm:"api_key_cipher"`
-	Status                 int        `orm:"status"`
+	Id                  uint64     `orm:"id"`
+	ChannelId           uint64     `orm:"channel_id"`
+	KeyPrefix           string     `orm:"key_prefix"`
+	KeyHash             string     `orm:"key_hash"`
+	ApiKeyCipher        string     `orm:"api_key_cipher"`
+	ManagementKeyCipher string     `orm:"management_key_cipher"`
+	Status              int        `orm:"status"`
 	AutoDisabledAt         *time.Time `orm:"auto_disabled_at"`
 	AutoDisabledReason     string     `orm:"auto_disabled_reason"`
 	AutoDisabledStatusCode *uint      `orm:"auto_disabled_status_code"`
@@ -75,6 +77,11 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 	if err != nil {
 		return 0, err
 	}
+	managementKey, err := s.encryptOptionalCredentialKey(input.ManagementKey)
+	if err != nil {
+		return 0, err
+	}
+	data.ManagementKeyCipher = managementKey
 	exists, err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID, KeyHash: keyHash}).Count()
 	if err != nil {
 		return 0, gerror.Wrap(err, "check duplicate channel credential")
@@ -127,6 +134,32 @@ func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]Cre
 	return views, nil
 }
 
+// SetCredentialManagementKey 为单把凭证设置或清除管理密钥。传 nil 或空白
+// 表示清除（回到渠道级回退）。管理密钥与推理密钥是两个独立凭据：推理密钥
+// 用于请求转发，管理密钥用于该上游账号的用量/余额/额度查询。
+func (s *sChannel) SetCredentialManagementKey(ctx context.Context, channelID, credentialID uint64, input adminapi.ChannelCredentialManagementKeyInput) error {
+	credential, err := s.credentialByID(ctx, channelID, credentialID)
+	if err != nil {
+		return err
+	}
+	cipher, err := s.encryptOptionalCredentialKey(input.ManagementKey)
+	if err != nil {
+		return err
+	}
+	data := do.ChannelCredentials{}
+	if cipher == "" {
+		data.ManagementKeyCipher = gdb.Raw("NULL")
+	} else {
+		data.ManagementKeyCipher = cipher
+	}
+	if _, err = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: credential.Id}).Data(data).Update(); err != nil {
+		return gerror.Wrap(err, "update channel credential management key")
+	}
+	s.invalidateCredentialCache(ctx)
+	s.InvalidateListCache(ctx)
+	return nil
+}
+
 func (s *sChannel) SetCredentialStatus(ctx context.Context, channelID, credentialID uint64, input adminapi.ChannelCredentialStatusInput) error {
 	credential, err := s.credentialByID(ctx, channelID, credentialID)
 	if err != nil {
@@ -148,7 +181,8 @@ func (s *sChannel) SetCredentialStatus(ctx context.Context, channelID, credentia
 	return s.invalidateRoutes(ctx)
 }
 
-func (s *sChannel) DeleteCredential(ctx context.Context, channelID, credentialID uint64) error {	credential, err := s.credentialByID(ctx, channelID, credentialID)
+func (s *sChannel) DeleteCredential(ctx context.Context, channelID, credentialID uint64) error {
+	credential, err := s.credentialByID(ctx, channelID, credentialID)
 	if err != nil {
 		return err
 	}
@@ -463,9 +497,22 @@ func (s *sChannel) newCredentialData(value string) (do.ChannelCredentials, error
 	}, nil
 }
 
+// encryptOptionalCredentialKey 处理可选的密钥输入：未传（nil）返回空串表示
+// 不改动；传入空白返回空串语义由调用方决定（创建时=不设置，更新时=清除）。
+func (s *sChannel) encryptOptionalCredentialKey(value *string) (string, error) {
+	if value == nil {
+		return "", nil
+	}
+	plainText := strings.TrimSpace(*value)
+	if plainText == "" {
+		return "", nil
+	}
+	return s.app.Secrets.Encrypt(plainText)
+}
+
 func credentialView(row credentialRow, config channeltype.CostConfig) CredentialView {
 	view := CredentialView{
-		Id: row.Id, KeyPrefix: row.KeyPrefix, Status: row.Status, AutoDisabledReason: row.AutoDisabledReason,
+		Id: row.Id, KeyPrefix: row.KeyPrefix, HasManagementKey: row.ManagementKeyCipher != "", Status: row.Status, AutoDisabledReason: row.AutoDisabledReason,
 		AutoDisabledStatusCode: row.AutoDisabledStatusCode, LastCostUsed: row.LastCostUsed, LastCostRemaining: row.LastCostRemaining,
 		LastCostCurrency: row.LastCostCurrency, LastCostAt: row.LastCostAt, CreatedAt: row.CreatedAt,
 	}
