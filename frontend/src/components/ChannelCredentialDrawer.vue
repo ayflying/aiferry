@@ -8,7 +8,7 @@ import { showError } from '../lib/error'
 import { formatCost, formatTime, formatNumber } from '../lib/format'
 import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
 
-const props = defineProps<{ modelValue: boolean; channel?: Channel; quotaSupported?: boolean; managementKeySupported?: boolean }>()
+const props = defineProps<{ modelValue: boolean; channel?: Channel; quotaSupported?: boolean; managementKeySupported?: boolean; managementKeyPair?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; changed: []; 'query-quota': [credential: ChannelCredential] }>()
 
 const visible = computed({
@@ -20,6 +20,12 @@ const adding = ref(false)
 const querying = ref(false)
 const credentialValue = ref('')
 const credentialManagementValue = ref('')
+// 火山 AFP 的管理密钥是 AK/SK 两个值，弹窗内分开输入，保存时合并为 "AK:SK"。
+const mgmtDialogVisible = ref(false)
+const mgmtDialogTarget = ref<ChannelCredential | null>(null)
+const mgmtAccessKeyInput = ref('')
+const mgmtSecretKeyInput = ref('')
+const mgmtSaving = ref(false)
 const rows = ref<ChannelCredential[]>([])
 const queryDetails = ref<ChannelCostResult['credentials']>([])
 const summaries = ref<CostSummary[]>([])
@@ -71,10 +77,18 @@ async function addCredential() {
   }
 }
 
-// setManagementKey 为单把凭证设置管理密钥（按上游账号独立查询用量）；
+// setManagementKey 为单把凭证设置管理密钥。火山渠道（managementKeyPair）
+// 弹出 AK/SK 两个独立输入框；其余类型保持单输入框弹窗。
 // 传空白时确认后清除该凭证的管理密钥，回退渠道级共享。
 async function setManagementKey(item: ChannelCredential) {
   if (!props.channel) return
+  if (props.managementKeyPair) {
+    mgmtDialogTarget.value = item
+    mgmtAccessKeyInput.value = ''
+    mgmtSecretKeyInput.value = ''
+    mgmtDialogVisible.value = true
+    return
+  }
   let value: string
   try {
     const result = await ElMessageBox.prompt(
@@ -96,12 +110,41 @@ async function setManagementKey(item: ChannelCredential) {
     if (error !== 'cancel') showError(error, '打开管理密钥输入失败')
     return
   }
+  await saveManagementKey(item, value)
+}
+
+async function saveManagementKey(item: ChannelCredential, value: string) {
+  if (!props.channel) return
   try {
     await apiPut(`/channels/${props.channel.id}/credentials/${item.id}/management-key`, { managementKey: value })
     item.hasManagementKey = value !== ''
     ElMessage.success(value ? '管理密钥已保存' : '管理密钥已清除，回退渠道级')
   } catch (error) {
     showError(error, '保存管理密钥失败')
+  }
+}
+
+// saveManagementKeyPair 保存火山 AK/SK 对话框：两个值都必须填写；
+// 两栏全空视为取消，任意一栏为空提示补全。
+async function saveManagementKeyPair() {
+  const item = mgmtDialogTarget.value
+  if (!item) return
+  const accessKey = mgmtAccessKeyInput.value.trim()
+  const secretKey = mgmtSecretKeyInput.value.trim()
+  if (!accessKey && !secretKey) {
+    mgmtDialogVisible.value = false
+    return
+  }
+  if (!accessKey || !secretKey) {
+    ElMessage.warning('Access Key 和 Secret Key 需要都填写')
+    return
+  }
+  mgmtSaving.value = true
+  try {
+    await saveManagementKey(item, `${accessKey}:${secretKey}`)
+    mgmtDialogVisible.value = false
+  } finally {
+    mgmtSaving.value = false
   }
 }
 
@@ -176,7 +219,7 @@ function costDetail(item: ChannelCredential) {
     <div class="credential-toolbar">
       <div class="credential-add">
         <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" placeholder="追加上游推理密钥" @keyup.enter="addCredential" />
-        <el-input v-if="props.managementKeySupported" v-model="credentialManagementValue" type="password" show-password autocomplete="new-password" placeholder="管理密钥（可选，按账号查用量）" @keyup.enter="addCredential" />
+        <el-input v-if="props.managementKeySupported" v-model="credentialManagementValue" type="password" show-password autocomplete="new-password" :placeholder="props.managementKeyPair ? '管理密钥 Secret Key（可选，格式 AK:SK）' : '管理密钥（可选，按账号查用量）'" @keyup.enter="addCredential" />
         <el-button type="primary" :icon="Plus" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">追加</el-button>
       </div>
       <el-button :icon="Coins" :loading="querying" :disabled="channel?.costQueryMode === 'none'" @click="queryCosts">{{ queryLabel }}</el-button>
@@ -206,9 +249,21 @@ function costDetail(item: ChannelCredential) {
       <strong>管理密钥共享余额</strong>
       <span v-for="item in queryDetails.filter(detail => detail.shared)" :key="item.queriedAt">{{ item.remainingAmount === undefined ? '未返回余额' : formatCost(item.remainingAmount, item.currency) }}</span>
     </div>
+
+    <el-dialog v-model="mgmtDialogVisible" :title="`管理密钥（AK/SK） · ${mgmtDialogTarget?.keyPrefix || ''}`" width="460px" append-to-body>
+      <el-alert v-if="mgmtDialogTarget?.hasManagementKey" type="warning" :closable="false" show-icon title="该上游账号已配置管理密钥，保存后将覆盖；两栏全空保存则取消。" class="mgmt-dialog-alert" />
+      <el-form label-position="top" @submit.prevent="saveManagementKeyPair">
+        <el-form-item label="Access Key（访问密钥 ID）"><el-input v-model="mgmtAccessKeyInput" placeholder="AK，例如 AKTPxxxxxxxx" autocomplete="off" /></el-form-item>
+        <el-form-item label="Secret Key（访问密钥）"><el-input v-model="mgmtSecretKeyInput" type="password" show-password placeholder="SK" autocomplete="new-password" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mgmtDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="mgmtSaving" @click="saveManagementKeyPair">保存</el-button>
+      </template>
+    </el-dialog>
   </el-drawer>
 </template>
 
 <style scoped>
-.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.mgmt-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; padding: 0 5px; border: 1px solid #b8d4ea; border-radius: 4px; color: #2a6f9e; background: #eef6fc; font-size: 10px; line-height: 16px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.row-actions { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }.shared-balance strong { color: #15202b; }@media (max-width: 600px) { .credential-toolbar { align-items: stretch; flex-direction: column; }.credential-add { width: 100%; flex-wrap: wrap; }.credential-table { overflow-x: auto; }.credential-table :deep(.el-table) { min-width: 650px; } }
+.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.mgmt-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; padding: 0 5px; border: 1px solid #b8d4ea; border-radius: 4px; color: #2a6f9e; background: #eef6fc; font-size: 10px; line-height: 16px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.mgmt-dialog-alert { margin-bottom: 12px; }.row-actions { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }.shared-balance strong { color: #15202b; }@media (max-width: 600px) { .credential-toolbar { align-items: stretch; flex-direction: column; }.credential-add { width: 100%; flex-wrap: wrap; }.credential-table { overflow-x: auto; }.credential-table :deep(.el-table) { min-width: 650px; } }
 </style>
