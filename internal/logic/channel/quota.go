@@ -87,14 +87,18 @@ func (s *sChannel) QueryQuota(ctx context.Context, channelID, credentialID uint6
 // queryCredentialQuota 查询单把上游密钥的套餐额度。密钥级查询是逐密钥
 // 排查额度问题的诊断入口，结果不与其他密钥合并，也不写渠道级缓存。
 func (s *sChannel) queryCredentialQuota(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, credentialID uint64) (QuotaView, error) {
-	// 火山 AFP 额度不走推理密钥：整渠道共用一份 AK/SK（渠道管理密钥），
-	// 凭证级查询与渠道级查询结果一致，直接按渠道级返回。
-	if config.Adapter == channeltype.AdapterVolcAFP {
-		return s.queryVolcAFP(ctx, channel, channel.ManagementKeyCipher)
-	}
 	credential, err := s.credentialByID(ctx, channel.Id, credentialID)
 	if err != nil {
 		return QuotaView{}, err
+	}
+	// 火山 AFP 额度走渠道/凭证管理密钥（AK/SK）签名，与推理密钥无关：
+	// 凭证配置了自己的 AK/SK 就用它查，否则回退渠道级 AK/SK。
+	if config.Adapter == channeltype.AdapterVolcAFP {
+		cipher := credential.ManagementKeyCipher
+		if cipher == "" {
+			cipher = channel.ManagementKeyCipher
+		}
+		return s.queryVolcAFP(ctx, channel, cipher)
 	}
 	endpoint, err := resolveHostURL(channel.BaseUrl, config.Path)
 	if err != nil {

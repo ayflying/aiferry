@@ -80,10 +80,13 @@ const selectedChannelType = computed(() => store.channelTypes.find((item) => ite
 // AK/SK（额度查询不走推理密钥）的类型仍在表单填写。
 const showsChannelManagementKey = computed(() => selectedChannelType.value?.config.quota?.adapter === 'volcengine_afp')
 // credentialUsesManagementKey 作用于上游密钥抽屉：
+// 覆盖 models/costs/pricing/quota 四类声明，火山 AFP 的额度接口用
+// 渠道管理密钥（AK/SK）鉴权，同样需要凭证级/渠道级管理密钥入口；
 // 智谱等用渠道密钥即可查额度的类型，不展示凭证级管理密钥入口。
 const credentialUsesManagementKey = computed(() => {
   const config = store.channelTypes.find((item) => item.code === credentialChannel.value?.type)?.config
-  return Boolean(config && [config.models.authType, config.costs.authType, config.pricing.authType].includes('management_key'))
+  if (!config) return false
+  return [config.models.authType, config.costs.authType, config.pricing.authType, config.quota?.authType ?? 'none'].includes('management_key')
 })
 const managementKeyHint = computed(() => {
   if (editingId.value) return '留空则清除；不修改请勿聚焦'
