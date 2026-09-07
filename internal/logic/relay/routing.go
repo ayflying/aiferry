@@ -2,9 +2,11 @@ package relay
 
 import (
 	"context"
+	"fmt"
 	mathrand "math/rand/v2"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
@@ -237,4 +239,24 @@ func retryableStatusForRules(status int, rules string) bool {
 		return true
 	}
 	return system.MatchesStatusCodeRules(rules, status)
+}
+
+// summarizeCredentialSkips 汇总候选渠道在选凭证阶段被整体跳过的原因，
+// 用于 attempts==0 的 503 诊断日志与用量记录：每个渠道标注"全部 N 把密钥冷却中"
+// 或"无启用密钥"。查询失败时降级为不含原因的渠道名列表，不阻断主流程。
+func (s *sRelay) summarizeCredentialSkips(ctx context.Context, candidates []Candidate) string {
+	seen := make(map[uint64]struct{}, len(candidates))
+	parts := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, exists := seen[candidate.ChannelID]; exists {
+			continue
+		}
+		seen[candidate.ChannelID] = struct{}{}
+		reason, err := s.channels.CredentialSkipReason(ctx, candidate.ChannelID)
+		if err != nil {
+			reason = "查询失败"
+		}
+		parts = append(parts, fmt.Sprintf("%s(#%d): %s", candidate.ChannelName, candidate.ChannelID, reason))
+	}
+	return strings.Join(parts, "；")
 }

@@ -206,6 +206,8 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		return err
 	}
 	if len(candidates) == 0 {
+		// 无可用渠道属于无痕失败（尚未进入转发循环，不会写用量），必须留日志便于排障。
+		g.Log().Warningf(ctx, "relay %s: no available channel for model %s (model auto-disabled, channel inactive, or group policy filtered)", clientIP, requestedModel)
 		return gerror.Wrapf(ErrNoAvailableChannel, "no available channel for model %s", requestedModel)
 	}
 	if s.requiresBalanceCheck(requestedModel) {
@@ -295,6 +297,24 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		}
 	} else {
 		last = failedAttemptResult(last, "All eligible channels failed")
+		// attempts==0 意味着所有候选渠道在选凭证阶段就被跳过（凭证冷却或无可用密钥），
+		// 请求从未到达上游、也不会出现在用量列表里。这里补一条用量记录（503）+ WARN 日志，
+		// 避免客户端看到 503 而管理端查无此请求。渠道信息取第一个候选（仅为落库展示），
+		// 计费按未定价处理，不会扣费。
+		last.attemptFlow = attemptFlow
+		last.status = http.StatusServiceUnavailable
+		last.body = openAIError("server_error", retryableAvailabilityMessage)
+		lastCandidate = candidates[0]
+		lastCandidate.ChannelCredentialID = 0
+		lastCandidate.APIKeyCipher = ""
+		requestID := newRequestID()
+		startedAt := time.Now()
+		skippedBy := s.summarizeCredentialSkips(ctx, candidates)
+		last.errorMessage = "全部候选渠道凭证不可用：" + skippedBy
+		if recordErr := s.record(ctx, requestID, key, lastCandidate, clientIP, endpoint, requestedModel, isStream, 0, startedAt, last); recordErr != nil {
+			g.Log().Errorf(ctx, "record no-attempt request %s: %v", requestID, recordErr)
+		}
+		g.Log().Warningf(ctx, "relay %s: request rejected before any upstream attempt (model %s, candidates %d, skip reasons: %s)", clientIP, requestedModel, len(candidates), skippedBy)
 	}
 	return gerror.Wrap(ErrEligibleChannelsExhausted, "all eligible channels failed")
 }

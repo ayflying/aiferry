@@ -43,6 +43,9 @@ type (
 		DeleteCredential(ctx context.Context, channelID uint64, credentialID uint64) error
 		HasAvailableCredential(ctx context.Context, channelID uint64) (bool, error)
 		SelectCredential(ctx context.Context, apiKeyID uint64, channelID uint64, excluded map[uint64]struct{}) (RouteCredential, error)
+		// CredentialSkipReason explains why a channel would be skipped entirely
+		// during credential selection (all keys cooling down / no enabled keys).
+		CredentialSkipReason(ctx context.Context, channelID uint64) (string, error)
 		CredentialForTest(ctx context.Context, channelID uint64, credentialID uint64) (RouteCredential, error)
 		StartHealthChecks(ctx context.Context)
 		InvalidateListCache(ctx context.Context)

@@ -173,6 +173,34 @@ func (s *sChannel) HasAvailableCredential(ctx context.Context, channelID uint64)
 	return len(credentials) > 0, err
 }
 
+// CredentialSkipReason 返回渠道在选凭证阶段会被整体跳过的具体原因，
+// 供 relay 的 attempts==0 诊断日志与用量记录使用：
+//   - "N 把密钥全部冷却中"：启用密钥存在但都在 Redis 冷却（连续失败触发）；
+//   - "无启用密钥"：渠道没有 status=1 的密钥（被手动禁用或自动禁用）；
+//   - "有可用密钥"：不应出现——出现说明排除集合（excluded）把密钥全部排掉。
+func (s *sChannel) CredentialSkipReason(ctx context.Context, channelID uint64) (string, error) {
+	rows := make([]credentialRow, 0)
+	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID, Status: 1}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
+		return "", gerror.Wrap(err, "list channel credentials for skip reason")
+	}
+	if len(rows) == 0 {
+		return "无启用密钥", nil
+	}
+	cooling := 0
+	for _, row := range rows {
+		if value, err := s.app.Redis.TTL(ctx, system.CredentialCooldownKey(row.Id)).Result(); err == nil && value > 0 {
+			cooling++
+		}
+	}
+	if cooling == len(rows) {
+		return fmt.Sprintf("%d 把密钥全部冷却中", cooling), nil
+	}
+	if cooling > 0 {
+		return fmt.Sprintf("%d/%d 把密钥冷却中，其余不可选", cooling, len(rows)), nil
+	}
+	return "有可用密钥", nil
+}
+
 func isMissingCredentialBindingError(err error) bool {
 	return errors.Is(err, sql.ErrNoRows)
 }
