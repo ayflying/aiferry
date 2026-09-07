@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Plus, RefreshCw, Trash2 } from '@lucide/vue'
+import { Info, Plus, RefreshCw, Trash2 } from '@lucide/vue'
 
 import type { DiscoveredModel } from '../api/types'
 
@@ -11,6 +11,7 @@ const props = defineProps<{
   channelName: string
   discovering: boolean
   discoveryError: string
+  discoveryUnsupported?: boolean
   applying: boolean
   discoveredModels: DiscoveredModel[]
   selectedModelNames: string[]
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   'update:selectedModelNames': [value: string[]]
   'update:discoveryKeyword': [value: string]
   'update:modelMappings': [value: ModelMappingRow[]]
+  'add-custom-model': [name: string]
   retry: []
   addMapping: []
   removeMapping: [id: number]
@@ -61,7 +63,7 @@ const addKeywordHint = computed(() => {
 function addKeywordAsModel() {
   const keyword = trimmedKeyword.value
   if (!keyword || keywordAlreadySelected.value || keywordMatchesDiscovered.value) return
-  emit('update:selectedModelNames', [...props.selectedModelNames, keyword])
+  emit('add-custom-model', keyword)
   emit('update:discoveryKeyword', '')
 }
 const selectedDiscoveredModels = computed(() => props.discoveredModels.filter((item) => props.selectedModelNames.includes(item.name)))
@@ -90,12 +92,13 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
   <el-dialog :model-value="modelValue" :title="`模型映射 · ${channelName}`" width="min(760px, 94vw)" @update:model-value="emit('update:modelValue', $event)">
     <div v-loading="discovering" class="model-selection">
       <div v-if="discoveryError" class="discovery-error" role="alert"><strong>模型发现失败</strong><span>{{ discoveryError }}</span><el-button :icon="RefreshCw" size="small" @click="emit('retry')">重新尝试</el-button></div>
+    <div v-else-if="discoveryUnsupported" class="discovery-unsupported"><Info :size="14" /><span>该渠道不提供模型发现接口，可直接在下方搜索框输入模型 ID，点「添加」手动加入。</span></div>
       <el-tabs v-model="activeTab" class="model-tabs">
         <el-tab-pane label="选择模型" name="selection">
           <div class="mapping-hint">勾选要启用的上游模型；自定义公开名称在“配置映射”页签中逐行添加。</div>
           <div class="selection-toolbar"><el-input :model-value="discoveryKeyword" clearable placeholder="搜索上游模型" @update:model-value="emit('update:discoveryKeyword', $event)" /><el-button :disabled="!canAddKeyword" :title="addKeywordHint" @click="addKeywordAsModel">添加</el-button><el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消全选' : '全选' }}</el-button></div>
           <div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div>
-          <el-checkbox-group v-if="visibleDiscoveredModels.length" :model-value="selectedModelNames" class="model-check-list" @update:model-value="emit('update:selectedModelNames', $event)"><div v-for="item in visibleDiscoveredModels" :key="item.name" class="model-selection-row"><el-checkbox :value="item.name"><code>{{ item.name }}</code></el-checkbox></div></el-checkbox-group>
+          <el-checkbox-group v-if="visibleDiscoveredModels.length" :model-value="selectedModelNames" class="model-check-list" @update:model-value="emit('update:selectedModelNames', $event)"><div v-for="item in visibleDiscoveredModels" :key="item.name" class="model-selection-row"><el-checkbox :value="item.name"><code>{{ item.name }}</code><el-tag v-if="item.custom" size="small" type="warning" class="custom-tag">自定义</el-tag></el-checkbox></div></el-checkbox-group>
           <div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div>
         </el-tab-pane>
         <el-tab-pane label="配置映射" name="mapping">
@@ -116,6 +119,6 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
 </template>
 
 <style scoped>
-.model-selection { min-height: 300px; }.mapping-hint { margin-bottom: 12px; color: #66717d; font-size: 12px; line-height: 1.5; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-selection-row { display: flex; min-height: 52px; align-items: center; padding: 7px 10px; border-bottom: 1px solid #eef1f3; }.model-selection-row:last-child { border-bottom: 0; }.model-selection-row .el-checkbox { min-width: 0; margin: 0; }.model-selection-row .el-checkbox :deep(.el-checkbox__label) { overflow: hidden; text-overflow: ellipsis; }.model-selection-row code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.mapping-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }.mapping-count { color: #66717d; font-size: 12px; }.mapping-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.mapping-entry-row { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 38px; gap: 12px; align-items: center; min-height: 58px; padding: 8px 10px; border-bottom: 1px solid #eef1f3; }.mapping-entry-row:last-child { border-bottom: 0; }.mapping-upstream, .mapping-public { min-width: 0; }.mapping-empty, .selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 13px; }.discovery-error span { flex: 1; min-width: 0; }
+.model-selection { min-height: 300px; }.mapping-hint { margin-bottom: 12px; color: #66717d; font-size: 12px; line-height: 1.5; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-selection-row { display: flex; min-height: 52px; align-items: center; padding: 7px 10px; border-bottom: 1px solid #eef1f3; }.model-selection-row:last-child { border-bottom: 0; }.model-selection-row .el-checkbox { min-width: 0; margin: 0; }.model-selection-row .el-checkbox :deep(.el-checkbox__label) { overflow: hidden; text-overflow: ellipsis; }.model-selection-row code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.custom-tag { margin-left: 8px; }.mapping-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }.mapping-count { color: #66717d; font-size: 12px; }.mapping-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.mapping-entry-row { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 38px; gap: 12px; align-items: center; min-height: 58px; padding: 8px 10px; border-bottom: 1px solid #eef1f3; }.mapping-entry-row:last-child { border-bottom: 0; }.mapping-upstream, .mapping-public { min-width: 0; }.mapping-empty, .selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 13px; }.discovery-error span { flex: 1; min-width: 0; }.discovery-unsupported { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 9px 14px; border: 1px solid #d8e6f2; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; line-height: 1.55; }.discovery-unsupported span { flex: 1; min-width: 0; }
 @media (max-width: 600px) { .selection-toolbar { grid-template-columns: 1fr auto auto; } .selection-toolbar .el-input { grid-column: 1 / -1; }.mapping-entry-row { grid-template-columns: minmax(0, 1fr) 38px; }.mapping-upstream, .mapping-public { grid-column: 1; }.mapping-public { grid-row: 2; }.mapping-entry-row .el-tooltip { grid-column: 2; grid-row: 1 / span 2; } }
 </style>

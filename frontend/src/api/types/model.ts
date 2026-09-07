@@ -47,6 +47,8 @@ export interface DiscoveredModel {
   name: string
   publicName: string
   selected: boolean
+  /** 手动添加的自定义模型（上游发现结果中没有，取消勾选即移除） */
+  custom?: boolean
 }
 
 export interface ModelTestResult {

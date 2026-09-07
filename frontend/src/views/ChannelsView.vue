@@ -37,11 +37,15 @@ const discovering = ref(false)
 const applyingSelection = ref(false)
 const discoveryChannel = ref<Channel>()
 const discoveredModels = ref<DiscoveredModel[]>([])
+const customModels = ref<DiscoveredModel[]>([])
 const discoveryKeyword = ref('')
 const selectedModelNames = ref<string[]>([])
 const modelMappings = ref<Array<{ id: number; upstreamName: string; publicName: string }>>([])
 let nextMappingID = 0
 const discoveryError = ref('')
+// 渠道上游没有模型发现接口（HTTP 404，如火山 Agent Plan）时置位：
+// 不显示红色错误框（避免误导），改为中性提示引导手动添加模型。
+const discoveryUnsupported = ref(false)
 const testOpen = ref(false)
 const testChannel = ref<Channel>()
 const credentialsOpen = ref(false)
@@ -240,9 +244,11 @@ async function discover(channel: Channel) {
   discoveryChannel.value = channel
   discoveryKeyword.value = ''
   discoveredModels.value = []
+  customModels.value = []
   selectedModelNames.value = []
   modelMappings.value = []
   discoveryError.value = ''
+  discoveryUnsupported.value = false
   discoveryOpen.value = true
   discovering.value = true
   try {
@@ -256,10 +262,42 @@ async function discover(channel: Channel) {
       .filter((item) => item.enabled === 1 && item.publicName !== item.upstreamName)
       .map((item) => ({ id: item.id, upstreamName: item.upstreamName, publicName: item.publicName }))
   } catch (error) {
-    discoveryError.value = describeDiscoveryError(error)
+    discoveryUnsupported.value = discoveryErrorUnsupported(error)
+    discoveryError.value = discoveryUnsupported.value ? '' : describeDiscoveryError(error)
   } finally {
     discovering.value = false
   }
+}
+
+// dialogModels 把手动添加的自定义模型与上游发现结果合并给对话框：
+// 自定义模型带 custom 标记，取消勾选时由 syncSelectionRemoval 移除。
+const dialogModels = computed(() => {
+  const upstream = new Set(discoveredModels.value.map((item) => item.name))
+  const extras = customModels.value.filter((item) => !upstream.has(item.name))
+  return [...extras, ...discoveredModels.value]
+})
+
+// syncSelectionRemoval 在勾选集合变化后执行自定义模型删除语义：
+// 自定义模型被取消勾选即从列表移除（保存后后端将其禁用，等效删除）。
+function syncSelectionRemoval() {
+  if (!customModels.value.length) return
+  const selected = new Set(selectedModelNames.value)
+  customModels.value = customModels.value.filter((item) => selected.has(item.name))
+}
+
+// addCustomModel 把搜索框里手动输入的模型 ID 作为自定义模型加入列表并勾选。
+function addCustomModel(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return
+  if (customModels.value.some((item) => item.name === trimmed)) return
+  customModels.value = [...customModels.value, { name: trimmed, publicName: trimmed, selected: true, custom: true }]
+  selectedModelNames.value = [...selectedModelNames.value, trimmed]
+}
+
+// onSelectionChanged 由对话框勾选变化时调用：先同步 v-model，再执行移除语义。
+function onSelectionChanged(names: string[]) {
+  selectedModelNames.value = names
+  syncSelectionRemoval()
 }
 
 function addModelMapping() {
@@ -274,8 +312,15 @@ function describeDiscoveryError(error: unknown) {
   const message = error instanceof Error ? error.message : '网络请求失败'
   if (message.startsWith('上游每日用量额度已用尽')) return message
   if (message.includes('HTTP 429')) return '上游返回 HTTP 429，当前请求受到限流或该密钥的可用配额不足。请稍后重试，或在上游确认配额和请求限制。'
-  if (message.includes('HTTP 404')) return '上游不存在模型列表接口（HTTP 404）。部分套餐类型（如火山方舟 Agent Plan）不提供模型发现 API，可在下方“配置映射”页签手动输入上游模型 ID。'
+  if (message.includes('HTTP 404')) return '上游不存在模型列表接口（HTTP 404）。部分套餐类型（如火山方舟 Agent Plan）不提供模型发现 API，可在搜索框输入模型 ID 后点“添加”手动加入。'
   return `上游模型接口调用失败：${message}`
+}
+
+// discoveryUnsupported 判定渠道是否根本没有模型发现能力（HTTP 404）：
+// 这类渠道属于正常情况（套餐类型不提供 /models），不算错误。
+function discoveryErrorUnsupported(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('HTTP 404')
 }
 
 async function saveModelSelection() {
@@ -405,7 +450,7 @@ watch(activeTab, (tab) => {
     <section v-else-if="activeTab === 'groups'"><ChannelGroupListPanel :channels="store.channels" :groups="store.channelGroups" :loading="tabLoading.groups" @create="openCreateGroup" @edit="openEditGroup" @refresh="loadChannelGroups" @remove="removeGroup" /></section>
     <section v-else><ChannelTypeListPanel :loading="tabLoading.types" :status-saving="typeStatusSaving" :types="store.channelTypes" @create="openCreateType" @edit="openEditType" @refresh="loadChannelTypes" @remove="removeType" @set-status="setTypeStatus" /></section>
 
-    <ChannelModelMappingDialog v-model="discoveryOpen" :channel-name="discoveryChannel?.name || ''" :discovering="discovering" :discovery-error="discoveryError" :applying="applyingSelection" :discovered-models="discoveredModels" v-model:selected-model-names="selectedModelNames" v-model:discovery-keyword="discoveryKeyword" v-model:model-mappings="modelMappings" @retry="discoveryChannel && discover(discoveryChannel)" @add-mapping="addModelMapping" @remove-mapping="removeModelMapping" @save="saveModelSelection" />
+    <ChannelModelMappingDialog v-model="discoveryOpen" :channel-name="discoveryChannel?.name || ''" :discovering="discovering" :discovery-error="discoveryError" :discovery-unsupported="discoveryUnsupported" :applying="applyingSelection" :discovered-models="dialogModels" :selected-model-names="selectedModelNames" @update:selected-model-names="onSelectionChanged" v-model:discovery-keyword="discoveryKeyword" v-model:model-mappings="modelMappings" @add-custom-model="addCustomModel" @retry="discoveryChannel && discover(discoveryChannel)" @add-mapping="addModelMapping" @remove-mapping="removeModelMapping" @save="saveModelSelection" />
 
     <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="loadChannels" />
     <ChannelQuotaDialog v-model="quotaOpen" :channel-name="quotaTitle" :loading="quotaLoading" :error="quotaError" :result="quotaResult" @refresh="quotaChannel && queryQuota(quotaChannel, true, quotaCredential)" />
