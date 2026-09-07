@@ -36,6 +36,22 @@ const visibleDiscoveredModels = computed(() => {
     ? props.discoveredModels.filter((item) => item.name.toLowerCase().includes(keyword))
     : props.discoveredModels
 })
+const keywordMatchesDiscovered = computed(() => {
+  const keyword = props.discoveryKeyword.trim()
+  if (!keyword) return false
+  return props.discoveredModels.some((item) => item.name.toLowerCase() === keyword.toLowerCase())
+})
+const keywordAlreadySelected = computed(() => {
+  const keyword = props.discoveryKeyword.trim().toLowerCase()
+  return props.selectedModelNames.some((item) => item.toLowerCase() === keyword)
+})
+
+function addKeywordAsModel() {
+  const keyword = props.discoveryKeyword.trim()
+  if (!keyword || keywordAlreadySelected.value) return
+  emit('update:selectedModelNames', [...props.selectedModelNames, keyword])
+  emit('update:discoveryKeyword', '')
+}
 const selectedDiscoveredModels = computed(() => props.discoveredModels.filter((item) => props.selectedModelNames.includes(item.name)))
 const allVisibleSelected = computed(() => visibleDiscoveredModels.value.length > 0
   && visibleDiscoveredModels.value.every((item) => props.selectedModelNames.includes(item.name)))
@@ -69,6 +85,10 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
           <div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div>
           <el-checkbox-group v-if="visibleDiscoveredModels.length" :model-value="selectedModelNames" class="model-check-list" @update:model-value="emit('update:selectedModelNames', $event)"><div v-for="item in visibleDiscoveredModels" :key="item.name" class="model-selection-row"><el-checkbox :value="item.name"><code>{{ item.name }}</code></el-checkbox></div></el-checkbox-group>
           <div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div>
+          <div v-if="!discovering && !keywordMatchesDiscovered" class="custom-model-add">
+            <span class="custom-model-hint">{{ discoveredModels.length ? '找不到需要的模型？' : '上游不提供模型列表（如火山方舟 Agent Plan）？' }}直接输入上游模型 ID：</span>
+            <el-button size="small" type="primary" :disabled="keywordAlreadySelected" @click="addKeywordAsModel">{{ keywordAlreadySelected ? '已添加' : `添加 "${discoveryKeyword.trim()}"` }}</el-button>
+          </div>
         </el-tab-pane>
         <el-tab-pane label="配置映射" name="mapping">
           <div class="mapping-toolbar"><span class="mapping-count">{{ modelMappings.length }} 条映射关系</span><el-button type="primary" :icon="Plus" @click="emit('addMapping')">添加映射</el-button></div>
@@ -88,6 +108,6 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
 </template>
 
 <style scoped>
-.model-selection { min-height: 300px; }.mapping-hint { margin-bottom: 12px; color: #66717d; font-size: 12px; line-height: 1.5; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-selection-row { display: flex; min-height: 52px; align-items: center; padding: 7px 10px; border-bottom: 1px solid #eef1f3; }.model-selection-row:last-child { border-bottom: 0; }.model-selection-row .el-checkbox { min-width: 0; margin: 0; }.model-selection-row .el-checkbox :deep(.el-checkbox__label) { overflow: hidden; text-overflow: ellipsis; }.model-selection-row code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.mapping-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }.mapping-count { color: #66717d; font-size: 12px; }.mapping-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.mapping-entry-row { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 38px; gap: 12px; align-items: center; min-height: 58px; padding: 8px 10px; border-bottom: 1px solid #eef1f3; }.mapping-entry-row:last-child { border-bottom: 0; }.mapping-upstream, .mapping-public { min-width: 0; }.mapping-empty, .selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.discovery-error { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 13px; }.discovery-error span { flex: 1; min-width: 0; }
+.model-selection { min-height: 300px; }.mapping-hint { margin-bottom: 12px; color: #66717d; font-size: 12px; line-height: 1.5; }.selection-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }.selection-summary { display: flex; justify-content: space-between; margin: 13px 0 8px; color: #66717d; font-size: 11px; }.model-check-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.model-selection-row { display: flex; min-height: 52px; align-items: center; padding: 7px 10px; border-bottom: 1px solid #eef1f3; }.model-selection-row:last-child { border-bottom: 0; }.model-selection-row .el-checkbox { min-width: 0; margin: 0; }.model-selection-row .el-checkbox :deep(.el-checkbox__label) { overflow: hidden; text-overflow: ellipsis; }.model-selection-row code { overflow-wrap: anywhere; font-family: 'JetBrains Mono', monospace; font-size: 12px; }.mapping-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }.mapping-count { color: #66717d; font-size: 12px; }.mapping-list { display: grid; max-height: 390px; overflow-y: auto; border-block: 1px solid #dce2e7; }.mapping-entry-row { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 38px; gap: 12px; align-items: center; min-height: 58px; padding: 8px 10px; border-bottom: 1px solid #eef1f3; }.mapping-entry-row:last-child { border-bottom: 0; }.mapping-upstream, .mapping-public { min-width: 0; }.mapping-empty, .selection-empty { display: grid; min-height: 220px; place-items: center; color: #66717d; font-size: 12px; }.custom-model-add { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 12px; padding: 10px 14px; border: 1px dashed #c4cdd5; border-radius: 6px; }.custom-model-hint { color: #66717d; font-size: 12px; }.discovery-error { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid #e9abb2; border-radius: 6px; color: #9c2836; background: #fff6f7; font-size: 12px; line-height: 1.55; }.discovery-error strong { font-size: 13px; }.discovery-error span { flex: 1; min-width: 0; }
 @media (max-width: 600px) { .selection-toolbar { grid-template-columns: 1fr; }.mapping-entry-row { grid-template-columns: minmax(0, 1fr) 38px; }.mapping-upstream, .mapping-public { grid-column: 1; }.mapping-public { grid-row: 2; }.mapping-entry-row .el-tooltip { grid-column: 2; grid-row: 1 / span 2; } }
 </style>
