@@ -314,11 +314,13 @@ func testPayload(endpoint, model string, stream bool) (string, any, bool) {
 	case "embeddings":
 		return "/embeddings", map[string]any{"model": model, "input": "AiFerry model check"}, false
 	case "images":
+		// size 不传：各上游默认值不同（火山 seedream 要求总像素
+		// >= 3686400，OpenAI 默认 1024x1024），写死任何一个都会被
+		// 其他上游拒绝，缺省让上游走自己的默认分辨率。
 		return "/images/generations", map[string]any{
 			"model":  model,
 			"prompt": "A small white ferry sailing on calm blue water.",
 			"n":      1,
-			"size":   "1024x1024",
 		}, false
 	default:
 		payload := map[string]any{

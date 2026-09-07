@@ -80,7 +80,9 @@ func TestTestPayloadUsesImageGenerationEndpoint(t *testing.T) {
 	if err = json.Unmarshal(body, &value); err != nil {
 		t.Fatal(err)
 	}
-	if value["model"] != "gpt-image-2" || value["prompt"] == "" || value["size"] != "1024x1024" {
+	// size 必须缺省：火山 seedream 等上游对最小像素有硬性要求，
+	// 写死 1024x1024 会被 400 拒绝；缺省时各上游走自己的默认分辨率。
+	if value["model"] != "gpt-image-2" || value["prompt"] == "" || value["size"] != nil {
 		t.Fatalf("unexpected image test payload: %#v", value)
 	}
 }
