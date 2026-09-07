@@ -33,9 +33,20 @@ func (s *sChannel) queryNewAPI(ctx context.Context, channel entity.Channels, con
 	if err != nil {
 		return err
 	}
-	used, remaining, err := newAPICostAmounts(account, status)
+	used, remaining, quotaPerUnit, err := newAPICostAmounts(account, status)
 	if err != nil {
 		return err
+	}
+	// 订阅套餐额度并入合计：NewAPI 除钱包外还有订阅制套餐（按订阅扣费），
+	// 只看钱包会低估真实可用额度。/api/subscription/self 与 /api/user/self
+	// 同为 UserAuth，管理密钥通用；旧版部署没有该接口，失败时静默降级为纯钱包。
+	subEndpoint, subErr := newAPIEndpointURL(channel.BaseUrl, "/api/subscription/self")
+	if subErr == nil {
+		if subBody, queryErr := s.getCostJSON(ctx, channel, "", subEndpoint, config); queryErr == nil {
+			subUsed, subRemaining := newAPISubscriptionAmounts(subBody)
+			*used += subUsed / quotaPerUnit
+			*remaining += subRemaining / quotaPerUnit
+		}
 	}
 	result.UsedAmount = used
 	result.RemainingAmount = remaining
@@ -58,25 +69,49 @@ func newAPIEndpointURL(baseURL, endpoint string) (string, error) {
 	return parsed.String(), nil
 }
 
-func newAPICostAmounts(account, status []byte) (*float64, *float64, error) {
+func newAPICostAmounts(account, status []byte) (*float64, *float64, float64, error) {
 	if !newAPIResponseSucceeded(account) {
-		return nil, nil, gerror.New("NewAPI account query was not successful")
+		return nil, nil, 0, gerror.New("NewAPI account query was not successful")
 	}
 	if !newAPIResponseSucceeded(status) {
-		return nil, nil, gerror.New("NewAPI status query was not successful")
+		return nil, nil, 0, gerror.New("NewAPI status query was not successful")
 	}
 	usedQuota := jsonFloat(account, "data.used_quota")
 	remainingQuota := jsonFloat(account, "data.quota")
 	if usedQuota == nil || remainingQuota == nil {
-		return nil, nil, gerror.New("NewAPI account response did not contain quota values")
+		return nil, nil, 0, gerror.New("NewAPI account response did not contain quota values")
 	}
 	quotaPerUnit := gjson.GetBytes(status, "data.quota_per_unit").Float()
 	if quotaPerUnit <= 0 {
-		return nil, nil, gerror.New("NewAPI status response did not contain a valid quota_per_unit")
+		return nil, nil, 0, gerror.New("NewAPI status response did not contain a valid quota_per_unit")
 	}
 	used := *usedQuota / quotaPerUnit
 	remaining := *remainingQuota / quotaPerUnit
-	return &used, &remaining, nil
+	return &used, &remaining, quotaPerUnit, nil
+}
+
+// newAPISubscriptionAmounts 汇总活跃订阅的已用与剩余额度（原始 quota 刻度）。
+// 响应结构：data.subscriptions[].subscription.{amount_total, amount_used}；
+// amount_total<=0 表示不限量订阅，不计入剩余（避免虚增），仅累计已用。
+// 接口不存在或结构变化时返回 0，调用方降级为纯钱包余额。
+func newAPISubscriptionAmounts(body []byte) (used, remaining float64) {
+	if !newAPIResponseSucceeded(body) {
+		return 0, 0
+	}
+	subscriptions := gjson.GetBytes(body, "data.subscriptions").Array()
+	for _, item := range subscriptions {
+		subscription := item.Get("subscription")
+		if !subscription.Exists() {
+			continue
+		}
+		total := subscription.Get("amount_total").Float()
+		usedTotal := subscription.Get("amount_used").Float()
+		used += usedTotal
+		if total > 0 {
+			remaining += total - usedTotal
+		}
+	}
+	return used, remaining
 }
 
 func newAPIResponseSucceeded(body []byte) bool {
