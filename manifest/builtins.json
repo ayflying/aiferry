@@ -136,7 +136,7 @@
       "name": "火山方舟 Agent Plan",
       "code": "volcengine_ark_agent",
       "config": {
-        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/plan/v3",
         "models": {
           "method": "GET",
           "path": "/models",

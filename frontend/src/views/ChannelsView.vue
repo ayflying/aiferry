@@ -268,6 +268,7 @@ function describeDiscoveryError(error: unknown) {
   const message = error instanceof Error ? error.message : '网络请求失败'
   if (message.startsWith('上游每日用量额度已用尽')) return message
   if (message.includes('HTTP 429')) return '上游返回 HTTP 429，当前请求受到限流或该密钥的可用配额不足。请稍后重试，或在上游确认配额和请求限制。'
+  if (message.includes('HTTP 404')) return '上游不存在模型列表接口（HTTP 404）。部分套餐类型（如火山方舟 Agent Plan）不提供模型发现 API，可在下方“配置映射”页签手动输入上游模型 ID。'
   return `上游模型接口调用失败：${message}`
 }
 

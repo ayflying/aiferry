@@ -102,7 +102,7 @@ func TestVolcengineArkPlanBuiltins(t *testing.T) {
 		},
 		"volcengine_ark_agent": {
 			id: 9000000000000020, name: "火山方舟 Agent Plan",
-			baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+			baseURL: "https://ark.cn-beijing.volces.com/api/plan/v3",
 		},
 	}
 	for code, want := range cases {
