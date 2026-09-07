@@ -147,7 +147,15 @@
           "headerPrefix": "Bearer "
         },
         "costs": { "adapter": "none" },
-        "pricing": { "adapter": "none" }
+        "pricing": { "adapter": "none" },
+        "quota": {
+          "adapter": "volcengine_afp",
+          "method": "POST",
+          "path": "/",
+          "authType": "management_key",
+          "headerName": "Authorization",
+          "headerPrefix": "Bearer "
+        }
       }
     },
     {

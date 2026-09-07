@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -121,5 +122,47 @@ func TestMergeQuotaViewsPartialFailureMessage(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0] != "密钥 ab****ef：HTTP 401: unauthorized" {
 		t.Fatalf("messages = %v, want one prefixed failure", messages)
+	}
+}
+
+func TestParseAFPResponse(t *testing.T) {
+	// 依官方文档结构构造：Agent Plan 档位仅 5 小时/周/月三窗口有效，
+	// 近一天 AFPDaily 为占位（Quota=0），应被跳过。数值为字符串形式。
+	body := []byte(`{"ResponseMetadata":{"RequestId":"x","Action":"GetAFPUsage","Version":"2024-01-01","Service":"ark","Region":"cn-beijing"},` +
+		`"Result":{"PlanType":"universe",` +
+		`"AFPFiveHour":{"Quota":"100.0","Used":"38.0","SubscribeTime":0,"ResetTime":1788700000000},` +
+		`"AFPDaily":{"Quota":"0","Used":"0","SubscribeTime":0,"ResetTime":0},` +
+		`"AFPWeekly":{"Quota":"300.0","Used":"60.0","SubscribeTime":0,"ResetTime":1789200000000},` +
+		`"AFPMonthly":{"Quota":"1200.0","Used":"240.0","SubscribeTime":0,"ResetTime":1790000000000}}}`)
+	view, err := parseAFPResponse(body)
+	if err != nil {
+		t.Fatalf("parseAFPResponse error: %v", err)
+	}
+	if view.Mode != "volcengine_afp" || view.Level != "universe" {
+		t.Fatalf("mode/level = %q/%q, want volcengine_afp/universe", view.Mode, view.Level)
+	}
+	if len(view.Windows) != 3 {
+		t.Fatalf("windows = %d, want 3", len(view.Windows))
+	}
+	fiveHour, weekly, monthly := view.Windows[0], view.Windows[1], view.Windows[2]
+	if fiveHour.Kind != QuotaWindowFiveHour || weekly.Kind != QuotaWindowWeekly || monthly.Kind != QuotaWindowMonthly {
+		t.Fatalf("kinds = %s/%s/%s, want five_hour/weekly/monthly", fiveHour.Kind, weekly.Kind, monthly.Kind)
+	}
+	if fiveHour.Used == nil || *fiveHour.Used != 38 || fiveHour.Total == nil || *fiveHour.Total != 100 || fiveHour.Remaining == nil || *fiveHour.Remaining != 62 {
+		t.Fatalf("five hour values = %v/%v/%v, want 38/100/62", fiveHour.Used, fiveHour.Total, fiveHour.Remaining)
+	}
+	if fiveHour.UsedPercent != 38 || weekly.UsedPercent != 20 || monthly.UsedPercent != 20 {
+		t.Fatalf("percents = %v/%v/%v, want 38/20/20", fiveHour.UsedPercent, weekly.UsedPercent, monthly.UsedPercent)
+	}
+	if fiveHour.NextResetAt == nil || fiveHour.NextResetAt.UnixMilli() != 1788700000000 {
+		t.Fatalf("five hour reset = %v, want epoch 1788700000000", fiveHour.NextResetAt)
+	}
+}
+
+func TestParseAFPResponseError(t *testing.T) {
+	body := []byte(`{"ResponseMetadata":{"Error":{"Code":"AccessDenied","Message":"The requested action is not permitted"}},"Result":{}}`)
+	_, err := parseAFPResponse(body)
+	if err == nil || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("err = %v, want AccessDenied message", err)
 	}
 }

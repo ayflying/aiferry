@@ -25,7 +25,7 @@
 ## 版本与镜像
 
 - 根目录 `VERSION` 是唯一发布版本来源，当前值以该文件内容为准，格式固定为 `主版本.次版本.补丁版本`。
-- 每次发布构建必须先递增补丁版本，提交并推送 Git 源码，再构建和推送同名版本标签及 `latest` 到 GitHub Container Registry。
+- **版本号由开发者在每次提交发布前手动递增根目录 `VERSION` 文件**（补丁位 +1），并把 VERSION 与代码改动放进同一个提交。CI 不再自动递增，也不再回推 bump 提交——避免每次推送后远端多出一个提交、下次推送还需 rebase 的冗余流程。
 - 使用 `hack/release.ps1` 发起发布：它只在本地 Git 工作区干净时运行，递增版本、创建详细中文发布提交、推送 `main`，再将 Git 归档同步到远程构建服务器。
 - 远程服务器必须预先执行 `docker login ghcr.io -u ayflying`，并使用具有 `write:packages`、`read:packages` 权限的 GitHub PAT。令牌只存在 Docker 凭据存储，不得写入仓库或 `.env`。
 - 发布后确认版本镜像与 `latest` 均已推送，Compose 已从 GHCR 拉取镜像，容器状态为 `healthy`。仓库没有远端时不得自行推送；已有 `origin` 后推送 `main`。

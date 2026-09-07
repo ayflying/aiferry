@@ -86,7 +86,7 @@ export interface ChannelTypeEndpointConfig {
 }
 
 export interface ChannelTypeQuotaConfig {
-  adapter: 'none' | 'zhipu_coding_plan'
+  adapter: 'none' | 'zhipu_coding_plan' | 'volcengine_afp'
   method: string
   path: string
   authType: 'none' | 'channel_key' | 'management_key'

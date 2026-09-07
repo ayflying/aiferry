@@ -27,6 +27,7 @@ const (
 	AdapterSiliconFlow = "siliconflow_balance"
 	AdapterOpenRouter  = "openrouter_credits"
 	AdapterZhipuQuota  = "zhipu_coding_plan"
+	AdapterVolcAFP     = "volcengine_afp"
 	// AdapterQiniuUsage remains supported for custom types created before 0.5.18.
 	AdapterQiniuUsage  = "qiniu_usage"
 	AdapterNewAPIRatio = "newapi_ratio"

@@ -87,6 +87,9 @@ const credentialUsesManagementKey = computed(() => {
 })
 const managementKeyHint = computed(() => {
   if (editingId.value) return '留空则清除；不修改请勿聚焦'
+  if (selectedChannelType.value?.config.quota?.adapter === 'volcengine_afp') {
+    return '填入火山引擎 Access Key（AccessKeyID:SecretAccessKey），用于查询 AFP 套餐额度'
+  }
   return '当前渠道类型的用量接口使用管理密钥鉴权'
 })
 const healthCheckModelOptions = computed(() => [...healthCheckModels.value]

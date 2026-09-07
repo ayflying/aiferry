@@ -81,6 +81,8 @@ func normalizeBaseURL(value *string) error {
 
 // normalizeQuotaConfig 校验套餐额度查询配置。启用 adapter 时默认 GET 请求、
 // 智谱用量接口路径与 channel_key 认证（额度接口总是使用渠道推理密钥）。
+// volcengine_afp 例外：火山 GetAFPUsage 是控制面 V4 签名 POST 请求，path 固定、
+// 鉴权走渠道管理密钥（AK/SK），method/path/header 字段被忽略。
 func normalizeQuotaConfig(config *QuotaConfig) error {
 	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
 	switch config.Adapter {
@@ -89,8 +91,18 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 		*config = QuotaConfig{Adapter: AdapterNone}
 		return nil
 	case AdapterZhipuQuota:
+	case AdapterVolcAFP:
+		// V4 签名接口：固定 POST + 管理密钥鉴权，path 仅用于校验留空兼容。
+		config.Method = httpMethodGet
+		config.AuthType = AuthManagementKey
+		config.HeaderName = "Authorization"
+		config.HeaderPrefix = "Bearer "
+		if !strings.HasPrefix(config.Path, "/") {
+			config.Path = "/"
+		}
+		return nil
 	default:
-		return gerror.Newf("unsupported quota adapter %q (expected none or %s)", config.Adapter, AdapterZhipuQuota)
+		return gerror.Newf("unsupported quota adapter %q (expected none, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterVolcAFP)
 	}
 	config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
 	if config.Method == "" {

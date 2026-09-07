@@ -88,9 +88,10 @@ func TestVolcengineArkPlanBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]struct {
-		id      uint64
-		name    string
-		baseURL string
+		id          uint64
+		name        string
+		baseURL     string
+		quotaAdapter string
 	}{
 		"volcengine_ark": {
 			id: 9000000000000004, name: "火山方舟 Ark",
@@ -103,6 +104,7 @@ func TestVolcengineArkPlanBuiltins(t *testing.T) {
 		"volcengine_ark_agent": {
 			id: 9000000000000020, name: "火山方舟 Agent Plan",
 			baseURL: "https://ark.cn-beijing.volces.com/api/plan/v3",
+			quotaAdapter: "volcengine_afp",
 		},
 	}
 	for code, want := range cases {
@@ -123,8 +125,14 @@ func TestVolcengineArkPlanBuiltins(t *testing.T) {
 		if config.BaseURL != want.baseURL {
 			t.Fatalf("%s base URL = %q, want %q", code, config.BaseURL, want.baseURL)
 		}
-		if len(config.Quota) != 0 {
-			t.Fatalf("%s must not declare quota config, got %s", code, config.Quota)
+		if want.quotaAdapter == "" {
+			if len(config.Quota) != 0 {
+				t.Fatalf("%s must not declare quota config, got %s", code, config.Quota)
+			}
+			continue
+		}
+		if !strings.Contains(string(config.Quota), `"`+want.quotaAdapter+`"`) {
+			t.Fatalf("%s quota config = %s, want adapter %q", code, config.Quota, want.quotaAdapter)
 		}
 	}
 }
