@@ -17,13 +17,13 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/protocol"
 )
 
-func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
+func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, userID uint64, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
 	advancedConfig, err := channel.ParseAdvancedConfig([]byte(candidate.AdvancedConfig))
 	if err != nil {
 		return attemptResult{}, false, err
 	}
 	primary := preferredProtocolPlan(endpoint, candidate)
-	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, userID, settings, advancedConfig, primary, sensitiveDataRestorer)
+	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, settings, advancedConfig, primary, sensitiveDataRestorer)
 	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	if handled || attemptErr != nil || !needsFallback {
 		return result, handled, attemptErr
@@ -32,7 +32,7 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if !ok {
 		return result, handled, attemptErr
 	}
-	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, startedAt, userID, settings, advancedConfig, fallback, sensitiveDataRestorer)
+	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, settings, advancedConfig, fallback, sensitiveDataRestorer)
 }
 
 func preferredProtocolPlan(endpoint string, candidate Candidate) protocol.Plan {
@@ -47,7 +47,7 @@ func isZhipuResponsesBaseURL(baseURL string) bool {
 	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "https://open.bigmodel.cn/api/v1")
 }
 
-func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, startedAt time.Time, userID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocol.Plan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
+func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, userID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocol.Plan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
 	convertedBody, err := plan.ConvertRequest(originalBody)
 	if err != nil {
 		return attemptResult{}, false, err
@@ -135,7 +135,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	committed := false
 	writeOutput := func(output []byte) error {
 		if !result.wroteBytes {
-			recordFirstStreamOutput(&result, startedAt)
+			recordFirstStreamOutput(&result, requestStartedAt)
 			copyResponseHeaders(writer.Header(), result.headers)
 			writer.WriteHeader(resp.StatusCode)
 		}
@@ -180,7 +180,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			return result, false, nil
 		}
 		if streamPayloadHasVisibleOutput(line) {
-			recordFirstStreamOutput(&result, startedAt)
+			recordFirstStreamOutput(&result, requestStartedAt)
 		}
 		parseSSEUsage(line, &result.tokens)
 		lines := [][]byte{line}

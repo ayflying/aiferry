@@ -289,9 +289,9 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 		candidate.ChannelCredentialID = credential.ID
 		candidate.APIKeyCipher = credential.APIKeyCipher
 		attemptStartedAt := time.Now()
-		result, attemptHandled := s.attemptAudioUpstream(ctx, writer, incomingHeaders, body, candidate, handler, startedAt, settings)
+		result, attemptHandled := s.attemptAudioUpstream(ctx, writer, incomingHeaders, body, candidate, handler, attemptStartedAt, settings)
 		result.latency = time.Since(attemptStartedAt)
-		attemptFlow = append(attemptFlow, usage.AttemptFlowStep{ChannelName: candidate.ChannelName, DurationMs: result.latency.Milliseconds()})
+		attemptFlow = append(attemptFlow, newAttemptFlowStep(candidate.ChannelName, result))
 		if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" {
 			// 成功请求按上游响应速度加分，与 chat 链路保持一致。
 			_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{

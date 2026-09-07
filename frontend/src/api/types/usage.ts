@@ -52,6 +52,8 @@ export interface AttemptFlowStep {
   channelName: string
   durationMs: number
   firstTokenMs?: number
+  status?: number
+  error?: string
 }
 
 export interface UsageLog {

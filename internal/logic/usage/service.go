@@ -46,6 +46,8 @@ type AttemptFlowStep struct {
 	ChannelName  string `json:"channelName"`
 	DurationMs   int64  `json:"durationMs"`
 	FirstTokenMs *int64 `json:"firstTokenMs,omitempty"`
+	Status       *uint  `json:"status,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 type RecordInput struct {

@@ -11,6 +11,20 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
+// newAttemptFlowStep snapshots one attempt for the usage-log call flow. The
+// status/error are kept so the admin UI can expand a failed step and show why
+// the gateway moved on to the next candidate. Errors are redacted and capped —
+// full bodies stay in the request's failure log.
+func newAttemptFlowStep(channelName string, result attemptResult) usage.AttemptFlowStep {
+	step := usage.AttemptFlowStep{ChannelName: channelName, DurationMs: result.latency.Milliseconds(), FirstTokenMs: result.firstTokenMs}
+	if result.status != 0 && (result.status < http.StatusOK || result.status >= http.StatusMultipleChoices) {
+		status := uint(result.status)
+		step.Status = &status
+		step.Error = truncateFailureLog(redactFailureText(result.errorMessage), 240)
+	}
+	return step
+}
+
 type channelAttempt struct {
 	candidate Candidate
 	result    attemptResult
@@ -21,7 +35,7 @@ type channelAttempt struct {
 
 // attemptChannel keeps retries inside one channel until no usable upstream key
 // remains. Those retries do not consume the cross-channel failover budget.
-func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, candidate Candidate, stream bool, startedAt time.Time, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, excluded map[uint64]struct{}, sensitiveDataRestorer *sensitiveDataRestorer) channelAttempt {
+func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, candidate Candidate, stream bool, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, excluded map[uint64]struct{}, sensitiveDataRestorer *sensitiveDataRestorer) channelAttempt {
 	candidate.ReasoningEffort = requestReasoningEffort(body)
 	last := channelAttempt{candidate: candidate}
 	for {
@@ -45,14 +59,14 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			if !stream {
 				attemptWriter = nil
 			}
-			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, startedAt, userID, settings, sensitiveDataRestorer)
+			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, userID, settings, sensitiveDataRestorer)
 			result.latency = time.Since(attemptStartedAt)
-			flow := append(last.flow, usage.AttemptFlowStep{ChannelName: current.ChannelName, DurationMs: result.latency.Milliseconds(), FirstTokenMs: result.firstTokenMs})
-			last = channelAttempt{candidate: current, result: result, attempts: last.attempts + 1, flow: flow}
 			if attemptErr != nil {
-				last.result = failedAttemptResult(last.result, attemptErr.Error())
-				last.result.timedOut = isUpstreamTimeout(attemptErr)
+				result = failedAttemptResult(result, attemptErr.Error())
+				result.timedOut = isUpstreamTimeout(attemptErr)
 			}
+			flow := append(last.flow, newAttemptFlowStep(current.ChannelName, result))
+			last = channelAttempt{candidate: current, result: result, attempts: last.attempts + 1, flow: flow}
 			if attemptCompleted(last.result, attemptErr) || nonRetryableClientFailure(last.result, attemptErr, settings) {
 				last.handled = true
 				last.result.attemptFlow = last.flow

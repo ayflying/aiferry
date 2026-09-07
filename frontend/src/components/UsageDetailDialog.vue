@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { ChevronDown } from '@lucide/vue'
 import type { BillingItem, UsageLog } from '../api/types'
 import { formatLatency, formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
@@ -49,6 +50,23 @@ const billingModeLabel = computed(() => {
 })
 const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '历史价格快照复原' : '调用时价格快照')
 const attemptFlow = computed(() => props.usage?.attemptFlow ?? [])
+const expandedFlowSteps = ref<number[]>([])
+watch(() => props.modelValue, (open) => {
+  if (open) expandedFlowSteps.value = []
+})
+
+function stepFailed(step: { status?: number }) {
+  return step.status != null && (step.status < 200 || step.status >= 300)
+}
+
+function toggleFlowStep(index: number) {
+  const target = expandedFlowSteps.value.indexOf(index)
+  if (target >= 0) {
+    expandedFlowSteps.value = expandedFlowSteps.value.filter((item) => item !== index)
+  } else {
+    expandedFlowSteps.value = [...expandedFlowSteps.value, index]
+  }
+}
 
 function itemUnitPrice(item: BillingItem) {
   const currency = billingDetails.value?.currency
@@ -133,9 +151,13 @@ function billingSummary() {
         <h3>调用流程</h3>
         <div class="attempt-flow" aria-label="上游渠道调用流程">
           <template v-for="(step, index) in attemptFlow" :key="`${step.channelName}-${index}`">
-            <div class="flow-step">
-              <strong>{{ step.channelName || '未知渠道' }}</strong>
-              <small>耗时 {{ formatLatency(step.durationMs) }}<template v-if="step.firstTokenMs != null"> · 首字 {{ formatLatency(step.firstTokenMs) }}</template></small>
+            <div class="flow-step" :class="{ failed: stepFailed(step) }">
+              <component :is="stepFailed(step) && step.error ? 'button' : 'div'" class="flow-step-main" :type="stepFailed(step) && step.error ? 'button' : undefined" :aria-expanded="stepFailed(step) && step.error ? expandedFlowSteps.includes(index) : undefined" @click="stepFailed(step) && step.error && toggleFlowStep(index)">
+                <strong>{{ step.channelName || '未知渠道' }}<span v-if="stepFailed(step)" class="flow-failed-tag">失败 {{ step.status }}</span></strong>
+                <small>耗时 {{ formatLatency(step.durationMs) }}<template v-if="step.firstTokenMs != null"> · 首字 {{ formatLatency(step.firstTokenMs) }}</template></small>
+              </component>
+              <div v-if="stepFailed(step) && step.error && expandedFlowSteps.includes(index)" class="flow-step-error">{{ step.error }}</div>
+              <ChevronDown v-if="stepFailed(step) && step.error" :size="13" class="flow-step-chevron" :class="{ expanded: expandedFlowSteps.includes(index) }" />
             </div>
             <span v-if="index < attemptFlow.length - 1" class="flow-arrow" aria-hidden="true">→</span>
           </template>
@@ -176,9 +198,16 @@ function billingSummary() {
 .empty-billing { margin: 0; color: #66717d; font-size: 13px; }
 .flow-section { overflow-x: auto; }
 .attempt-flow { display: flex; align-items: center; gap: 10px; min-width: max-content; padding: 12px; background: #f5f7fa; border: 1px solid #dce2e7; }
-.flow-step { display: flex; min-width: 132px; flex-direction: column; gap: 5px; padding: 10px 12px; background: #fff; border: 1px solid #cbd5df; border-radius: 6px; }
+.flow-step { position: relative; display: flex; min-width: 132px; flex-direction: column; gap: 5px; padding: 10px 12px; background: #fff; border: 1px solid #cbd5df; border-radius: 6px; }
 .flow-step strong { color: #15202b; font-size: 13px; }
 .flow-step small { color: #66717d; font-family: 'JetBrains Mono', monospace; font-size: 11px; white-space: nowrap; }
+.flow-step.failed { border-color: #e4b6b6; background: #fffafa; }
+.flow-step-main { display: flex; flex-direction: column; gap: 5px; padding: 0; text-align: left; background: none; border: 0; font: inherit; cursor: default; }
+button.flow-step-main { cursor: pointer; }
+.flow-failed-tag { margin-left: 7px; padding: 1px 6px; border-radius: 4px; background: #fdeaea; color: #b23030; font-size: 10px; font-weight: 600; }
+.flow-step-error { max-height: 180px; overflow: auto; padding: 8px 9px; border: 1px solid #f1cccc; border-radius: 5px; background: #fff5f5; color: #9f2f2f; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.flow-step-chevron { position: absolute; top: 10px; right: 9px; color: #b23030; transition: transform 0.15s ease; }
+.flow-step-chevron.expanded { transform: rotate(180deg); }
 .flow-arrow { color: #7f8b97; font-size: 20px; font-weight: 700; }
 .result-section { padding-bottom: 0; }
 .result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }
