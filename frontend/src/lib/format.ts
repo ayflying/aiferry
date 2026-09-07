@@ -77,7 +77,11 @@ export function formatLatency(value?: number | null): string {
 export function formatUsageDuration(value?: number | null): string {
   if (value === undefined || value === null) return '—'
   const seconds = value / 1000
-  if (seconds > 60) return `${(seconds / 60).toFixed(1)}分`
+  if (seconds > 60) {
+    const minutes = Math.floor(seconds / 60)
+    const remainder = seconds - minutes * 60
+    return `${minutes}分${remainder.toFixed(1)}秒`
+  }
   return `${seconds.toFixed(1)}秒`
 }
 
