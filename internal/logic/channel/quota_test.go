@@ -1,14 +1,35 @@
 package channel
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 func floatPtr(value float64) *float64 { return &value }
 
 func timePtr(value time.Time) *time.Time { return &value }
+
+// 回归：fetchQuotaVolcAFP 必须用凭证的管理密钥（AK/SK）而不是推理密钥做
+// 签名——推理密钥（ark-xxx）不含冒号，误用会报「管理密钥格式无效」。
+// queryVolcAFPWithKey 是所有路径的最终入口，校验它对非 AK:SK 载荷的拒绝。
+func TestQueryVolcAFPWithKeyRejectsInferenceKeyShape(t *testing.T) {
+	s := &sChannel{}
+	cases := map[string]string{
+		"推理密钥无冒号":   "ark-7efd1234567890",
+		"冒号后 SK 为空": "AKID123:",
+		"AK 为空":     ":SKSECRET",
+		"全空":        ":",
+	}
+	for name, key := range cases {
+		if _, err := s.queryVolcAFPWithKey(context.Background(), entity.Channels{}, key); err == nil || !strings.Contains(err.Error(), "格式无效") {
+			t.Fatalf("%s: err = %v, want 格式无效", name, err)
+		}
+	}
+}
 
 func TestMergeQuotaViewsSingleCredential(t *testing.T) {
 	views := []QuotaView{{

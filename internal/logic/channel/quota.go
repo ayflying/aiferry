@@ -202,7 +202,7 @@ func (s *sChannel) fetchQuotaVolcAFP(ctx context.Context, channel entity.Channel
 	if err != nil {
 		return QuotaView{}, err
 	}
-	// 凭证无自己的 AK/SK 时共享渠道级 AK/SK 查询结果（同一份套餐水位）。
+	// 凭证无自己的 AK/SK（管理密钥）时共享渠道级 AK/SK 查询结果（同一份套餐水位）。
 	fallbackUsed := false
 	plainFallback := ""
 	if channel.ManagementKeyCipher != "" {
@@ -213,7 +213,7 @@ func (s *sChannel) fetchQuotaVolcAFP(ctx context.Context, channel entity.Channel
 	}
 	keyed := make([]string, len(ciphers))
 	for index, credential := range ciphers {
-		if credential.Cipher == "" {
+		if credential.ManagementKeyCipher == "" {
 			if plainFallback == "" {
 				continue
 			}
@@ -221,7 +221,7 @@ func (s *sChannel) fetchQuotaVolcAFP(ctx context.Context, channel entity.Channel
 			fallbackUsed = true
 			continue
 		}
-		plain, err := s.app.Secrets.Decrypt(credential.Cipher)
+		plain, err := s.app.Secrets.Decrypt(credential.ManagementKeyCipher)
 		if err != nil {
 			return QuotaView{}, gerror.Wrap(err, "解密凭证管理密钥失败")
 		}
@@ -373,13 +373,16 @@ func (s *sChannel) fetchQuotaWithPrefix(ctx context.Context, channel entity.Chan
 type quotaCredential struct {
 	Prefix string
 	Cipher string
+	// ManagementKeyCipher 是凭证级管理密钥（火山 AFP 等 AK/SK 场景使用；
+	// 普通费用/额度查询只用 Cipher 即推理密钥）。
+	ManagementKeyCipher string
 }
 
 // credentialCiphers 返回渠道全部上游密钥（与费用查询一致，包含已停用密钥，
 // 便于检查被自动禁用渠道的剩余额度），按 ID 升序保证结果顺序稳定。
 func (s *sChannel) credentialCiphers(ctx context.Context, channelID uint64) ([]quotaCredential, error) {
 	rows := make([]credentialRow, 0, 1)
-	if err := dao.ChannelCredentials.Ctx(ctx).Fields(dao.ChannelCredentials.Columns().Id, dao.ChannelCredentials.Columns().KeyPrefix, dao.ChannelCredentials.Columns().ApiKeyCipher).Where(do.ChannelCredentials{ChannelId: channelID}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
+	if err := dao.ChannelCredentials.Ctx(ctx).Fields(dao.ChannelCredentials.Columns().Id, dao.ChannelCredentials.Columns().KeyPrefix, dao.ChannelCredentials.Columns().ApiKeyCipher, dao.ChannelCredentials.Columns().ManagementKeyCipher).Where(do.ChannelCredentials{ChannelId: channelID}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list channel credentials for quota query")
 	}
 	if len(rows) == 0 {
@@ -391,7 +394,7 @@ func (s *sChannel) credentialCiphers(ctx context.Context, channelID uint64) ([]q
 		if prefix == "" {
 			prefix = fmt.Sprintf("#%d", row.Id)
 		}
-		credentials = append(credentials, quotaCredential{Prefix: prefix, Cipher: row.ApiKeyCipher})
+		credentials = append(credentials, quotaCredential{Prefix: prefix, Cipher: row.ApiKeyCipher, ManagementKeyCipher: row.ManagementKeyCipher})
 	}
 	return credentials, nil
 }
