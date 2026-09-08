@@ -94,12 +94,17 @@ export interface ChannelTypeQuotaConfig {
   headerPrefix: string
 }
 
+export interface ChannelTypeVideoConfig {
+  adapter: 'openai' | 'minimax' | 'volcengine_ark'
+}
+
 export interface ChannelTypeConfig {
   baseUrl: string
   models: ChannelTypeModelConfig
   costs: ChannelTypeCostConfig
   pricing: ChannelTypePricingConfig
   quota?: ChannelTypeQuotaConfig
+  video?: ChannelTypeVideoConfig
   endpoints: Record<string, ChannelTypeEndpointConfig>
 }
 

@@ -17,6 +17,7 @@ func ParseConfig(raw []byte) (Config, error) {
 		var supplied struct {
 			Endpoints json.RawMessage `json:"endpoints"`
 			Audio     json.RawMessage `json:"audio"`
+			Video     json.RawMessage `json:"video"`
 		}
 		if err := json.Unmarshal(value, &supplied); err != nil {
 			return Config{}, gerror.Wrap(err, "invalid channel type JSON")
@@ -26,6 +27,9 @@ func ParseConfig(raw []byte) (Config, error) {
 		}
 		if supplied.Audio != nil {
 			config.Audio = AudioConfig{}
+		}
+		if supplied.Video != nil {
+			config.Video = VideoConfig{}
 		}
 		decoder := json.NewDecoder(bytes.NewReader(value))
 		decoder.DisallowUnknownFields()
@@ -55,6 +59,14 @@ func ParseConfig(raw []byte) (Config, error) {
 	case AudioAdapterChat:
 	default:
 		return Config{}, gerror.Newf("unsupported audio adapter %q (expected openai or chat)", config.Audio.Adapter)
+	}
+	config.Video.Adapter = strings.ToLower(strings.TrimSpace(config.Video.Adapter))
+	switch config.Video.Adapter {
+	case "", VideoAdapterOpenAI:
+		config.Video.Adapter = VideoAdapterOpenAI
+	case VideoAdapterMiniMax, VideoAdapterVolcengineArk:
+	default:
+		return Config{}, gerror.Newf("unsupported video adapter %q (expected openai, minimax or volcengine_ark)", config.Video.Adapter)
 	}
 	pricing, err := ParsePricingConfig(config.Pricing)
 	if err != nil {

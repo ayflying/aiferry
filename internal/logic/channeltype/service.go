@@ -113,6 +113,7 @@ type Config struct {
 	Costs     CostConfig                `json:"costs"`
 	Pricing   PricingConfig             `json:"pricing"`
 	Audio     AudioConfig               `json:"audio"`
+	Video     VideoConfig               `json:"video"`
 	Quota     QuotaConfig               `json:"quota"`
 	Endpoints map[string]EndpointConfig `json:"endpoints"`
 }
@@ -142,6 +143,21 @@ type AudioConfig struct {
 const (
 	AudioAdapterOpenAI = "openai"
 	AudioAdapterChat   = "chat"
+)
+
+// VideoConfig 声明渠道的视频接口形态：
+// adapter "openai"（默认）走标准 /videos 创建与查询；
+// adapter "minimax" 走 MiniMax 私有协议（/v2/video_generation，content 数组载荷）；
+// adapter "volcengine_ark" 走火山方舟内容生成任务协议（/contents/generations/tasks）。
+type VideoConfig struct {
+	Adapter string `json:"adapter"`
+}
+
+// 视频适配器取值。
+const (
+	VideoAdapterOpenAI       = "openai"
+	VideoAdapterMiniMax      = "minimax"
+	VideoAdapterVolcengineArk = "volcengine_ark"
 )
 
 type View struct {
@@ -186,6 +202,7 @@ func DefaultConfig() Config {
 		},
 		Pricing: PricingConfig{Adapter: AdapterNone, Method: "GET", AuthType: AuthChannelKey, HeaderName: "Authorization", HeaderPrefix: "Bearer "},
 		Audio:   AudioConfig{Adapter: AudioAdapterOpenAI},
+		Video:   VideoConfig{Adapter: VideoAdapterOpenAI},
 		Endpoints: map[string]EndpointConfig{
 			"chatCompletions":       defaultEndpoint("POST", "/chat/completions", "json", true),
 			"responses":             defaultEndpoint("POST", "/responses", "json", true),

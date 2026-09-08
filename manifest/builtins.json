@@ -159,6 +159,18 @@
       }
     },
     {
+      "id": 9000000000000021,
+      "name": "火山方舟视频",
+      "code": "volcengine_ark_video",
+      "config": {
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" },
+        "video": { "adapter": "volcengine_ark" }
+      }
+    },
+    {
       "id": 9000000000000005,
       "name": "MiniMax",
       "code": "minimax",
@@ -166,7 +178,8 @@
 		"baseUrl": "https://api.minimax.io/v1",
         "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
         "costs": { "adapter": "none" },
-        "pricing": { "adapter": "none" }
+        "pricing": { "adapter": "none" },
+        "video": { "adapter": "minimax" }
       }
     },
     {

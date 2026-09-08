@@ -8,10 +8,12 @@ import (
 	"testing"
 
 	"github.com/tidwall/gjson"
+
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
 
 func TestPrepareVideoRequestBodyMapsLegacyPromptWithoutChangingModel(t *testing.T) {
-	body, err := prepareVideoRequestBody([]byte(`{"model":"minimax-h3","prompt":"A ferry crossing a quiet lake","duration":5,"resolution":"2K","ratio":"16:9"}`), "application/json", "minimax")
+	body, err := prepareMiniMaxVideoRequestBody([]byte(`{"model":"minimax-h3","prompt":"A ferry crossing a quiet lake","duration":5,"resolution":"2K","ratio":"16:9"}`), "application/json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,12 +39,70 @@ func TestPrepareVideoRequestBodyMapsLegacyPromptWithoutChangingModel(t *testing.
 
 func TestPrepareVideoRequestBodyPreservesNonMiniMaxPayload(t *testing.T) {
 	original := []byte(`{"model":"other","prompt":"test","custom":true}`)
-	body, err := prepareVideoRequestBody(original, "application/json", "openai")
+	adapter := videoAdapter{code: channeltype.VideoAdapterOpenAI}
+	body, err := adapter.prepareBody(original, "application/json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(body) != string(original) {
 		t.Fatalf("payload = %s, want %s", body, original)
+	}
+}
+
+func TestVideoAdapterURLsPerProtocol(t *testing.T) {
+	cases := []struct {
+		adapter       string
+		baseURL       string
+		legacyCreate  string
+		openAICreate  string
+		legacyQuery   string
+		openAIQuery   string
+	}{
+		{channeltype.VideoAdapterOpenAI, "https://gateway.example/v1",
+			"https://gateway.example/v1/video/generations",
+			"https://gateway.example/v1/videos",
+			"https://gateway.example/v1/video/generations/task_1",
+			"https://gateway.example/v1/videos/task_1"},
+		{channeltype.VideoAdapterMiniMax, "https://api.minimax.io/v1",
+			"https://api.minimax.io/v2/video_generation",
+			"https://api.minimax.io/v2/video_generation",
+			"https://api.minimax.io/v2/query/video_generation/task_1",
+			"https://api.minimax.io/v2/query/video_generation/task_1"},
+		{channeltype.VideoAdapterVolcengineArk, "https://ark.cn-beijing.volces.com/api/v3",
+			"https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks",
+			"https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks",
+			"https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/task_1",
+			"https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/task_1"},
+	}
+	for _, tc := range cases {
+		adapter := videoAdapter{code: tc.adapter}
+		candidate := Candidate{ChannelType: tc.adapter, BaseURL: tc.baseURL}
+		if got := adapter.createURL(candidate, legacyVideoAPI); got != tc.legacyCreate {
+			t.Fatalf("%s legacy create URL = %q, want %q", tc.adapter, got, tc.legacyCreate)
+		}
+		if got := adapter.createURL(candidate, openAIVideoAPI); got != tc.openAICreate {
+			t.Fatalf("%s OpenAI create URL = %q, want %q", tc.adapter, got, tc.openAICreate)
+		}
+		if got := adapter.retrieveURL(candidate, "task_1", legacyVideoAPI); got != tc.legacyQuery {
+			t.Fatalf("%s legacy query URL = %q, want %q", tc.adapter, got, tc.legacyQuery)
+		}
+		if got := adapter.retrieveURL(candidate, "task_1", openAIVideoAPI); got != tc.openAIQuery {
+			t.Fatalf("%s OpenAI query URL = %q, want %q", tc.adapter, got, tc.openAIQuery)
+		}
+	}
+}
+
+func TestArkVideoResponseURLExtractionAndRewrite(t *testing.T) {
+	body := []byte(`{"id":"cgt-1","status":"succeeded","content":{"video_url":"https://ark.example/result.mp4"}}`)
+	if got := arkVideoResponseURL(body); got != "https://ark.example/result.mp4" {
+		t.Fatalf("ark video URL = %q", got)
+	}
+	rewritten := rewriteArkVideoResponseURL(body, "/v1/videos/cgt-1/content")
+	if got := gjson.GetBytes(rewritten, "content.video_url").String(); got != "/v1/videos/cgt-1/content" {
+		t.Fatalf("rewritten ark URL = %q", got)
+	}
+	if got := arkVideoResponseURL([]byte(`{"status":"running"}`)); got != "" {
+		t.Fatalf("running task URL = %q", got)
 	}
 }
 
@@ -65,20 +125,6 @@ func TestVideoRequestedModelSupportsJSONAndMultipart(t *testing.T) {
 	model, err = videoRequestedModel(body.Bytes(), writer.FormDataContentType())
 	if err != nil || model != "sora-2" {
 		t.Fatalf("multipart model = %q, err = %v", model, err)
-	}
-}
-
-func TestVideoCreateURLUsesChannelProtocol(t *testing.T) {
-	miniMax := Candidate{ChannelType: "minimax", BaseURL: "https://api.minimax.io/v1"}
-	if got := videoCreateURL(miniMax, legacyVideoAPI); got != "https://api.minimax.io/v2/video_generation" {
-		t.Fatalf("MiniMax URL = %q", got)
-	}
-	openAI := Candidate{ChannelType: "openai", BaseURL: "https://gateway.example/v1"}
-	if got := videoCreateURL(openAI, legacyVideoAPI); got != "https://gateway.example/v1/video/generations" {
-		t.Fatalf("legacy URL = %q", got)
-	}
-	if got := videoCreateURL(openAI, openAIVideoAPI); got != "https://gateway.example/v1/videos" {
-		t.Fatalf("OpenAI URL = %q", got)
 	}
 }
 

@@ -63,7 +63,7 @@ func TestNormalizedVideoClientResponsePreservesNonEmptyBody(t *testing.T) {
 
 func TestVideoContentRoutesMatchPathParameters(t *testing.T) {
 	const webRoot = "web"
-	if err := os.Mkdir(webRoot, 0o700); err != nil {
+	if err := os.MkdirAll(webRoot, 0o700); err != nil {
 		t.Fatalf("create test web root: %v", err)
 	}
 	defer os.RemoveAll(webRoot)
