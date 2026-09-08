@@ -124,6 +124,16 @@ func (s *sChannel) queryVolcAFP(ctx context.Context, channel entity.Channels, ma
 	if err != nil {
 		return QuotaView{}, err
 	}
+	return s.queryVolcAFPWithKey(ctx, channel, accessKeyID+":"+secretAccessKey)
+}
+
+// queryVolcAFPWithKey 以明文 "AK:SK" 调用 GetAFPUsage 并解析为额度窗口视图，
+// 供渠道级（单 AK/SK）与列表级（多凭证 AK/SK 合并）查询共用。
+func (s *sChannel) queryVolcAFPWithKey(ctx context.Context, channel entity.Channels, keyPair string) (QuotaView, error) {
+	accessKeyID, secretAccessKey, found := strings.Cut(strings.TrimSpace(keyPair), ":")
+	if !found || accessKeyID == "" || secretAccessKey == "" {
+		return QuotaView{}, gerror.New("管理密钥格式无效：火山渠道需填入 AccessKeyID:SecretAccessKey（冒号分隔）")
+	}
 
 	endpoint := fmt.Sprintf("https://ark.%s.volcengineapi.com/?Action=%s&Version=%s", afpRegion, afpAction, afpVersion)
 	body := []byte("{}")

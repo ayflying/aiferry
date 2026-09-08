@@ -73,7 +73,7 @@ function resetLabel(window: ChannelQuotaWindow) {
         </el-alert>
         <div v-for="window in props.result.windows" :key="window.kind" class="quota-window">
           <div class="quota-window__header"><strong>{{ window.label }}</strong><span class="muted">{{ resetLabel(window) }}</span></div>
-          <el-progress :percentage="Math.min(100, Math.max(0, window.usedPercent))" :color="windowColor(window)" :stroke-width="14" />
+          <el-progress :percentage="Math.min(100, Math.max(0, Number(window.usedPercent.toFixed(2))))" :color="windowColor(window)" :stroke-width="14" />
           <div class="quota-window__detail">{{ windowDetail(window) }}</div>
         </div>
       </template>

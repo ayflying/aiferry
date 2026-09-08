@@ -137,9 +137,10 @@ func (s *sChannel) writeQuotaCache(ctx context.Context, channelID uint64, view Q
 // 百分比窗口取平均，MCP 调用次数累加，重置时间取最早，档位去重后拼接。
 // 部分密钥查询失败时仍返回成功部分，失败明细附在 PartialErrors 中。
 func (s *sChannel) fetchQuota(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig) (QuotaView, error) {
-	// 火山 AFP 额度按渠道级 AK/SK 查询，与推理密钥无关，不参与多密钥合并。
+	// 火山 AFP 额度不走推理密钥：凭证配置了自己的 AK/SK 就按凭证并发查询
+	// 并合并（多账号计划取平均水位），否则回退渠道级 AK/SK 查一次。
 	if config.Adapter == channeltype.AdapterVolcAFP {
-		return s.queryVolcAFP(ctx, channel, channel.ManagementKeyCipher)
+		return s.fetchQuotaVolcAFP(ctx, channel)
 	}
 	endpoint, err := resolveHostURL(channel.BaseUrl, config.Path)
 	if err != nil {
@@ -191,6 +192,90 @@ func (s *sChannel) fetchQuotaWithCredential(ctx context.Context, channel entity.
 		return view, err
 	}
 	return s.fetchQuotaWithPrefix(ctx, channel, config, endpoint, "Bearer ", cipher)
+}
+
+// fetchQuotaVolcAFP 火山 AFP 的列表级额度查询：并发按各凭证配置的 AK/SK
+// 查询（未配置的凭证回退渠道级 AK/SK），再按多密钥规则合并为总览视图。
+// 全部凭证都没有 AK/SK 时直接报错提示配置。
+func (s *sChannel) fetchQuotaVolcAFP(ctx context.Context, channel entity.Channels) (QuotaView, error) {
+	ciphers, err := s.credentialCiphers(ctx, channel.Id)
+	if err != nil {
+		return QuotaView{}, err
+	}
+	// 凭证无自己的 AK/SK 时共享渠道级 AK/SK 查询结果（同一份套餐水位）。
+	fallbackUsed := false
+	plainFallback := ""
+	if channel.ManagementKeyCipher != "" {
+		plainFallback, err = s.app.Secrets.Decrypt(channel.ManagementKeyCipher)
+		if err != nil {
+			return QuotaView{}, gerror.Wrap(err, "解密渠道管理密钥失败")
+		}
+	}
+	keyed := make([]string, len(ciphers))
+	for index, credential := range ciphers {
+		if credential.Cipher == "" {
+			if plainFallback == "" {
+				continue
+			}
+			keyed[index] = plainFallback
+			fallbackUsed = true
+			continue
+		}
+		plain, err := s.app.Secrets.Decrypt(credential.Cipher)
+		if err != nil {
+			return QuotaView{}, gerror.Wrap(err, "解密凭证管理密钥失败")
+		}
+		keyed[index] = plain
+	}
+	if !fallbackUsed {
+		allEmpty := true
+		for _, key := range keyed {
+			if key != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			return QuotaView{}, gerror.New("渠道未配置管理密钥：请在密钥抽屉为凭证设置火山引擎 AK/SK，或在渠道设置中填入渠道级管理密钥")
+		}
+	}
+	views := make([]QuotaView, len(keyed))
+	failed := make([]string, len(keyed))
+	var wg sync.WaitGroup
+	for index, key := range keyed {
+		if key == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(index int, key string) {
+			defer wg.Done()
+			view, err := s.queryVolcAFPWithKey(ctx, channel, key)
+			if err != nil {
+				failed[index] = err.Error()
+				return
+			}
+			views[index] = view
+		}(index, key)
+	}
+	wg.Wait()
+	success := make([]QuotaView, 0, len(keyed))
+	failures := make([]string, 0, len(keyed))
+	for index := range keyed {
+		if keyed[index] == "" {
+			continue
+		}
+		if failed[index] != "" {
+			failures = append(failures, fmt.Sprintf("密钥 %s：%s", ciphers[index].Prefix, failed[index]))
+			continue
+		}
+		success = append(success, views[index])
+	}
+	if len(success) == 0 {
+		return QuotaView{}, gerror.New(strings.Join(failures, "；"))
+	}
+	view := mergeQuotaViews(success)
+	view.PartialErrors = failures
+	return view, nil
 }
 
 // mergeQuotaViews 合并多个密钥的套餐额度：百分比窗口按 kind 分组取平均
