@@ -26,7 +26,7 @@ func (s *sChannel) StartHealthChecks(ctx context.Context) {
 				return
 			case now := <-ticker.C:
 				settings, err := s.resilience.Get(ctx)
-				if err != nil || !settings.HealthCheckEnabled || !settings.RecoveryEnabled {
+				if err != nil {
 					continue
 				}
 				interval := time.Duration(settings.HealthCheckIntervalMinutes) * time.Minute
@@ -34,8 +34,13 @@ func (s *sChannel) StartHealthChecks(ctx context.Context) {
 					continue
 				}
 				lastHealthCheck = now
-				s.runRecoveryChecks(ctx, settings.HealthCheckMode)
-				s.runRegularHealthChecks(ctx, settings.HealthCheckMode)
+				recovery, regular := healthActions(settings)
+				if recovery {
+					s.runRecoveryChecks(ctx, settings.HealthCheckMode)
+				}
+				if regular {
+					s.runRegularHealthChecks(ctx, settings.HealthCheckMode)
+				}
 			}
 		}
 	}()
@@ -43,6 +48,13 @@ func (s *sChannel) StartHealthChecks(ctx context.Context) {
 
 func healthCheckDue(now, last time.Time, interval time.Duration) bool {
 	return interval > 0 && !now.Before(last.Add(interval))
+}
+
+// healthActions 判定本轮调度应执行哪些检查。恢复检查（测试被禁目标并解禁）
+// 只受恢复开关控制；主动巡检正常渠道才受健康检查开关控制——历史上恢复检查
+// 被误挂在健康检查开关下，导致默认配置下被禁模型永不自动解禁。
+func healthActions(settings adminapi.SystemResilienceSettingsInput) (recovery bool, regular bool) {
+	return settings.RecoveryEnabled, settings.HealthCheckEnabled
 }
 
 func (s *sChannel) runRegularHealthChecks(ctx context.Context, mode string) {
@@ -194,7 +206,7 @@ func (s *sChannel) runModelRecoveryChecks(ctx context.Context, mode string) {
 	for _, item := range models {
 		channelIDs[item.ChannelId] = struct{}{}
 	}
-	channels, err := loadActiveHealthChannels(ctx, sortedModelIDs(channelIDs))
+	channels, err := loadModelRecoveryChannels(ctx, sortedModelIDs(channelIDs))
 	if err != nil {
 		g.Log().Warningf(ctx, "load model recovery channels: %v", err)
 		return
@@ -263,6 +275,26 @@ func loadActiveHealthChannels(ctx context.Context, channelIDs []uint64) ([]entit
 		WhereIn(columns.Id, channelIDs).
 		Where(columns.Status, 1).
 		Where(columns.AutoDisableEnabled, 1).
+		OrderAsc(columns.Id).
+		Scan(&channels)
+	return channels, err
+}
+
+// loadModelRecoveryChannels 加载模型恢复检查可探测的渠道。除启用中的渠道外，
+// 还包含「因所有模型被扣分禁用而被自动关闭」的渠道（Status=0 且 AutoDisabledAt
+// 非空）——否则模型恢复检查跳过这些渠道，渠道又被被动模式的来源过滤卡死，
+// 形成两边都够不着的死锁。手动关闭的渠道 AutoDisabledAt 为空，仍被排除。
+func loadModelRecoveryChannels(ctx context.Context, channelIDs []uint64) ([]entity.Channels, error) {
+	if len(channelIDs) == 0 {
+		return nil, nil
+	}
+	columns := dao.Channels.Columns()
+	channels := make([]entity.Channels, 0, len(channelIDs))
+	err := dao.Channels.Ctx(ctx).
+		Fields(columns.Id, columns.HealthCheckModelId).
+		WhereIn(columns.Id, channelIDs).
+		Where(columns.AutoDisableEnabled, 1).
+		Where("(" + columns.Status + " = 1) OR (" + columns.Status + " = 0 AND " + columns.AutoDisabledAt + " IS NOT NULL)").
 		OrderAsc(columns.Id).
 		Scan(&channels)
 	return channels, err
