@@ -146,7 +146,7 @@ func modelDisableReason(input ModelDisableInput) string {
 // 不重复扣分或重写禁用标记：分数已在禁用时归零，恢复巡检负责用成功的测试
 // 解禁。没有这层防护，恢复测试失败会在 0 分上反复归零、模型永不解禁——
 // 生产曾出现恢复巡检连测 190 次、每次都撞限流又每次都归零的死循环。
-func shouldSkipDisabledModelRetry(source string, autoDisabledAt *gtime.Time) bool {
+func shouldSkipDisabledModelRetry(source string, autoDisabledAt *time.Time) bool {
 	return source == AutoDisableSourceModelTest && autoDisabledAt != nil
 }
 

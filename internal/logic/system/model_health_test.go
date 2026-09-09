@@ -3,8 +3,6 @@ package system
 import (
 	"testing"
 	"time"
-
-	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func TestModelHealthRelaySuccessByLatency(t *testing.T) {
@@ -106,7 +104,7 @@ func TestMatchesAutoDisableSkipsHealthyModelScenario(t *testing.T) {
 // 重新写入禁用标记——分数已在禁用时归零，重复处理只会让模型永远停留在
 // 禁用态（生产实测恢复巡检连测 190 次限流失败、每次归零的死循环）。
 func TestShouldSkipDisabledModelRetry(t *testing.T) {
-	now := gtime.Now()
+	now := &time.Time{}
 	if !shouldSkipDisabledModelRetry(AutoDisableSourceModelTest, now) {
 		t.Fatal("test-source failure on a disabled model must be skipped")
 	}
