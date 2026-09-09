@@ -66,7 +66,7 @@ func healthActions(settings adminapi.SystemResilienceSettingsInput) (recovery bo
 // 渠道恢复巡检保留来源过滤——model_test 来源关闭的渠道（全部模型被
 // 扣分禁用引发的连带关闭）由模型恢复路径间接解禁。
 func recoverySourceRestriction(mode string, target system.RecoveryTarget) (string, bool) {
-	if mode == "passive" && target == RecoveryTargetChannel {
+	if mode == "passive" && target == system.RecoveryTargetChannel {
 		return system.AutoDisableSourceRelayRequest, true
 	}
 	return "", false
