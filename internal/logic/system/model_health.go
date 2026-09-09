@@ -248,6 +248,18 @@ func (s *sSystem) RecoverModelIfAllowed(ctx context.Context, modelID uint64) (bo
 		return false, nil
 	}
 	s.clearModelRouteCache(ctx)
+	// 模型自动恢复与渠道/密钥恢复保持一致，向管理员发送恢复通知邮件。
+	if settings, settingsErr := s.Get(ctx); settingsErr == nil {
+		s.notifyAutoDisableTransition(ctx, settings, AutoDisableNotification{
+			Recovered:   true,
+			ChannelID:   model.ChannelId,
+			ChannelName: s.autoDisableNotificationChannelName(ctx, model.ChannelId),
+			Reason:      model.AutoDisabledReason,
+			Source:      model.AutoDisabledSource,
+			ModelName:   model.PublicName,
+			ModelID:     model.Id,
+		})
+	}
 	return true, nil
 }
 
