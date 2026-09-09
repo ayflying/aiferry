@@ -3,6 +3,8 @@ package system
 import (
 	"testing"
 	"time"
+
+	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func TestModelHealthRelaySuccessByLatency(t *testing.T) {
@@ -97,5 +99,24 @@ func TestMatchesAutoDisableSkipsHealthyModelScenario(t *testing.T) {
 	input := AutoDisableInput{ChannelModelID: 1, Status: 502, Message: "bad gateway"}
 	if IsAutoDisableMatch(settings, input) {
 		t.Fatal("auto disable disabled should never match")
+	}
+}
+
+// 回归：恢复巡检（model_test 来源）重测已禁用模型失败时，不得重复扣分或
+// 重新写入禁用标记——分数已在禁用时归零，重复处理只会让模型永远停留在
+// 禁用态（生产实测恢复巡检连测 190 次限流失败、每次归零的死循环）。
+func TestShouldSkipDisabledModelRetry(t *testing.T) {
+	now := gtime.Now()
+	if !shouldSkipDisabledModelRetry(AutoDisableSourceModelTest, now) {
+		t.Fatal("test-source failure on a disabled model must be skipped")
+	}
+	if shouldSkipDisabledModelRetry(AutoDisableSourceModelTest, nil) {
+		t.Fatal("test-source failure on an enabled model must still apply")
+	}
+	if shouldSkipDisabledModelRetry(AutoDisableSourceRelayRequest, now) {
+		t.Fatal("relay-source failures on disabled models must still apply (account-level path)")
+	}
+	if shouldSkipDisabledModelRetry("", now) {
+		t.Fatal("unknown source must not trigger skip")
 	}
 }

@@ -57,6 +57,21 @@ func healthActions(settings adminapi.SystemResilienceSettingsInput) (recovery bo
 	return settings.RecoveryEnabled, settings.HealthCheckEnabled
 }
 
+// recoverySourceRestriction 决定恢复巡检是否按「禁用来源」过滤。
+// 恢复巡检的本质是重测已被自动禁用的目标——无论当初是真实流量
+// （relay_request）还是模型测试（model_test）触发的禁用，都必须重测才有
+// 机会解禁。被动模式若只认 relay_request 来源，model_test 来源的禁用将
+// 永远无人测试，形成死锁（2026-09-09 生产实测：渠道 9 两个被测试失败
+// 禁用的模型从未被巡检过）。因此模型与密钥的恢复巡检不再按来源过滤；
+// 渠道恢复巡检保留来源过滤——model_test 来源关闭的渠道（全部模型被
+// 扣分禁用引发的连带关闭）由模型恢复路径间接解禁。
+func recoverySourceRestriction(mode string, target system.RecoveryTarget) (string, bool) {
+	if mode == "passive" && target == RecoveryTargetChannel {
+		return system.AutoDisableSourceRelayRequest, true
+	}
+	return "", false
+}
+
 func (s *sChannel) runRegularHealthChecks(ctx context.Context, mode string) {
 	if mode != "all" {
 		return
@@ -103,8 +118,8 @@ func (s *sChannel) runChannelRecoveryChecks(ctx context.Context, mode string) {
 		Where(columns.AutoDisableEnabled, 1).
 		WhereNotNull(columns.AutoDisabledAt).
 		OrderAsc(columns.Id)
-	if mode == "passive" {
-		model = model.Where(columns.AutoDisabledSource, system.AutoDisableSourceRelayRequest)
+	if source, restrict := recoverySourceRestriction(mode, system.RecoveryTargetChannel); restrict {
+		model = model.Where(columns.AutoDisabledSource, source)
 	}
 	if err := model.Scan(&channels); err != nil {
 		g.Log().Warningf(ctx, "load channel recovery checks: %v", err)
@@ -143,8 +158,8 @@ func (s *sChannel) runCredentialRecoveryChecks(ctx context.Context, mode string)
 		Where(credentialColumns.Status, 0).
 		WhereNotNull(credentialColumns.AutoDisabledAt).
 		OrderAsc(credentialColumns.Id)
-	if mode == "passive" {
-		model = model.Where(credentialColumns.AutoDisabledSource, system.AutoDisableSourceRelayRequest)
+	if source, restrict := recoverySourceRestriction(mode, system.RecoveryTargetCredential); restrict {
+		model = model.Where(credentialColumns.AutoDisabledSource, source)
 	}
 	if err := model.Scan(&credentials); err != nil {
 		g.Log().Warningf(ctx, "load credential recovery checks: %v", err)
@@ -192,8 +207,8 @@ func (s *sChannel) runModelRecoveryChecks(ctx context.Context, mode string) {
 		Where(columns.Enabled, 1).
 		WhereNotNull(columns.AutoDisabledAt).
 		OrderAsc(columns.Id)
-	if mode == "passive" {
-		model = model.Where(columns.AutoDisabledSource, system.AutoDisableSourceRelayRequest)
+	if source, restrict := recoverySourceRestriction(mode, system.RecoveryTargetModel); restrict {
+		model = model.Where(columns.AutoDisabledSource, source)
 	}
 	if err := model.Scan(&models); err != nil {
 		g.Log().Warningf(ctx, "load model recovery checks: %v", err)
@@ -234,7 +249,8 @@ func (s *sChannel) runModelRecoveryChecks(ctx context.Context, mode string) {
 	}
 }
 
-func loadHealthCheckModelIDs(ctx context.Context, channels []entity.Channels) (map[uint64]uint64, error) {	result := make(map[uint64]uint64)
+func loadHealthCheckModelIDs(ctx context.Context, channels []entity.Channels) (map[uint64]uint64, error) {
+	result := make(map[uint64]uint64)
 	if len(channels) == 0 {
 		return result, nil
 	}

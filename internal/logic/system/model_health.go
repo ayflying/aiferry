@@ -142,6 +142,14 @@ func modelDisableReason(input ModelDisableInput) string {
 	return truncate(strings.Join(parts, ", "), 1024)
 }
 
+// shouldSkipDisabledModelRetry 已被自动禁用的模型收到模型测试来源的失败时，
+// 不重复扣分或重写禁用标记：分数已在禁用时归零，恢复巡检负责用成功的测试
+// 解禁。没有这层防护，恢复测试失败会在 0 分上反复归零、模型永不解禁——
+// 生产曾出现恢复巡检连测 190 次、每次都撞限流又每次都归零的死循环。
+func shouldSkipDisabledModelRetry(source string, autoDisabledAt *gtime.Time) bool {
+	return source == AutoDisableSourceModelTest && autoDisabledAt != nil
+}
+
 // ApplyModelHealthScore 记录一次模型请求结果：成功加分、失败扣分。
 // 返回是否触发了模型自动禁用。
 func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, input ModelDisableInput) (bool, error) {
@@ -150,6 +158,9 @@ func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.S
 		return false, gerror.Wrap(err, "load channel model for health score")
 	}
 	if model.Id == 0 || model.Enabled != 1 {
+		return false, nil
+	}
+	if shouldSkipDisabledModelRetry(input.Source, model.AutoDisabledAt) {
 		return false, nil
 	}
 	newScore := model.HealthScore
