@@ -9,20 +9,27 @@ import (
 )
 
 type StreamConverter struct {
-	plan           Plan
-	id             string
-	model          string
-	created        int64
-	started        bool
-	contentStarted bool
-	completed      bool
-	sawToolCall    bool
-	outputText     strings.Builder
-	usage          map[string]any
+	plan             Plan
+	id               string
+	model            string
+	created          int64
+	started          bool
+	contentStarted   bool
+	completed        bool
+	sawToolCall      bool
+	outputText       strings.Builder
+	usage            map[string]any
+	chatToolIndexes  map[string]int
+	chatToolNameSent map[string]bool
 }
 
 func NewStreamConverter(plan Plan) *StreamConverter {
-	return &StreamConverter{plan: plan, created: time.Now().Unix()}
+	return &StreamConverter{
+		plan:             plan,
+		created:          time.Now().Unix(),
+		chatToolIndexes:  make(map[string]int),
+		chatToolNameSent: make(map[string]bool),
+	}
 }
 
 func (c *StreamConverter) Transform(line []byte) [][]byte {
@@ -80,10 +87,19 @@ func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 		if item.Get("type").String() != "function_call" {
 			return nil
 		}
+		callID := stringOr(item.Get("call_id").Value(), item.Get("id").String())
+		index := c.chatToolIndex(callID, int(gjson.GetBytes(payload, "output_index").Int()))
+		// Chat Completions 的 function.name 是增量字段。部分 Responses 上游会
+		// 重复发送 output_item.added；同一调用若再次下发完整名称，客户端会
+		// 按 delta 拼成 PowerShellPowerShell。每个 call 只发送一次名称。
+		if c.chatToolNameSent[callID] {
+			return nil
+		}
+		c.chatToolNameSent[callID] = true
 		c.sawToolCall = true
 		return append(c.ensureChatRole(), c.chatChunk(map[string]any{"tool_calls": []any{map[string]any{
-			"index":    0,
-			"id":       item.Get("call_id").String(),
+			"index":    index,
+			"id":       callID,
 			"type":     "function",
 			"function": map[string]any{"name": item.Get("name").String()},
 		}}}, nil, nil)...)
@@ -92,10 +108,12 @@ func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 		if delta == "" {
 			return nil
 		}
+		callID := gjson.GetBytes(payload, "call_id").String()
+		index := c.chatToolIndex(callID, int(gjson.GetBytes(payload, "output_index").Int()))
 		c.sawToolCall = true
 		return append(c.ensureChatRole(), c.chatChunk(map[string]any{"tool_calls": []any{map[string]any{
-			"index":    0,
-			"id":       gjson.GetBytes(payload, "call_id").String(),
+			"index":    index,
+			"id":       callID,
 			"type":     "function",
 			"function": map[string]any{"arguments": delta},
 		}}}, nil, nil)...)
@@ -255,6 +273,21 @@ func (c *StreamConverter) captureChatMetadata(payload []byte) {
 	if created := gjson.GetBytes(payload, "created").Int(); created > 0 {
 		c.created = created
 	}
+}
+
+func (c *StreamConverter) chatToolIndex(callID string, upstreamIndex int) int {
+	if index, exists := c.chatToolIndexes[callID]; exists {
+		return index
+	}
+	index := upstreamIndex
+	for _, assigned := range c.chatToolIndexes {
+		if assigned == index {
+			index = len(c.chatToolIndexes)
+			break
+		}
+	}
+	c.chatToolIndexes[callID] = index
+	return index
 }
 
 func (c *StreamConverter) chatID() string {

@@ -377,6 +377,37 @@ func TestProtocolStreamConversion(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamDoesNotRepeatToolName(t *testing.T) {
+	plan, _ := fallbackPlan(ChatCompletionsEndpoint)
+	converter := NewStreamConverter(plan)
+	added := []byte(`data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"PowerShell"}}`)
+
+	first := protocolStreamText(converter.Transform(added))
+	second := protocolStreamText(converter.Transform(added))
+	if count := strings.Count(first+second, `"name":"PowerShell"`); count != 1 {
+		t.Fatalf("tool name emitted %d times, want once: %s%s", count, first, second)
+	}
+	if !strings.Contains(first, `"index":2`) {
+		t.Fatalf("tool index must retain output_index=2: %s", first)
+	}
+
+	arguments := converter.Transform([]byte(`data: {"type":"response.function_call_arguments.delta","output_index":2,"call_id":"call_1","delta":"{\"command\":\"dir\"}"}`))
+	output := protocolStreamText(arguments)
+	if !strings.Contains(output, `"index":2`) || !strings.Contains(output, `"arguments":"{\"command\":\"dir\"}"`) {
+		t.Fatalf("arguments must retain the tool index: %s", output)
+	}
+}
+
+func TestResponsesStreamKeepsParallelToolIndexes(t *testing.T) {
+	plan, _ := fallbackPlan(ChatCompletionsEndpoint)
+	converter := NewStreamConverter(plan)
+	first := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"Read"}}`)))
+	second := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_2","name":"Bash"}}`)))
+	if !strings.Contains(first, `"index":0`) || !strings.Contains(second, `"index":1`) {
+		t.Fatalf("parallel tool indexes collapsed: first=%s second=%s", first, second)
+	}
+}
+
 func TestProtocolFallbackOnlyForUnsupportedEndpoints(t *testing.T) {
 	if !ShouldFallback(404, nil) {
 		t.Fatal("404 should trigger protocol fallback")
