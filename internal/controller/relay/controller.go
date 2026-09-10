@@ -39,6 +39,9 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/videos", c.videos)
 	group.GET("/videos/:video_id", c.video)
 	group.GET("/videos/:video_id/content", c.videoContent)
+	group.GET("/dashboard/billing/subscription", c.billingSubscription)
+	group.GET("/dashboard/billing/usage", c.billingUsage)
+	group.GET("/dashboard/billing/channels", c.billingChannels)
 }
 
 func (c *Controller) models(r *ghttp.Request) {
