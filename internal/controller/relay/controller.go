@@ -31,6 +31,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/responses", c.proxy("/responses"))
 	group.POST("/embeddings", c.proxy("/embeddings"))
 	group.POST("/images/generations", c.proxy("/images/generations"))
+	group.POST("/images/edits", c.imagesEdits)
 	group.POST("/audio/speech", c.audioProxy("/audio/speech"))
 	group.POST("/audio/transcriptions", c.audioProxy("/audio/transcriptions"))
 	group.POST("/video/generations", c.videoGenerations)
@@ -157,6 +158,40 @@ func (c *Controller) audioProxy(endpoint string) ghttp.HandlerFunc {
 		}
 		r.Exit()
 	}
+}
+
+// imagesEdits 代理 /v1/images/edits：请求体为 multipart/form-data（参考图 + 文本字段），
+// 无法走要求 JSON 的通用 proxy，故同步缓冲后交给 relay 层的 multipart 链路解析与重建。
+func (c *Controller) imagesEdits(r *ghttp.Request) {
+	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, (32<<20)+1))
+		if err != nil {
+			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+			return
+		}
+		relayErr := c.relay.HandleImagesEdit(r.Context(), r.Header, clientIP(r), "/images/edits", body, r.Header.Get("Content-Type"), key, r.Response.RawWriter())
+		if relayErr != nil {
+			if relaysvc.IsRetryableAvailabilityError(relayErr) {
+				writeRetryableAvailabilityError(r)
+				return
+			}
+			if system.IsImageInputDisabled(relayErr) {
+				writeError(r, http.StatusBadRequest, "invalid_request_error", relayErr.Error())
+				return
+			}
+			if system.IsSensitiveWordBlocked(relayErr) {
+				writeError(r, http.StatusBadRequest, "sensitive_word_blocked", relayErr.Error())
+				return
+			}
+			if user.IsInsufficientBalance(relayErr) {
+				writeError(r, http.StatusPaymentRequired, "insufficient_balance", relayErr.Error())
+				return
+			}
+			writeError(r, http.StatusBadRequest, "invalid_request_error", relayErr.Error())
+			return
+		}
+		r.Exit()
+	})
 }
 
 func (c *Controller) videoGenerations(r *ghttp.Request) {

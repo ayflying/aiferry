@@ -177,7 +177,7 @@ func sensitivePromptTexts(endpoint string, body []byte) []string {
 		return responseInputTexts(payload["input"])
 	case "/embeddings":
 		return embeddingInputTexts(payload["input"])
-	case "/images/generations":
+	case "/images/generations", "/images/edits":
 		return imageGenerationPromptTexts(payload["prompt"])
 	default:
 		return nil
