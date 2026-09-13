@@ -33,18 +33,34 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
 转发层承担两件事，都在 `internal/logic/relay/reasoning_echo.go`：
 
 1. **存档（写路径）**：转发时从上游响应里累积思考内容与它绑定的工具调用 id。流式从
-   `choices[0].delta.reasoning_content` 与 `delta.tool_calls[].id` 累积；非流式读
-   `choices[0].message`。按 `tool_call id` 写入 Redis：
+   `choices[0].delta.reasoning_content`（或聚合渠道的 `delta.reasoning`）与
+   `delta.tool_calls[].id` 累积；非流式读 `choices[0].message`。按 `tool_call id` 写入 Redis：
 
    ```text
-   aiferry:reasoning:<API 密钥 ID>:<tool_call id>  ->  reasoning_content
+   aiferry:reasoning:<API 密钥 ID>:<tool_call id>  ->  {"field":"reasoning_content","text":"..."}
    ```
 
-   TTL 24 小时，按 API 密钥作用域隔离，避免不同用户之间串号。
+   TTL 24 小时，按 API 密钥作用域隔离，避免不同用户之间串号。存档连**字段名**一起保存，
+   回传时沿用上游自己的方言（见下）。
 
 2. **回填（读路径）**：请求进入 `/v1/chat/completions` 时，对每条 `role=assistant`、带
-   `tool_calls`、且缺少 `reasoning_content` 的消息，用它的 `tool_call id` 查存档；命中则补回
-   真实内容。客户端已经带了该字段时不覆盖，查不到存档时保持原样交给上游处理。
+   `tool_calls`、且尚无思考内容字段的消息，用它的 `tool_call id` 查存档；命中则按存档记录的
+   字段名补回真实内容。客户端已经带了该字段时不覆盖，查不到存档时保持原样交给上游处理。
+
+### 字段名方言
+
+思考内容的字段名各家不一致，且同一个聚合渠道里也可能混用：
+
+| 上游 | 字段名 |
+| --- | --- |
+| DeepSeek / Kimi / GLM / MiMo 直连 | `reasoning_content` |
+| OpenCode 系聚合端点（含 `opencode_go`） | `reasoning` |
+
+因此实现**不写死字段名**：捕获时记录实际命中的字段名（优先 `reasoning_content`，其次
+`reasoning`），回传时按同一个名字写回。否则会出现「上游用 `reasoning` 返回、网关按
+`reasoning_content` 补回」，上游读不到补回的内容，仍然 400。
+
+早期存档是纯文本（无字段名），读取时按标准字段名 `reasoning_content` 兼容处理。
 
 两条路径都只在「模型确实产生过思考内容」时生效，对不使用思考模式的模型没有任何副作用，也不会
 为无关请求增加 Redis 调用（只有发现缺少字段的工具调用消息时才查询）。
@@ -67,5 +83,6 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
   redis-cli --scan --pattern 'aiferry:reasoning:*'
   ```
 
-- 注入逻辑的单测见 `internal/logic/relay/reasoning_echo_test.go`（捕获、去重、已有字段不覆盖、
-  无工具调用不动请求体、查不到存档保持原样）。
+- 注入逻辑的单测见 `internal/logic/relay/reasoning_echo_test.go`（捕获、两种字段名方言、
+  按方言回传、去重、已有字段不覆盖、无工具调用不动请求体、查不到存档保持原样、存档往返与
+  旧格式兼容）。

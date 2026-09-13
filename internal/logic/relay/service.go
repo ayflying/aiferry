@@ -93,9 +93,10 @@ type attemptResult struct {
 	responseModel      string
 	streamCompleted    bool
 	attemptFlow        []usage.AttemptFlowStep
-	// reasoningContent / reasoningToolCallIDs 是上游本轮返回的思考内容及其绑定的
-	// 工具调用 id，用于按需回传给要求回传思考内容的 thinking 模式上游。
+	// reasoningContent / reasoningField / reasoningToolCallIDs 是上游本轮返回的思考内容、
+	// 其字段名（方言）以及绑定的工具调用 id，用于按需回传给要求回传思考内容的 thinking 模式上游。
 	reasoningContent     string
+	reasoningField       string
 	reasoningToolCallIDs []string
 }
 

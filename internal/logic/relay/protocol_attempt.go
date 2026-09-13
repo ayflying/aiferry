@@ -100,12 +100,13 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 		// 思考内容必须在响应改写前捕获：ReasoningToContent 会把 reasoning_content
 		// 合并进 content 并删除原字段，改写后再读就拿不到了。
-		reasoningContent, reasoningToolCallIDs := captureBufferedReasoning(plan.UpstreamEndpoint(), responseBody)
+		reasoningContent, reasoningField, reasoningToolCallIDs := captureBufferedReasoning(plan.UpstreamEndpoint(), responseBody)
 		responseBody = normalizeResponseBody(plan.UpstreamEndpoint(), responseBody, candidate.UpstreamName, advancedConfig)
 		result := attemptResult{status: resp.StatusCode, body: plan.ConvertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
 		result.upstreamEndpoint = plan.UpstreamEndpoint()
 		result.protocolConversion = plan.Conversion()
 		result.reasoningContent = reasoningContent
+		result.reasoningField = reasoningField
 		result.reasoningToolCallIDs = reasoningToolCallIDs
 		result.responseText, result.responseModel = captureBufferedResponse(plan.UpstreamEndpoint(), responseBody)
 		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -273,6 +274,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	result.responseModel = capture.Model()
 	result.streamCompleted = capture.Completed()
 	result.reasoningContent = reasoning.Reasoning()
+	result.reasoningField = reasoning.Field()
 	result.reasoningToolCallIDs = reasoning.ToolCallIDs()
 	return result, true, nil
 }
