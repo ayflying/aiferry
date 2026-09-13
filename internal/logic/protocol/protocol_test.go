@@ -408,6 +408,81 @@ func TestResponsesStreamKeepsParallelToolIndexes(t *testing.T) {
 	}
 }
 
+func TestResponsesToolContinuationToChatRestoresToolCalls(t *testing.T) {
+	body, err := responsesRequestToChat([]byte(`{
+  "model":"deepseek-v4-pro","stream":true,
+  "input":[
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"查天气"}]},
+    {"type":"reasoning","summary":[{"type":"summary_text","text":"需要先查两个城市"}]},
+    {"type":"message","role":"assistant","content":[{"type":"output_text","text":"我并行查一下。"}]},
+    {"type":"function_call","id":"fc_1","call_id":"call_a","name":"weather","arguments":"{\"city\":\"wuhan\"}"},
+    {"type":"function_call","id":"fc_2","call_id":"call_b","name":"weather","arguments":"{\"city\":\"beijing\"}"},
+    {"type":"function_call_output","call_id":"call_a","output":"晴"},
+    {"type":"function_call_output","call_id":"call_b","output":"多云"}
+  ]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.role").String(); actual != "assistant" {
+		t.Fatalf("assistant role = %q", actual)
+	}
+	// Responses 里拆开的 assistant 文本与并行 function_call 应合并回同一条消息。
+	if actual := gjson.GetBytes(body, "messages.1.content.0.text").String(); actual != "我并行查一下。" {
+		t.Fatalf("assistant content = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.reasoning_content").String(); actual != "需要先查两个城市" {
+		t.Fatalf("reasoning_content = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.tool_calls.#").Int(); actual != 2 {
+		t.Fatalf("tool_calls count = %d, body=%s", actual, body)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.tool_calls.0.id").String(); actual != "call_a" {
+		t.Fatalf("first tool call id = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.tool_calls.0.function.name").String(); actual != "weather" {
+		t.Fatalf("first tool call name = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.tool_calls.1.id").String(); actual != "call_b" {
+		t.Fatalf("second tool call id = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.2.role").String(); actual != "tool" {
+		t.Fatalf("tool role = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.2.tool_call_id").String(); actual != "call_a" {
+		t.Fatalf("tool call id = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.3.tool_call_id").String(); actual != "call_b" {
+		t.Fatalf("second tool call id = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.#").Int(); actual != 4 {
+		t.Fatalf("messages count = %d, body=%s", actual, body)
+	}
+}
+
+func TestResponsesUnknownInputItemDoesNotBecomeUserMessage(t *testing.T) {
+	body, err := responsesRequestToChat([]byte(`{
+  "model":"deepseek-v4-pro",
+  "input":[
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"跑一下"}]},
+    {"type":"local_shell_call","call_id":"shell_1","action":{"type":"exec","command":["ls"]}},
+    {"type":"function_call","call_id":"call_a","name":"done","arguments":"{}"}
+  ]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := gjson.GetBytes(body, "messages.#").Int(); actual != 2 {
+		t.Fatalf("messages count = %d, body=%s", actual, body)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.role").String(); actual != "assistant" {
+		t.Fatalf("second message role = %q", actual)
+	}
+	if actual := gjson.GetBytes(body, "messages.1.tool_calls.0.id").String(); actual != "call_a" {
+		t.Fatalf("tool call id = %q", actual)
+	}
+}
+
 func TestProtocolFallbackOnlyForUnsupportedEndpoints(t *testing.T) {
 	if !ShouldFallback(404, nil) {
 		t.Fatal("404 should trigger protocol fallback")

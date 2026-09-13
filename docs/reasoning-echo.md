@@ -46,6 +46,9 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
 2. **回填（读路径）**：请求进入 `/v1/chat/completions` 时，对每条 `role=assistant`、带
    `tool_calls`、且尚无思考内容字段的消息，用它的 `tool_call id` 查存档；命中则按存档记录的
    字段名补回真实内容。客户端已经带了该字段时不覆盖，查不到存档时保持原样交给上游处理。
+   客户端用 `/v1/responses` 且上游是 Chat 端点时，请求体会先经 `responses_to_chat` 转换，
+   转换后（此时工具调用历史已成 `tool_calls` 形态）会再补一次，详见
+   `docs/protocol-conversion.md`。
 
 ### 字段名方言
 
@@ -68,7 +71,8 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
 ## 生效条件与限制
 
 - 只对**上游是 `/chat/completions`** 的请求生效。上游走 `/responses` 时思考内容以 reasoning
-  summary 形式传递，不在本机制覆盖范围内。
+  summary 形式传递，不在本机制覆盖范围内（客户端是 Responses 端点、上游是 Chat 端点的组合
+  则在覆盖范围内，见 `docs/protocol-conversion.md`）。
 - 存档依赖 Redis 与同一个 API 密钥。**Redis 重启、键超过 24 小时、或客户端切换了 API 密钥时
   命中不了存档**，该轮仍会拿到上游的原始 400（此时需要重新发起一次对话）。
 - 流式响应被客户端中断（未收到 `[DONE]`）时不存档，避免下一轮回传出残缺的推理。
@@ -76,7 +80,9 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
 
 ## 排障
 
-- 失败日志里出现「协议转换：」行，说明请求经过了 Responses/Chat 协议转换；本机制不覆盖该路径。
+- 失败日志里出现「协议转换：」行时，说明请求经过了 Responses/Chat 协议转换：方向是
+  `responses_to_chat`（工具调用被还原成 `tool_calls`）时本机制仍然生效；方向是
+  `chat_to_responses`（上游才是 Responses 端点）时不生效。
 - 确认存档是否写入：
 
   ```bash

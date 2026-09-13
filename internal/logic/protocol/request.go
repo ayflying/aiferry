@@ -1,5 +1,7 @@
 package protocol
 
+import "strings"
+
 func chatToolsToResponses(value any) []any {
 	result := make([]any, 0)
 	for _, itemValue := range arrayValue(value) {
@@ -58,25 +60,109 @@ func responsesToolChoiceToChat(value any) any {
 	return map[string]any{"type": "function", "function": map[string]any{"name": stringValue(choice["name"])}}
 }
 
+// responsesInputToChat 把 Responses 的 input 数组还原成 Chat 的 messages。
+//
+// Responses 把「一次工具调用」拆成独立的 function_call 输入项，而 Chat 要求它出现在 assistant
+// 消息的 tool_calls 里，因此这里需要缓冲相邻的 function_call（并行调用是多个相邻项）后合并成
+// 一条 assistant 消息；紧随其后的 function_call_output 再落成 role=tool 消息，两者的 call_id
+// 必须一一对应，否则上游会因为「工具结果找不到对应的工具调用」而拒绝请求。
+//
+// 同一段里出现的 reasoning 输入项（思考模式的历史）会作为 reasoning_content 挂到这条
+// assistant 消息上——DeepSeek/Kimi 等上游要求发生过工具调用后必须原样回传思考内容。
 func responsesInputToChat(value any) []any {
 	if text, ok := value.(string); ok {
 		return []any{map[string]any{"role": "user", "content": text}}
 	}
 	result := make([]any, 0)
+	var (
+		pendingAssistant map[string]any
+		pendingToolCalls []any
+		pendingReasoning string
+	)
+	flush := func() {
+		if len(pendingToolCalls) > 0 {
+			message := map[string]any{"role": "assistant", "content": nil, "tool_calls": pendingToolCalls}
+			if pendingAssistant != nil {
+				message["content"] = pendingAssistant["content"]
+			}
+			if pendingReasoning != "" {
+				message["reasoning_content"] = pendingReasoning
+			}
+			result = append(result, message)
+		} else if pendingAssistant != nil {
+			// 没有工具调用时思考内容不参与校验，丢弃以免上游拒绝未知字段。
+			result = append(result, pendingAssistant)
+		}
+		pendingAssistant, pendingToolCalls, pendingReasoning = nil, nil, ""
+	}
 	for _, itemValue := range arrayValue(value) {
 		item, ok := objectValue(itemValue)
 		if !ok {
 			continue
 		}
-		switch stringValue(item["type"]) {
+		switch itemType := stringValue(item["type"]); itemType {
+		case "function_call":
+			// Responses 的 id 是条目 id，call_id 才是与 function_call_output 对应的键；
+			// 回退到 id 兼容只填了 id 的客户端。
+			callID := stringOr(item["call_id"], stringValue(item["id"]))
+			pendingToolCalls = append(pendingToolCalls, map[string]any{
+				"id":   callID,
+				"type": "function",
+				"function": map[string]any{
+					"name": stringValue(item["name"]),
+					// Chat 上游要求 arguments 是字符串，缺失时给空对象。
+					"arguments": stringOr(item["arguments"], "{}"),
+				},
+			})
+		case "reasoning":
+			if text := responsesReasoningText(item); text != "" {
+				pendingReasoning = text
+			}
 		case "function_call_output":
+			flush()
 			result = append(result, map[string]any{"role": "tool", "tool_call_id": stringValue(item["call_id"]), "content": item["output"]})
 		default:
+			if itemType != "" && itemType != "message" {
+				// 未知输入项（local_shell_call、computer_call 等）没有 Chat 对应形态，
+				// 直接跳过；降级成 role=user/content=null 会向对话里注入空用户消息。
+				continue
+			}
 			role := stringOr(item["role"], "user")
+			if role == "assistant" {
+				// 缓冲 assistant 文本，等待可能紧随其后的 function_call 合并成同一条消息。
+				// 只有确实存在待发出的内容时才 flush，否则会丢掉刚缓冲的 reasoning
+				// （Responses 的顺序是 reasoning -> assistant 文本 -> function_call）。
+				if len(pendingToolCalls) > 0 || pendingAssistant != nil {
+					flush()
+				}
+				pendingAssistant = map[string]any{"role": role, "content": responsesContentToChat(item["content"])}
+				continue
+			}
+			flush()
 			result = append(result, map[string]any{"role": role, "content": responsesContentToChat(item["content"])})
 		}
 	}
+	flush()
 	return result
+}
+
+// responsesReasoningText 提取 Responses reasoning 输入项里的思考文本。
+// summary 是 Responses 的公开摘要，content 是完整思考内容的回传形态，两者都可能出现。
+func responsesReasoningText(item map[string]any) string {
+	var text strings.Builder
+	for _, field := range []string{"summary", "content"} {
+		for _, partValue := range arrayValue(item[field]) {
+			part, ok := objectValue(partValue)
+			if !ok {
+				continue
+			}
+			text.WriteString(stringValue(part["text"]))
+		}
+	}
+	if text.Len() > 0 {
+		return text.String()
+	}
+	return stringValue(item["text"])
 }
 
 func chatToolCallsToResponses(value any) []any {

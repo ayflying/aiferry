@@ -59,7 +59,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			if !stream {
 				attemptWriter = nil
 			}
-			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, userID, settings, sensitiveDataRestorer)
+			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, userID, apiKeyID, settings, sensitiveDataRestorer)
 			result.latency = time.Since(attemptStartedAt)
 			if attemptErr != nil {
 				result = failedAttemptResult(result, attemptErr.Error())

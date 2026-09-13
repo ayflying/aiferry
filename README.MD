@@ -6,6 +6,7 @@ AiFerry（AI 摆渡）是基于 GoFrame v2 和 Vue 3 的 OpenAI 兼容中转管�
 
 - OpenAI 兼容接口：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/images/generations`
 - 普通响应与 SSE 流式响应
+- Responses 与 Chat Completions 之间的协议自动转换（工具调用历史、多模态内容与思考内容的双向还原，见 `docs/protocol-conversion.md`）
 - 渠道优先级、权重路由、最多三渠道故障转移和 Redis 冷却
 - thinking 模式模型的 `reasoning_content` 回传（DeepSeek/Kimi 等要求发生过工具调用后必须回传，见 `docs/reasoning-echo.md`）
 - OpenAI 官方、Sub2API 和自定义 JSON 费用查询

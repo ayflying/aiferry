@@ -17,13 +17,13 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/protocol"
 )
 
-func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, userID uint64, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
+func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
 	advancedConfig, err := channel.ParseAdvancedConfig([]byte(candidate.AdvancedConfig))
 	if err != nil {
 		return attemptResult{}, false, err
 	}
 	primary := preferredProtocolPlan(endpoint, candidate)
-	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, settings, advancedConfig, primary, sensitiveDataRestorer)
+	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
 	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	if handled || attemptErr != nil || !needsFallback {
 		return result, handled, attemptErr
@@ -32,7 +32,7 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if !ok {
 		return result, handled, attemptErr
 	}
-	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, settings, advancedConfig, fallback, sensitiveDataRestorer)
+	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, fallback, sensitiveDataRestorer)
 }
 
 func preferredProtocolPlan(endpoint string, candidate Candidate) protocol.Plan {
@@ -47,10 +47,16 @@ func isZhipuResponsesBaseURL(baseURL string) bool {
 	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "https://open.bigmodel.cn/api/v1")
 }
 
-func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, userID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocol.Plan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
+func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocol.Plan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
 	convertedBody, err := plan.ConvertRequest(originalBody)
 	if err != nil {
 		return attemptResult{}, false, err
+	}
+	if plan.Converts() && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
+		// 协议转换会把 Responses 的 function_call 还原成 assistant 的 tool_calls，此时
+		// 客户端是否携带过思考内容已经不可知（Responses 用独立的 reasoning 输入项）。
+		// 转换后再补一次存档内容，让 Responses 客户端也能满足 thinking 模式上游的要求。
+		convertedBody = s.restoreReasoningContent(ctx, convertedBody, apiKeyID)
 	}
 	body, err := prepareRequestBody(plan.UpstreamEndpoint(), convertedBody, candidate.UpstreamName, advancedConfig)
 	if err != nil {
