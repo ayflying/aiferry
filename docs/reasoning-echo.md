@@ -67,25 +67,30 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
    - 客户端只带了聚合方言 `reasoning` 时，内容**转写到** `reasoning_content`，同时把
      `reasoning` 删掉。
 
-   #### 「当前轮」边界（0.5.100 定稿）
+   #### 「当前轮」边界（0.5.100 发现、0.5.101 定稿）
 
-   上游**只校验最后一条 `user` 消息之后的消息**。实测（OpenCode Go / `deepseek-v4.1-flash`）：
+   上游**只校验最后一条 `user` 消息之后的消息**，且该范围内的**每一条 `assistant` 消息**
+   （含不带 `tool_calls` 的普通消息）都必须带 `reasoning_content`。实测（OpenCode Go /
+   `deepseek-v4.1-flash`）：
 
    | 形态 | 结果 |
    | --- | --- |
    | `[user, assistant(tool_calls, 无 rc), tool]` | **400** |
    | `[user, assistant(tool_calls, 无 rc), tool, assistant("done")]` | **400** |
    | `[user, assistant(tool_calls, 无 rc), tool, user, assistant(tool_calls, 无 rc)]` | **400** |
+   | `[user, assistant("普通文本", 无 rc)]` | **400**（没有工具调用也算） |
+   | `[user, assistant("a1"), assistant("a2")]`（均无 rc） | **400**（每一条都算） |
+   | `[user, assistant(tool_calls, rc=""), tool, assistant("done", 无 rc)]` | **400**（漏在普通消息上） |
    | `[user, assistant(tool_calls, 无 rc), tool, user]` | 200（已翻篇） |
    | `[user, assistant(tool_calls, rc=""), tool]` | 200（空串可接受） |
    | `[user, assistant(tool_calls, rc=null), tool]` | 200（网关已归一成空串） |
 
-   也就是说：上一轮工具调用的 assistant 消息一旦被后续 `user` 消息「翻篇」就不再参与校验，
-   但**只要没有 `user` 消息把它隔开，它就必须带 `reasoning_content`**——包括历史以 `tool`
-   结果结尾（agent 循环中间态）或历史末尾又跟了一条 assistant 消息的情况。
+   也就是说：上一轮的 assistant 消息一旦被后续 `user` 消息「翻篇」就不再参与校验，但**只要没有
+   `user` 消息把它隔开，它就必须带 `reasoning_content`**——包括历史以 `tool` 结果结尾（agent
+   循环中间态）、末尾又跟了一条 assistant 消息、以及这条 assistant 消息根本没有工具调用的情形。
 
-   因此兜底补空串只作用于「最后一条 `user` 消息之后」的工具调用消息：既修掉缺字段导致的
-   400，又不会给已经翻篇的历史消息平白加字段（对不使用思考模式的模型保持无副作用）。
+   因此兜底补空串作用于「最后一条 `user` 消息之后」的**每一条 `assistant` 消息**：既修掉缺字段
+   导致的 400，又不会给已经翻篇的历史消息平白加字段（对不使用思考模式的模型保持无副作用）。
 
 ### 字段名方言与「有毒字段」
 
@@ -95,8 +100,8 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
 捕获侧两种名字都识别（`reasoning_content` 优先，其次 `reasoning`），但回填侧**只写
 `reasoning_content`**，并**删除**客户端带来的 `reasoning`。
 
-在 OpenCode Go（`opencode.ai/zen/go/v1`）全 37 个模型上实测的字段容忍度（均针对**当前轮**
-的工具调用消息；`reasoning_content` 缺失/`null` 在已翻篇的历史消息上不会触发校验）：
+在 OpenCode Go（`opencode.ai/zen/go/v1`）全 37 个模型上实测的字段容忍度（均针对**当前轮**的
+assistant 消息；`reasoning_content` 缺失/`null` 在已翻篇的历史消息上不会触发校验）：
 
 | 字段取值 | GLM 系 | DeepSeek 系 | Kimi 系 |
 | --- | --- | --- | --- |
@@ -113,16 +118,16 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
   「标准名 + 方言」双写以兼容两类端点，实测直接把 GLM-5.x 从 200 打成 400，已放弃。
 - 因此客户端若按聚合方言 `reasoning` 重建了历史，不能只是「补齐标准字段」，必须**把
   `reasoning` 删掉**，否则会毒到严格上游。
-- `null` 与「缺字段」在**当前轮**同样致命：只归一时 `null` 是不够的，还必须为完全没带字段的
-  当前轮工具调用消息补空串（0.5.100 修复）。
+- `null` 与「缺字段」在**当前轮**同样致命：只归一 `null` 是不够的，还必须为当前轮里完全没带
+  字段的 assistant 消息补空串（0.5.100 起，0.5.101 扩展到不带 `tool_calls` 的普通消息）。
 
 早期存档是纯文本（无字段名），读取时按标准字段名 `reasoning_content` 兼容处理。
 
 回填发生在路由之前，无法预知本次请求会落到哪个上游，所以「统一输出唯一标准字段」是
 唯一在跨渠道轮转下都成立的方案。
 
-补空串只发生在「当前轮」的工具调用消息上，且只在该消息确实没有任何思考内容可回填时；已翻篇
-的历史消息与没有工具调用的请求都不会被改写，也不会为其增加 Redis 调用（只有发现缺少有效
+补空串只发生在「当前轮」的 assistant 消息上，且只在该消息确实没有任何思考内容可回填时；已翻篇
+的历史消息与不在当前轮的请求都不会被改写，也不会为其增加 Redis 调用（只有发现缺少有效
 思考内容的工具调用消息时才查询存档）。
 
 ## 生效条件与限制
@@ -131,7 +136,7 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
   summary 形式传递，不在本机制覆盖范围内（客户端是 Responses 端点、上游是 Chat 端点的组合
   则在覆盖范围内，见 `docs/protocol-conversion.md`）。
 - 存档依赖 Redis 与同一个 API 密钥。**Redis 重启、键超过 24 小时、或客户端切换了 API 密钥时
-  命中不了存档**。此时请求仍可继续：当前轮的工具调用消息会被补成空串，客户端历史里值为
+  命中不了存档**。此时请求仍可继续：当前轮的 assistant 消息会被补成空串，客户端历史里值为
   `null` 的字段也会被归一成空串——严格上游（OpenCode Go）接受空串，只是丢失了该轮的推理
   上下文。
 - 流式响应被客户端中断（未收到 `[DONE]`）时不存档，避免下一轮回传出残缺的推理。
@@ -150,5 +155,5 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
 
 - 注入逻辑的单测见 `internal/logic/relay/reasoning_echo_test.go`（捕获两种字段名方言、按 tool_call
   id 回填、客户端已带标准字段时原样保留、聚合方言转写并删除、`null` 回填、无存档时 `null`
-  归一成空串、当前轮补空串、已翻篇的历史消息不动、无工具调用不动请求体、非 Chat 请求体不动、
-  存档往返与旧格式兼容）。
+  归一成空串、当前轮每条 assistant 消息补空串、已翻篇的历史消息不动、非 assistant 消息不动、
+  非 Chat 请求体不动、存档往返与旧格式兼容）。

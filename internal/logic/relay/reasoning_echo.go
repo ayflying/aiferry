@@ -38,7 +38,7 @@ import (
 // 诊断与兼容历史存档）；但 patch 侧统一只写 reasoning_content 并删除 reasoning，理由见
 // patchReasoningContent 的字段容忍度实测表——reasoning 是「有毒字段」。
 //
-// 补空串只发生在「最后一条 user 消息之后」的工具调用消息上（上游只校验这一段，见
+// 补空串只发生在「最后一条 user 消息之后」的 assistant 消息上（上游只校验这一段，见
 // patchReasoningContent 的边界实测），对不使用思考模式的模型与已翻篇的历史消息都没有副作用。
 const (
 	// reasoningEchoTTL 需要覆盖一次多步工具调用链的持续时间，超时后回退为不补（客户端会拿到上游的原始 400）。
@@ -251,7 +251,7 @@ func (s *sRelay) restoreReasoningContent(ctx context.Context, body []byte, apiKe
 	})
 }
 
-// patchReasoningContent 为「assistant + 带 tool_calls」的消息规整思考内容字段。
+// patchReasoningContent 规整请求里 assistant 消息的思考内容字段。
 //
 // 字段名统一为 reasoning_content，实测这是唯一各方都接受的名字（OpenCode Go / Zen
 // 全 37 模型实测）：
@@ -267,20 +267,23 @@ func (s *sRelay) restoreReasoningContent(ctx context.Context, body []byte, apiKe
 //  1. reasoning 是「有毒字段」：GLM 与 DeepSeek 看到它就 400，哪怕只是空串或 null。
 //     客户端（部分 Codex 系客户端按聚合方言重建历史）可能带上它，必须删除；其内容若为
 //     唯一来源，则转写到 reasoning_content。
-//  2. reasoning_content 必须存在且为字符串：null 与「字段缺失」都会被 DeepSeek 判为
-//     未回传而 400（gjson 的 Exists() 对 JSON null 返回 true，所以不能拿它当「已带」）。
+//  2. 「当前轮」的每一条 assistant 消息都必须带 reasoning_content（存在且为字符串）。
+//     null 与「字段缺失」都会被 DeepSeek 判为未回传而 400（gjson 的 Exists() 对 JSON
+//     null 返回 true，所以不能拿它当「已带」）。
 //
-// 第 2 条只在「最后一条 user 消息之后」的消息上被上游校验——这是实测出来的边界：
+// 第 2 条的「当前轮」= 最后一条 user 消息之后。实测边界（OpenCode Go / deepseek-v4.1-flash）：
 //
 //	[user, assistant(tool_calls, 无 rc), tool]                       -> 400  当前轮缺字段
-//	[user, assistant(tool_calls, 无 rc), tool, user]                 -> 200  已被 user 翻篇
+//	[user, assistant(tool_calls, 无 rc), tool, assistant("done")]    -> 400  当前轮缺字段
 //	[user, assistant(tool_calls, 无 rc), tool, user, assistant(..)]  -> 400  又进入当前轮
-//	[user, assistant(tool_calls, 无 rc), tool, assistant("done")]    -> 400  当前轮
+//	[user, assistant("plain", 无 rc)]                                -> 400  普通消息同样算
+//	[user, assistant("a1"), assistant("a2")]（均无 rc）               -> 400  普通消息同样算
+//	[user, assistant(tool_calls, 无 rc), tool, user]                 -> 200  已被 user 翻篇
 //	[user, assistant(tool_calls, rc=""), tool]                       -> 200  空串可接受
 //
-// 也就是说上一轮工具调用的 assistant 消息一旦被后续 user 消息「翻篇」就不再参与校验。
-// 因此只需要为「最后一条 user 消息之后」的工具调用消息兜底：取不到任何思考内容时补一个
-// 空串，既满足上游，又不会给已经翻篇的历史消息平白加字段。
+// 注意第 3、4 行：**不带 tool_calls 的普通 assistant 消息同样在校验范围内**，所以不能只处理
+// 工具调用消息。而一旦被后续 user 消息「翻篇」，整条历史就不再参与校验，所以也不该给它们
+// 平白加字段。
 func patchReasoningContent(body []byte, lookup func(toolCallIDs []string) storedReasoning) []byte {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.IsArray() {
@@ -300,9 +303,6 @@ func patchReasoningContent(body []byte, lookup func(toolCallIDs []string) stored
 			return true
 		}
 		toolCallIDs := chatToolCallIDs(message)
-		if len(toolCallIDs) == 0 {
-			return true
-		}
 		// 客户端可能按聚合方言带了内容，先取出来（优先标准名），再统一规整。
 		clientText := strings.TrimSpace(message.Get(reasoningFieldStandard).String())
 		if clientText == "" {
@@ -315,11 +315,13 @@ func patchReasoningContent(body []byte, lookup func(toolCallIDs []string) stored
 			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, clientText)
 			return true
 		}
-		if stored := lookup(toolCallIDs); stored.Text != "" {
-			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, stored.Text)
-			return true
+		if len(toolCallIDs) > 0 {
+			if stored := lookup(toolCallIDs); stored.Text != "" {
+				patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, stored.Text)
+				return true
+			}
 		}
-		// 兜底：当前轮的工具调用消息必须带字段，取不到内容时补空串。
+		// 兜底：当前轮的每条 assistant 消息都必须带字段，取不到内容时补空串。
 		if index.Int() > lastUserIndex {
 			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, "")
 			return true

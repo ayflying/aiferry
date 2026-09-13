@@ -192,14 +192,51 @@ func TestPatchReasoningContentFallsBackToStandardField(t *testing.T) {
 	}
 }
 
-func TestPatchReasoningContentIgnoresMessagesWithoutToolCalls(t *testing.T) {
-	body := []byte(`{"messages":[{"role":"assistant","content":"普通回答"},{"role":"assistant","content":"","tool_calls":[]}]}`)
+// 只有 assistant 消息参与规整，user / tool / system 消息一律不动。
+func TestPatchReasoningContentIgnoresNonAssistantMessages(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"system","content":"s"},{"role":"user","content":"u"},{"role":"tool","tool_call_id":"call_1","content":"ok"},{"role":"assistant","content":"答","reasoning_content":"思考"}]}`)
 	patched := patchReasoningContent(body, func([]string) storedReasoning {
-		t.Fatal("没有工具调用时不应查询存档")
+		t.Fatal("客户端已带思考内容时不应查询存档")
 		return storedReasoning{}
 	})
-	if string(patched) != string(body) {
-		t.Fatalf("请求体应保持不变：%s", patched)
+	if gjson.GetBytes(patched, "messages.0.reasoning_content").Exists() {
+		t.Fatalf("system 消息不应被改写：%s", patched)
+	}
+	if gjson.GetBytes(patched, "messages.1.reasoning_content").Exists() {
+		t.Fatalf("user 消息不应被改写：%s", patched)
+	}
+	if gjson.GetBytes(patched, "messages.2.reasoning_content").Exists() {
+		t.Fatalf("tool 消息不应被改写：%s", patched)
+	}
+	if got := gjson.GetBytes(patched, "messages.3.reasoning_content").String(); got != "思考" {
+		t.Fatalf("assistant 自带的思考内容应保留：%s", patched)
+	}
+}
+
+// 当前轮里不带 tool_calls 的普通 assistant 消息同样在校验范围内（实测 400），也必须补字段。
+func TestPatchReasoningContentAddsEmptyReasoningToCurrentTurnPlainAssistant(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"写一段"},{"role":"assistant","content":"好的"}]}`)
+	patched := patchReasoningContent(body, func([]string) storedReasoning { return storedReasoning{} })
+	got := gjson.GetBytes(patched, "messages.1.reasoning_content")
+	if got.Type != gjson.String || got.String() != "" {
+		t.Fatalf("当前轮普通 assistant 消息也必须补空串：%s", patched)
+	}
+}
+
+// 当前轮里的每一条 assistant 消息都要补；已翻篇的普通 assistant 消息不动。
+func TestPatchReasoningContentCoversEveryCurrentTurnAssistantMessage(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"a1"},{"role":"assistant","content":"a2"}]}`)
+	patched := patchReasoningContent(body, func([]string) storedReasoning { return storedReasoning{} })
+	if got := gjson.GetBytes(patched, "messages.1.reasoning_content"); got.Type != gjson.String {
+		t.Fatalf("messages.1 应补空串：%s", patched)
+	}
+	if got := gjson.GetBytes(patched, "messages.2.reasoning_content"); got.Type != gjson.String {
+		t.Fatalf("messages.2 应补空串：%s", patched)
+	}
+
+	archived := []byte(`{"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"a1"},{"role":"user","content":"b"}]}`)
+	if got := patchReasoningContent(archived, func([]string) storedReasoning { return storedReasoning{} }); string(got) != string(archived) {
+		t.Fatalf("已翻篇的普通 assistant 消息不应被改写：%s", got)
 	}
 }
 
@@ -220,13 +257,16 @@ func TestPatchReasoningContentAddsEmptyReasoningForCurrentTurnToolCalls(t *testi
 	}
 }
 
-// 当前轮的判定覆盖「最后一条 user 消息之后的所有 assistant 工具调用消息」，
-// 不要求它紧邻结尾（实测 [.., tool, assistant("done")] 同样会 400）。
+// 当前轮的判定覆盖「最后一条 user 消息之后的所有 assistant 消息」，
+// 不要求它紧邻结尾（实测 [.., tool, assistant("done")] 同样会 400，且末尾普通消息也要带字段）。
 func TestPatchReasoningContentAddsEmptyReasoningBeforeTrailingAssistantText(t *testing.T) {
 	body := []byte(`{"messages":[{"role":"user","content":"跑一下"},{"role":"assistant","content":"","tool_calls":[{"id":"call_1"}]},{"role":"tool","tool_call_id":"call_1","content":"ok"},{"role":"assistant","content":"done"}]}`)
 	patched := patchReasoningContent(body, func([]string) storedReasoning { return storedReasoning{} })
 	if got := gjson.GetBytes(patched, "messages.1.reasoning_content"); got.Type != gjson.String || got.String() != "" {
 		t.Fatalf("当前轮工具调用消息必须补空串：%s", patched)
+	}
+	if got := gjson.GetBytes(patched, "messages.3.reasoning_content"); got.Type != gjson.String || got.String() != "" {
+		t.Fatalf("当前轮末尾的普通 assistant 消息也必须补空串：%s", patched)
 	}
 }
 
