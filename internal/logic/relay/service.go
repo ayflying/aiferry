@@ -93,6 +93,10 @@ type attemptResult struct {
 	responseModel      string
 	streamCompleted    bool
 	attemptFlow        []usage.AttemptFlowStep
+	// reasoningContent / reasoningToolCallIDs 是上游本轮返回的思考内容及其绑定的
+	// 工具调用 id，用于按需回传给要求回传思考内容的 thinking 模式上游。
+	reasoningContent     string
+	reasoningToolCallIDs []string
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, locationSvc *iplocation.Service) *sRelay {
@@ -201,6 +205,12 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	if endpoint == "/chat/completions" && isStream {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
+	if endpoint == "/chat/completions" {
+		// 客户端重建历史时只保留 role/content/tool_calls，会丢掉非标准的 reasoning_content，
+		// 而 DeepSeek/Kimi 等 thinking 模式上游要求发生过工具调用后必须原样回传。这里按
+		// tool_call id 补回本网关存档的思考内容，没有存档时保持原样。
+		body = s.restoreReasoningContent(ctx, body, key.Id)
+	}
 	if !keyAllowsModel(key, requestedModel) {
 		return gerror.New("API key is not allowed to use model " + requestedModel)
 	}
@@ -268,6 +278,10 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			}
 			if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut {
 				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
+				// 流式响应被客户端中断时不存档半截思考内容，避免下一轮回传出残缺的推理。
+				if !isStream || result.streamCompleted {
+					s.rememberReasoningContent(ctx, key.Id, result)
+				}
 				// 成功请求按上游响应速度加分：响应越快，模型健康分增长越多。
 				_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{
 					ChannelID: candidate.ChannelID,
