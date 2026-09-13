@@ -85,8 +85,8 @@ kimi 需要回传，grok、gpt 不需要。因此实现里既不做渠道类型�
 
 结论：
 
-- **OpenCode Go 只认 `reasoning_content`，不认 `reasoning`**：只写 `reasoning` 会被判定为
-  「字段缺失」而 400，所以标准名必须写。
+- **`reasoning_content` 是唯一各方都接受的名字**：`reasoning` 在 GLM 与 DeepSeek 系会被直接
+  400 拒绝（Kimi 系虽不报错，但无法确认它能读到内容），所以标准名必须写。
 - `reasoning` 会**主动**让 GLM 与 DeepSeek 系 400，哪怕只是空串或 `null`。早期版本曾尝试
   「标准名 + 方言」双写以兼容两类端点，实测直接把 GLM-5.x 从 200 打成 400，已放弃。
 - 因此客户端若按聚合方言 `reasoning` 重建了历史，不能只是「补齐标准字段」，必须**把
