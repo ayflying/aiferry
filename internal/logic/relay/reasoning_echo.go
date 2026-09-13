@@ -15,9 +15,9 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/protocol"
 )
 
-// DeepSeek、Kimi 等 thinking 模式的上游都是「无状态」的：只要本次对话发生过工具调用，
-// 中间那条 assistant 消息的 reasoning_content 就必须在后续每一轮原样回传，否则上游
-// 直接返回 HTTP 400。两家的提示分别是：
+// DeepSeek、Kimi 等 thinking 模式的上游都是「无状态」的：发生过工具调用的当前轮里，
+// assistant 消息的 reasoning_content 必须原样回传，否则上游直接返回 HTTP 400。两家的
+// 提示分别是：
 //
 //	DeepSeek: The `reasoning_content` in the thinking mode must be passed back to the API.
 //	Kimi:     thinking is enabled but reasoning_content is missing in assistant tool call message at index N
@@ -31,14 +31,15 @@ import (
 // 转发层因此承担两件事：
 //  1. rememberReasoningContent：把上游返回的思考内容按 tool_call id 存档；
 //  2. restoreReasoningContent：客户端下一轮回传历史时，为缺少该字段的 assistant
-//     工具调用消息补回存档内容。
+//     工具调用消息补回存档内容；存档与客户端都没有内容时，为「当前轮」的消息补空串。
 //
 // 字段名不统一：直连厂商（DeepSeek/Kimi/GLM/MiMo）用 reasoning_content，OpenCode 系
 // 聚合端点用 reasoning。capture 侧两种名字都识别（存档时把命中的名字一并保存，仅用于
 // 诊断与兼容历史存档）；但 patch 侧统一只写 reasoning_content 并删除 reasoning，理由见
 // patchReasoningContent 的字段容忍度实测表——reasoning 是「有毒字段」。
 //
-// 两条路径都只在「确实产生过思考内容」时生效，对不使用思考模式的模型完全没有副作用。
+// 补空串只发生在「最后一条 user 消息之后」的工具调用消息上（上游只校验这一段，见
+// patchReasoningContent 的边界实测），对不使用思考模式的模型与已翻篇的历史消息都没有副作用。
 const (
 	// reasoningEchoTTL 需要覆盖一次多步工具调用链的持续时间，超时后回退为不补（客户端会拿到上游的原始 400）。
 	reasoningEchoTTL = 24 * time.Hour
@@ -252,30 +253,47 @@ func (s *sRelay) restoreReasoningContent(ctx context.Context, body []byte, apiKe
 
 // patchReasoningContent 为「assistant + 带 tool_calls」的消息规整思考内容字段。
 //
-// 字段名统一为 reasoning_content，实测这是唯一各方都接受的名字：
+// 字段名统一为 reasoning_content，实测这是唯一各方都接受的名字（OpenCode Go / Zen
+// 全 37 模型实测）：
 //
-//	上游（Zen 37 模型实测）  reasoning_content=""   reasoning_content=null   reasoning=任意值
-//	GLM 系                   200                    200                      400
-//	DeepSeek 系              200                    400                      400
-//	Kimi 系                  200                    200                      200
+//	字段取值                        GLM 系   DeepSeek 系   Kimi 系
+//	reasoning_content = ""          200      200           200
+//	reasoning_content = null        200      400           200
+//	reasoning_content 缺失          200      400           200
+//	reasoning = 任意值（含 ""/null） 400      400           200
 //
-// 因此 reasoning 是「有毒字段」：GLM 与 DeepSeek 看到它就 400，哪怕只是空串或 null。
-// 客户端（部分 Codex 系客户端按聚合方言重建历史）可能带上它，必须删除；其内容若为唯一
-// 来源，则转写到 reasoning_content。
+// 由此得到两条必须遵守的规则：
 //
-// 另一个坑是 null：gjson 的 Exists() 对 JSON null 返回 true，不能据此判定「客户端已带」。
-// 客户端重建历史写出 "reasoning_content": null 时，若跳过回填，null 会原样透传给上游，
-// DeepSeek 系判定为「字段缺失」直接 400：
+//  1. reasoning 是「有毒字段」：GLM 与 DeepSeek 看到它就 400，哪怕只是空串或 null。
+//     客户端（部分 Codex 系客户端按聚合方言重建历史）可能带上它，必须删除；其内容若为
+//     唯一来源，则转写到 reasoning_content。
+//  2. reasoning_content 必须存在且为字符串：null 与「字段缺失」都会被 DeepSeek 判为
+//     未回传而 400（gjson 的 Exists() 对 JSON null 返回 true，所以不能拿它当「已带」）。
 //
-//	The `reasoning_content` in the thinking mode must be passed back to the API.
+// 第 2 条只在「最后一条 user 消息之后」的消息上被上游校验——这是实测出来的边界：
 //
-// 因此：只认非空字符串为「已带」；null 与空串都交给存档回填，查不到存档时归一成空串
-// （上游接受空串、拒绝 null）。
+//	[user, assistant(tool_calls, 无 rc), tool]                       -> 400  当前轮缺字段
+//	[user, assistant(tool_calls, 无 rc), tool, user]                 -> 200  已被 user 翻篇
+//	[user, assistant(tool_calls, 无 rc), tool, user, assistant(..)]  -> 400  又进入当前轮
+//	[user, assistant(tool_calls, 无 rc), tool, assistant("done")]    -> 400  当前轮
+//	[user, assistant(tool_calls, rc=""), tool]                       -> 200  空串可接受
+//
+// 也就是说上一轮工具调用的 assistant 消息一旦被后续 user 消息「翻篇」就不再参与校验。
+// 因此只需要为「最后一条 user 消息之后」的工具调用消息兜底：取不到任何思考内容时补一个
+// 空串，既满足上游，又不会给已经翻篇的历史消息平白加字段。
 func patchReasoningContent(body []byte, lookup func(toolCallIDs []string) storedReasoning) []byte {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.IsArray() {
 		return body
 	}
+	// 上游只校验最后一条 user 消息之后的「当前轮」消息。
+	lastUserIndex := int64(-1)
+	messages.ForEach(func(index, message gjson.Result) bool {
+		if message.Get("role").String() == "user" {
+			lastUserIndex = index.Int()
+		}
+		return true
+	})
 	patched := body
 	messages.ForEach(func(index, message gjson.Result) bool {
 		if message.Get("role").String() != "assistant" {
@@ -297,12 +315,16 @@ func patchReasoningContent(body []byte, lookup func(toolCallIDs []string) stored
 			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, clientText)
 			return true
 		}
-		stored := lookup(toolCallIDs)
-		if stored.Text != "" {
+		if stored := lookup(toolCallIDs); stored.Text != "" {
 			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, stored.Text)
 			return true
 		}
-		// 查不到存档：把可能存在的 null 归一成空串，避免上游判定字段缺失而 400。
+		// 兜底：当前轮的工具调用消息必须带字段，取不到内容时补空串。
+		if index.Int() > lastUserIndex {
+			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, "")
+			return true
+		}
+		// 已翻篇的历史消息：只在客户端显式写了 null 时归一成空串。
 		if value := message.Get(reasoningFieldStandard); value.Exists() && value.Type == gjson.Null {
 			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, "")
 		}

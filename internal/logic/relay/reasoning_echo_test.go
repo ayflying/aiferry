@@ -203,11 +203,39 @@ func TestPatchReasoningContentIgnoresMessagesWithoutToolCalls(t *testing.T) {
 	}
 }
 
-func TestPatchReasoningContentLeavesBodyWhenNoArchive(t *testing.T) {
-	body := []byte(`{"messages":[{"role":"assistant","tool_calls":[{"id":"call_1"}]}]}`)
+// 当前轮（最后一条 user 消息之后）的工具调用消息即使查不到存档也必须带上字段：
+// 上游用「字段缺失」判定未回传而 400，空串则可接受。
+func TestPatchReasoningContentAddsEmptyReasoningForCurrentTurnToolCalls(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"跑一下"},{"role":"assistant","content":"","tool_calls":[{"id":"call_1"}]},{"role":"tool","tool_call_id":"call_1","content":"ok"}]}`)
+	patched := patchReasoningContent(body, func([]string) storedReasoning { return storedReasoning{} })
+	got := gjson.GetBytes(patched, "messages.1.reasoning_content")
+	if got.Type != gjson.String || got.String() != "" {
+		t.Fatalf("当前轮工具调用消息必须补空串：%s", patched)
+	}
+	if gjson.GetBytes(patched, "messages.0.reasoning_content").Exists() {
+		t.Fatalf("user 消息不应被改写：%s", patched)
+	}
+	if gjson.GetBytes(patched, "messages.2.reasoning_content").Exists() {
+		t.Fatalf("tool 消息不应被改写：%s", patched)
+	}
+}
+
+// 当前轮的判定覆盖「最后一条 user 消息之后的所有 assistant 工具调用消息」，
+// 不要求它紧邻结尾（实测 [.., tool, assistant("done")] 同样会 400）。
+func TestPatchReasoningContentAddsEmptyReasoningBeforeTrailingAssistantText(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"跑一下"},{"role":"assistant","content":"","tool_calls":[{"id":"call_1"}]},{"role":"tool","tool_call_id":"call_1","content":"ok"},{"role":"assistant","content":"done"}]}`)
+	patched := patchReasoningContent(body, func([]string) storedReasoning { return storedReasoning{} })
+	if got := gjson.GetBytes(patched, "messages.1.reasoning_content"); got.Type != gjson.String || got.String() != "" {
+		t.Fatalf("当前轮工具调用消息必须补空串：%s", patched)
+	}
+}
+
+// 已被后续 user 消息「翻篇」的历史消息不参与上游校验，不应平白加字段。
+func TestPatchReasoningContentLeavesArchivedToolCallsUntouched(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"跑一下"},{"role":"assistant","content":"","tool_calls":[{"id":"call_1"}]},{"role":"tool","tool_call_id":"call_1","content":"ok"},{"role":"user","content":"继续"}]}`)
 	patched := patchReasoningContent(body, func([]string) storedReasoning { return storedReasoning{} })
 	if string(patched) != string(body) {
-		t.Fatalf("没有存档时请求体应保持不变：%s", patched)
+		t.Fatalf("已翻篇的历史消息不应被改写：%s", patched)
 	}
 }
 
