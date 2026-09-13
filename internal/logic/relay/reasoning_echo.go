@@ -34,8 +34,9 @@ import (
 //     工具调用消息补回存档内容。
 //
 // 字段名不统一：直连厂商（DeepSeek/Kimi/GLM/MiMo）用 reasoning_content，OpenCode 系
-// 聚合端点用 reasoning。存档时连字段名一起保存，回传沿用上游自己的方言，避免出现
-// 「上游用 reasoning 返回、我们按 reasoning_content 补回去」而对方读不到的情况。
+// 聚合端点用 reasoning。capture 侧两种名字都识别（存档时把命中的名字一并保存，仅用于
+// 诊断与兼容历史存档）；但 patch 侧统一只写 reasoning_content 并删除 reasoning，理由见
+// patchReasoningContent 的字段容忍度实测表——reasoning 是「有毒字段」。
 //
 // 两条路径都只在「确实产生过思考内容」时生效，对不使用思考模式的模型完全没有副作用。
 const (
@@ -249,9 +250,27 @@ func (s *sRelay) restoreReasoningContent(ctx context.Context, body []byte, apiKe
 	})
 }
 
-// patchReasoningContent 为「assistant + 带 tool_calls + 尚无思考内容字段」的消息补回思考内容。
-// lookup 返回第一个命中的存档；Text 为空表示没有可补内容，消息保持原样。
-// 写入的字段名取自存档（即上游返回时所用的方言）。
+// patchReasoningContent 为「assistant + 带 tool_calls」的消息规整思考内容字段。
+//
+// 字段名统一为 reasoning_content，实测这是唯一各方都接受的名字：
+//
+//	上游（Zen 37 模型实测）  reasoning_content=""   reasoning_content=null   reasoning=任意值
+//	GLM 系                   200                    200                      400
+//	DeepSeek 系              200                    400                      400
+//	Kimi 系                  200                    200                      200
+//
+// 因此 reasoning 是「有毒字段」：GLM 与 DeepSeek 看到它就 400，哪怕只是空串或 null。
+// 客户端（部分 Codex 系客户端按聚合方言重建历史）可能带上它，必须删除；其内容若为唯一
+// 来源，则转写到 reasoning_content。
+//
+// 另一个坑是 null：gjson 的 Exists() 对 JSON null 返回 true，不能据此判定「客户端已带」。
+// 客户端重建历史写出 "reasoning_content": null 时，若跳过回填，null 会原样透传给上游，
+// DeepSeek 系判定为「字段缺失」直接 400：
+//
+//	The `reasoning_content` in the thinking mode must be passed back to the API.
+//
+// 因此：只认非空字符串为「已带」；null 与空串都交给存档回填，查不到存档时归一成空串
+// （上游接受空串、拒绝 null）。
 func patchReasoningContent(body []byte, lookup func(toolCallIDs []string) storedReasoning) []byte {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.IsArray() {
@@ -262,28 +281,50 @@ func patchReasoningContent(body []byte, lookup func(toolCallIDs []string) stored
 		if message.Get("role").String() != "assistant" {
 			return true
 		}
-		// 客户端已按任一方言带上思考内容时不覆盖。
-		if message.Get(reasoningFieldStandard).Exists() || message.Get(reasoningFieldCompact).Exists() {
-			return true
-		}
 		toolCallIDs := chatToolCallIDs(message)
 		if len(toolCallIDs) == 0 {
 			return true
 		}
-		stored := lookup(toolCallIDs)
-		if stored.Text == "" {
+		// 客户端可能按聚合方言带了内容，先取出来（优先标准名），再统一规整。
+		clientText := strings.TrimSpace(message.Get(reasoningFieldStandard).String())
+		if clientText == "" {
+			clientText = strings.TrimSpace(message.Get(reasoningFieldCompact).String())
+		}
+		// reasoning 是有毒字段，任何取值都要删掉。
+		patched = deleteReasoningField(patched, index.Int(), reasoningFieldCompact)
+		if clientText != "" {
+			// 客户端确实带过思考内容：统一落到标准字段。
+			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, clientText)
 			return true
 		}
-		field := stored.Field
-		if field == "" {
-			field = reasoningFieldStandard
+		stored := lookup(toolCallIDs)
+		if stored.Text != "" {
+			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, stored.Text)
+			return true
 		}
-		if next, err := sjson.SetBytes(patched, fmt.Sprintf("messages.%d.%s", index.Int(), field), stored.Text); err == nil {
-			patched = next
+		// 查不到存档：把可能存在的 null 归一成空串，避免上游判定字段缺失而 400。
+		if value := message.Get(reasoningFieldStandard); value.Exists() && value.Type == gjson.Null {
+			patched = setReasoningField(patched, index.Int(), reasoningFieldStandard, "")
 		}
 		return true
 	})
 	return patched
+}
+
+func setReasoningField(body []byte, index int64, field, text string) []byte {
+	next, err := sjson.SetBytes(body, fmt.Sprintf("messages.%d.%s", index, field), text)
+	if err != nil {
+		return body
+	}
+	return next
+}
+
+func deleteReasoningField(body []byte, index int64, field string) []byte {
+	next, err := sjson.DeleteBytes(body, fmt.Sprintf("messages.%d.%s", index, field))
+	if err != nil {
+		return body
+	}
+	return next
 }
 
 func chatToolCallIDs(message gjson.Result) []string {

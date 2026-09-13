@@ -107,17 +107,77 @@ func TestPatchReasoningContentFillsMissingToolCallReasoning(t *testing.T) {
 	}
 }
 
-// 回传必须沿用上游返回时所用的字段名，否则聚合端点读不到补回的内容。
-func TestPatchReasoningContentWritesUpstreamDialect(t *testing.T) {
+// 无论存档记录的是哪种方言，回填一律写标准字段 reasoning_content。
+// 实测 reasoning 是「有毒字段」：GLM 与 DeepSeek 见到它就 400，不能写。
+func TestPatchReasoningContentNormalizesDialectToStandardField(t *testing.T) {
 	body := []byte(`{"messages":[{"role":"assistant","content":"","tool_calls":[{"id":"call_1"}]}]}`)
 	patched := patchReasoningContent(body, func([]string) storedReasoning {
 		return storedReasoning{Field: reasoningFieldCompact, Text: "聚合端点的思考"}
 	})
-	if got := gjson.GetBytes(patched, "messages.0.reasoning").String(); got != "聚合端点的思考" {
-		t.Fatalf("应按上游方言写入 reasoning：%s", patched)
+	if got := gjson.GetBytes(patched, "messages.0.reasoning_content").String(); got != "聚合端点的思考" {
+		t.Fatalf("必须写标准字段：%s", patched)
 	}
-	if gjson.GetBytes(patched, "messages.0.reasoning_content").Exists() {
-		t.Fatalf("不应额外写入 reasoning_content：%s", patched)
+	if gjson.GetBytes(patched, "messages.0.reasoning").Exists() {
+		t.Fatalf("不得写入有毒字段 reasoning：%s", patched)
+	}
+}
+
+// 客户端按聚合方言带回的历史必须被规整：内容转写到标准字段，reasoning 删除。
+func TestPatchReasoningContentMovesCompactDialectToStandardField(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","reasoning":"客户端自带的","tool_calls":[{"id":"call_1"}]}]}`)
+	patched := patchReasoningContent(body, func([]string) storedReasoning {
+		t.Fatal("客户端已带思考内容时不应查询存档")
+		return storedReasoning{}
+	})
+	if got := gjson.GetBytes(patched, "messages.0.reasoning_content").String(); got != "客户端自带的" {
+		t.Fatalf("内容应转写到标准字段：%s", patched)
+	}
+	if gjson.GetBytes(patched, "messages.0.reasoning").Exists() {
+		t.Fatalf("有毒字段 reasoning 必须删除：%s", patched)
+	}
+}
+
+// 客户端已带标准方言时原样保留（不查询存档、不重复改写）。
+func TestPatchReasoningContentKeepsStandardReasoning(t *testing.T) {
+	body := `{"messages":[{"role":"assistant","reasoning_content":"客户端自带的","tool_calls":[{"id":"call_1"}]}]}`
+	patched := patchReasoningContent([]byte(body), func([]string) storedReasoning {
+		t.Fatal("已有标准思考内容时不应查询存档")
+		return storedReasoning{}
+	})
+	if string(patched) != body {
+		t.Fatalf("客户端自带的思考内容必须原样保留：%s", patched)
+	}
+}
+
+// 客户端重建历史时会写出 "reasoning_content": null（gjson 的 Exists() 判定为 true），
+// 必须按「未提供」处理并回填，否则 null 透传给严格上游会直接 400。
+func TestPatchReasoningContentFillsNullReasoning(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","content":"","reasoning_content":null,"tool_calls":[{"id":"call_1"}]}]}`)
+	patched := patchReasoningContent(body, func([]string) storedReasoning {
+		return storedReasoning{Field: reasoningFieldStandard, Text: "真实思考"}
+	})
+	if got := gjson.GetBytes(patched, "messages.0.reasoning_content").String(); got != "真实思考" {
+		t.Fatalf("null 字段必须被回填：%s", patched)
+	}
+}
+
+// 查不到存档时也不能把 null 留给上游：归一成空串（上游接受空串，但拒绝 null）。
+func TestPatchReasoningContentNormalizesNullWithoutArchive(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","reasoning_content":null,"tool_calls":[{"id":"call_1"}]}]}`)
+	patched := patchReasoningContent(body, func([]string) storedReasoning { return storedReasoning{} })
+	if got := gjson.GetBytes(patched, "messages.0.reasoning_content"); got.Type != gjson.String || got.String() != "" {
+		t.Fatalf("无存档时 null 应归一成空串：%s", patched)
+	}
+}
+
+// 空串同样视为待回填（客户端拿到过空思考时）。
+func TestPatchReasoningContentFillsEmptyStringReasoning(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","reasoning_content":"","tool_calls":[{"id":"call_1"}]}]}`)
+	patched := patchReasoningContent(body, func([]string) storedReasoning {
+		return storedReasoning{Field: reasoningFieldStandard, Text: "真实思考"}
+	})
+	if got := gjson.GetBytes(patched, "messages.0.reasoning_content").String(); got != "真实思考" {
+		t.Fatalf("空串应被回填：%s", patched)
 	}
 }
 
@@ -129,21 +189,6 @@ func TestPatchReasoningContentFallsBackToStandardField(t *testing.T) {
 	})
 	if got := gjson.GetBytes(patched, "messages.0.reasoning_content").String(); got != "思考" {
 		t.Fatalf("字段名为空时应回退标准字段：%s", patched)
-	}
-}
-
-func TestPatchReasoningContentKeepsExistingReasoning(t *testing.T) {
-	for _, body := range []string{
-		`{"messages":[{"role":"assistant","reasoning_content":"客户端自带的","tool_calls":[{"id":"call_1"}]}]}`,
-		`{"messages":[{"role":"assistant","reasoning":"客户端自带的","tool_calls":[{"id":"call_1"}]}]}`,
-	} {
-		patched := patchReasoningContent([]byte(body), func([]string) storedReasoning {
-			t.Fatal("已有思考内容字段时不应查询存档")
-			return storedReasoning{}
-		})
-		if string(patched) != body {
-			t.Fatalf("客户端自带的思考内容必须保留：%s", patched)
-		}
 	}
 }
 
