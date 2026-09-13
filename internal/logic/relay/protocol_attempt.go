@@ -82,6 +82,8 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// OpenCode Go 等上游要求稳定的会话标识头，缺失时直接 400。
+	applyUpstreamSessionHeader(req.Header, incomingHeaders, candidate, userID)
 	if candidate.OrganizationID != "" {
 		req.Header.Set("OpenAI-Organization", candidate.OrganizationID)
 	}
