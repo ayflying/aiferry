@@ -27,3 +27,4 @@ bin
 web/
 frontend/node_modules/
 frontend/components.d.ts
+frontend/dist/

@@ -100,7 +100,7 @@ func (s *sChannel) queryCredentialQuota(ctx context.Context, channel entity.Chan
 		}
 		return s.queryVolcAFP(ctx, channel, cipher)
 	}
-	endpoint, err := resolveHostURL(channel.BaseUrl, config.Path)
+	endpoint, err := resolveQuotaURL(channel.BaseUrl, config.Path)
 	if err != nil {
 		return QuotaView{}, err
 	}
@@ -142,7 +142,7 @@ func (s *sChannel) fetchQuota(ctx context.Context, channel entity.Channels, conf
 	if config.Adapter == channeltype.AdapterVolcAFP {
 		return s.fetchQuotaVolcAFP(ctx, channel)
 	}
-	endpoint, err := resolveHostURL(channel.BaseUrl, config.Path)
+	endpoint, err := resolveQuotaURL(channel.BaseUrl, config.Path)
 	if err != nil {
 		return QuotaView{}, err
 	}
@@ -400,6 +400,9 @@ func (s *sChannel) credentialCiphers(ctx context.Context, channelID uint64) ([]q
 }
 
 func parseQuotaResponse(adapter string, body []byte) (QuotaView, error) {
+	if adapter == channeltype.AdapterOpenCodeGo {
+		return parseOpenCodeGoUsage(body)
+	}
 	var payload struct {
 		Code    int    `json:"code"`
 		Msg     string `json:"msg"`
@@ -481,6 +484,54 @@ func quotaRawSnippet(body []byte) string {
 	return compact
 }
 
+// parseOpenCodeGoUsage 解析 OpenCode Go 套餐用量接口
+// （GET {baseUrl}/usage，2026-08 起上游提供）。响应结构：
+//
+//	{"usage": {"rolling": {"status","percent","resetsAt"},
+//	           "weekly":  {"status","percent","resetsAt"},
+//	           "monthly": {"status","percent","resetsAt"}}}
+//
+// percent 是该预算窗口的已用百分比（0-100），resetsAt 为窗口重置时刻。
+// 三个窗口映射到 five_hour / weekly / monthly。
+func parseOpenCodeGoUsage(body []byte) (QuotaView, error) {
+	var payload struct {
+		Usage struct {
+			Rolling *openCodeGoWindow `json:"rolling"`
+			Weekly  *openCodeGoWindow `json:"weekly"`
+			Monthly *openCodeGoWindow `json:"monthly"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return QuotaView{}, gerror.Wrap(err, "decode opencode go usage response")
+	}
+	view := QuotaView{Mode: channeltype.AdapterOpenCodeGo, QueriedAt: time.Now()}
+	appendOpenCodeGoWindow(&view.Windows, QuotaWindowFiveHour, "5 小时额度", payload.Usage.Rolling)
+	appendOpenCodeGoWindow(&view.Windows, QuotaWindowWeekly, "每周额度", payload.Usage.Weekly)
+	appendOpenCodeGoWindow(&view.Windows, QuotaWindowMonthly, "每月额度", payload.Usage.Monthly)
+	if len(view.Windows) == 0 {
+		return QuotaView{}, gerror.Newf("上游未返回可用的套餐额度窗口，原始响应：%s", quotaRawSnippet(body))
+	}
+	return view, nil
+}
+
+// openCodeGoWindow 是 OpenCode Go 单个预算窗口的字段。
+type openCodeGoWindow struct {
+	Status   string   `json:"status"`
+	Percent  *float64 `json:"percent"`
+	ResetsAt string   `json:"resetsAt"`
+}
+
+func appendOpenCodeGoWindow(windows *[]QuotaWindow, kind, label string, window *openCodeGoWindow) {
+	if window == nil || window.Percent == nil {
+		return
+	}
+	quotaWindow := QuotaWindow{Kind: kind, Label: label, UsedPercent: quotaPercent(window.Percent)}
+	if reset, err := time.Parse(time.RFC3339, window.ResetsAt); err == nil {
+		quotaWindow.NextResetAt = &reset
+	}
+	*windows = append(*windows, quotaWindow)
+}
+
 func quotaPercent(value *float64) float64 {
 	if value == nil {
 		return 0
@@ -517,6 +568,18 @@ func isQuotaUnauthorized(err error) bool {
 	}
 	message := err.Error()
 	return strings.Contains(message, "HTTP 401") || strings.Contains(message, "HTTP 403")
+}
+
+// resolveQuotaURL 解析套餐额度接口地址。部分上游（如 OpenCode Go）的额度
+// 接口位于 baseUrl 路径之下（…/zen/go/v1/usage），此时配置 path 为完整 URL
+// 直连；其余上游（如智谱）额度接口在 host 根路径，path 为绝对路径，按
+// resolveHostURL 拼接。
+func resolveQuotaURL(baseURL, path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path, nil
+	}
+	return resolveHostURL(baseURL, path)
 }
 
 // resolveHostURL 把 host 根路径（如 /api/monitor/usage/quota/limit）拼接到

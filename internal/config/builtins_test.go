@@ -82,6 +82,33 @@ func TestZhipuAPIBuiltinTargetsStandardEndpoint(t *testing.T) {
 	}
 }
 
+func TestOpenCodeGoBuiltinDeclaresUsageQuota(t *testing.T) {
+	registry, err := LoadBuiltins(filepath.Join("..", "..", "manifest", "builtins.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, exists := registry.ChannelTypeByCode("opencode_go")
+	if !exists {
+		t.Fatal("OpenCode Go channel type is missing")
+	}
+	var config struct {
+		BaseURL string          `json:"baseUrl"`
+		Quota   json.RawMessage `json:"quota"`
+	}
+	if err = json.Unmarshal(item.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.BaseURL != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("OpenCode Go base URL = %q", config.BaseURL)
+	}
+	if !strings.Contains(string(config.Quota), `"opencode_go_usage"`) {
+		t.Fatalf("OpenCode Go quota config = %s, want opencode_go_usage adapter", config.Quota)
+	}
+	if !strings.Contains(string(config.Quota), `https://opencode.ai/zen/go/v1/usage`) {
+		t.Fatalf("OpenCode Go quota path must be the absolute usage URL, got %s", config.Quota)
+	}
+}
+
 func TestVolcengineArkPlanBuiltins(t *testing.T) {
 	registry, err := LoadBuiltins(filepath.Join("..", "..", "manifest", "builtins.json"))
 	if err != nil {

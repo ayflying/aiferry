@@ -187,3 +187,74 @@ func TestParseAFPResponseError(t *testing.T) {
 		t.Fatalf("err = %v, want AccessDenied message", err)
 	}
 }
+
+func TestParseOpenCodeGoUsage(t *testing.T) {
+	// 上游 /usage 响应：三个窗口各带 status/percent/resetsAt。
+	// percent 为已用百分比（第三方实现 used=percent, remaining=100-percent）。
+	body := []byte(`{"usage":{` +
+		`"rolling":{"status":"ok","percent":37,"resetsAt":"2026-09-14T03:00:00Z"},` +
+		`"weekly":{"status":"ok","percent":12,"resetsAt":"2026-09-20T00:00:00Z"},` +
+		`"monthly":{"status":"ok","percent":63,"resetsAt":"2026-09-30T23:59:59Z"}}}`)
+	view, err := parseQuotaResponse("opencode_go_usage", body)
+	if err != nil {
+		t.Fatalf("parseQuotaResponse error: %v", err)
+	}
+	if view.Mode != "opencode_go_usage" {
+		t.Fatalf("Mode = %q, want opencode_go_usage", view.Mode)
+	}
+	if len(view.Windows) != 3 {
+		t.Fatalf("windows = %d, want 3", len(view.Windows))
+	}
+	byKind := make(map[string]QuotaWindow, len(view.Windows))
+	for _, window := range view.Windows {
+		byKind[window.Kind] = window
+	}
+	if byKind[QuotaWindowFiveHour].UsedPercent != 37 {
+		t.Fatalf("five hour percent = %v, want 37", byKind[QuotaWindowFiveHour].UsedPercent)
+	}
+	if byKind[QuotaWindowWeekly].UsedPercent != 12 {
+		t.Fatalf("weekly percent = %v, want 12", byKind[QuotaWindowWeekly].UsedPercent)
+	}
+	if byKind[QuotaWindowMonthly].UsedPercent != 63 {
+		t.Fatalf("monthly percent = %v, want 63", byKind[QuotaWindowMonthly].UsedPercent)
+	}
+	if byKind[QuotaWindowFiveHour].Label != "5 小时额度" || byKind[QuotaWindowMonthly].Label != "每月额度" {
+		t.Fatalf("labels = %q/%q, want 5 小时额度/每月额度", byKind[QuotaWindowFiveHour].Label, byKind[QuotaWindowMonthly].Label)
+	}
+	if byKind[QuotaWindowWeekly].NextResetAt == nil || byKind[QuotaWindowWeekly].NextResetAt.Format(time.RFC3339) != "2026-09-20T00:00:00Z" {
+		t.Fatalf("weekly reset = %v, want 2026-09-20T00:00:00Z", byKind[QuotaWindowWeekly].NextResetAt)
+	}
+}
+
+func TestParseOpenCodeGoUsageMissingWindow(t *testing.T) {
+	// 上游只返回 rolling 窗口时，缺失的窗口不应填充空行。
+	body := []byte(`{"usage":{"rolling":{"status":"ok","percent":10,"resetsAt":"2026-09-14T03:00:00Z"}}}`)
+	view, err := parseQuotaResponse("opencode_go_usage", body)
+	if err != nil {
+		t.Fatalf("parseQuotaResponse error: %v", err)
+	}
+	if len(view.Windows) != 1 || view.Windows[0].Kind != QuotaWindowFiveHour {
+		t.Fatalf("windows = %+v, want single five_hour", view.Windows)
+	}
+}
+
+func TestParseOpenCodeGoUsageRejectsEmpty(t *testing.T) {
+	// 全部窗口缺失或不可解析时必须报错，而不是返回空视图。
+	_, err := parseQuotaResponse("opencode_go_usage", []byte(`{"usage":{}}`))
+	if err == nil {
+		t.Fatal("expected error for empty usage payload")
+	}
+}
+
+func TestResolveQuotaURL(t *testing.T) {
+	// 完整 URL 直连（OpenCode Go）：原样返回，不拼 baseUrl。
+	endpoint, err := resolveQuotaURL("https://opencode.ai/zen/go/v1", "https://opencode.ai/zen/go/v1/usage")
+	if err != nil || endpoint != "https://opencode.ai/zen/go/v1/usage" {
+		t.Fatalf("absolute URL = %q, err %v", endpoint, err)
+	}
+	// 相对路径（智谱）：按 host 根路径拼接。
+	endpoint, err = resolveQuotaURL("https://open.bigmodel.cn/api/coding/paas/v4", "/api/monitor/usage/quota/limit")
+	if err != nil || endpoint != "https://open.bigmodel.cn/api/monitor/usage/quota/limit" {
+		t.Fatalf("relative path = %q, err %v", endpoint, err)
+	}
+}

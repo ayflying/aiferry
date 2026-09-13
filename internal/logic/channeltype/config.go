@@ -103,6 +103,15 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 		*config = QuotaConfig{Adapter: AdapterNone}
 		return nil
 	case AdapterZhipuQuota:
+	case AdapterOpenCodeGo:
+		// OpenCode Go /usage 接口位于 baseUrl 路径之下（…/zen/go/v1/usage），
+		// 与智谱（host 根路径）不同，endpoint 拼接由 quota 解析层用完整 URL
+		// 处理；path 直接使用完整 URL，不走下方以 / 开头的绝对路径校验。
+		config.Method = httpMethodGet
+		config.AuthType = AuthChannelKey
+		config.HeaderName = "Authorization"
+		config.HeaderPrefix = "Bearer "
+		return nil
 	case AdapterVolcAFP:
 		// V4 签名接口：固定 POST + 管理密钥鉴权，path 仅用于校验留空兼容。
 		config.Method = httpMethodGet
@@ -114,7 +123,7 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 		}
 		return nil
 	default:
-		return gerror.Newf("unsupported quota adapter %q (expected none, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterVolcAFP)
+		return gerror.Newf("unsupported quota adapter %q (expected none, %s, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterOpenCodeGo, AdapterVolcAFP)
 	}
 	config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
 	if config.Method == "" {
