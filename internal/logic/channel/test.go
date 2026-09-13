@@ -170,6 +170,14 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	if err = s.setConfiguredHeaders(ctx, req, channel, credential.APIKeyCipher, typeConfig.Models.AuthType, typeConfig.Models.HeaderName, typeConfig.Models.HeaderPrefix); err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, err
 	}
+	// OpenCode Go 等上游要求稳定的客户端标识头，缺失时会直接返回 400
+	// MissingSessionID，模型测试与巡检链路同样必须补齐。
+	ApplyUpstreamClientHeaders(req.Header, nil, UpstreamClientIdentity{
+		ChannelType:  channel.Type,
+		ChannelID:    channel.Id,
+		CredentialID: credential.ID,
+		ModelName:    model.UpstreamName,
+	})
 	startedAt := time.Now()
 	client, clientErr := s.HTTPClientForProxy(channel.ProxyUrlCipher)
 	if clientErr != nil {

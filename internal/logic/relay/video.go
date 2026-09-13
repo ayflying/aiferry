@@ -411,6 +411,8 @@ func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, i
 		return videoUpstreamResult{err: gerror.Wrap(err, "create video upstream request")}
 	}
 	copyRequestHeaders(req.Header, incomingHeaders)
+	// OpenCode Go 等上游要求稳定的客户端标识头，缺失时会直接返回 400。
+	applyOpencodeGoHeaders(req.Header, incomingHeaders, candidate, 0)
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}

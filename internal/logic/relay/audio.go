@@ -357,6 +357,8 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 		return attemptResult{errorMessage: gerror.Wrap(err, "create audio upstream request").Error()}, false
 	}
 	copyRequestHeaders(req.Header, incomingHeaders)
+	// OpenCode Go 等上游要求稳定的客户端标识头，缺失时会直接返回 400。
+	applyOpencodeGoHeaders(req.Header, incomingHeaders, candidate, 0)
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}

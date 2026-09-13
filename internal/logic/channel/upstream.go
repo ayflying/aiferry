@@ -33,6 +33,11 @@ func (s *sChannel) fetchUpstreamJSON(ctx context.Context, channel entity.Channel
 	if err = s.setConfiguredHeaders(ctx, req, channel, credentialCipher, input.AuthType, input.HeaderName, input.HeaderPrefix); err != nil {
 		return nil, err
 	}
+	// OpenCode Go 等上游要求稳定的客户端标识头，模型同步与额度查询同样需要。
+	ApplyUpstreamClientHeaders(req.Header, nil, UpstreamClientIdentity{
+		ChannelType: channel.Type,
+		ChannelID:   channel.Id,
+	})
 	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
 	if err != nil {
 		return nil, err
