@@ -167,7 +167,17 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}
-	if err = s.setConfiguredHeaders(ctx, req, channel, credential.APIKeyCipher, typeConfig.Models.AuthType, typeConfig.Models.HeaderName, typeConfig.Models.HeaderPrefix); err != nil {
+	if err = s.ApplyUpstreamAuthHeaders(req, UpstreamAuthInput{
+		Spec: UpstreamAuthSpec{
+			AuthType:     typeConfig.Models.AuthType,
+			HeaderName:   typeConfig.Models.HeaderName,
+			HeaderPrefix: typeConfig.Models.HeaderPrefix,
+		},
+		CredentialCipher:    credential.APIKeyCipher,
+		ManagementKeyCipher: channel.ManagementKeyCipher,
+		OrganizationID:      channel.OrganizationId,
+		ProjectID:           channel.ProjectId,
+	}); err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, err
 	}
 	// OpenCode Go 等上游要求稳定的客户端标识头，缺失时会直接返回 400
@@ -232,21 +242,21 @@ func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel e
 		}
 	}
 	recordErr := s.usage.Record(ctx, usage.RecordInput{
-		RequestID:           usage.NewRequestID("aftest"),
-		UserID:              userID,
-		ChannelID:           channel.Id,
-		ChannelCredentialID: credentialID,
-		Endpoint:            "test:" + path,
-		RequestedModel:      model.PublicName,
-		UpstreamModel:       model.UpstreamName,
+		RequestID:            usage.NewRequestID("aftest"),
+		UserID:               userID,
+		ChannelID:            channel.Id,
+		ChannelCredentialID:  credentialID,
+		Endpoint:             "test:" + path,
+		RequestedModel:       model.PublicName,
+		UpstreamModel:        model.UpstreamName,
 		HealthScoreAtRequest: &model.HealthScore,
-		HTTPStatus:          recordStatus,
-		Stream:              result.Stream,
-		Tokens:              tokens,
-		EstimatedCost:       cost,
-		DurationMs:          result.LatencyMs,
-		Attempts:            1,
-		ErrorMessage:        recordMessage,
+		HTTPStatus:           recordStatus,
+		Stream:               result.Stream,
+		Tokens:               tokens,
+		EstimatedCost:        cost,
+		DurationMs:           result.LatencyMs,
+		Attempts:             1,
+		ErrorMessage:         recordMessage,
 	})
 	if recordErr != nil {
 		result.Message = truncate(result.Message+"；用量记录失败："+recordErr.Error(), 1024)

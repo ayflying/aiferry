@@ -396,14 +396,6 @@ func sameUpstreamOrigin(baseURL, targetURL string) bool {
 }
 
 func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, incomingHeaders http.Header, body []byte, candidate Candidate) videoUpstreamResult {
-	apiKey := ""
-	var err error
-	if candidate.APIKeyCipher != "" {
-		apiKey, err = s.app.Secrets.Decrypt(candidate.APIKeyCipher)
-		if err != nil {
-			return videoUpstreamResult{err: err}
-		}
-	}
 	requestCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, method, target, bytes.NewReader(body))
@@ -413,17 +405,12 @@ func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, i
 	copyRequestHeaders(req.Header, incomingHeaders)
 	// OpenCode Go 等上游要求稳定的客户端标识头，缺失时会直接返回 400。
 	applyOpencodeGoHeaders(req.Header, incomingHeaders, candidate, 0)
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+	// 鉴权头与组织/项目头由渠道类型声明统一决定，与模型测试共用同一实现。
+	if err = s.applyUpstreamAuthHeaders(ctx, req, candidate); err != nil {
+		return videoUpstreamResult{err: err}
 	}
 	if method == http.MethodPost && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	if candidate.OrganizationID != "" {
-		req.Header.Set("OpenAI-Organization", candidate.OrganizationID)
-	}
-	if candidate.ProjectID != "" {
-		req.Header.Set("OpenAI-Project", candidate.ProjectID)
 	}
 	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
 	if candidate.DirectHTTP {

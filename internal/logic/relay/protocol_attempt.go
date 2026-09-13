@@ -63,10 +63,6 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if stream && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
-	apiKey, err := s.app.Secrets.Decrypt(candidate.APIKeyCipher)
-	if err != nil {
-		return attemptResult{}, false, err
-	}
 	requestCtx := ctx
 	cancel := func() {}
 	if !stream {
@@ -78,18 +74,13 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		return attemptResult{}, false, gerror.Wrap(err, "create upstream request")
 	}
 	copyRequestHeaders(req.Header, incomingHeaders)
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+	// 鉴权头与组织/项目头由渠道类型声明统一决定，与模型测试共用同一实现。
+	if err = s.applyUpstreamAuthHeaders(ctx, req, candidate); err != nil {
+		return attemptResult{}, false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// OpenCode Go 等上游要求稳定的会话标识头，缺失时直接 400。
 	applyOpencodeGoHeaders(req.Header, incomingHeaders, candidate, userID)
-	if candidate.OrganizationID != "" {
-		req.Header.Set("OpenAI-Organization", candidate.OrganizationID)
-	}
-	if candidate.ProjectID != "" {
-		req.Header.Set("OpenAI-Project", candidate.ProjectID)
-	}
 	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
 	if err != nil {
 		return attemptResult{}, false, err

@@ -134,21 +134,22 @@ func (s *sRelay) routeStatic(ctx context.Context, model string) ([]Candidate, er
 			continue
 		}
 		candidates = append(candidates, Candidate{
-			ChannelModelID: row.Id,
-			ChannelID:      channel.Id,
-			ChannelName:    channel.Name,
-			ChannelType:    channel.Type,
-			BaseURL:        channel.BaseUrl,
-			BackupBaseURLs: advancedConfig.BackupBaseURLs,
-			OrganizationID: channel.OrganizationId,
-			ProjectID:      channel.ProjectId,
-			ProxyURLCipher: channel.ProxyUrlCipher,
-			AdvancedConfig: channel.AdvancedConfig,
-			Priority:       channel.Priority,
-			Weight:         channel.Weight,
-			PublicName:     row.PublicName,
-			UpstreamName:   row.UpstreamName,
-			GroupIDs:       groupIDs,
+			ChannelModelID:      row.Id,
+			ChannelID:           channel.Id,
+			ChannelName:         channel.Name,
+			ChannelType:         channel.Type,
+			BaseURL:             channel.BaseUrl,
+			BackupBaseURLs:      advancedConfig.BackupBaseURLs,
+			ManagementKeyCipher: channel.ManagementKeyCipher,
+			OrganizationID:      channel.OrganizationId,
+			ProjectID:           channel.ProjectId,
+			ProxyURLCipher:      channel.ProxyUrlCipher,
+			AdvancedConfig:      channel.AdvancedConfig,
+			Priority:            channel.Priority,
+			Weight:              channel.Weight,
+			PublicName:          row.PublicName,
+			UpstreamName:        row.UpstreamName,
+			GroupIDs:            groupIDs,
 		})
 	}
 	return candidates, nil

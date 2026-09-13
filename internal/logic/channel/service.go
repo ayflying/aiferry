@@ -3,7 +3,6 @@ package channel
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -85,32 +84,32 @@ type View struct {
 }
 
 type ModelView struct {
-	Id                uint64     `json:"id" orm:"id"`
-	ChannelId         uint64     `json:"channelId" orm:"channel_id"`
-	ChannelName       string     `json:"channelName" orm:"channel_name"`
-	PublicName        string     `json:"publicName" orm:"public_name"`
-	UpstreamName      string     `json:"upstreamName" orm:"upstream_name"`
-	Discovered        int        `json:"discovered" orm:"discovered"`
-	Enabled           int        `json:"enabled" orm:"enabled"`
-	HealthScore       int        `json:"healthScore" orm:"health_score"`
-	AutoDisabled      bool       `json:"autoDisabled"`
-	AutoDisabledAt    *time.Time `json:"autoDisabledAt"`
-	AutoDisabledReason string    `json:"autoDisabledReason"`
-	InputPrice        *float64   `json:"inputPrice" orm:"input_price"`
-	CachedInputPrice  *float64   `json:"cachedInputPrice" orm:"cached_input_price"`
-	CacheWritePrice   *float64   `json:"cacheWritePrice" orm:"cache_write_price"`
-	OutputPrice       *float64   `json:"outputPrice" orm:"output_price"`
-	ImageInputPrice   *float64   `json:"imageInputPrice" orm:"image_input_price"`
-	AudioInputPrice   *float64   `json:"audioInputPrice" orm:"audio_input_price"`
-	AudioOutputPrice  *float64   `json:"audioOutputPrice" orm:"audio_output_price"`
-	RequestPrice      *float64   `json:"requestPrice" orm:"request_price"`
-	BillingMode       string     `json:"billingMode" orm:"billing_mode"`
-	LastTestEndpoint  string     `json:"lastTestEndpoint" orm:"last_test_endpoint"`
-	LastTestStatus    string     `json:"lastTestStatus" orm:"last_test_status"`
-	LastTestLatencyMs uint       `json:"lastTestLatencyMs" orm:"last_test_latency_ms"`
-	LastTestError     string     `json:"lastTestError" orm:"last_test_error"`
-	LastTestAt        *time.Time `json:"lastTestAt" orm:"last_test_at"`
-	UpdatedAt         time.Time  `json:"updatedAt" orm:"updated_at"`
+	Id                 uint64     `json:"id" orm:"id"`
+	ChannelId          uint64     `json:"channelId" orm:"channel_id"`
+	ChannelName        string     `json:"channelName" orm:"channel_name"`
+	PublicName         string     `json:"publicName" orm:"public_name"`
+	UpstreamName       string     `json:"upstreamName" orm:"upstream_name"`
+	Discovered         int        `json:"discovered" orm:"discovered"`
+	Enabled            int        `json:"enabled" orm:"enabled"`
+	HealthScore        int        `json:"healthScore" orm:"health_score"`
+	AutoDisabled       bool       `json:"autoDisabled"`
+	AutoDisabledAt     *time.Time `json:"autoDisabledAt"`
+	AutoDisabledReason string     `json:"autoDisabledReason"`
+	InputPrice         *float64   `json:"inputPrice" orm:"input_price"`
+	CachedInputPrice   *float64   `json:"cachedInputPrice" orm:"cached_input_price"`
+	CacheWritePrice    *float64   `json:"cacheWritePrice" orm:"cache_write_price"`
+	OutputPrice        *float64   `json:"outputPrice" orm:"output_price"`
+	ImageInputPrice    *float64   `json:"imageInputPrice" orm:"image_input_price"`
+	AudioInputPrice    *float64   `json:"audioInputPrice" orm:"audio_input_price"`
+	AudioOutputPrice   *float64   `json:"audioOutputPrice" orm:"audio_output_price"`
+	RequestPrice       *float64   `json:"requestPrice" orm:"request_price"`
+	BillingMode        string     `json:"billingMode" orm:"billing_mode"`
+	LastTestEndpoint   string     `json:"lastTestEndpoint" orm:"last_test_endpoint"`
+	LastTestStatus     string     `json:"lastTestStatus" orm:"last_test_status"`
+	LastTestLatencyMs  uint       `json:"lastTestLatencyMs" orm:"last_test_latency_ms"`
+	LastTestError      string     `json:"lastTestError" orm:"last_test_error"`
+	LastTestAt         *time.Time `json:"lastTestAt" orm:"last_test_at"`
+	UpdatedAt          time.Time  `json:"updatedAt" orm:"updated_at"`
 }
 
 type PublicModelView struct {
@@ -155,42 +154,6 @@ func (s *sChannel) writableType(ctx context.Context, code string) (entity.Channe
 		return row, config, gerror.New("channel type is disabled")
 	}
 	return row, config, nil
-}
-
-func (s *sChannel) setConfiguredHeaders(ctx context.Context, req *http.Request, channel entity.Channels, credentialCipher, authType, headerName, headerPrefix string) error {
-	req.Header.Set("Accept", "application/json")
-	switch authType {
-	case channeltype.AuthNone:
-	case channeltype.AuthChannelKey:
-		if credentialCipher == "" {
-			return gerror.New("channel credential is required")
-		}
-		key, err := s.app.Secrets.Decrypt(credentialCipher)
-		if err != nil {
-			return err
-		}
-		if key != "" {
-			req.Header.Set(headerName, headerPrefix+key)
-		}
-	case channeltype.AuthManagementKey:
-		if channel.ManagementKeyCipher == "" {
-			return gerror.New("channel type requires a management key")
-		}
-		key, err := s.app.Secrets.Decrypt(channel.ManagementKeyCipher)
-		if err != nil {
-			return err
-		}
-		req.Header.Set(headerName, headerPrefix+key)
-	default:
-		return gerror.New("unsupported channel type auth")
-	}
-	if channel.OrganizationId != "" {
-		req.Header.Set("OpenAI-Organization", channel.OrganizationId)
-	}
-	if channel.ProjectId != "" {
-		req.Header.Set("OpenAI-Project", channel.ProjectId)
-	}
-	return nil
 }
 
 // withCredentialManagementKey 返回一个注入了凭证级管理密钥的渠道副本：

@@ -346,10 +346,6 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 	if err != nil {
 		return attemptResult{errorMessage: err.Error()}, false
 	}
-	apiKey, err := s.app.Secrets.Decrypt(candidate.APIKeyCipher)
-	if err != nil {
-		return attemptResult{errorMessage: err.Error()}, false
-	}
 	requestCtx, cancel := context.WithTimeout(ctx, audioUpstreamTTL)
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, candidate.BaseURL+upstreamPath, bytes.NewReader(upstreamBody))
@@ -359,16 +355,11 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 	copyRequestHeaders(req.Header, incomingHeaders)
 	// OpenCode Go 等上游要求稳定的客户端标识头，缺失时会直接返回 400。
 	applyOpencodeGoHeaders(req.Header, incomingHeaders, candidate, 0)
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+	// 鉴权头与组织/项目头由渠道类型声明统一决定，与模型测试共用同一实现。
+	if err = s.applyUpstreamAuthHeaders(ctx, req, candidate); err != nil {
+		return attemptResult{errorMessage: err.Error()}, false
 	}
 	req.Header.Set("Content-Type", contentType)
-	if candidate.OrganizationID != "" {
-		req.Header.Set("OpenAI-Organization", candidate.OrganizationID)
-	}
-	if candidate.ProjectID != "" {
-		req.Header.Set("OpenAI-Project", candidate.ProjectID)
-	}
 	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
 	if candidate.DirectHTTP {
 		client = s.app.HTTPDirect
@@ -435,27 +426,27 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 		g.Log().Debugf(ctx, "audio usage %s: no billing breakdown for priced model %s", requestID, candidate.PublicName)
 	}
 	if err := s.usage.Record(ctx, usage.RecordInput{
-		RequestID:           requestID,
-		UserID:              key.UserId,
-		APIKeyID:            key.Id,
-		ChannelID:           candidate.ChannelID,
-		ChannelCredentialID: candidate.ChannelCredentialID,
-		Endpoint:            endpoint,
-		UpstreamEndpoint:    upstreamEndpoint,
-		ClientIP:            clientIP,
-		IPLocation:          s.location(clientIP),
-		RequestedModel:      requestedModel,
-		UpstreamModel:       candidate.UpstreamName,
+		RequestID:            requestID,
+		UserID:               key.UserId,
+		APIKeyID:             key.Id,
+		ChannelID:            candidate.ChannelID,
+		ChannelCredentialID:  candidate.ChannelCredentialID,
+		Endpoint:             endpoint,
+		UpstreamEndpoint:     upstreamEndpoint,
+		ClientIP:             clientIP,
+		IPLocation:           s.location(clientIP),
+		RequestedModel:       requestedModel,
+		UpstreamModel:        candidate.UpstreamName,
 		HealthScoreAtRequest: s.modelHealthScoreAtRequest(ctx, candidate),
-		HTTPStatus:          recordStatus,
-		Stream:              false,
-		Tokens:              result.tokens,
-		EstimatedCost:       audioCost(billingDetails),
-		BillingDetails:      billingDetails,
-		DurationMs:          time.Since(startedAt).Milliseconds(),
-		Attempts:            len(result.attemptFlow),
-		AttemptFlow:         result.attemptFlow,
-		ErrorMessage:        recordError,
+		HTTPStatus:           recordStatus,
+		Stream:               false,
+		Tokens:               result.tokens,
+		EstimatedCost:        audioCost(billingDetails),
+		BillingDetails:       billingDetails,
+		DurationMs:           time.Since(startedAt).Milliseconds(),
+		Attempts:             len(result.attemptFlow),
+		AttemptFlow:          result.attemptFlow,
+		ErrorMessage:         recordError,
 	}); err != nil {
 		g.Log().Errorf(ctx, "record audio usage %s: %v", requestID, err)
 	}

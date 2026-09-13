@@ -47,20 +47,21 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 			return nil, gerror.Wrap(configErr, "parse channel advanced config")
 		}
 		candidates = append(candidates, Candidate{
-			ChannelModelID: row.Id,
-			ChannelID:      channel.Id,
-			ChannelName:    channel.Name,
-			ChannelType:    channel.Type,
-			BaseURL:        channel.BaseUrl,
-			BackupBaseURLs: advancedConfig.BackupBaseURLs,
-			OrganizationID: channel.OrganizationId,
-			ProjectID:      channel.ProjectId,
-			ProxyURLCipher: channel.ProxyUrlCipher,
-			AdvancedConfig: channel.AdvancedConfig,
-			Priority:       channel.Priority,
-			Weight:         channel.Weight,
-			PublicName:     row.PublicName,
-			UpstreamName:   row.UpstreamName,
+			ChannelModelID:      row.Id,
+			ChannelID:           channel.Id,
+			ChannelName:         channel.Name,
+			ChannelType:         channel.Type,
+			BaseURL:             channel.BaseUrl,
+			BackupBaseURLs:      advancedConfig.BackupBaseURLs,
+			ManagementKeyCipher: channel.ManagementKeyCipher,
+			OrganizationID:      channel.OrganizationId,
+			ProjectID:           channel.ProjectId,
+			ProxyURLCipher:      channel.ProxyUrlCipher,
+			AdvancedConfig:      channel.AdvancedConfig,
+			Priority:            channel.Priority,
+			Weight:              channel.Weight,
+			PublicName:          row.PublicName,
+			UpstreamName:        row.UpstreamName,
 		})
 	}
 	available := candidates[:0]
@@ -158,7 +159,7 @@ func activeRouteChannels(ctx context.Context, channelIDs []uint64) (map[uint64]e
 	columns := dao.Channels.Columns()
 	channels := make([]entity.Channels, 0, len(channelIDs))
 	if err := dao.Channels.Ctx(ctx).
-		Fields(columns.Id, columns.Name, columns.Type, columns.BaseUrl, columns.OrganizationId, columns.ProjectId, columns.ProxyUrlCipher, columns.AdvancedConfig, columns.Priority, columns.Weight).
+		Fields(columns.Id, columns.Name, columns.Type, columns.BaseUrl, columns.ManagementKeyCipher, columns.OrganizationId, columns.ProjectId, columns.ProxyUrlCipher, columns.AdvancedConfig, columns.Priority, columns.Weight).
 		WhereIn(columns.Id, channelIDs).
 		Where(columns.Status, 1).
 		Scan(&channels); err != nil {

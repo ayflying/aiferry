@@ -49,6 +49,9 @@ type Candidate struct {
 	BackupBaseURLs      []string
 	ChannelCredentialID uint64
 	APIKeyCipher        string
+	// ManagementKeyCipher 是渠道管理密钥密文，供 authType=management_key 的
+	// 渠道类型使用；与渠道类型声明的鉴权规则一起交给渠道层统一处理。
+	ManagementKeyCipher string
 	OrganizationID      string `orm:"organization_id"`
 	ProjectID           string `orm:"project_id"`
 	ProxyURLCipher      string `orm:"proxy_url_cipher"`

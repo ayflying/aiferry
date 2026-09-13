@@ -151,10 +151,6 @@ func (s *sRelay) attemptImagesEditUpstream(ctx context.Context, writer http.Resp
 	if err != nil {
 		return attemptResult{errorMessage: err.Error()}, false
 	}
-	apiKey, err := s.app.Secrets.Decrypt(candidate.APIKeyCipher)
-	if err != nil {
-		return attemptResult{errorMessage: err.Error()}, false
-	}
 	timeout := time.Duration(settings.NonStreamTimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 180 * time.Second
@@ -170,16 +166,11 @@ func (s *sRelay) attemptImagesEditUpstream(ctx context.Context, writer http.Resp
 	copyRequestHeaders(req.Header, incomingHeaders)
 	// OpenCode Go 等上游要求稳定的客户端标识头，缺失时会直接返回 400。
 	applyOpencodeGoHeaders(req.Header, incomingHeaders, candidate, 0)
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+	// 鉴权头与组织/项目头由渠道类型声明统一决定，与模型测试共用同一实现。
+	if err = s.applyUpstreamAuthHeaders(ctx, req, candidate); err != nil {
+		return attemptResult{errorMessage: err.Error()}, false
 	}
 	req.Header.Set("Content-Type", contentType)
-	if candidate.OrganizationID != "" {
-		req.Header.Set("OpenAI-Organization", candidate.OrganizationID)
-	}
-	if candidate.ProjectID != "" {
-		req.Header.Set("OpenAI-Project", candidate.ProjectID)
-	}
 	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
 	if candidate.DirectHTTP {
 		client = s.app.HTTPDirect

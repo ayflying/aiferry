@@ -30,7 +30,17 @@ func (s *sChannel) fetchUpstreamJSON(ctx context.Context, channel entity.Channel
 	if err != nil {
 		return nil, gerror.Wrap(err, input.RequestError)
 	}
-	if err = s.setConfiguredHeaders(ctx, req, channel, credentialCipher, input.AuthType, input.HeaderName, input.HeaderPrefix); err != nil {
+	if err = s.ApplyUpstreamAuthHeaders(req, UpstreamAuthInput{
+		Spec: UpstreamAuthSpec{
+			AuthType:     input.AuthType,
+			HeaderName:   input.HeaderName,
+			HeaderPrefix: input.HeaderPrefix,
+		},
+		CredentialCipher:    credentialCipher,
+		ManagementKeyCipher: channel.ManagementKeyCipher,
+		OrganizationID:      channel.OrganizationId,
+		ProjectID:           channel.ProjectId,
+	}); err != nil {
 		return nil, err
 	}
 	// OpenCode Go 等上游要求稳定的客户端标识头，模型同步与额度查询同样需要。
