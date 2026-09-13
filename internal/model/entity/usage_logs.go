@@ -24,6 +24,7 @@ type UsageLogs struct {
 	RequestedModel      string    `json:"requestedModel"      orm:"requested_model"       description:""`  //
 	UpstreamModel       string    `json:"upstreamModel"       orm:"upstream_model"        description:""`  //
 	ReasoningEffort     string    `json:"reasoningEffort"     orm:"reasoning_effort"      description:""`  //
+	HealthScoreAtRequest *int     `json:"healthScoreAtRequest" orm:"health_score_at_request" description:""` // 请求时模型健康分快照
 	HttpStatus          uint      `json:"httpStatus"          orm:"http_status"           description:""`  //
 	IsStream            int       `json:"isStream"            orm:"is_stream"             description:""`  //
 	InputTokens         uint64    `json:"inputTokens"         orm:"input_tokens"          description:""`  //

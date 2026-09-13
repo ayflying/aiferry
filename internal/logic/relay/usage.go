@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/shopspring/decimal"
 
+	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/apikey"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
@@ -63,6 +64,7 @@ func (s *sRelay) record(ctx context.Context, requestID string, key apikey.AuthKe
 		RequestedModel:      requestedModel,
 		UpstreamModel:       candidate.UpstreamName,
 		ReasoningEffort:     candidate.ReasoningEffort,
+		HealthScoreAtRequest: s.modelHealthScoreAtRequest(ctx, candidate),
 		HTTPStatus:          recordStatus,
 		Stream:              stream,
 		Tokens:              result.tokens,
@@ -107,6 +109,29 @@ func pricedUsageCost(priced bool, billingDetails *usage.BillingBreakdown) (*deci
 		return &freeCost, false
 	}
 	return nil, false
+}
+
+// modelHealthScoreAtRequest 查询本次请求所用模型记录的当前健康分，作为日志快照。
+// 必须在 ApplyModelHealthScore 加减分之前调用（record 先于健康分更新执行），
+// 拿到的正是"请求发生时"的分数。查询失败降级为 nil，不阻塞用量记录。
+func (s *sRelay) modelHealthScoreAtRequest(ctx context.Context, candidate Candidate) *int {
+	if candidate.ChannelModelID == 0 {
+		return nil
+	}
+	columns := dao.ChannelModels.Columns()
+	score, err := dao.ChannelModels.Ctx(ctx).
+		Fields(columns.HealthScore).
+		Where(columns.Id, candidate.ChannelModelID).
+		Value()
+	if err != nil {
+		g.Log().Warningf(ctx, "load health score for usage log model %d: %v", candidate.ChannelModelID, err)
+		return nil
+	}
+	if score == nil || score.IsNil() {
+		return nil
+	}
+	value := score.Int()
+	return &value
 }
 
 func (s *sRelay) location(clientIP string) string {

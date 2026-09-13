@@ -444,6 +444,7 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 		IPLocation:          s.location(clientIP),
 		RequestedModel:      requestedModel,
 		UpstreamModel:       candidate.UpstreamName,
+		HealthScoreAtRequest: s.modelHealthScoreAtRequest(ctx, candidate),
 		HTTPStatus:          recordStatus,
 		Stream:              false,
 		Tokens:              result.tokens,

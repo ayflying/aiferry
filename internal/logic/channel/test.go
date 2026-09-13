@@ -231,6 +231,7 @@ func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel e
 		Endpoint:            "test:" + path,
 		RequestedModel:      model.PublicName,
 		UpstreamModel:       model.UpstreamName,
+		HealthScoreAtRequest: &model.HealthScore,
 		HTTPStatus:          recordStatus,
 		Stream:              result.Stream,
 		Tokens:              tokens,

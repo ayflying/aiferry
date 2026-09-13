@@ -25,6 +25,7 @@ type UsageLogs struct {
 	RequestedModel      any //
 	UpstreamModel       any //
 	ReasoningEffort     any //
+	HealthScoreAtRequest any //
 	HttpStatus          any //
 	IsStream            any //
 	InputTokens         any //

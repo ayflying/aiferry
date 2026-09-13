@@ -64,6 +64,7 @@ type RecordInput struct {
 	RequestedModel      string
 	UpstreamModel       string
 	ReasoningEffort     string
+	HealthScoreAtRequest *int
 	HTTPStatus          int
 	Stream              bool
 	Tokens              TokenUsage
@@ -155,7 +156,7 @@ type LogView struct {
 	RequestedModel         string            `json:"requestedModel" orm:"requested_model"`
 	UpstreamModel          string            `json:"upstreamModel" orm:"upstream_model"`
 	ReasoningEffort        string            `json:"reasoningEffort" orm:"reasoning_effort"`
-	ModelHealthScore       *int              `json:"modelHealthScore,omitempty" orm:"-"`
+	HealthScoreAtRequest  *int              `json:"modelHealthScore,omitempty" orm:"health_score_at_request"`
 	HttpStatus             uint              `json:"httpStatus" orm:"http_status"`
 	IsStream               int               `json:"isStream" orm:"is_stream"`
 	InputTokens            *uint64           `json:"inputTokens" orm:"input_tokens"`
@@ -230,6 +231,9 @@ func (s *sUsage) Record(ctx context.Context, input RecordInput) error {
 	}
 	if input.ReasoningEffort != "" {
 		data.ReasoningEffort = input.ReasoningEffort
+	}
+	if input.HealthScoreAtRequest != nil {
+		data.HealthScoreAtRequest = *input.HealthScoreAtRequest
 	}
 	if input.ChannelCredentialID > 0 {
 		data.ChannelCredentialId = input.ChannelCredentialID
