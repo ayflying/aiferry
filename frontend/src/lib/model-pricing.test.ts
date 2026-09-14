@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { configuredTokenPriceItems, createPriceRuleDraft, describePriceRuleConditions, describePriceRuleTime, formatModelPrice, modelBillingModeLabel, priceRuleTimeIsRestricted } from './model-pricing'
+import { configuredTokenPriceItems, createPriceRuleDraft, describePriceRuleConditions, describePriceRuleTime, formatModelPrice, modelBillingModeLabel, priceRuleTimeIsRestricted, priceRuleToDraft } from './model-pricing'
+import type { PriceRule } from '../api/types'
 
 describe('model pricing display', () => {
   it('includes cache read and cache write as separate configured prices', () => {
@@ -76,5 +77,47 @@ describe('price rule time description', () => {
 
   it('creates an unrestricted draft with no conditions or rates', () => {
     expect(createPriceRuleDraft()).toEqual({ name: '', priority: 100, currency: 'USD', conditions: {}, rates: {} })
+  })
+})
+
+describe('price rule draft hydration', () => {
+  const rule: PriceRule = {
+    id: 7,
+    channelModelId: 3,
+    name: 'Chat 高峰价',
+    source: 'sync',
+    sourceRef: '/chat/completions',
+    priority: 20,
+    currency: 'CNY',
+    conditions: { endpoint: '/chat/completions', time: { weekdays: [1, 2, 3] } },
+    rates: { inputPerMillion: 4, outputPerMillion: 12 },
+    status: 1,
+    updatedAt: '2026-09-14T00:00:00Z',
+  }
+
+  it('carries every editable field into the draft', () => {
+    expect(priceRuleToDraft(rule)).toEqual({
+      name: 'Chat 高峰价',
+      priority: 20,
+      currency: 'CNY',
+      conditions: { endpoint: '/chat/completions', time: { weekdays: [1, 2, 3] } },
+      rates: { inputPerMillion: 4, outputPerMillion: 12 },
+    })
+  })
+
+  it('copies conditions and rates instead of aliasing the rule', () => {
+    const draft = priceRuleToDraft(rule)
+    draft.conditions['endpoint'] = '/responses'
+    draft.rates['inputPerMillion'] = 99
+
+    // 编辑器与规则列表共用一份数据，别名会让列表展示跟着草稿一起变。
+    expect(rule.conditions['endpoint']).toBe('/chat/completions')
+    expect(rule.rates['inputPerMillion']).toBe(4)
+  })
+
+  it('falls back to safe defaults for missing name, priority, currency and maps', () => {
+    const broken = { ...rule, name: undefined, priority: undefined, currency: '  ', conditions: undefined, rates: undefined } as unknown as PriceRule
+
+    expect(priceRuleToDraft(broken)).toEqual({ name: '', priority: 100, currency: 'USD', conditions: {}, rates: {} })
   })
 })

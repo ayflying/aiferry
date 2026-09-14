@@ -1,4 +1,4 @@
-import type { ModelBillingMode, PublicModel, TimeWindow } from '../api/types'
+import type { ModelBillingMode, PriceRule, PublicModel, TimeWindow } from '../api/types'
 import { describeTimeWindow, readTimeWindow } from './time-window'
 
 type TokenPriceField = Pick<PublicModel,
@@ -54,6 +54,19 @@ export type PriceRuleDraft = {
 
 export function createPriceRuleDraft(): PriceRuleDraft {
   return { name: '', priority: 100, currency: 'USD', conditions: {}, rates: {} }
+}
+
+// 编辑已有规则时把规则回填成编辑器草稿。
+// conditions/rates 必须拷贝：抽屉里的规则列表和编辑器共用同一份数据，
+// 直接引用会让编辑器内的临时改动立刻污染列表展示。
+export function priceRuleToDraft(rule: PriceRule): PriceRuleDraft {
+  return {
+    name: rule.name ?? '',
+    priority: Number.isFinite(rule.priority) ? rule.priority : 100,
+    currency: rule.currency?.trim() || 'USD',
+    conditions: { ...(rule.conditions ?? {}) },
+    rates: { ...(rule.rates ?? {}) },
+  }
 }
 
 // 计费规则的时段条件与「模型关闭时间」共用同一套 TimeWindow 结构，
