@@ -108,6 +108,16 @@ type EndpointConfig struct {
 	HeaderPrefix   string `json:"headerPrefix"`
 }
 
+// ProtocolConfig 声明渠道的协议端点偏好。零值表示按模型名自动推断：
+// gpt-* 走上游 /responses，其余模型走 /chat/completions。
+type ProtocolConfig struct {
+	// ChatCompletionsOnly 表示该上游只提供 Chat Completions 端点，全部模型都
+	// 直连 /chat/completions，不再按 gpt-* 前缀转投上游 /responses。
+	// 适用于 Command Code 这类只暴露单一 OpenAI 兼容端点的聚合上游：
+	// 先转投 /responses 必然失败再回退，等于每次请求多一次上游往返。
+	ChatCompletionsOnly bool `json:"chatCompletionsOnly"`
+}
+
 type Config struct {
 	BaseURL   string                    `json:"baseUrl"`
 	Models    ModelConfig               `json:"models"`
@@ -116,6 +126,7 @@ type Config struct {
 	Audio     AudioConfig               `json:"audio"`
 	Video     VideoConfig               `json:"video"`
 	Quota     QuotaConfig               `json:"quota"`
+	Protocol  ProtocolConfig            `json:"protocol"`
 	Endpoints map[string]EndpointConfig `json:"endpoints"`
 }
 

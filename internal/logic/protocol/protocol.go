@@ -52,6 +52,19 @@ func PreferredResponsesPlan(endpoint string) Plan {
 	}
 }
 
+// PreferredChatCompletionsPlan 把上游锁定在 Chat Completions。用于只提供
+// Chat Completions 端点的聚合上游（如 Command Code）：即便是 gpt-* 模型也直连
+// /chat/completions，不按模型名转投上游 /responses；Responses 客户端经
+// responses_to_chat 转换后同样落在该端点。
+func PreferredChatCompletionsPlan(endpoint string) Plan {
+	switch endpoint {
+	case ResponsesEndpoint:
+		return Plan{clientEndpoint: endpoint, upstreamEndpoint: ChatCompletionsEndpoint, conversion: responsesToChatConversion}
+	default:
+		return directPlan(endpoint)
+	}
+}
+
 func AlternatePlan(endpoint string, primary Plan) (Plan, bool) {
 	if primary.Converts() {
 		return directPlan(endpoint), true

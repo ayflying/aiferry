@@ -296,6 +296,18 @@ func TestPreferredResponsesPlanDoesNotDependOnModelName(t *testing.T) {
 	}
 }
 
+// 只提供 Chat Completions 的聚合上游（如 Command Code）不走模型名推断。
+func TestPreferredChatCompletionsPlanPinsChatEndpoint(t *testing.T) {
+	chat := PreferredChatCompletionsPlan(ChatCompletionsEndpoint)
+	if chat.upstreamEndpoint != ChatCompletionsEndpoint || chat.conversion != "" {
+		t.Fatalf("Chat plan = %+v, want direct Chat", chat)
+	}
+	responses := PreferredChatCompletionsPlan(ResponsesEndpoint)
+	if responses.upstreamEndpoint != ChatCompletionsEndpoint || responses.conversion != responsesToChatConversion {
+		t.Fatalf("Responses plan = %+v, want Responses to Chat conversion", responses)
+	}
+}
+
 func TestResponsesRequestToChat(t *testing.T) {
 	body, err := responsesRequestToChat([]byte(`{
   "model":"gpt-test","instructions":"Follow policy",

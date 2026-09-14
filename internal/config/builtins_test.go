@@ -12,7 +12,7 @@ func TestLoadBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.ChannelTypes) != 20 {
+	if len(registry.ChannelTypes) != 21 {
 		t.Fatalf("unexpected built-in registry: %+v", registry)
 	}
 	for code, id := range map[string]uint64{
@@ -23,6 +23,7 @@ func TestLoadBuiltins(t *testing.T) {
 		"zhipu_api": 9000000000000018,
 		"volcengine_ark": 9000000000000004, "volcengine_ark_coding": 9000000000000019,
 		"volcengine_ark_agent": 9000000000000020, "volcengine_ark_video": 9000000000000021,
+		"commandcode": 9000000000000022,
 	} {
 		if item, exists := registry.ChannelTypeByCode(code); !exists || item.ID != id {
 			t.Fatalf("built-in channel type is missing: %s %+v", code, item)
@@ -106,6 +107,44 @@ func TestOpenCodeGoBuiltinDeclaresUsageQuota(t *testing.T) {
 	}
 	if !strings.Contains(string(config.Quota), `https://opencode.ai/zen/go/v1/usage`) {
 		t.Fatalf("OpenCode Go quota path must be the absolute usage URL, got %s", config.Quota)
+	}
+}
+
+func TestCommandCodeBuiltinPinsChatCompletions(t *testing.T) {
+	registry, err := LoadBuiltins(filepath.Join("..", "..", "manifest", "builtins.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, exists := registry.ChannelTypeByCode("commandcode")
+	if !exists {
+		t.Fatal("Command Code channel type is missing")
+	}
+	var config struct {
+		BaseURL  string          `json:"baseUrl"`
+		Models   json.RawMessage `json:"models"`
+		Costs    json.RawMessage `json:"costs"`
+		Protocol json.RawMessage `json:"protocol"`
+	}
+	if err = json.Unmarshal(item.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.BaseURL != "https://api.commandcode.ai/provider/v1" {
+		t.Fatalf("Command Code base URL = %q", config.BaseURL)
+	}
+	if len(config.Models) == 0 {
+		t.Fatal("Command Code must declare model discovery")
+	}
+	if !strings.Contains(string(config.Costs), "none") {
+		t.Fatalf("Command Code costs config = %s, want none adapter", config.Costs)
+	}
+	var protocolConfig struct {
+		ChatCompletionsOnly bool `json:"chatCompletionsOnly"`
+	}
+	if err = json.Unmarshal(config.Protocol, &protocolConfig); err != nil {
+		t.Fatal(err)
+	}
+	if !protocolConfig.ChatCompletionsOnly {
+		t.Fatalf("Command Code protocol config = %s, want chatCompletionsOnly", config.Protocol)
 	}
 }
 

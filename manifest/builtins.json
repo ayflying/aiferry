@@ -172,6 +172,18 @@
       }
     },
     {
+      "id": 9000000000000022,
+      "name": "Command Code",
+      "code": "commandcode",
+      "config": {
+        "baseUrl": "https://api.commandcode.ai/provider/v1",
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" },
+        "protocol": { "chatCompletionsOnly": true }
+      }
+    },
+    {
       "id": 9000000000000005,
       "name": "MiniMax",
       "code": "minimax",

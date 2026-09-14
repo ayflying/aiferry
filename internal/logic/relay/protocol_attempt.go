@@ -22,7 +22,7 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	primary := preferredProtocolPlan(endpoint, candidate)
+	primary := s.preferredProtocolPlan(ctx, endpoint, candidate)
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
 	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	if handled || attemptErr != nil || !needsFallback {
@@ -35,12 +35,30 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, fallback, sensitiveDataRestorer)
 }
 
-func preferredProtocolPlan(endpoint string, candidate Candidate) protocol.Plan {
+func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, candidate Candidate) protocol.Plan {
+	// 只提供 Chat Completions 的聚合上游先于模型名推断判定：转投 /responses
+	// 必然失败再回退，等于每次请求多一次上游往返。
+	if s.chatCompletionsOnly(ctx, candidate) {
+		return protocol.PreferredChatCompletionsPlan(endpoint)
+	}
 	if candidate.ChannelType == "zhipu" && isZhipuResponsesBaseURL(candidate.BaseURL) {
 		return protocol.PreferredResponsesPlan(endpoint)
 	}
 	// 协议能力由实际接收请求的上游模型决定，公开映射名仅供客户端路由使用。
 	return protocol.PreferredPlan(endpoint, candidate.UpstreamName)
+}
+
+// chatCompletionsOnly 判断渠道类型是否声明「该上游只提供 Chat Completions 端点」。
+// 渠道类型配置读取失败按未声明处理，退回按模型名推断，不阻断转发。
+func (s *sRelay) chatCompletionsOnly(ctx context.Context, candidate Candidate) bool {
+	if s.types == nil {
+		return false
+	}
+	_, typeConfig, err := s.types.GetByCode(ctx, candidate.ChannelType)
+	if err != nil {
+		return false
+	}
+	return typeConfig.Protocol.ChatCompletionsOnly
 }
 
 func isZhipuResponsesBaseURL(baseURL string) bool {

@@ -19,6 +19,7 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/apikey"
 	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/logic/channel"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/logic/iplocation"
 	mailservice "github.com/yunloli/aiferry/internal/logic/mail"
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
@@ -37,6 +38,7 @@ type sRelay struct {
 	prices     *pricingcache.Service
 	mail       *mailservice.Service
 	channels   *channel.Service
+	types      *channeltype.Service
 	locations  *iplocation.Service
 }
 
@@ -103,8 +105,8 @@ type attemptResult struct {
 	reasoningToolCallIDs []string
 }
 
-func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, locationSvc *iplocation.Service) *sRelay {
-	return &sRelay{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc, locations: locationSvc}
+func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, channelTypeSvc *channeltype.Service, locationSvc *iplocation.Service) *sRelay {
+	return &sRelay{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc, types: channelTypeSvc, locations: locationSvc}
 }
 
 // modelsListCacheKey 复用历史键名 aiferry:models:list 并嵌入路由版本号：

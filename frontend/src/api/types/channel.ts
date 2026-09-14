@@ -98,6 +98,10 @@ export interface ChannelTypeVideoConfig {
   adapter: 'openai' | 'minimax' | 'volcengine_ark'
 }
 
+export interface ChannelTypeProtocolConfig {
+  chatCompletionsOnly: boolean
+}
+
 export interface ChannelTypeConfig {
   baseUrl: string
   models: ChannelTypeModelConfig
@@ -105,6 +109,7 @@ export interface ChannelTypeConfig {
   pricing: ChannelTypePricingConfig
   quota?: ChannelTypeQuotaConfig
   video?: ChannelTypeVideoConfig
+  protocol?: ChannelTypeProtocolConfig
   endpoints: Record<string, ChannelTypeEndpointConfig>
 }
 

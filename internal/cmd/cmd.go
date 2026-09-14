@@ -68,7 +68,7 @@ var (
 				mailSvc         = mail.New(appSvc, systemSvc, userSvc)
 				channelSvc      = channel.New(appSvc, channelTypeSvc, channelGroupSvc, systemSvc, usageSvc, priceCache, userSvc, mailSvc)
 				priceSourceSvc  = pricesource.New(channelSvc)
-				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc, channelSvc, locationSvc)
+				relaySvc        = relay.New(appSvc, usageSvc, systemSvc, userSvc, priceCache, mailSvc, channelSvc, channelTypeSvc, locationSvc)
 				adminCtrl       = adminctrl.New(channelSvc, channelTypeSvc, channelGroupSvc, priceSourceSvc, apiKeySvc, systemSvc, firewallSvc, usageSvc, userSvc, authSvc, mailSvc, redemptionSvc)
 				authCtrl        = authctrl.New(authSvc, userSvc, systemSvc)
 				relayCtrl       = relayctrl.New(apiKeySvc, relaySvc, firewallSvc)

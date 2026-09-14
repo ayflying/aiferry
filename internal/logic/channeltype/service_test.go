@@ -98,6 +98,17 @@ func TestParseConfigRejectsInvalidEndpoint(t *testing.T) {
 	}
 }
 
+// 只提供 Chat Completions 的聚合上游（如 Command Code）用该字段声明协议偏好。
+func TestParseConfigAcceptsChatCompletionsOnlyProtocol(t *testing.T) {
+	config, err := ParseConfig([]byte(`{"models":{"path":"/models","idPath":"id"},"costs":{"adapter":"none"},"protocol":{"chatCompletionsOnly":true}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !config.Protocol.ChatCompletionsOnly {
+		t.Fatalf("unexpected protocol config: %+v", config.Protocol)
+	}
+}
+
 func TestParseConfigRejectsUnknownFields(t *testing.T) {
 	_, err := ParseConfig([]byte(`{"models":{"path":"/models","idPath":"id","listPatch":"data"},"costs":{"adapter":"none"}}`))
 	if err == nil {
