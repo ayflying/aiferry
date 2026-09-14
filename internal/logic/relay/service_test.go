@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/shopspring/decimal"
@@ -15,6 +16,10 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
+
+// ruleCostTestAt 是计费用例的固定评估时刻。这些用例的规则不含时段条件，
+// 取任意时刻结果都一样，固定下来只为让用例可复现。
+var ruleCostTestAt = time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 
 func TestParseJSONUsageVariants(t *testing.T) {
 	tokens := parseJSONUsage([]byte(`{"usage":{"prompt_tokens":100,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":30},"total_tokens":120}}`))
@@ -250,17 +255,17 @@ func TestFailedAttemptResultTurnsTransportFailureIntoGatewayError(t *testing.T) 
 
 func TestRuleCostHonorsEndpointAndCachedInput(t *testing.T) {
 	input, cached, output := uint64(1_000_000), uint64(200_000), uint64(500_000)
-	cost, ok := ruleCost(`{"endpoint":"/chat/completions","inputTokensAtLeast":500000}`, `{"inputPerMillion":2,"cachedInputPerMillion":0.5,"outputPerMillion":8,"request":0.01}`, "/chat/completions", usage.TokenUsage{Input: &input, CachedInput: &cached, Output: &output})
+	cost, ok := ruleCost(`{"endpoint":"/chat/completions","inputTokensAtLeast":500000}`, `{"inputPerMillion":2,"cachedInputPerMillion":0.5,"outputPerMillion":8,"request":0.01}`, "/chat/completions", usage.TokenUsage{Input: &input, CachedInput: &cached, Output: &output}, ruleCostTestAt)
 	if !ok || !cost.Equal(decimalRequire("5.71")) {
 		t.Fatalf("unexpected rule cost: %v, matched=%t", cost, ok)
 	}
-	if _, ok = ruleCost(`{"endpoint":"/embeddings"}`, `{"inputPerMillion":2,"outputPerMillion":8}`, "/chat/completions", usage.TokenUsage{Input: &input, Output: &output}); ok {
+	if _, ok = ruleCost(`{"endpoint":"/embeddings"}`, `{"inputPerMillion":2,"outputPerMillion":8}`, "/chat/completions", usage.TokenUsage{Input: &input, Output: &output}, ruleCostTestAt); ok {
 		t.Fatal("endpoint-mismatched rule should not apply")
 	}
 }
 
 func TestRuleCostSupportsRequestOnlyPricing(t *testing.T) {
-	cost, ok := ruleCost(`{}`, `{"request":0.01}`, "/images/generations", usage.TokenUsage{})
+	cost, ok := ruleCost(`{}`, `{"request":0.01}`, "/images/generations", usage.TokenUsage{}, ruleCostTestAt)
 	if !ok || !cost.Equal(decimalRequire("0.01")) {
 		t.Fatalf("unexpected request-only cost: %v, matched=%t", cost, ok)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync/atomic"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/shopspring/decimal"
@@ -136,7 +137,7 @@ func (s *sPricingCache) IsPriced(modelName string) bool {
 	}
 }
 
-func (s *sPricingCache) EstimateBreakdown(modelName, endpoint string, tokens usage.TokenUsage) *usage.BillingBreakdown {
+func (s *sPricingCache) EstimateBreakdown(modelName, endpoint string, tokens usage.TokenUsage, at time.Time) *usage.BillingBreakdown {
 	price, exists := s.current()[modelName]
 	if !exists {
 		return nil
@@ -144,7 +145,7 @@ func (s *sPricingCache) EstimateBreakdown(modelName, endpoint string, tokens usa
 	switch price.BillingMode {
 	case billingModeRules:
 		for _, rule := range price.Rules {
-			if breakdown, matches := usage.RuleBreakdown(rule.Conditions, rule.Rates, endpoint, tokens); matches {
+			if breakdown, matches := usage.RuleBreakdown(rule.Conditions, rule.Rates, endpoint, tokens, at); matches {
 				breakdown.BillingMode = billingModeRules
 				breakdown.Currency = normalizeCurrency(rule.Currency)
 				breakdown.Rule = &usage.BillingRuleSnapshot{
@@ -165,8 +166,8 @@ func (s *sPricingCache) EstimateBreakdown(modelName, endpoint string, tokens usa
 	}
 }
 
-func (s *sPricingCache) Estimate(modelName, endpoint string, tokens usage.TokenUsage) *decimal.Decimal {
-	breakdown := s.EstimateBreakdown(modelName, endpoint, tokens)
+func (s *sPricingCache) Estimate(modelName, endpoint string, tokens usage.TokenUsage, at time.Time) *decimal.Decimal {
+	breakdown := s.EstimateBreakdown(modelName, endpoint, tokens, at)
 	if breakdown == nil {
 		return nil
 	}

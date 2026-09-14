@@ -7,6 +7,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/shopspring/decimal"
 	_ "github.com/yunloli/aiferry/internal/logic/pricingcache"
@@ -17,8 +18,8 @@ type (
 	IPricingCache interface {
 		Load(ctx context.Context) error
 		IsPriced(modelName string) bool
-		EstimateBreakdown(modelName string, endpoint string, tokens usage.TokenUsage) *usage.BillingBreakdown
-		Estimate(modelName string, endpoint string, tokens usage.TokenUsage) *decimal.Decimal
+		EstimateBreakdown(modelName string, endpoint string, tokens usage.TokenUsage, at time.Time) *usage.BillingBreakdown
+		Estimate(modelName string, endpoint string, tokens usage.TokenUsage, at time.Time) *decimal.Decimal
 	}
 )
 

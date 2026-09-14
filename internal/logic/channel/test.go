@@ -219,7 +219,7 @@ func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel e
 	if s.usage == nil {
 		return nil
 	}
-	cost := s.prices.Estimate(model.PublicName, path, tokens)
+	cost := s.prices.Estimate(model.PublicName, path, tokens, time.Now())
 	recordStatus := result.HTTPStatus
 	recordMessage := result.Message
 	var chargeErr error

@@ -15,7 +15,9 @@ func (s *sUsage) reconstructLegacyBillingDetails(ctx context.Context, items []Lo
 		if item.BillingDetails != nil || item.EstimatedCost == nil || item.HttpStatus < 200 || item.HttpStatus >= 300 {
 			continue
 		}
-		breakdown := EstimatePublicModelBreakdown(ctx, item.RequestedModel, item.UpstreamEndpoint, tokenUsageFromLog(*item))
+		// 必须用日志自身的 created_at 作为时段评估时刻：分时定价下套用「当前时间」
+		// 会算出与库中 estimated_cost 不符的金额，导致历史账单详情无法重建。
+		breakdown := EstimatePublicModelBreakdown(ctx, item.RequestedModel, item.UpstreamEndpoint, tokenUsageFromLog(*item), item.CreatedAt)
 		breakdown = verifiedLegacyBillingDetails(*item, breakdown)
 		if breakdown == nil {
 			continue

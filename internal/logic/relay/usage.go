@@ -20,7 +20,7 @@ func (s *sRelay) record(ctx context.Context, requestID string, key apikey.AuthKe
 	if upstreamEndpoint == "" {
 		upstreamEndpoint = endpoint
 	}
-	billingDetails := s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens)
+	billingDetails := s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, startedAt)
 	cost, chargeable := pricedUsageCost(s.requiresBalanceCheck(candidate.PublicName), billingDetails)
 	recordStatus := result.status
 	recordError := result.errorMessage
@@ -92,7 +92,9 @@ func (s *sRelay) missingBillableUsage(candidate Candidate, endpoint string, resu
 	if upstreamEndpoint == "" {
 		upstreamEndpoint = endpoint
 	}
-	return s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens) == nil
+	// 这里是对「刚刚拿到的这份响应」做实时判断，用当前时刻折算生效时段即可；
+	// 真正落账的金额在 record 里按请求起始时刻重算。
+	return s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, time.Now()) == nil
 }
 
 func (s *sRelay) requiresBalanceCheck(modelName string) bool {
@@ -149,6 +151,6 @@ func parseSSEUsage(line []byte, target *usage.TokenUsage) {
 	usage.ParseSSEUsage(line, target)
 }
 
-func ruleCost(conditionsJSON, ratesJSON, endpoint string, tokens usage.TokenUsage) (*decimal.Decimal, bool) {
-	return usage.RuleCost(conditionsJSON, ratesJSON, endpoint, tokens)
+func ruleCost(conditionsJSON, ratesJSON, endpoint string, tokens usage.TokenUsage, at time.Time) (*decimal.Decimal, bool) {
+	return usage.RuleCost(conditionsJSON, ratesJSON, endpoint, tokens, at)
 }

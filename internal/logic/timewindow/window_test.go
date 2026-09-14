@@ -174,3 +174,49 @@ func TestContainsIgnoresWeekdaysWhenEmpty(t *testing.T) {
 		t.Fatal("星期为空表示每天都生效")
 	}
 }
+
+// TestAllowsTreatsUndeclaredDimensionsAsUnrestricted 固定 Contains 与 Allows 的分界：
+// Contains 是「落在关闭窗口内」，没有时段就不构成窗口；Allows 是「条件是否适用于该时刻」，
+// 未声明的维度一律视为不限，因此不限制的时间窗恒为真。
+func TestAllowsTreatsUndeclaredDimensionsAsUnrestricted(t *testing.T) {
+	for _, raw := range []string{"", "null", `{}`, `{"tz":"Asia/Shanghai"}`, `{"weekdays":[1,2,3,4,5,6,7]}`} {
+		window := mustParse(t, raw)
+		if !window.Allows(shanghaiTime(t, 2026, time.September, 14, 3, 0)) {
+			t.Fatalf("Allows(%s) 不限制的时间窗应恒为真", raw)
+		}
+	}
+	// 只声明星期：这些星期全天适用，其余星期不适用。同一时间窗的 Contains 恒为假。
+	window := mustParse(t, `{"weekdays":[6,7]}`)
+	if !window.Allows(shanghaiTime(t, 2026, time.September, 19, 3, 0)) {
+		t.Fatal("只声明星期六日时，周六任意时刻都应允许")
+	}
+	if window.Allows(shanghaiTime(t, 2026, time.September, 14, 3, 0)) {
+		t.Fatal("只声明星期六日时，周一不应允许")
+	}
+	if window.Contains(shanghaiTime(t, 2026, time.September, 19, 3, 0)) {
+		t.Fatal("没有时段就不构成关闭窗口，Contains 应为假")
+	}
+}
+
+func TestAllowsAppliesWeekdaysAndRanges(t *testing.T) {
+	window := mustParse(t, `{"tz":"Asia/Shanghai","weekdays":[1,2,3,4,5],"ranges":[["09:00","12:00"],["14:00","18:00"]]}`)
+	cases := []struct {
+		name string
+		at   time.Time
+		want bool
+	}{
+		{"工作日高峰内", shanghaiTime(t, 2026, time.September, 14, 10, 0), true},
+		{"时段终点不含", shanghaiTime(t, 2026, time.September, 14, 12, 0), false},
+		{"晚间非高峰", shanghaiTime(t, 2026, time.September, 14, 18, 55), false},
+		{"周六不属工作日", shanghaiTime(t, 2026, time.September, 19, 10, 0), false},
+	}
+	for _, item := range cases {
+		if got := window.Allows(item.at); got != item.want {
+			t.Fatalf("%s：Allows = %v, want %v", item.name, got, item.want)
+		}
+	}
+	// 与 Contains 在「有时段」这一支上必须一致。
+	if window.Contains(shanghaiTime(t, 2026, time.September, 14, 10, 0)) != window.Allows(shanghaiTime(t, 2026, time.September, 14, 10, 0)) {
+		t.Fatal("有具体时段时 Contains 与 Allows 判定应一致")
+	}
+}

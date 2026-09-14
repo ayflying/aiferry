@@ -418,7 +418,7 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 	}
 	// 音频接口上游不返回 token usage：TTS 按字符计价的规则在定价层处理，
 	// 这里把 TTS 二进制响应的 tokens 留空；若模型已定价但估算不出成本，则按免费记录，不阻塞响应。
-	billingDetails := s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens)
+	billingDetails := s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, startedAt)
 	recordStatus := result.status
 	recordError := result.errorMessage
 	if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && billingDetails == nil && s.requiresBalanceCheck(candidate.PublicName) {

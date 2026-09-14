@@ -13,6 +13,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/timewindow"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -347,6 +348,23 @@ func validatePriceRule(input adminapi.PriceRuleInput) error {
 	}
 	if len(input.Conditions) > 0 && !json.Valid(input.Conditions) {
 		return gerror.New("price rule conditions must be valid JSON")
+	}
+	return validateConditions(input.Conditions)
+}
+
+// validateConditions 校验 conditions.time 块，让非法时区/星期/时段在保存时就被拒绝，
+// 而不是等到计费时静默不命中（那时用户只会看到「未命中规则、无法计费」）。
+//
+// 校验直接复用 timewindow.Parse：计费端判定用的是同一个解析器，
+// 两边共用一份规则，不会出现「保存通过、运行时判不命中」的写法差异
+// （时段必须是补零的 HH:MM，全天用起止相同表示，跨零点用 start > end 表示）。
+func validateConditions(raw json.RawMessage) error {
+	block := gjson.ParseBytes(raw).Get("time")
+	if !block.Exists() {
+		return nil
+	}
+	if _, err := timewindow.Parse(block.Raw); err != nil {
+		return gerror.Wrap(err, "price rule conditions.time is invalid")
 	}
 	return nil
 }

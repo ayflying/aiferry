@@ -146,6 +146,9 @@ func (w Window) Location() *time.Location {
 }
 
 // Contains 判断给定时刻是否落在时间窗内。
+//
+// 这是「关闭窗口」语义：没有时段就不构成窗口，恒为 false。
+// 判断「某条条件是否适用于该时刻」请用 Allows。
 func (w Window) Contains(at time.Time) bool {
 	if len(w.Ranges) == 0 {
 		return false
@@ -154,8 +157,43 @@ func (w Window) Contains(at time.Time) bool {
 	if len(w.Weekdays) > 0 && !containsWeekday(w.Weekdays, isoWeekday(local)) {
 		return false
 	}
+	return coversClock(w.Ranges, local)
+}
+
+// Allows 判断「条件命中」语义下给定时刻是否被允许，未声明的维度一律视为不限。
+//
+// 与 Contains 的差别只在「没有时段」这一支：Contains 回答「是否落在关闭窗口内」，
+// 没有时段就不构成窗口，恒为 false；Allows 回答「这条条件是否适用于该时刻」，
+// 因此只声明星期（没有时段）表示这些星期全天适用。等价于「不限制」的时间窗
+// （IsZero）恒为 true，对应前端显示的「不限时段」。
+//
+// 分时定价用它判断价格规则是否命中：条件里出现了时段就按时段限制，
+// 完全没写时段的条件不会把规则挡在门外，而是作为兜底规则参与匹配。
+func (w Window) Allows(at time.Time) bool {
+	if w.IsZero() {
+		return true
+	}
+	local := at.In(w.Location())
+	if len(w.Weekdays) > 0 && !containsWeekday(w.Weekdays, isoWeekday(local)) {
+		return false
+	}
+	if len(w.Ranges) == 0 {
+		// 只声明了星期：这些星期全天适用。
+		return true
+	}
+	return coversClock(w.Ranges, local)
+}
+
+// coversClock 判断本地时刻是否落在任一时段内；没有时段视为不落于任何时段。
+func coversClock(ranges [][]string, local time.Time) bool {
+	if len(ranges) == 0 {
+		return false
+	}
 	minute := local.Hour()*60 + local.Minute()
-	for _, item := range w.Ranges {
+	for _, item := range ranges {
+		if len(item) != 2 {
+			continue
+		}
 		start, startErr := parseClock(item[0])
 		if startErr != nil {
 			continue
