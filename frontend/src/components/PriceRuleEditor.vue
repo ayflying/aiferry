@@ -8,10 +8,11 @@ import TimeWindowEditor from './TimeWindowEditor.vue'
 type TokenDimension = 'inputTokens' | 'outputTokens' | 'totalTokens'
 type TokenBound = { atLeast?: number; atMost?: number }
 
-const props = withDefaults(defineProps<{ modelValue: PriceRuleDraft; saving?: boolean; editing?: boolean; editingHint?: string }>(), {
+const props = withDefaults(defineProps<{ modelValue: PriceRuleDraft; saving?: boolean; editing?: boolean; editingHint?: string; showActions?: boolean }>(), {
   saving: false,
   editing: false,
   editingHint: '',
+  showActions: true,
 })
 const emit = defineEmits<{
   (event: 'update:modelValue', value: PriceRuleDraft): void
@@ -182,7 +183,7 @@ const generatedConditions = computed(() => JSON.stringify(buildConditions(), nul
     </el-collapse>
 
     <p v-if="editing && editingHint" class="editor-editing-hint">{{ editingHint }}</p>
-    <div class="editor-actions">
+    <div v-if="showActions" class="editor-actions">
       <el-button type="primary" :loading="saving" @click="emit('submit')">{{ editing ? '保存修改' : '添加人工规则' }}</el-button>
       <el-button v-if="editing" :disabled="saving" @click="emit('cancel')">取消编辑</el-button>
     </div>
@@ -190,5 +191,5 @@ const generatedConditions = computed(() => JSON.stringify(buildConditions(), nul
 </template>
 
 <style scoped>
-.price-rule-editor { display: grid; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #dce2e7; }.price-rule-editor :deep(.el-input-number) { width: 100%; }.editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.editor-field { display: flex; flex-direction: column; gap: 4px; }.editor-field > span { color: #66717d; font-size: 11px; }.editor-block { display: grid; gap: 8px; padding: 11px; border: 1px solid #dce2e7; border-radius: 6px; background: #fbfcfd; }.editor-block__head { display: flex; align-items: center; gap: 8px; }.editor-block__head strong { color: #33404c; font-size: 12px; }.editor-block__head .el-switch { margin-left: auto; }.editor-hint { margin: 0; color: #66717d; font-size: 11px; line-height: 1.5; }.timezone-select { width: 100%; }.weekday-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }.range-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 6px; }.range-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }.token-row { display: grid; grid-template-columns: 88px 1fr 1fr; align-items: center; gap: 8px; }.editor-preview { border-top: 0; }.editor-preview :deep(.el-collapse-item__header) { font-size: 12px; }.editor-preview pre { margin: 0; overflow-x: auto; color: #4b5763; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6; }.editor-actions { display: flex; align-items: center; gap: 8px; }.editor-editing-hint { margin: 0; padding: 8px 10px; border: 1px solid #f0c9a0; border-radius: 6px; background: #fdf6ec; color: #8a5a12; font-size: 11px; line-height: 1.6; }
+.price-rule-editor { display: grid; gap: 12px; }.price-rule-editor :deep(.el-input-number) { width: 100%; }.editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.editor-field { display: flex; flex-direction: column; gap: 4px; }.editor-field > span { color: #66717d; font-size: 11px; }.editor-block { display: grid; gap: 8px; padding: 11px; border: 1px solid #dce2e7; border-radius: 6px; background: #fbfcfd; }.editor-block__head { display: flex; align-items: center; gap: 8px; }.editor-block__head strong { color: #33404c; font-size: 12px; }.editor-block__head .el-switch { margin-left: auto; }.editor-hint { margin: 0; color: #66717d; font-size: 11px; line-height: 1.5; }.timezone-select { width: 100%; }.weekday-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }.range-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 6px; }.range-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }.token-row { display: grid; grid-template-columns: 88px 1fr 1fr; align-items: center; gap: 8px; }.editor-preview { border-top: 0; }.editor-preview :deep(.el-collapse-item__header) { font-size: 12px; }.editor-preview pre { margin: 0; overflow-x: auto; color: #4b5763; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6; }.editor-actions { display: flex; align-items: center; gap: 8px; }.editor-editing-hint { margin: 0; padding: 8px 10px; border: 1px solid #f0c9a0; border-radius: 6px; background: #fdf6ec; color: #8a5a12; font-size: 11px; line-height: 1.6; }
 </style>

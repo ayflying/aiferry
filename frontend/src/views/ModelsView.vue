@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { Braces, Coins, Pencil, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { Braces, Coins, Pencil, Plus, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { APIKey, ModelBillingMode, PriceRule, PriceSource, PublicModel } from '../api/types'
@@ -34,7 +34,8 @@ const rules = ref<PriceRule[]>([])
 const ruleSaving = ref(false)
 const ruleDraft = ref<PriceRuleDraft>(createPriceRuleDraft())
 const editingRuleId = ref<number | null>(null)
-const ruleEditorAnchor = ref<HTMLElement | null>(null)
+// 新增与编辑共用同一个弹框：null 表示新增，否则是正在编辑的规则 id。
+const ruleDialogOpen = ref(false)
 const priceDrawerSize = window.innerWidth <= 600 ? '94%' : '520px'
 const form = reactive({
   billingMode: 'token' as ModelBillingMode,
@@ -121,6 +122,7 @@ function openEdit(model: PublicModel) {
   })
   editingRuleId.value = null
   ruleDraft.value = createPriceRuleDraft()
+  ruleDialogOpen.value = false
   editOpen.value = true
   loadRules(model.id)
 }
@@ -147,16 +149,22 @@ async function save() {
   } catch (error) { showError(error, '保存公共价格失败') } finally { saving.value = false }
 }
 
-async function startEditRule(rule: PriceRule) {
+function startAddRule() {
+  editingRuleId.value = null
+  ruleDraft.value = createPriceRuleDraft()
+  ruleDialogOpen.value = true
+}
+
+function startEditRule(rule: PriceRule) {
   editingRuleId.value = rule.id
   ruleDraft.value = priceRuleToDraft(rule)
-  await nextTick()
-  ruleEditorAnchor.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  ruleDialogOpen.value = true
 }
 
 function cancelEditRule() {
   editingRuleId.value = null
   ruleDraft.value = createPriceRuleDraft()
+  ruleDialogOpen.value = false
 }
 
 async function submitRule() {
@@ -184,12 +192,15 @@ async function submitRule() {
       await apiPost(`/models/${current.value.id}/price-rules`, { name: draft.name || '人工规则', source: 'manual', sourceRef: '', priority: draft.priority, currency: draft.currency, conditions: draft.conditions, rates: draft.rates, status: 1 })
       ElMessage.success('高级价格规则已添加')
     }
+    // 先关弹框再切换计费模式：规则已经落库，若后面的模式切换失败而弹框还开着，
+    // 再点一次保存就会重复新增一条规则。
+    ruleDialogOpen.value = false
+    ruleDraft.value = createPriceRuleDraft()
     // 规则只有在该模型切到「高级规则」计费时才真正参与计费，新增与修改都要保证这一点。
     if (form.billingMode !== 'rules') {
       form.billingMode = 'rules'
       await apiPut(`/models/${current.value.id}`, { billingMode: form.billingMode })
     }
-    ruleDraft.value = createPriceRuleDraft()
     await loadRules(current.value.id)
   } catch (error) { showError(error, editing ? '更新价格规则失败' : '添加价格规则失败') } finally { ruleSaving.value = false }
 }
@@ -224,6 +235,8 @@ function formatSyncFailures(failures: Array<{ sourceName?: string; channelName?:
 }
 
 watch([keyword, models], () => { page.value = 1 })
+// 弹框被 teleport 到 body，抽屉关掉不会连带隐藏它，必须显式收起，否则会浮在列表上方。
+watch(editOpen, (open) => { if (!open) ruleDialogOpen.value = false })
 
 onMounted(load)
 </script>
@@ -284,9 +297,11 @@ onMounted(load)
             <div class="section-heading price-heading"><h2>高级计费规则</h2><span>仅在此页签启用时参与计费</span></div>
             <div class="rules-list"><div v-for="rule in rules" :key="rule.id" class="rule-row" :class="{ 'rule-row--editing': rule.id === editingRuleId }"><div><strong>{{ rule.name }}</strong><span>{{ rule.source === 'sync' ? '上游同步' : '人工规则' }} · P{{ rule.priority }} · {{ rule.currency }} · {{ describePriceRuleTime(rule.conditions) }}</span></div><code>{{ JSON.stringify(rule.rates) }}</code><div class="rule-actions"><TableActionButton :icon="Pencil" label="编辑规则" :size="15" :disabled="ruleSaving" @click="startEditRule(rule)" /><TableActionButton :icon="Trash2" label="删除规则" danger :size="15" :disabled="ruleSaving" @click="removeRule(rule)" /></div></div><div v-if="!rules.length" class="muted">没有高级规则。</div></div>
             <p v-if="missingFallbackRule" class="rule-warning">现有规则都限定了生效时段，其他时段匹配不到任何规则、不会产生费用。建议补充一条不限时段的兜底规则。</p>
-            <div ref="ruleEditorAnchor">
-              <PriceRuleEditor v-model="ruleDraft" :saving="ruleSaving" :editing="editingRule !== null" :editing-hint="editingHint" @submit="submitRule" @cancel="cancelEditRule" />
-            </div>
+            <div class="rule-add"><el-button type="primary" plain :icon="Plus" :disabled="ruleSaving" @click="startAddRule">添加规则</el-button></div>
+            <el-dialog v-model="ruleDialogOpen" :title="editingRule ? '编辑高级计费规则' : '添加高级计费规则'" width="min(560px, 94vw)" append-to-body>
+              <PriceRuleEditor v-model="ruleDraft" :saving="ruleSaving" :editing="editingRule !== null" :editing-hint="editingHint" :show-actions="false" @submit="submitRule" @cancel="cancelEditRule" />
+              <template #footer><el-button :disabled="ruleSaving" @click="cancelEditRule">取消</el-button><el-button type="primary" :loading="ruleSaving" @click="submitRule">{{ editingRule ? '保存修改' : '添加规则' }}</el-button></template>
+            </el-dialog>
           </el-tab-pane>
         </el-tabs>
       </el-form>
@@ -297,5 +312,5 @@ onMounted(load)
 </template>
 
 <style scoped>
-.models-page :deep(.el-input__inner), .models-page :deep(.el-select__placeholder), .models-page :deep(.el-table th.el-table__cell .cell), .models-page :deep(.el-table td.el-table__cell .cell) { font-size: 14px; }.models-page :deep(.el-table th.el-table__cell .cell) { color: #33404c; font-weight: 600; }.models-page :deep(.el-table td.el-table__cell .cell) { line-height: 1.5; }.model-name { color: #15202b; font-size: 14px; font-weight: 600; }.models-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 56px; color: #66717d; font-size: 13px; }.mobile-record__title code { font-size: 14px; font-weight: 600; }.price-target { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; background: #f7f9fa; }.price-target div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.price-target span { color: #66717d; font-size: 11px; }.price-target code, .price-target strong { overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.pricing-tabs { margin-top: 18px; }.pricing-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }.pricing-tabs :deep(.el-input-number) { width: 100%; }.price-heading { margin-top: 4px; padding-top: 0; border-top: 0; }.rules-list { display: grid; gap: 7px; margin: 10px 0; }.rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; padding: 8px; border: 1px solid #dce2e7; border-radius: 6px; }.rule-row div { display: flex; flex-direction: column; gap: 2px; }.rule-row span { color: #66717d; font-size: 10px; }.rule-row code { overflow: hidden; color: #4b5763; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.rule-row .rule-actions { display: flex; flex-direction: row; align-items: center; gap: 2px; }.rule-row--editing { border-color: #a8c6ee; background: #f2f8ff; }.rule-warning { margin: 10px 0 0; padding: 9px 11px; border: 1px solid #f0c9a0; border-radius: 6px; background: #fdf6ec; color: #8a5a12; font-size: 11px; line-height: 1.6; }@media (max-width: 720px) { .models-pagination { justify-content: space-between; flex-wrap: wrap; gap: 8px; } }
+.models-page :deep(.el-input__inner), .models-page :deep(.el-select__placeholder), .models-page :deep(.el-table th.el-table__cell .cell), .models-page :deep(.el-table td.el-table__cell .cell) { font-size: 14px; }.models-page :deep(.el-table th.el-table__cell .cell) { color: #33404c; font-weight: 600; }.models-page :deep(.el-table td.el-table__cell .cell) { line-height: 1.5; }.model-name { color: #15202b; font-size: 14px; font-weight: 600; }.models-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 56px; color: #66717d; font-size: 13px; }.mobile-record__title code { font-size: 14px; font-weight: 600; }.price-target { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; background: #f7f9fa; }.price-target div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.price-target span { color: #66717d; font-size: 11px; }.price-target code, .price-target strong { overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.pricing-tabs { margin-top: 18px; }.pricing-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }.pricing-tabs :deep(.el-input-number) { width: 100%; }.price-heading { margin-top: 4px; padding-top: 0; border-top: 0; }.rule-add { display: flex; justify-content: flex-end; margin-top: 10px; }.rules-list { display: grid; gap: 7px; margin: 10px 0; }.rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; padding: 8px; border: 1px solid #dce2e7; border-radius: 6px; }.rule-row div { display: flex; flex-direction: column; gap: 2px; }.rule-row span { color: #66717d; font-size: 10px; }.rule-row code { overflow: hidden; color: #4b5763; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.rule-row .rule-actions { display: flex; flex-direction: row; align-items: center; gap: 2px; }.rule-row--editing { border-color: #a8c6ee; background: #f2f8ff; }.rule-warning { margin: 10px 0 0; padding: 9px 11px; border: 1px solid #f0c9a0; border-radius: 6px; background: #fdf6ec; color: #8a5a12; font-size: 11px; line-height: 1.6; }@media (max-width: 720px) { .models-pagination { justify-content: space-between; flex-wrap: wrap; gap: 8px; } }
 </style>
