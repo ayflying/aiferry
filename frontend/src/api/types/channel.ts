@@ -92,12 +92,16 @@ export interface ChannelTypeEndpointConfig {
 }
 
 export interface ChannelTypeQuotaConfig {
-  adapter: 'none' | 'zhipu_coding_plan' | 'volcengine_afp'
+  adapter: 'none' | 'zhipu_coding_plan' | 'opencode_go_usage' | 'volcengine_afp'
   method: string
   path: string
   authType: 'none' | 'channel_key' | 'management_key'
   headerName: string
   headerPrefix: string
+}
+
+export interface ChannelTypeAudioConfig {
+  adapter: 'openai' | 'chat'
 }
 
 export interface ChannelTypeVideoConfig {
@@ -114,6 +118,7 @@ export interface ChannelTypeConfig {
   costs: ChannelTypeCostConfig
   pricing: ChannelTypePricingConfig
   quota?: ChannelTypeQuotaConfig
+  audio?: ChannelTypeAudioConfig
   video?: ChannelTypeVideoConfig
   protocol?: ChannelTypeProtocolConfig
   endpoints: Record<string, ChannelTypeEndpointConfig>

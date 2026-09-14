@@ -12,6 +12,7 @@ import ChannelListPanel from '../components/ChannelListPanel.vue'
 import ChannelModelMappingDialog from '../components/ChannelModelMappingDialog.vue'
 import ChannelModelTestDialog from '../components/ChannelModelTestDialog.vue'
 import ChannelRouteCoverageSettings from '../components/ChannelRouteCoverageSettings.vue'
+import ChannelTypeConfigEditor from '../components/ChannelTypeConfigEditor.vue'
 import ChannelTypeListPanel from '../components/ChannelTypeListPanel.vue'
 import { type ChannelTab, useChannelConfiguration } from '../composables/useChannelConfiguration'
 import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput, supportsOrganizationIdentity } from '../lib/channelForm'
@@ -518,10 +519,6 @@ watch(activeTab, (tab) => {
 
     <el-drawer v-model="groupDrawerOpen" :title="editingGroup ? '编辑渠道分组' : '添加渠道分组'" :size="drawerSize"><el-form v-loading="groupFormLoading" label-position="top"><div class="form-grid"><el-form-item label="分组名称"><el-input v-model="groupForm.name" placeholder="例如 高优先级" /></el-form-item><el-form-item label="分组代码"><el-input v-model="groupForm.code" :disabled="Boolean(editingGroup)" placeholder="例如 premium" /></el-form-item><el-form-item label="状态"><el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="说明"><el-input v-model="groupForm.description" maxlength="255" show-word-limit /></el-form-item><el-form-item label="包含渠道"><el-select v-model="groupForm.channelIds" multiple filterable clearable placeholder="选择渠道"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="groupDrawerOpen = false">取消</el-button><el-button type="primary" :loading="groupSaving" @click="saveGroup">保存分组</el-button></template></el-drawer>
 
-    <el-drawer v-model="typeDrawerOpen" :title="typeReadOnly ? '查看内置渠道类型' : (editingType ? '编辑渠道类型' : '添加渠道类型')" :size="typeDrawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="类型名称"><el-input v-model="typeForm.name" :readonly="typeReadOnly" placeholder="例如 自建网关" /></el-form-item><el-form-item label="类型代码"><el-input v-model="typeForm.code" :disabled="Boolean(editingType)" placeholder="例如 custom_gateway" /></el-form-item></div><el-form-item label="类型 JSON 配置"><el-input v-model="typeForm.configText" class="config-editor" type="textarea" :rows="22" :readonly="typeReadOnly" spellcheck="false" /></el-form-item></el-form><template #footer><el-button @click="typeDrawerOpen = false">{{ typeReadOnly ? '关闭' : '取消' }}</el-button><el-button v-if="!typeReadOnly" type="primary" :loading="typeSaving" @click="saveType">保存类型</el-button></template></el-drawer>
+    <el-drawer v-model="typeDrawerOpen" :title="typeReadOnly ? '查看内置渠道类型' : (editingType ? '编辑渠道类型' : '添加渠道类型')" :size="typeDrawerSize"><el-form label-position="top"><div class="form-grid"><el-form-item label="类型名称"><el-input v-model="typeForm.name" :readonly="typeReadOnly" placeholder="例如 自建网关" /></el-form-item><el-form-item label="类型代码"><el-input v-model="typeForm.code" :disabled="Boolean(editingType)" placeholder="例如 custom_gateway" /></el-form-item></div></el-form><ChannelTypeConfigEditor v-model:config-text="typeForm.configText" :readonly="typeReadOnly" /><template #footer><el-button @click="typeDrawerOpen = false">{{ typeReadOnly ? '关闭' : '取消' }}</el-button><el-button v-if="!typeReadOnly" type="primary" :loading="typeSaving" @click="saveType">保存类型</el-button></template></el-drawer>
   </div>
 </template>
-
-<style scoped>
-.config-editor :deep(textarea) { min-height: 440px !important; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; }
-</style>
