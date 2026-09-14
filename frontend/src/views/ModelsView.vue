@@ -8,8 +8,10 @@ import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
 import { compareModelNames } from '../lib/models'
-import { modelBillingModeLabel } from '../lib/model-pricing'
+import { createPriceRuleDraft, describePriceRuleTime, modelBillingModeLabel, priceRuleTimeIsRestricted } from '../lib/model-pricing'
+import type { PriceRuleDraft } from '../lib/model-pricing'
 import ModelPriceSummary from '../components/ModelPriceSummary.vue'
+import PriceRuleEditor from '../components/PriceRuleEditor.vue'
 import TableActionButton from '../components/TableActionButton.vue'
 import PriceSourceManager from '../components/PriceSourceManager.vue'
 import MobileRecordList from '../components/MobileRecordList.vue'
@@ -30,7 +32,7 @@ const sourceOpen = ref(false)
 const current = ref<PublicModel>()
 const rules = ref<PriceRule[]>([])
 const ruleSaving = ref(false)
-const ruleForm = reactive({ name: '', priority: 100, currency: 'USD', status: 1, conditionsText: '{\n  "endpoint": ""\n}', ratesText: '{\n  "inputPerMillion": 0,\n  "cachedInputPerMillion": 0,\n  "cacheWritePerMillion": 0,\n  "outputPerMillion": 0,\n  "imageInputPerMillion": 0,\n  "audioInputPerMillion": 0,\n  "audioOutputPerMillion": 0,\n  "request": 0\n}' })
+const ruleDraft = ref<PriceRuleDraft>(createPriceRuleDraft())
 const priceDrawerSize = window.innerWidth <= 600 ? '94%' : '520px'
 const form = reactive({
   billingMode: 'token' as ModelBillingMode,
@@ -44,6 +46,8 @@ const form = reactive({
   requestPrice: undefined as number | undefined,
 })
 const isAdmin = computed(() => auth.user?.isAdmin === true)
+// 分时定价下最容易踩的坑：所有规则都限定了时段，其余时间匹配不到任何规则，请求会静默不计费。
+const missingFallbackRule = computed(() => rules.value.length > 0 && rules.value.every((rule) => priceRuleTimeIsRestricted(rule.conditions)))
 
 const filtered = computed(() => {
   const query = keyword.value.trim().toLowerCase()
@@ -131,14 +135,14 @@ async function save() {
 
 async function addRule() {
   if (!current.value) return
-  let conditions: Record<string, unknown>; let rates: Record<string, number>
-  try { conditions = JSON.parse(ruleForm.conditionsText); rates = JSON.parse(ruleForm.ratesText) } catch { showError('规则条件或费率 JSON 格式无效', '格式错误'); return }
+  const draft = ruleDraft.value
   ruleSaving.value = true
   try {
-    await apiPost(`/models/${current.value.id}/price-rules`, { name: ruleForm.name.trim() || '人工规则', source: 'manual', sourceRef: '', priority: ruleForm.priority, currency: ruleForm.currency, conditions, rates, status: ruleForm.status })
+    await apiPost(`/models/${current.value.id}/price-rules`, { name: draft.name || '人工规则', source: 'manual', sourceRef: '', priority: draft.priority, currency: draft.currency, conditions: draft.conditions, rates: draft.rates, status: 1 })
     form.billingMode = 'rules'
     await apiPut(`/models/${current.value.id}`, { billingMode: form.billingMode })
     ElMessage.success('高级价格规则已添加')
+    ruleDraft.value = createPriceRuleDraft()
     await loadRules(current.value.id)
   } catch (error) { showError(error, '添加价格规则失败') } finally { ruleSaving.value = false }
 }
@@ -231,8 +235,9 @@ onMounted(load)
           </el-tab-pane>
           <el-tab-pane label="高级计费规则" name="rules">
             <div class="section-heading price-heading"><h2>高级计费规则</h2><span>仅在此页签启用时参与计费</span></div>
-            <div class="rules-list"><div v-for="rule in rules" :key="rule.id" class="rule-row"><div><strong>{{ rule.name }}</strong><span>{{ rule.source === 'sync' ? '上游同步' : '人工规则' }} · P{{ rule.priority }} · {{ rule.currency }}</span></div><code>{{ JSON.stringify(rule.rates) }}</code><TableActionButton :icon="Trash2" label="删除规则" danger :size="15" @click="removeRule(rule)" /></div><div v-if="!rules.length" class="muted">没有高级规则。</div></div>
-            <div class="rule-editor"><el-input v-model="ruleForm.name" placeholder="规则名称，例如 Chat 长上下文" /><div class="form-grid"><el-input-number v-model="ruleForm.priority" :min="-999" :max="999" controls-position="right" /><el-input v-model="ruleForm.currency" maxlength="12" /></div><el-input v-model="ruleForm.conditionsText" type="textarea" :rows="4" spellcheck="false" /><el-input v-model="ruleForm.ratesText" type="textarea" :rows="8" spellcheck="false" /><el-button :loading="ruleSaving" @click="addRule">添加人工规则</el-button></div>
+            <div class="rules-list"><div v-for="rule in rules" :key="rule.id" class="rule-row"><div><strong>{{ rule.name }}</strong><span>{{ rule.source === 'sync' ? '上游同步' : '人工规则' }} · P{{ rule.priority }} · {{ rule.currency }} · {{ describePriceRuleTime(rule.conditions) }}</span></div><code>{{ JSON.stringify(rule.rates) }}</code><TableActionButton :icon="Trash2" label="删除规则" danger :size="15" @click="removeRule(rule)" /></div><div v-if="!rules.length" class="muted">没有高级规则。</div></div>
+            <p v-if="missingFallbackRule" class="rule-warning">现有规则都限定了生效时段，其他时段匹配不到任何规则、不会产生费用。建议补充一条不限时段的兜底规则。</p>
+            <PriceRuleEditor v-model="ruleDraft" :saving="ruleSaving" @submit="addRule" />
           </el-tab-pane>
         </el-tabs>
       </el-form>
@@ -243,5 +248,5 @@ onMounted(load)
 </template>
 
 <style scoped>
-.models-page :deep(.el-input__inner), .models-page :deep(.el-select__placeholder), .models-page :deep(.el-table th.el-table__cell .cell), .models-page :deep(.el-table td.el-table__cell .cell) { font-size: 14px; }.models-page :deep(.el-table th.el-table__cell .cell) { color: #33404c; font-weight: 600; }.models-page :deep(.el-table td.el-table__cell .cell) { line-height: 1.5; }.model-name { color: #15202b; font-size: 14px; font-weight: 600; }.models-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 56px; color: #66717d; font-size: 13px; }.mobile-record__title code { font-size: 14px; font-weight: 600; }.price-target { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; background: #f7f9fa; }.price-target div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.price-target span { color: #66717d; font-size: 11px; }.price-target code, .price-target strong { overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.pricing-tabs { margin-top: 18px; }.pricing-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }.pricing-tabs :deep(.el-input-number) { width: 100%; }.price-heading { margin-top: 4px; padding-top: 0; border-top: 0; }.rules-list { display: grid; gap: 7px; margin: 10px 0; }.rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; padding: 8px; border: 1px solid #dce2e7; border-radius: 6px; }.rule-row div { display: flex; flex-direction: column; gap: 2px; }.rule-row span { color: #66717d; font-size: 10px; }.rule-row code { overflow: hidden; color: #4b5763; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.rule-editor { display: grid; gap: 9px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #dce2e7; }.rule-editor :deep(textarea) { font-family: 'JetBrains Mono', monospace; font-size: 11px; }@media (max-width: 720px) { .models-pagination { justify-content: space-between; flex-wrap: wrap; gap: 8px; } }
+.models-page :deep(.el-input__inner), .models-page :deep(.el-select__placeholder), .models-page :deep(.el-table th.el-table__cell .cell), .models-page :deep(.el-table td.el-table__cell .cell) { font-size: 14px; }.models-page :deep(.el-table th.el-table__cell .cell) { color: #33404c; font-weight: 600; }.models-page :deep(.el-table td.el-table__cell .cell) { line-height: 1.5; }.model-name { color: #15202b; font-size: 14px; font-weight: 600; }.models-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 56px; color: #66717d; font-size: 13px; }.mobile-record__title code { font-size: 14px; font-weight: 600; }.price-target { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; background: #f7f9fa; }.price-target div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.price-target span { color: #66717d; font-size: 11px; }.price-target code, .price-target strong { overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.pricing-tabs { margin-top: 18px; }.pricing-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }.pricing-tabs :deep(.el-input-number) { width: 100%; }.price-heading { margin-top: 4px; padding-top: 0; border-top: 0; }.rules-list { display: grid; gap: 7px; margin: 10px 0; }.rule-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; padding: 8px; border: 1px solid #dce2e7; border-radius: 6px; }.rule-row div { display: flex; flex-direction: column; gap: 2px; }.rule-row span { color: #66717d; font-size: 10px; }.rule-row code { overflow: hidden; color: #4b5763; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.rule-warning { margin: 10px 0 0; padding: 9px 11px; border: 1px solid #f0c9a0; border-radius: 6px; background: #fdf6ec; color: #8a5a12; font-size: 11px; line-height: 1.6; }@media (max-width: 720px) { .models-pagination { justify-content: space-between; flex-wrap: wrap; gap: 8px; } }
 </style>
