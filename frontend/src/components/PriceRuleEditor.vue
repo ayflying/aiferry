@@ -18,11 +18,12 @@ const tokenDimensions: Array<{ key: TokenDimension; label: string }> = [
 ]
 
 // 字段名与后端 internal/logic/usage/pricing.go 的 rulePriceRates 保持一致。
+// 顺序即两列网格的排列顺序：输入/输出占第一行，缓存维度紧随其后。
 const rateFields = [
   { key: 'inputPerMillion', label: '输入' },
+  { key: 'outputPerMillion', label: '输出' },
   { key: 'cachedInputPerMillion', label: '缓存读取' },
   { key: 'cacheWritePerMillion', label: '缓存写入' },
-  { key: 'outputPerMillion', label: '输出' },
   { key: 'imageInputPerMillion', label: '图像输入' },
   { key: 'audioInputPerMillion', label: '音频输入' },
   { key: 'audioOutputPerMillion', label: '音频输出' },
