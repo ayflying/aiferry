@@ -115,3 +115,71 @@ func TestRuleBreakdownPicksRateByTimeWindow(t *testing.T) {
 		t.Fatal("18:55 已过高价区时段，不应命中高价区规则")
 	}
 }
+
+// deepseekPeakCondition 是价格同步按 BaseLLM billing_expr 生成的高峰档条件原文：
+// 上游用 UTC 的周一至周五 01:00-04:00、06:00-10:00 两段；对应的非高峰档不带
+// 任何条件（补集无法用「与」条件表达），靠兜底顺序在时段外生效。
+const deepseekPeakCondition = `{"time":{"tz":"UTC","weekdays":[1,2,3,4,5],"ranges":[["01:00","04:00"],["06:00","10:00"]]}}`
+
+// TestRuleMatchesDeepseekUpstreamPeakWindow 锁住同步出来的峰谷条件语义：
+// 上游写 UTC，判定必须按 UTC，不能跟着容器本地时区（通常也是 UTC，但
+// 一旦容器改成东八区就会整体偏移）漂移。
+func TestRuleMatchesDeepseekUpstreamPeakWindow(t *testing.T) {
+	at := func(year int, month time.Month, day, hour, minute int) time.Time {
+		return time.Date(year, month, day, hour, minute, 0, 0, time.UTC)
+	}
+	cases := []struct {
+		name string
+		at   time.Time
+		peak bool
+	}{
+		// 2026-09-14 周一、09-19 周六。
+		{name: "UTC 周一 01:00 时段起点", at: at(2026, 9, 14, 1, 0), peak: true},
+		{name: "UTC 周一 03:59 第一段内", at: at(2026, 9, 14, 3, 59), peak: true},
+		{name: "UTC 周一 04:00 不含终点", at: at(2026, 9, 14, 4, 0), peak: false},
+		{name: "UTC 周一 05:59 两段之间", at: at(2026, 9, 14, 5, 59), peak: false},
+		{name: "UTC 周一 06:00 第二段起点", at: at(2026, 9, 14, 6, 0), peak: true},
+		{name: "UTC 周一 09:59 第二段内", at: at(2026, 9, 14, 9, 59), peak: true},
+		{name: "UTC 周一 10:00 不含终点", at: at(2026, 9, 14, 10, 0), peak: false},
+		{name: "UTC 周一 00:59 时段之前", at: at(2026, 9, 14, 0, 59), peak: false},
+		{name: "UTC 周六 02:00 不属工作日", at: at(2026, 9, 19, 2, 0), peak: false},
+		{name: "UTC 周日 07:00 不属工作日", at: at(2026, 9, 20, 7, 0), peak: false},
+	}
+	for _, item := range cases {
+		if got := RuleMatches(deepseekPeakCondition, "", TokenUsage{}, item.at); got != item.peak {
+			t.Errorf("%s：高峰档命中 = %t，期望 %t", item.name, got, item.peak)
+		}
+		// 兜底档无条件，任何时刻都必须命中，否则时段外会静默不计费。
+		if !RuleMatches(`{}`, "", TokenUsage{}, item.at) {
+			t.Errorf("%s：兜底档应恒命中", item.name)
+		}
+	}
+}
+
+// TestRuleBreakdownUsesPeakRateInsideUpstreamWindow 确认时段内真的按高峰价计费。
+func TestRuleBreakdownUsesPeakRateInsideUpstreamWindow(t *testing.T) {
+	input, output := uint64(1_000_000), uint64(1_000_000)
+	tokens := TokenUsage{Input: &input, Output: &output}
+	peakRates := `{"cachedInputPerMillion":0.006,"inputPerMillion":0.3,"outputPerMillion":1.2}`
+	offPeakRates := `{"cachedInputPerMillion":0.003,"inputPerMillion":0.15,"outputPerMillion":0.6}`
+	peakAt := time.Date(2026, 9, 14, 2, 0, 0, 0, time.UTC)
+	offPeakAt := time.Date(2026, 9, 14, 11, 0, 0, 0, time.UTC)
+
+	peak, matched := RuleBreakdown(deepseekPeakCondition, peakRates, "", tokens, peakAt)
+	if !matched || peak == nil {
+		t.Fatal("高峰时刻应命中高峰档")
+	}
+	if !peak.Cost().Equal(decimal.RequireFromString("1.5")) {
+		t.Fatalf("高峰时刻成本 = %s，期望 1.5（0.3 + 1.2）", peak.Cost())
+	}
+	if _, matched := RuleBreakdown(deepseekPeakCondition, peakRates, "", tokens, offPeakAt); matched {
+		t.Fatal("非高峰时刻不应命中高峰档，应落到兜底档")
+	}
+	offPeak, matched := RuleBreakdown(`{}`, offPeakRates, "", tokens, offPeakAt)
+	if !matched || offPeak == nil {
+		t.Fatal("非高峰时刻应命中兜底档")
+	}
+	if !offPeak.Cost().Equal(decimal.RequireFromString("0.75")) {
+		t.Fatalf("非高峰时刻成本 = %s，期望 0.75（0.15 + 0.6）", offPeak.Cost())
+	}
+}

@@ -12,9 +12,9 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
-	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
 
 // matchModelsForRule 把上游价格条目匹配到本地模型。先按完整名称精确匹配
@@ -34,7 +34,8 @@ func matchModelsForRule(byName map[string][]entity.ChannelModels, ruleModel stri
 	return nil
 }
 
-func (s *sChannel) syncPricesFromPayload(ctx context.Context, endpoint string, config channeltype.PricingConfig, body []byte) (int, error) {	rules, err := syncedRulesFromJSON(body, config)
+func (s *sChannel) syncPricesFromPayload(ctx context.Context, endpoint string, config channeltype.PricingConfig, body []byte) (int, error) {
+	rules, err := syncedRulesFromJSON(body, config)
 	if err != nil {
 		return 0, err
 	}
@@ -75,7 +76,11 @@ func (s *sChannel) saveSyncedPriceRules(ctx context.Context, endpoint string, ru
 			if _, deleteErr := dao.ModelPriceRules.Ctx(txCtx).Where(do.ModelPriceRules{ModelName: modelName, Source: "sync"}).Delete(); deleteErr != nil {
 				return gerror.Wrap(deleteErr, "replace synced price rules")
 			}
-			for _, rule := range modelRules {
+			conditional := false
+			for _, rule := range orderSyncedRules(modelRules) {
+				if ruleHasConditions(rule) {
+					conditional = true
+				}
 				if _, insertErr := dao.ModelPriceRules.Ctx(txCtx).Data(do.ModelPriceRules{ChannelModelId: canonicalModelIDs[modelName], ModelName: modelName, Name: rule.Name, Source: "sync", SourceRef: endpoint, Currency: rule.Currency, ConditionsJson: string(rule.Conditions), RatesJson: string(rule.Rates), Status: 1, SyncedAt: gtime.Now()}).Insert(); insertErr != nil {
 					return gerror.Wrap(insertErr, "save synced price rule")
 				}
@@ -84,6 +89,13 @@ func (s *sChannel) saveSyncedPriceRules(ctx context.Context, endpoint string, ru
 					if saveErr := s.mergePublicPrice(txCtx, modelName, values); saveErr != nil {
 						return saveErr
 					}
+				}
+			}
+			// 分档模型（峰谷/上下文阶梯）只有走规则计费才能命中对应档位，
+			// 因此这里把它的公共价格切到 rules 模式；无条件模型不受影响。
+			if conditional {
+				if modeErr := s.setPublicBillingMode(txCtx, modelName, BillingModeRules); modeErr != nil {
+					return modeErr
 				}
 			}
 		}
@@ -164,10 +176,15 @@ func syncedRuleRates(item gjson.Result, config channeltype.PricingConfig) json.R
 	return encoded
 }
 
+// syncedRulesFromNewAPIRatio 兼容两种上游载荷：BaseLLM 自 2026-09 起改为
+// billing_expr（tiered_expr 计费表达式），旧版本仍是 model_ratio 倍率表。
 func syncedRulesFromNewAPIRatio(body []byte) ([]syncedRule, error) {
 	data := gjson.GetBytes(body, "data")
 	if !data.IsObject() {
 		return nil, gerror.New("NewAPI ratio source did not return a data object")
+	}
+	if expressions := data.Get("billing_expr"); expressions.IsObject() {
+		return syncedRulesFromBillingExpressions(expressions, data.Get("billing_mode"))
 	}
 	modelRatios := newAPIRatioValues(data.Get("model_ratio"))
 	if len(modelRatios) == 0 {
@@ -217,4 +234,45 @@ func completionRatio(values map[string]float64, model string) float64 {
 		return value
 	}
 	return 1
+}
+
+// orderSyncedRules 让无条件规则先入库、条件规则后入库。规则匹配按 id 降序
+// 逐条试错，后入库的条件规则（峰谷价、上下文阶梯）因此先于兜底规则命中。
+func orderSyncedRules(rules []syncedRule) []syncedRule {
+	ordered := make([]syncedRule, len(rules))
+	copy(ordered, rules)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return !ruleHasConditions(ordered[i]) && ruleHasConditions(ordered[j])
+	})
+	return ordered
+}
+
+func ruleHasConditions(rule syncedRule) bool {
+	conditions := strings.TrimSpace(string(rule.Conditions))
+	return conditions != "" && conditions != "{}" && conditions != "null"
+}
+
+// setPublicBillingMode 切换公共价格的计费模式。分档模型（上下文阶梯等）只有
+// 走 rules 计费才能命中对应档位，否则规则虽然入库却不会参与计费。
+// 记录不存在时创建，避免规则已写入却缺少计费入口。
+func (s *sChannel) setPublicBillingMode(ctx context.Context, modelName, mode string) error {
+	var current PublicModelView
+	if err := dao.ModelPrices.Ctx(ctx).
+		Where(dao.ModelPrices.Columns().PublicName, modelName).
+		Scan(&current); err != nil && !isMissingPublicPriceError(err) {
+		return gerror.Wrap(err, "load current public model price mode")
+	}
+	if current.PublicName == "" {
+		if _, err := dao.ModelPrices.Ctx(ctx).Data(do.ModelPrices{PublicName: modelName, BillingMode: mode}).Insert(); err != nil {
+			return gerror.Wrap(err, "create public model price for rules billing")
+		}
+		return nil
+	}
+	if current.BillingMode == mode {
+		return nil
+	}
+	if _, err := dao.ModelPrices.Ctx(ctx).Where(dao.ModelPrices.Columns().PublicName, modelName).Data(do.ModelPrices{BillingMode: mode}).Update(); err != nil {
+		return gerror.Wrap(err, "switch public model price to rules billing")
+	}
+	return nil
 }
