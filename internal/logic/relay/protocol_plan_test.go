@@ -33,7 +33,7 @@ func relayWithBuiltinType(t *testing.T, code, typeConfig string) *sRelay {
 func TestChatCompletionsOnlyChannelPinsChatForGPTModels(t *testing.T) {
 	service := relayWithBuiltinType(t, "commandcode", commandCodeTypeConfig)
 	candidate := Candidate{ChannelType: "commandcode", UpstreamName: "gpt-5.6-luna"}
-	plan := service.preferredProtocolPlan(context.Background(), protocol.ChatCompletionsEndpoint, candidate)
+	plan := service.preferredProtocolPlan(context.Background(), protocol.ChatCompletionsEndpoint, candidate, true)
 	if plan.UpstreamEndpoint() != protocol.ChatCompletionsEndpoint || plan.Conversion() != "" {
 		t.Fatalf("plan = %+v, want direct Chat Completions", plan)
 	}
@@ -43,7 +43,7 @@ func TestChatCompletionsOnlyChannelPinsChatForGPTModels(t *testing.T) {
 func TestChatCompletionsOnlyChannelConvertsResponsesClient(t *testing.T) {
 	service := relayWithBuiltinType(t, "commandcode", commandCodeTypeConfig)
 	candidate := Candidate{ChannelType: "commandcode", UpstreamName: "deepseek/deepseek-v4-flash"}
-	plan := service.preferredProtocolPlan(context.Background(), protocol.ResponsesEndpoint, candidate)
+	plan := service.preferredProtocolPlan(context.Background(), protocol.ResponsesEndpoint, candidate, true)
 	if plan.UpstreamEndpoint() != protocol.ChatCompletionsEndpoint || plan.Conversion() != "responses_to_chat" {
 		t.Fatalf("plan = %+v, want Responses to Chat conversion", plan)
 	}
@@ -53,8 +53,18 @@ func TestChatCompletionsOnlyChannelConvertsResponsesClient(t *testing.T) {
 func TestChannelWithoutProtocolPreferenceKeepsGPTResponsesPlan(t *testing.T) {
 	service := &sRelay{}
 	candidate := Candidate{ChannelType: "openai", UpstreamName: "gpt-5.6-luna"}
-	plan := service.preferredProtocolPlan(context.Background(), protocol.ChatCompletionsEndpoint, candidate)
+	plan := service.preferredProtocolPlan(context.Background(), protocol.ChatCompletionsEndpoint, candidate, true)
 	if plan.UpstreamEndpoint() != protocol.ResponsesEndpoint || plan.Conversion() != "chat_to_responses" {
 		t.Fatalf("plan = %+v, want Chat to Responses conversion", plan)
+	}
+}
+
+// 关闭协议转换后，gpt-* 模型也直连客户端声明的端点，不再转投上游 /responses。
+func TestProtocolConversionDisabledPinsClientEndpoint(t *testing.T) {
+	service := &sRelay{}
+	candidate := Candidate{ChannelType: "openai", UpstreamName: "gpt-5.6-luna"}
+	plan := service.preferredProtocolPlan(context.Background(), protocol.ChatCompletionsEndpoint, candidate, false)
+	if plan.Converts() || plan.UpstreamEndpoint() != protocol.ChatCompletionsEndpoint {
+		t.Fatalf("plan = %+v, want direct Chat Completions", plan)
 	}
 }

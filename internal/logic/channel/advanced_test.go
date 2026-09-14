@@ -52,6 +52,30 @@ func TestParseAdvancedConfigIgnoresRetiredProtocolConversion(t *testing.T) {
 	}
 }
 
+func TestParseAdvancedConfigProtocolConversionThreeStates(t *testing.T) {
+	inherited, err := ParseAdvancedConfig([]byte(`{"forceOpenAIFormat":true}`))
+	if err != nil {
+		t.Fatalf("ParseAdvancedConfig() error = %v", err)
+	}
+	if inherited.ProtocolConversion != nil {
+		t.Fatal("missing field must inherit the system setting")
+	}
+	disabled, err := ParseAdvancedConfig([]byte(`{"protocolConversion":false}`))
+	if err != nil {
+		t.Fatalf("ParseAdvancedConfig() error = %v", err)
+	}
+	if disabled.ProtocolConversion == nil || *disabled.ProtocolConversion {
+		t.Fatal("explicit false must disable conversion for the channel")
+	}
+	enabled, err := ParseAdvancedConfig([]byte(`{"protocolConversion":true}`))
+	if err != nil {
+		t.Fatalf("ParseAdvancedConfig() error = %v", err)
+	}
+	if enabled.ProtocolConversion == nil || !*enabled.ProtocolConversion {
+		t.Fatal("explicit true must enable conversion for the channel")
+	}
+}
+
 func TestNormalizeBackupBaseURLs(t *testing.T) {
 	urls, err := normalizeBackupBaseURLs([]string{"https://cdn-a.example.com/v1/", "https://primary.example.com/v1", "https://cdn-a.example.com/v1", "  "}, "https://primary.example.com/v1/")
 	if err != nil {

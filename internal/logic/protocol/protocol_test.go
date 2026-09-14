@@ -399,14 +399,38 @@ func TestResponsesStreamDoesNotRepeatToolName(t *testing.T) {
 	if count := strings.Count(first+second, `"name":"PowerShell"`); count != 1 {
 		t.Fatalf("tool name emitted %d times, want once: %s%s", count, first, second)
 	}
-	if !strings.Contains(first, `"index":2`) {
-		t.Fatalf("tool index must retain output_index=2: %s", first)
+	// Chat Completions 的 tool_calls 下标必须从 0 起连续，不能照搬上游 output_index：
+	// Responses 的 output_index 会把 message、reasoning 等输出项一起计入。
+	if !strings.Contains(first, `"index":0`) {
+		t.Fatalf("chat tool index must start at 0: %s", first)
 	}
 
 	arguments := converter.Transform([]byte(`data: {"type":"response.function_call_arguments.delta","output_index":2,"call_id":"call_1","delta":"{\"command\":\"dir\"}"}`))
 	output := protocolStreamText(arguments)
-	if !strings.Contains(output, `"index":2`) || !strings.Contains(output, `"arguments":"{\"command\":\"dir\"}"`) {
-		t.Fatalf("arguments must retain the tool index: %s", output)
+	if !strings.Contains(output, `"index":0`) || !strings.Contains(output, `"arguments":"{\"command\":\"dir\"}"`) {
+		t.Fatalf("arguments must land on the same tool index: %s", output)
+	}
+}
+
+// 上游只在 function_call_arguments.delta 上给 item_id（不带 call_id）时，参数必须与
+// output_item.added 申报的名称落在同一个 tool 下标上。早期实现只读 call_id，缺字段时
+// 解析成空标识，参数会被算成另一次调用并汇到别的下标，客户端就会看到多个工具的参数
+// 被拼成一个 JSON、工具名对不上（Tool not found）。
+func TestResponsesStreamMatchesToolArgumentsByItemID(t *testing.T) {
+	plan, _ := fallbackPlan(ChatCompletionsEndpoint)
+	converter := NewStreamConverter(plan)
+	firstName := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.output_item.added","output_index":5,"item":{"id":"fc_a","type":"function_call","call_id":"call_a","name":"Read"}}`)))
+	secondName := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.output_item.added","output_index":6,"item":{"id":"fc_b","type":"function_call","call_id":"call_b","name":"Read"}}`)))
+	firstArgs := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.function_call_arguments.delta","output_index":5,"item_id":"fc_a","delta":"{\"file_path\":\"a\"}"}`)))
+	secondArgs := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.function_call_arguments.delta","output_index":6,"item_id":"fc_b","delta":"{\"file_path\":\"b\"}"}`)))
+	if !strings.Contains(firstName, `"index":0`) || !strings.Contains(secondName, `"index":1`) {
+		t.Fatalf("names must use consecutive indexes: first=%s second=%s", firstName, secondName)
+	}
+	if !strings.Contains(firstArgs, `"index":0`) || !strings.Contains(secondArgs, `"index":1`) {
+		t.Fatalf("arguments must not be merged into one call: first=%s second=%s", firstArgs, secondArgs)
+	}
+	if !strings.Contains(firstArgs, `"file_path\":\"a\"`) || !strings.Contains(secondArgs, `"file_path\":\"b\"`) {
+		t.Fatalf("arguments payload mismatched: first=%s second=%s", firstArgs, secondArgs)
 	}
 }
 

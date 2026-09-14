@@ -54,6 +54,7 @@ func DefaultResilienceSettings() adminapi.SystemResilienceSettingsInput {
 		DisableLatencySeconds:          120,
 		DisableStatusCodes:             "401,429",
 		ModelQualityDetectionEnabled:   false,
+		ProtocolConversionEnabled:      true,
 		FailureKeywords: []string{
 			"Your credit balance is too low",
 			"This organization has been disabled.",

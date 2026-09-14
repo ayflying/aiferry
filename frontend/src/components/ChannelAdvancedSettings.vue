@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { SlidersHorizontal } from '@lucide/vue'
 import type { ChannelAdvancedConfig } from '../api/types'
 
@@ -6,6 +7,14 @@ defineProps<{ hasProxy: boolean; editing: boolean }>()
 const emit = defineEmits<{ clearProxy: [] }>()
 const config = defineModel<ChannelAdvancedConfig>('config', { required: true })
 const proxyUrl = defineModel<string | undefined>('proxyUrl')
+
+// 渠道级协议转换开关是三态的：未设置时跟随系统设置，所以要区分 null 与 false。
+const protocolConversion = computed({
+  get: () => (config.value.protocolConversion === true ? 'on' : config.value.protocolConversion === false ? 'off' : 'inherit'),
+  set: (value: string) => {
+    config.value.protocolConversion = value === 'inherit' ? null : value === 'on'
+  },
+})
 
 function setStoreAllowed(value: boolean | string | number) {
   config.value.blockStore = !Boolean(value)
@@ -43,6 +52,18 @@ function setStoreAllowed(value: boolean | string | number) {
       </div>
     </div>
 
+    <div class="conversion-field">
+      <div class="section-caption">协议转换</div>
+      <div class="setting-row">
+        <div><strong>Chat / Responses 自动转换</strong><span>开启后 gpt-* 模型转投上游 /responses，上游不支持时自动回退；关闭后本渠道一律直连客户端声明的端点，用于排查转换引入的问题</span></div>
+        <el-select v-model="protocolConversion">
+          <el-option label="跟随系统" value="inherit" />
+          <el-option label="启用" value="on" />
+          <el-option label="关闭" value="off" />
+        </el-select>
+      </div>
+    </div>
+
     <div class="proxy-field">
       <div class="field-label"><strong>代理地址</strong><el-button v-if="editing && hasProxy" text size="small" @click="emit('clearProxy')">清除已保存代理</el-button></div>
       <el-input v-model="proxyUrl" clearable :placeholder="editing && hasProxy ? '已配置（不回显）；留空保持原值，输入新值覆盖，清空保存即删除' : 'http://user:pass@host:port'" autocomplete="off" spellcheck="false" />
@@ -70,5 +91,5 @@ function setStoreAllowed(value: boolean | string | number) {
 </template>
 
 <style scoped>
-.advanced-settings { margin-top: 20px; border-top: 1px solid #dce2e7; }.advanced-heading { display: flex; align-items: center; gap: 8px; padding: 16px 0 10px; color: #15202b; }.advanced-heading svg { color: #1677ff; }.advanced-heading strong, .setting-row strong, .proxy-field strong, .prompt-field > strong { font-size: 13px; }.setting-group, .field-controls { border-top: 1px solid #dce2e7; }.setting-row { display: flex; min-height: 61px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #dce2e7; padding: 8px 0; }.setting-row > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.setting-row span, .proxy-field > span { color: #66717d; font-size: 11px; line-height: 1.45; }.setting-row :deep(.el-switch) { flex: 0 0 auto; }.proxy-field, .prompt-field { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.field-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.field-label :deep(.el-button) { height: auto; padding: 0; }.compact { min-height: 52px; margin-top: 4px; border-bottom: 0; }.section-caption { padding: 14px 0 5px; color: #40505f; font-size: 12px; font-weight: 600; }.limit-field { border-top: 1px solid #dce2e7; }.limit-field .setting-row :deep(.el-input-number) { flex: 0 0 auto; width: 132px; }@media (max-width: 480px) { .setting-row { align-items: flex-start; padding: 12px 0; }.setting-row :deep(.el-switch) { margin-top: 4px; } }
+.advanced-settings { margin-top: 20px; border-top: 1px solid #dce2e7; }.advanced-heading { display: flex; align-items: center; gap: 8px; padding: 16px 0 10px; color: #15202b; }.advanced-heading svg { color: #1677ff; }.advanced-heading strong, .setting-row strong, .proxy-field strong, .prompt-field > strong { font-size: 13px; }.setting-group, .field-controls { border-top: 1px solid #dce2e7; }.setting-row { display: flex; min-height: 61px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #dce2e7; padding: 8px 0; }.setting-row > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.setting-row span, .proxy-field > span { color: #66717d; font-size: 11px; line-height: 1.45; }.setting-row :deep(.el-switch) { flex: 0 0 auto; }.proxy-field, .prompt-field { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.field-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.field-label :deep(.el-button) { height: auto; padding: 0; }.compact { min-height: 52px; margin-top: 4px; border-bottom: 0; }.section-caption { padding: 14px 0 5px; color: #40505f; font-size: 12px; font-weight: 600; }.limit-field, .conversion-field { border-top: 1px solid #dce2e7; }.limit-field .setting-row :deep(.el-input-number), .conversion-field .setting-row :deep(.el-select) { flex: 0 0 auto; width: 132px; }@media (max-width: 480px) { .setting-row { align-items: flex-start; padding: 12px 0; }.setting-row :deep(.el-switch) { margin-top: 4px; } }
 </style>

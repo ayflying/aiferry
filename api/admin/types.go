@@ -189,6 +189,10 @@ type SystemResilienceSettingsInput struct {
 	DisableStatusCodes             string   `json:"disableStatusCodes"`
 	FailureKeywords                []string `json:"failureKeywords"`
 	ModelQualityDetectionEnabled   bool     `json:"modelQualityDetectionEnabled"`
+	// ProtocolConversionEnabled 控制网关是否允许在 Chat Completions 与 Responses
+	// 之间自动转换。关闭后，除渠道高级配置显式覆盖的渠道外，请求一律直连客户端
+	// 声明的端点，用于排查协议转换引入的问题。字段缺省（历史数据）按启用处理。
+	ProtocolConversionEnabled bool `json:"protocolConversionEnabled"`
 }
 
 type ModelQualitySettingsInput struct {

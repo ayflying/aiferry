@@ -22,10 +22,17 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	primary := s.preferredProtocolPlan(ctx, endpoint, candidate)
+	// 协议转换开关：渠道高级配置显式指定时以渠道为准，缺省跟随系统设置。
+	conversionEnabled := settings.ProtocolConversionEnabled
+	if advancedConfig.ProtocolConversion != nil {
+		conversionEnabled = *advancedConfig.ProtocolConversion
+	}
+	primary := s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled)
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
 	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
-	if handled || attemptErr != nil || !needsFallback {
+	// 关闭协议转换时不做端点回退：AlternatePlan 给出的备选端点必然要求转换，
+	// 继续回退等于绕过开关。此时把上游的原始失败结果交还给客户端。
+	if handled || attemptErr != nil || !needsFallback || !conversionEnabled {
 		return result, handled, attemptErr
 	}
 	fallback, ok := protocol.AlternatePlan(endpoint, primary)
@@ -35,7 +42,12 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, fallback, sensitiveDataRestorer)
 }
 
-func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, candidate Candidate) protocol.Plan {
+// preferredProtocolPlan 决定这次转发用哪个上游端点。allowConversion 为 false 时
+// 锁定直连，不再把 gpt-* 请求转投 /responses，但也不阻断转发。
+func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, candidate Candidate, allowConversion bool) protocol.Plan {
+	if !allowConversion {
+		return protocol.DirectPlan(endpoint)
+	}
 	// 只提供 Chat Completions 的聚合上游先于模型名推断判定：转投 /responses
 	// 必然失败再回退，等于每次请求多一次上游往返。
 	if s.chatCompletionsOnly(ctx, candidate) {

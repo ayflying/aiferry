@@ -34,6 +34,10 @@ type AdvancedConfig struct {
 	// 额度按「渠道 × 密钥」独立计数，同一渠道的多把密钥互不占用：
 	// 配置 15 且渠道有 3 把密钥时，每把各 15 并发，渠道合计 45 并发。
 	ConcurrencyLimit int `json:"concurrencyLimit"`
+	// ProtocolConversion 控制该渠道是否参与 Chat Completions 与 Responses 的
+	// 自动协议转换。nil 表示跟随系统设置（默认启用）；true 强制启用，
+	// false 强制关闭：关闭后请求直连客户端声明的端点，也不会再回退到转换。
+	ProtocolConversion *bool `json:"protocolConversion"`
 }
 
 func DefaultAdvancedConfig() AdvancedConfig {
@@ -50,8 +54,9 @@ func ParseAdvancedConfig(raw []byte) (AdvancedConfig, error) {
 	if err := decoder.Decode(&fields); err != nil {
 		return AdvancedConfig{}, gerror.Wrap(err, "decode channel advanced config")
 	}
-	// Protocol conversion is now always enabled, but retain compatibility with
-	// saved channel JSON that still contains the retired switch.
+	// 已废弃的 enableProtocolConversion（曾被改成始终启用）仍需删除：历史渠道
+	// JSON 里可能残留该字段，留着会触发下方的 DisallowUnknownFields 报错。
+	// 现行开关是 ProtocolConversion，缺省表示跟随系统设置。
 	delete(fields, "enableProtocolConversion")
 	normalized, err := json.Marshal(fields)
 	if err != nil {

@@ -28,6 +28,12 @@ func directPlan(endpoint string) Plan {
 	return Plan{clientEndpoint: endpoint, upstreamEndpoint: endpoint}
 }
 
+// DirectPlan 表示不做任何协议转换：客户端端点与上游端点保持一致。显式关闭
+// 协议转换时用它锁定直连，避免 gpt-* 模型被转投到上游 /responses。
+func DirectPlan(endpoint string) Plan {
+	return directPlan(endpoint)
+}
+
 func PreferredPlan(endpoint, upstreamModel string) Plan {
 	isGPT := isGPTModel(upstreamModel)
 	if (endpoint == ChatCompletionsEndpoint && isGPT) || (endpoint == ResponsesEndpoint && !isGPT) {

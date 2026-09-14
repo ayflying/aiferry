@@ -56,7 +56,7 @@ func TestPreferredProtocolPlanUsesUpstreamModel(t *testing.T) {
 			converts:         false,
 		},
 		{
-			name:         "Zhipu Responses address uses native Responses for GLM",
+			name:           "Zhipu Responses address uses native Responses for GLM",
 			clientEndpoint: protocol.ResponsesEndpoint,
 			candidate: Candidate{
 				ChannelType:  "zhipu",
@@ -67,7 +67,7 @@ func TestPreferredProtocolPlanUsesUpstreamModel(t *testing.T) {
 			converts:         false,
 		},
 		{
-			name:         "Zhipu Responses address converts Chat for GLM",
+			name:           "Zhipu Responses address converts Chat for GLM",
 			clientEndpoint: protocol.ChatCompletionsEndpoint,
 			candidate: Candidate{
 				ChannelType:  "zhipu",
@@ -82,7 +82,7 @@ func TestPreferredProtocolPlanUsesUpstreamModel(t *testing.T) {
 	service := &sRelay{}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			plan := service.preferredProtocolPlan(context.Background(), test.clientEndpoint, test.candidate)
+			plan := service.preferredProtocolPlan(context.Background(), test.clientEndpoint, test.candidate, true)
 			if plan.UpstreamEndpoint() != test.upstreamEndpoint || plan.Converts() != test.converts {
 				t.Fatalf("plan = endpoint %q, converts %t; want endpoint %q, converts %t", plan.UpstreamEndpoint(), plan.Converts(), test.upstreamEndpoint, test.converts)
 			}

@@ -25,6 +25,9 @@ export interface ChannelAdvancedConfig {
   // concurrencyLimit 是每把上游密钥允许同时进行的转发请求数，0 表示不限制。
   // 额度按「渠道 × 密钥」独立计数，多把密钥互不占用。
   concurrencyLimit: number
+  // protocolConversion 控制该渠道是否参与 Chat Completions 与 Responses 的
+  // 自动协议转换。null 表示跟随系统设置，true/false 为渠道级强制开关。
+  protocolConversion: boolean | null
 }
 
 export interface ChannelTypeModelConfig {
@@ -290,6 +293,9 @@ export interface SystemResilienceSettings {
   disableStatusCodes: string
   failureKeywords: string[]
   modelQualityDetectionEnabled: boolean
+  // protocolConversionEnabled 控制网关是否允许在 Chat Completions 与 Responses
+  // 之间自动转换；关闭后请求直连客户端声明的端点，用于排查转换引入的问题。
+  protocolConversionEnabled: boolean
 }
 
 export interface BaseSettings {

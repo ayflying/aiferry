@@ -20,6 +20,7 @@ type StreamConverter struct {
 	outputText       strings.Builder
 	usage            map[string]any
 	chatToolIndexes  map[string]int
+	chatToolCount    int
 	chatToolNameSent map[string]bool
 }
 
@@ -87,19 +88,21 @@ func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 		if item.Get("type").String() != "function_call" {
 			return nil
 		}
-		callID := stringOr(item.Get("call_id").Value(), item.Get("id").String())
-		index := c.chatToolIndex(callID, int(gjson.GetBytes(payload, "output_index").Int()))
+		itemID := item.Get("id").String()
+		callID := item.Get("call_id").String()
+		index := c.chatToolIndex(itemID, callID)
 		// Chat Completions 的 function.name 是增量字段。部分 Responses 上游会
 		// 重复发送 output_item.added；同一调用若再次下发完整名称，客户端会
 		// 按 delta 拼成 PowerShellPowerShell。每个 call 只发送一次名称。
-		if c.chatToolNameSent[callID] {
+		nameKey := stringOr(itemID, callID)
+		if c.chatToolNameSent[nameKey] {
 			return nil
 		}
-		c.chatToolNameSent[callID] = true
+		c.chatToolNameSent[nameKey] = true
 		c.sawToolCall = true
 		return append(c.ensureChatRole(), c.chatChunk(map[string]any{"tool_calls": []any{map[string]any{
 			"index":    index,
-			"id":       callID,
+			"id":       stringOr(callID, itemID),
 			"type":     "function",
 			"function": map[string]any{"name": item.Get("name").String()},
 		}}}, nil, nil)...)
@@ -108,12 +111,13 @@ func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 		if delta == "" {
 			return nil
 		}
+		itemID := gjson.GetBytes(payload, "item_id").String()
 		callID := gjson.GetBytes(payload, "call_id").String()
-		index := c.chatToolIndex(callID, int(gjson.GetBytes(payload, "output_index").Int()))
+		index := c.chatToolIndex(itemID, callID)
 		c.sawToolCall = true
 		return append(c.ensureChatRole(), c.chatChunk(map[string]any{"tool_calls": []any{map[string]any{
 			"index":    index,
-			"id":       callID,
+			"id":       stringOr(callID, itemID),
 			"type":     "function",
 			"function": map[string]any{"arguments": delta},
 		}}}, nil, nil)...)
@@ -275,18 +279,32 @@ func (c *StreamConverter) captureChatMetadata(payload []byte) {
 	}
 }
 
-func (c *StreamConverter) chatToolIndex(callID string, upstreamIndex int) int {
-	if index, exists := c.chatToolIndexes[callID]; exists {
-		return index
-	}
-	index := upstreamIndex
-	for _, assigned := range c.chatToolIndexes {
-		if assigned == index {
-			index = len(c.chatToolIndexes)
-			break
+// chatToolIndex 为每次工具调用分配 Chat Completions 的 tool_calls 下标。传入的
+// 多个键（item.id 与 call_id）会作为别名指向同一下标，任意一个命中即复用。
+//
+// 两个约束必须同时满足，否则客户端会把并行工具调用读错：
+//   - 下标要从 0 起连续分配，不能照搬上游 output_index——Responses 的
+//     output_index 把 message、reasoning 等输出项一并计入，透传会留下空洞。
+//   - output_item.added 携带 item.id + call_id，而部分上游的
+//     function_call_arguments.delta 只带 item_id、不带 call_id。若只认单一键，
+//     同一次调用的「名称」与「参数」会被算成两次调用、落到两个下标上，
+//     客户端表现为多个工具的参数拼成一个 JSON 且工具名对不上（Tool not found）。
+func (c *StreamConverter) chatToolIndex(keys ...string) int {
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if index, exists := c.chatToolIndexes[key]; exists {
+			return index
 		}
 	}
-	c.chatToolIndexes[callID] = index
+	index := c.chatToolCount
+	c.chatToolCount++
+	for _, key := range keys {
+		if key != "" {
+			c.chatToolIndexes[key] = index
+		}
+	}
 	return index
 }
 
