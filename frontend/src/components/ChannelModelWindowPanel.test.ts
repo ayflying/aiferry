@@ -41,6 +41,12 @@ function selectModel(wrapper: ReturnType<typeof mountPanel>['wrapper'], value: s
   wrapper.findComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', value)
 }
 
+function actionButton(wrapper: ReturnType<typeof mountPanel>['wrapper'], label: string) {
+  const button = wrapper.findAll('button').find((item) => item.attributes('aria-label') === label)
+  if (!button) throw new Error(`未找到「${label}」按钮`)
+  return button
+}
+
 describe('ChannelModelWindowPanel', () => {
   it('父级清空再回填时按外部数据重建行，哪怕内容与上次提交完全相同', async () => {
     const { wrapper, windows } = mountPanel()
@@ -96,5 +102,26 @@ describe('ChannelModelWindowPanel', () => {
     expect(windows.value['gpt-x']).toEqual({ tz: 'UTC', weekdays: [1], ranges: [['08:00', '09:00']] })
     expect(wrapper.findComponent(TimeWindowEditor).exists()).toBe(true)
     expect(wrapper.text()).toContain('已配置 1 条关闭时段')
+  })
+
+  it('编辑时段改为图标按钮后仍可收起/展开，未选模型时保持禁用', async () => {
+    const { wrapper } = mountPanel()
+
+    // 新增的行默认展开编辑器，此时图标按钮的语义是「收起时段」；没选模型不得编辑，否则点开的是空配置。
+    await addButton(wrapper).trigger('click')
+    expect(wrapper.findComponent(TimeWindowEditor).exists()).toBe(true)
+    expect(actionButton(wrapper, '收起时段').attributes('disabled')).toBeDefined()
+
+    selectModel(wrapper, 'gpt-x')
+    await nextTick()
+    expect(actionButton(wrapper, '收起时段').attributes('disabled')).toBeUndefined()
+
+    await actionButton(wrapper, '收起时段').trigger('click')
+    await nextTick()
+    expect(wrapper.findComponent(TimeWindowEditor).exists()).toBe(false)
+
+    await actionButton(wrapper, '编辑时段').trigger('click')
+    await nextTick()
+    expect(wrapper.findComponent(TimeWindowEditor).exists()).toBe(true)
   })
 })

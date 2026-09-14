@@ -155,6 +155,8 @@ button { color: inherit; }
 .icon-button { display: inline-grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 5px; color: #3a4652; background: var(--surface); cursor: pointer; }
 .icon-button:hover { border-color: #9fbfe5; color: var(--action); background: var(--action-soft); }
 .icon-button.danger:hover { border-color: #e9abb2; color: var(--danger); background: var(--danger-soft); }
+.icon-button:disabled { cursor: not-allowed; opacity: .45; }
+.icon-button:disabled:hover { border-color: var(--line); color: #3a4652; background: var(--surface); }
 .table-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }

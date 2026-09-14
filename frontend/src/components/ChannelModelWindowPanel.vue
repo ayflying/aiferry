@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Plus, Trash2 } from '@lucide/vue'
+import { ChevronUp, Pencil, Plus, Trash2 } from '@lucide/vue'
 
 import type { TimeWindow } from '../api/types'
 import { createClosedWindow, describeTimeWindow, timeWindowIsEmpty, windowRowsFromRecord, windowRowsToRecord } from '../lib/time-window'
@@ -156,9 +156,14 @@ function summaryOf(row: WindowRow): string {
               </el-option>
             </el-select>
             <span class="window-entry__summary" :class="{ empty: timeWindowIsEmpty(row.window) }">{{ summaryOf(row) }}</span>
-            <el-button text size="small" :disabled="!row.publicName" @click="toggleEditing(row)">
-              {{ editingId === row.id ? '收起' : '编辑时段' }}
-            </el-button>
+            <!-- 与旁边的删除按钮同为一枚图标按钮：展开时换成上箭头，补回文字按钮原有的「收起」提示。 -->
+            <TableActionButton
+              :icon="editingId === row.id ? ChevronUp : Pencil"
+              :label="editingId === row.id ? '收起时段' : '编辑时段'"
+              :size="15"
+              :disabled="!row.publicName"
+              @click="toggleEditing(row)"
+            />
             <TableActionButton :icon="Trash2" label="删除关闭时段" danger :size="15" @click="removeRow(row)" />
           </div>
           <TimeWindowEditor
@@ -175,6 +180,6 @@ function summaryOf(row: WindowRow): string {
 </template>
 
 <style scoped>
-.window-panel { display: grid; gap: 10px; }.panel-hint { margin: 0; color: #66717d; font-size: 11px; line-height: 1.6; }.panel-hint strong { color: #33404c; }.panel-empty { padding: 14px; border: 1px dashed #dce2e7; border-radius: 6px; color: #66717d; font-size: 12px; text-align: center; }.panel-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; }.panel-count { color: #66717d; font-size: 12px; }.window-list { display: grid; gap: 7px; max-height: 420px; overflow-y: auto; }.window-entry { display: grid; gap: 8px; padding: 9px 11px; border: 1px solid #dce2e7; border-radius: 6px; }.window-entry__row { display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 1fr) auto 34px; align-items: center; gap: 10px; }.window-entry__model { min-width: 0; }.window-option__name { font-family: 'JetBrains Mono', monospace; font-size: 12px; }.window-option__upstream { margin-left: 8px; color: #8b959e; font-size: 11px; }.window-entry__summary { overflow: hidden; color: #b45309; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.window-entry__summary.empty { color: #8b959e; font-weight: 400; }.window-entry__editor { padding: 9px; border: 1px solid #e3e8ec; border-radius: 6px; background: #fbfcfd; }
-@media (max-width: 600px) { .window-entry__row { grid-template-columns: minmax(0, 1fr) auto 34px; }.window-entry__model { grid-column: 1 / -1; } }
+.window-panel { display: grid; gap: 10px; }.panel-hint { margin: 0; color: #66717d; font-size: 11px; line-height: 1.6; }.panel-hint strong { color: #33404c; }.panel-empty { padding: 14px; border: 1px dashed #dce2e7; border-radius: 6px; color: #66717d; font-size: 12px; text-align: center; }.panel-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; }.panel-count { color: #66717d; font-size: 12px; }.window-list { display: grid; gap: 7px; max-height: 420px; overflow-y: auto; }.window-entry { display: grid; gap: 8px; padding: 9px 11px; border: 1px solid #dce2e7; border-radius: 6px; }.window-entry__row { display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 1fr) 34px 34px; align-items: center; gap: 10px; }.window-entry__model { min-width: 0; }.window-option__name { font-family: 'JetBrains Mono', monospace; font-size: 12px; }.window-option__upstream { margin-left: 8px; color: #8b959e; font-size: 11px; }.window-entry__summary { overflow: hidden; color: #b45309; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.window-entry__summary.empty { color: #8b959e; font-weight: 400; }.window-entry__editor { padding: 9px; border: 1px solid #e3e8ec; border-radius: 6px; background: #fbfcfd; }
+@media (max-width: 600px) { .window-entry__row { grid-template-columns: minmax(0, 1fr) 34px 34px; }.window-entry__model { grid-column: 1 / -1; } }
 </style>
