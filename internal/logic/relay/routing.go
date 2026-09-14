@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
@@ -62,6 +63,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 			Weight:              channel.Weight,
 			PublicName:          row.PublicName,
 			UpstreamName:        row.UpstreamName,
+			ClosedWindow:        row.ClosedWindowsJson,
 		})
 	}
 	available := candidates[:0]
@@ -83,7 +85,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 		candidate.GroupIDs = groupIDs
 		available = append(available, candidate)
 	}
-	return weightedOrder(available), nil
+	return weightedOrder(filterClosedCandidates(available, time.Now())), nil
 }
 
 func weightedOrder(candidates []Candidate) []Candidate {

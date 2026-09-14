@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { Channel, ChannelCostResult, ChannelCredential, ChannelInput, ChannelModel, ChannelQuotaResult, DiscoveredModel } from '../api/types'
+import type { Channel, ChannelCostResult, ChannelCredential, ChannelInput, ChannelModel, ChannelQuotaResult, DiscoveredModel, TimeWindow } from '../api/types'
 import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
 import ChannelGroupListPanel from '../components/ChannelGroupListPanel.vue'
@@ -17,6 +17,7 @@ import { type ChannelTab, useChannelConfiguration } from '../composables/useChan
 import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput } from '../lib/channelForm'
 import { showError } from '../lib/error'
 import { sortDiscoveredModels } from '../lib/models'
+import { closedWindowPayload, closedWindowsFromModels } from '../lib/time-window'
 import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
@@ -41,6 +42,8 @@ const customModels = ref<DiscoveredModel[]>([])
 const discoveryKeyword = ref('')
 const selectedModelNames = ref<string[]>([])
 const modelMappings = ref<Array<{ id: number; upstreamName: string; publicName: string }>>([])
+// 定时关闭时段，按公开模型名索引；键存在表示本次提交该字段（空时间窗 = 清除）。
+const closedWindows = ref<Record<string, TimeWindow>>({})
 let nextMappingID = 0
 const discoveryError = ref('')
 // 渠道上游没有模型发现接口（HTTP 404，如火山 Agent Plan）时置位：
@@ -252,6 +255,7 @@ async function discover(channel: Channel) {
   customModels.value = []
   selectedModelNames.value = []
   modelMappings.value = []
+  closedWindows.value = {}
   discoveryError.value = ''
   discoveryUnsupported.value = false
   discoveryOpen.value = true
@@ -284,6 +288,8 @@ async function discover(channel: Channel) {
     modelMappings.value = channelModels
       .filter((item) => item.enabled === 1 && item.publicName !== item.upstreamName)
       .map((item) => ({ id: item.id, upstreamName: item.upstreamName, publicName: item.publicName }))
+    // 已配置的关闭时段随模型一起回填，保存时原样提交，未配过的模型不出现。
+    closedWindows.value = closedWindowsFromModels(channelModels.filter((item) => item.enabled === 1))
   } catch (error) {
     showError(error, '加载渠道模型失败')
   } finally {
@@ -297,6 +303,22 @@ const dialogModels = computed(() => {
   const upstream = new Set(discoveredModels.value.map((item) => item.name))
   const extras = customModels.value.filter((item) => !upstream.has(item.name))
   return [...extras, ...discoveredModels.value]
+})
+
+// windowModels 是该渠道当前会生效的「公开模型」清单，供「关闭时间」页签逐项配置。
+// 一个上游模型可以有多个公开别名，这里按公开名去重：同一个公开名共享一套关闭时段。
+const windowModels = computed(() => {
+  const rows = new Map<string, { publicName: string; upstreamName: string }>()
+  for (const upstreamName of selectedModelNames.value) {
+    const aliases = modelMappings.value.filter((item) => item.upstreamName === upstreamName)
+    const entries = aliases.length ? aliases : [{ publicName: upstreamName }]
+    for (const entry of entries) {
+      const publicName = entry.publicName.trim()
+      if (!publicName || rows.has(publicName)) continue
+      rows.set(publicName, { publicName, upstreamName })
+    }
+  }
+  return [...rows.values()].sort((left, right) => left.publicName.localeCompare(right.publicName))
 })
 
 // syncSelectionRemoval 在勾选集合变化后执行自定义模型删除语义：
@@ -368,7 +390,12 @@ async function saveModelSelection() {
   try {
     const models = selectedModelNames.value.flatMap((upstreamName) => {
       const aliases = mappings.filter((item) => item.upstreamName === upstreamName)
-      return aliases.length ? aliases : [{ upstreamName, publicName: upstreamName }]
+      const entries = aliases.length ? aliases : [{ upstreamName, publicName: upstreamName }]
+      return entries.map((entry) => {
+        const closedWindow = closedWindowPayload(closedWindows.value, entry.publicName)
+        // 没配置过的模型不带 closedWindow，后端保持库里原值；改过的按新值覆盖。
+        return closedWindow ? { ...entry, closedWindow } : entry
+      })
     })
     await apiPut(`/channels/${discoveryChannel.value.id}/models/selection`, { models })
     ElMessage.success(`已保存 ${models.length} 条模型映射关系`)
@@ -472,7 +499,7 @@ watch(activeTab, (tab) => {
     <section v-else-if="activeTab === 'groups'"><ChannelGroupListPanel :channels="store.channels" :groups="store.channelGroups" :loading="tabLoading.groups" @create="openCreateGroup" @edit="openEditGroup" @refresh="loadChannelGroups" @remove="removeGroup" /></section>
     <section v-else><ChannelTypeListPanel :loading="tabLoading.types" :status-saving="typeStatusSaving" :types="store.channelTypes" @create="openCreateType" @edit="openEditType" @refresh="loadChannelTypes" @remove="removeType" @set-status="setTypeStatus" /></section>
 
-    <ChannelModelMappingDialog v-model="discoveryOpen" :channel-name="discoveryChannel?.name || ''" :discovering="discovering" :discovery-error="discoveryError" :discovery-unsupported="discoveryUnsupported" :applying="applyingSelection" :discovered-models="dialogModels" :selected-model-names="selectedModelNames" @update:selected-model-names="onSelectionChanged" v-model:discovery-keyword="discoveryKeyword" v-model:model-mappings="modelMappings" @add-custom-model="addCustomModel" @retry="discoveryChannel && discover(discoveryChannel)" @add-mapping="addModelMapping" @remove-mapping="removeModelMapping" @save="saveModelSelection" />
+    <ChannelModelMappingDialog v-model="discoveryOpen" :channel-name="discoveryChannel?.name || ''" :discovering="discovering" :discovery-error="discoveryError" :discovery-unsupported="discoveryUnsupported" :applying="applyingSelection" :discovered-models="dialogModels" :selected-model-names="selectedModelNames" @update:selected-model-names="onSelectionChanged" v-model:discovery-keyword="discoveryKeyword" v-model:model-mappings="modelMappings" :window-models="windowModels" v-model:closed-windows="closedWindows" @add-custom-model="addCustomModel" @retry="discoveryChannel && discover(discoveryChannel)" @add-mapping="addModelMapping" @remove-mapping="removeModelMapping" @save="saveModelSelection" />
 
     <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="loadChannels" />
     <ChannelQuotaDialog v-model="quotaOpen" :channel-name="quotaTitle" :loading="quotaLoading" :error="quotaError" :result="quotaResult" @refresh="quotaChannel && queryQuota(quotaChannel, true, quotaCredential)" />

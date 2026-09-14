@@ -23,6 +23,7 @@ type ChannelModels struct {
 	AutoDisabledAt     *time.Time `json:"autoDisabledAt"    orm:"auto_disabled_at"      description:""` //
 	AutoDisabledReason string    `json:"autoDisabledReason" orm:"auto_disabled_reason"  description:""` //
 	AutoDisabledSource string    `json:"autoDisabledSource" orm:"auto_disabled_source"  description:""` //
+	ClosedWindowsJson  string    `json:"closedWindowsJson"  orm:"closed_windows_json"   description:""` //
 	LastTestEndpoint   string    `json:"lastTestEndpoint"   orm:"last_test_endpoint"    description:""` //
 	LastTestStatus     string    `json:"lastTestStatus"     orm:"last_test_status"      description:""` //
 	LastTestLatencyMs  uint      `json:"lastTestLatencyMs"  orm:"last_test_latency_ms"  description:""` //

@@ -24,6 +24,7 @@ type ChannelModels struct {
 	AutoDisabledAt     any //
 	AutoDisabledReason any //
 	AutoDisabledSource any //
+	ClosedWindowsJson  any //
 	LastTestEndpoint   any //
 	LastTestStatus     any //
 	LastTestLatencyMs  any //

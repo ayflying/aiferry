@@ -16,6 +16,7 @@ import (
 	mailservice "github.com/yunloli/aiferry/internal/logic/mail"
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
 	"github.com/yunloli/aiferry/internal/logic/system"
+	"github.com/yunloli/aiferry/internal/logic/timewindow"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/logic/user"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -95,21 +96,23 @@ type ModelView struct {
 	AutoDisabled       bool       `json:"autoDisabled"`
 	AutoDisabledAt     *time.Time `json:"autoDisabledAt"`
 	AutoDisabledReason string     `json:"autoDisabledReason"`
-	InputPrice         *float64   `json:"inputPrice" orm:"input_price"`
-	CachedInputPrice   *float64   `json:"cachedInputPrice" orm:"cached_input_price"`
-	CacheWritePrice    *float64   `json:"cacheWritePrice" orm:"cache_write_price"`
-	OutputPrice        *float64   `json:"outputPrice" orm:"output_price"`
-	ImageInputPrice    *float64   `json:"imageInputPrice" orm:"image_input_price"`
-	AudioInputPrice    *float64   `json:"audioInputPrice" orm:"audio_input_price"`
-	AudioOutputPrice   *float64   `json:"audioOutputPrice" orm:"audio_output_price"`
-	RequestPrice       *float64   `json:"requestPrice" orm:"request_price"`
-	BillingMode        string     `json:"billingMode" orm:"billing_mode"`
-	LastTestEndpoint   string     `json:"lastTestEndpoint" orm:"last_test_endpoint"`
-	LastTestStatus     string     `json:"lastTestStatus" orm:"last_test_status"`
-	LastTestLatencyMs  uint       `json:"lastTestLatencyMs" orm:"last_test_latency_ms"`
-	LastTestError      string     `json:"lastTestError" orm:"last_test_error"`
-	LastTestAt         *time.Time `json:"lastTestAt" orm:"last_test_at"`
-	UpdatedAt          time.Time  `json:"updatedAt" orm:"updated_at"`
+	// ClosedWindow 是该「渠道 × 模型」的定时关闭时段；未配置时为 nil。
+	ClosedWindow      *timewindow.Window `json:"closedWindow" orm:"-"`
+	InputPrice        *float64           `json:"inputPrice" orm:"input_price"`
+	CachedInputPrice  *float64           `json:"cachedInputPrice" orm:"cached_input_price"`
+	CacheWritePrice   *float64           `json:"cacheWritePrice" orm:"cache_write_price"`
+	OutputPrice       *float64           `json:"outputPrice" orm:"output_price"`
+	ImageInputPrice   *float64           `json:"imageInputPrice" orm:"image_input_price"`
+	AudioInputPrice   *float64           `json:"audioInputPrice" orm:"audio_input_price"`
+	AudioOutputPrice  *float64           `json:"audioOutputPrice" orm:"audio_output_price"`
+	RequestPrice      *float64           `json:"requestPrice" orm:"request_price"`
+	BillingMode       string             `json:"billingMode" orm:"billing_mode"`
+	LastTestEndpoint  string             `json:"lastTestEndpoint" orm:"last_test_endpoint"`
+	LastTestStatus    string             `json:"lastTestStatus" orm:"last_test_status"`
+	LastTestLatencyMs uint               `json:"lastTestLatencyMs" orm:"last_test_latency_ms"`
+	LastTestError     string             `json:"lastTestError" orm:"last_test_error"`
+	LastTestAt        *time.Time         `json:"lastTestAt" orm:"last_test_at"`
+	UpdatedAt         time.Time          `json:"updatedAt" orm:"updated_at"`
 }
 
 type PublicModelView struct {

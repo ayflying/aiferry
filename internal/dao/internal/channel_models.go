@@ -34,6 +34,7 @@ type ChannelModelsColumns struct {
 	AutoDisabledAt     string //
 	AutoDisabledReason string //
 	AutoDisabledSource string //
+	ClosedWindowsJson  string //
 	LastTestEndpoint   string //
 	LastTestStatus     string //
 	LastTestLatencyMs  string //
@@ -59,6 +60,7 @@ var channelModelsColumns = ChannelModelsColumns{
 	AutoDisabledAt:     "auto_disabled_at",
 	AutoDisabledReason: "auto_disabled_reason",
 	AutoDisabledSource: "auto_disabled_source",
+	ClosedWindowsJson:  "closed_windows_json",
 	LastTestEndpoint:   "last_test_endpoint",
 	LastTestStatus:     "last_test_status",
 	LastTestLatencyMs:  "last_test_latency_ms",

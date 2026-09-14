@@ -1,4 +1,5 @@
-import type { ModelBillingMode, PublicModel } from '../api/types'
+import type { ModelBillingMode, PublicModel, TimeWindow } from '../api/types'
+import { describeTimeWindow, readTimeWindow } from './time-window'
 
 type TokenPriceField = Pick<PublicModel,
   | 'inputPrice'
@@ -55,62 +56,22 @@ export function createPriceRuleDraft(): PriceRuleDraft {
   return { name: '', priority: 100, currency: 'USD', conditions: {}, rates: {} }
 }
 
-const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-
-function readTimeBlock(conditions?: Record<string, unknown> | null): Record<string, unknown> | null {
-  const block = conditions?.['time']
-  if (!block || typeof block !== 'object' || Array.isArray(block)) return null
-  return block as Record<string, unknown>
-}
-
-function readWeekdays(time: Record<string, unknown>): number[] {
-  if (!Array.isArray(time.weekdays)) return []
-  return [...new Set(time.weekdays.filter((item): item is number => typeof item === 'number' && item >= 1 && item <= 7))].sort((left, right) => left - right)
-}
-
-function readClockPairs(time: Record<string, unknown>): Array<[string, string]> {
-  if (!Array.isArray(time.ranges)) return []
-  return time.ranges
-    .filter((item): item is unknown[] => Array.isArray(item) && item.length === 2)
-    .map((item) => [String(item[0]), String(item[1])] as [string, string])
-}
-
-function formatWeekdays(days: number[]): string {
-  if (!days.length || days.length === 7) return ''
-  const segments: string[] = []
-  let start = days[0]
-  let previous = days[0]
-  for (let index = 1; index <= days.length; index += 1) {
-    const current = days[index]
-    if (current === previous + 1) {
-      previous = current
-      continue
-    }
-    segments.push(start === previous ? weekdayLabels[start - 1] : `${weekdayLabels[start - 1]}至${weekdayLabels[previous - 1]}`)
-    if (current === undefined) break
-    start = current
-    previous = current
-  }
-  return segments.join('、')
+// 计费规则的时段条件与「模型关闭时间」共用同一套 TimeWindow 结构，
+// 这里只负责从 conditions 里取出 time 块，摘要与判定复用公共实现。
+function readTimeBlock(conditions?: Record<string, unknown> | null): TimeWindow | null {
+  return readTimeWindow(conditions?.['time'])
 }
 
 // 判断规则的生效时段是否真的收窄了范围：只有「部分星期」或「显式时段区间」才算受限，
-// 全选七天或没有 time 块都等价于全天生效。
+// 全选七天、只写时区或没有 time 块都等价于全天生效。
 export function priceRuleTimeIsRestricted(conditions?: Record<string, unknown> | null): boolean {
-  const time = readTimeBlock(conditions)
-  if (!time) return false
-  return formatWeekdays(readWeekdays(time)) !== '' || readClockPairs(time).length > 0
+  return readTimeBlock(conditions) !== null
 }
 
 export function describePriceRuleTime(conditions?: Record<string, unknown> | null): string {
   const time = readTimeBlock(conditions)
   if (!time) return '不限时段'
-  const weekdays = formatWeekdays(readWeekdays(time))
-  const ranges = readClockPairs(time)
-    .map(([start, end]) => `${start}–${end}`)
-    .join('、')
-  if (!ranges) return weekdays || '不限时段'
-  return `${weekdays || '每天'} ${ranges}`
+  return describeTimeWindow(time)
 }
 
 export function describePriceRuleConditions(conditions?: Record<string, unknown> | null): string {

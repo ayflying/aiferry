@@ -1,5 +1,15 @@
 export type ModelBillingMode = 'token' | 'request' | 'rules'
 
+/**
+ * 时间窗：时区 + 星期（ISO 1=周一 … 7=周日，空表示每天）+ 一天内的多个时段。
+ * 时段元素为 [开始, 结束]，起止相同表示全天，开始晚于结束表示跨零点。
+ */
+export interface TimeWindow {
+  tz?: string
+  weekdays?: number[]
+  ranges?: Array<[string, string]>
+}
+
 export interface ChannelModel {
   id: number
   channelId: number
@@ -12,6 +22,8 @@ export interface ChannelModel {
   autoDisabled: boolean
   autoDisabledAt?: string
   autoDisabledReason: string
+  /** 定时关闭时段；未配置时为 null */
+  closedWindow?: TimeWindow | null
   inputPrice?: number
   cachedInputPrice?: number
   cacheWritePrice?: number

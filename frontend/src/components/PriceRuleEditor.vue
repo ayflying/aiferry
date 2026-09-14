@@ -1,26 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { Plus, Trash2 } from '@lucide/vue'
+import type { TimeWindow } from '../api/types'
 import type { PriceRuleDraft } from '../lib/model-pricing'
-import { timeZoneOptionGroups } from '../lib/time-zones'
-import TableActionButton from './TableActionButton.vue'
+import { createTimeWindow, toTimeWindow } from '../lib/time-window'
+import TimeWindowEditor from './TimeWindowEditor.vue'
 
 type TokenDimension = 'inputTokens' | 'outputTokens' | 'totalTokens'
 type TokenBound = { atLeast?: number; atMost?: number }
-type TimeRange = { start: string; end: string }
 
 const props = withDefaults(defineProps<{ modelValue: PriceRuleDraft; saving?: boolean }>(), { saving: false })
 const emit = defineEmits<{ (event: 'update:modelValue', value: PriceRuleDraft): void; (event: 'submit'): void }>()
-
-const weekdayOptions = [
-  { value: 1, label: '一' },
-  { value: 2, label: '二' },
-  { value: 3, label: '三' },
-  { value: 4, label: '四' },
-  { value: 5, label: '五' },
-  { value: 6, label: '六' },
-  { value: 7, label: '日' },
-]
 
 const tokenDimensions: Array<{ key: TokenDimension; label: string }> = [
   { key: 'inputTokens', label: '输入 Token' },
@@ -48,9 +37,7 @@ const priority = ref(100)
 const currency = ref('USD')
 const endpoint = ref('')
 const timeEnabled = ref(false)
-const timezone = ref('Asia/Shanghai')
-const weekdays = ref<number[]>([])
-const ranges = ref<TimeRange[]>([])
+const timeWindow = ref<TimeWindow>(createTimeWindow())
 const tokenBounds = reactive<Record<TokenDimension, TokenBound>>({ inputTokens: {}, outputTokens: {}, totalTokens: {} })
 const rates = reactive<Record<string, number | undefined>>({})
 
@@ -64,10 +51,10 @@ function buildConditions(): Record<string, unknown> {
     if (typeof bound.atMost === 'number') conditions[`${key}AtMost`] = bound.atMost
   }
   if (timeEnabled.value) {
-    const time: Record<string, unknown> = { tz: timezone.value.trim() || 'Asia/Shanghai' }
-    const days = [...new Set(weekdays.value)].sort((left, right) => left - right)
-    if (days.length) time.weekdays = days
-    const pairs = ranges.value.filter((item) => item.start && item.end).map((item) => [item.start, item.end])
+    const window = timeWindow.value
+    const time: Record<string, unknown> = { tz: window.tz?.trim() || 'Asia/Shanghai' }
+    if (window.weekdays?.length) time.weekdays = [...window.weekdays]
+    const pairs = (window.ranges ?? []).filter((item) => item[0] && item[1])
     if (pairs.length) time.ranges = pairs
     conditions.time = time
   }
@@ -133,18 +120,10 @@ watch(() => props.modelValue, (value) => {
   void nextTick(() => { syncing = false })
 }, { immediate: true, deep: true })
 
-watch([name, priority, currency, endpoint, timeEnabled, timezone, weekdays, ranges, tokenBounds, rates], () => {
+watch([name, priority, currency, endpoint, timeEnabled, timeWindow, tokenBounds, rates], () => {
   if (syncing) return
   emit('update:modelValue', buildValue())
 }, { deep: true })
-
-function addRange() {
-  ranges.value.push({ start: '09:00', end: '18:00' })
-}
-
-function removeRange(index: number) {
-  ranges.value.splice(index, 1)
-}
 
 const generatedConditions = computed(() => JSON.stringify(buildConditions(), null, 2))
 </script>
@@ -163,30 +142,7 @@ const generatedConditions = computed(() => JSON.stringify(buildConditions(), nul
         <el-switch v-model="timeEnabled" />
       </header>
       <p class="editor-hint">关闭时该规则全天生效；开启后可限定星期与每日区间。</p>
-      <template v-if="timeEnabled">
-        <el-select v-model="timezone" filterable placeholder="选择时区" class="timezone-select">
-          <el-option-group v-for="group in timeZoneOptionGroups" :key="group.label" :label="group.label">
-            <el-option v-for="item in group.options" :key="item.value" :label="item.label" :value="item.value" />
-          </el-option-group>
-        </el-select>
-        <div class="weekday-row">
-          <span class="editor-hint">星期</span>
-          <el-checkbox-group v-model="weekdays">
-            <el-checkbox-button v-for="item in weekdayOptions" :key="item.value" :value="item.value">{{ item.label }}</el-checkbox-button>
-          </el-checkbox-group>
-          <span class="editor-hint">不勾选表示不限星期</span>
-        </div>
-        <div class="range-row" v-for="(item, index) in ranges" :key="`range-${index}`">
-          <el-time-select v-model="item.start" start="00:00" end="23:45" step="00:15" :clearable="false" placeholder="开始" />
-          <span class="editor-hint">至</span>
-          <el-time-select v-model="item.end" start="00:00" end="23:45" step="00:15" :clearable="false" placeholder="结束" />
-          <TableActionButton :icon="Trash2" label="删除时段" danger :size="15" @click="removeRange(index)" />
-        </div>
-        <div class="range-actions">
-          <el-button size="small" :icon="Plus" @click="addRange">添加时段</el-button>
-          <span class="editor-hint">支持跨零点（如 22:00 至 06:00）；不添加时段表示不限时刻。</span>
-        </div>
-      </template>
+      <TimeWindowEditor v-if="timeEnabled" v-model="timeWindow" />
     </section>
 
     <section class="editor-block">

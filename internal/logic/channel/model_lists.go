@@ -143,6 +143,7 @@ func modelViewFromEntity(model entity.ChannelModels, channelName string, price m
 		HealthScore:        model.HealthScore,
 		AutoDisabled:       model.AutoDisabledAt != nil,
 		AutoDisabledReason: model.AutoDisabledReason,
+		ClosedWindow:       modelClosedWindow(model.ClosedWindowsJson),
 		InputPrice:         price.InputPrice,
 		CachedInputPrice:   price.CachedInputPrice,
 		CacheWritePrice:    price.CacheWritePrice,

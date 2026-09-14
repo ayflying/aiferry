@@ -82,14 +82,14 @@ func (s *sRelay) writeRouteCache(ctx context.Context, model string, version int6
 func (s *sRelay) routeCached(ctx context.Context, model string, key apikey.AuthKey) ([]Candidate, error) {
 	version := s.routeCacheVersion(ctx)
 	if candidates, ok := s.readRouteCache(ctx, model, version); ok {
-		return s.filterCandidatesByKey(ctx, candidates, key)
+		return s.filterCandidatesByKey(ctx, filterClosedCandidates(candidates, time.Now()), key)
 	}
 	candidates, err := s.routeStatic(ctx, model)
 	if err != nil {
 		return nil, err
 	}
 	s.writeRouteCache(ctx, model, version, candidates)
-	return s.filterCandidatesByKey(ctx, candidates, key)
+	return s.filterCandidatesByKey(ctx, filterClosedCandidates(candidates, time.Now()), key)
 }
 
 // routeStatic 解析与密钥无关的渠道候选：启用的模型映射 + 激活渠道 + 激活分组。
@@ -149,6 +149,7 @@ func (s *sRelay) routeStatic(ctx context.Context, model string) ([]Candidate, er
 			Weight:              channel.Weight,
 			PublicName:          row.PublicName,
 			UpstreamName:        row.UpstreamName,
+			ClosedWindow:        row.ClosedWindowsJson,
 			GroupIDs:            groupIDs,
 		})
 	}

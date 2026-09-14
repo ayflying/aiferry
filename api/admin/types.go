@@ -116,6 +116,18 @@ type ModelSelectionInput struct {
 type ModelMappingInput struct {
 	UpstreamName string `json:"upstreamName"`
 	PublicName   string `json:"publicName"`
+	// ClosedWindow 是「定时关闭时段」。字段缺省（nil）表示保持已有时段不变，
+	// 传空对象表示清除；只在所选模型的映射关系上生效。
+	ClosedWindow *ModelClosedWindowInput `json:"closedWindow"`
+}
+
+// ModelClosedWindowInput 描述「时区 + 星期 + 多时段」的定时关闭时间窗：
+// weekdays 用 ISO 编号（1=周一…7=周日），空表示每天；ranges 为 ["HH:MM","HH:MM"]
+// 列表，起止相同视为全天、start > end 视为跨零点；空表示不关闭。
+type ModelClosedWindowInput struct {
+	TZ       string     `json:"tz"`
+	Weekdays []int      `json:"weekdays"`
+	Ranges   [][]string `json:"ranges"`
 }
 
 type ModelTestInput struct {

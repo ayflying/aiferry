@@ -61,8 +61,11 @@ type Candidate struct {
 	Weight              uint   `orm:"weight"`
 	PublicName          string `orm:"public_name"`
 	UpstreamName        string `orm:"upstream_name"`
-	GroupIDs            []uint64
-	ReasoningEffort     string `orm:"-"`
+	// ClosedWindow 是该渠道模型的定时关闭时段原始 JSON。关闭判定随时间变化，
+	// 因此缓存里保存原值，由每次请求实时判定是否落在关闭时段内。
+	ClosedWindow    string `json:"closedWindow,omitempty"`
+	GroupIDs        []uint64
+	ReasoningEffort string `orm:"-"`
 }
 
 type Model struct {

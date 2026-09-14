@@ -13,6 +13,7 @@ import (
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/system"
+	"github.com/yunloli/aiferry/internal/logic/timewindow"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -87,6 +88,10 @@ func (s *sChannel) SelectModels(ctx context.Context, channelID uint64, input adm
 	if err != nil {
 		return nil, err
 	}
+	closedWindows, err := normalizeModelClosedWindows(input)
+	if err != nil {
+		return nil, err
+	}
 	err = dao.ChannelModels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
 		var existing []entity.ChannelModels
 		if scanErr := dao.ChannelModels.Ctx(txCtx).
@@ -113,24 +118,35 @@ func (s *sChannel) SelectModels(ctx context.Context, channelID uint64, input adm
 			}
 			if exists {
 				used[model.Id] = struct{}{}
-				if model.Enabled == 1 && model.PublicName == mapping.PublicName {
+				data := do.ChannelModels{PublicName: mapping.PublicName, Enabled: 1}
+				needsUpdate := model.Enabled != 1 || model.PublicName != mapping.PublicName
+				// 时段变化同样要落库；未提交该字段时保持库里原值。
+				if window, submitted := closedWindows[mapping]; submitted && model.ClosedWindowsJson != window {
+					data.ClosedWindowsJson = window
+					needsUpdate = true
+				}
+				if !needsUpdate {
 					continue
 				}
 				if _, updateErr := dao.ChannelModels.Ctx(txCtx).
 					Where(dao.ChannelModels.Columns().Id, model.Id).
-					Data(do.ChannelModels{PublicName: mapping.PublicName, Enabled: 1}).
+					Data(data).
 					Update(); updateErr != nil {
 					return gerror.Wrap(updateErr, "update model selection")
 				}
 				continue
 			}
-			if _, insertErr := dao.ChannelModels.Ctx(txCtx).Data(do.ChannelModels{
+			insert := do.ChannelModels{
 				ChannelId:    channelID,
 				PublicName:   mapping.PublicName,
 				UpstreamName: mapping.UpstreamName,
 				Discovered:   1,
 				Enabled:      1,
-			}).Insert(); insertErr != nil {
+			}
+			if window, submitted := closedWindows[mapping]; submitted {
+				insert.ClosedWindowsJson = window
+			}
+			if _, insertErr := dao.ChannelModels.Ctx(txCtx).Data(insert).Insert(); insertErr != nil {
 				return gerror.Wrap(insertErr, "save selected model")
 			}
 		}
@@ -197,6 +213,50 @@ func normalizeModelMappings(input adminapi.ModelSelectionInput) ([]modelMapping,
 		result = append(result, mapping)
 	}
 	return result, nil
+}
+
+// normalizeModelClosedWindows 解析每条映射随请求带上的定时关闭时段。
+// 返回值只包含「本次显式提交了该字段」的映射：字段缺省（nil）不进结果，
+// 保存时保持库里原值；提交空对象得到空串，表示清除已配置的时段。
+func normalizeModelClosedWindows(input adminapi.ModelSelectionInput) (map[modelMapping]string, error) {
+	windows := make(map[modelMapping]string, len(input.Models))
+	for _, item := range input.Models {
+		if item.ClosedWindow == nil {
+			continue
+		}
+		upstreamName := strings.TrimSpace(item.UpstreamName)
+		if upstreamName == "" {
+			continue
+		}
+		publicName := strings.TrimSpace(item.PublicName)
+		if publicName == "" {
+			publicName = upstreamName
+		}
+		key := modelMapping{UpstreamName: upstreamName, PublicName: publicName}
+		if _, exists := windows[key]; exists {
+			continue
+		}
+		normalized, err := timewindow.NormalizeWindow(timewindow.Window{
+			TZ:       item.ClosedWindow.TZ,
+			Weekdays: item.ClosedWindow.Weekdays,
+			Ranges:   item.ClosedWindow.Ranges,
+		})
+		if err != nil {
+			return nil, gerror.Wrapf(err, "模型 %s 的关闭时段无效", publicName)
+		}
+		windows[key] = normalized
+	}
+	return windows, nil
+}
+
+// modelClosedWindow 把库里存的时段 JSON 转成视图结构；内容异常时按「未配置」
+// 处理（fail-open，不因配置脏数据阻断该模型的正常转发）。
+func modelClosedWindow(raw string) *timewindow.Window {
+	window, err := timewindow.Parse(raw)
+	if err != nil || window.IsZero() {
+		return nil
+	}
+	return &window
 }
 
 func stringOrDefault(value, fallback string) string {
