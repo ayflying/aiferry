@@ -95,15 +95,10 @@ function hydrate(value?: PriceRuleDraft) {
     }
   }
   const block = conditions['time']
-  const time = block && typeof block === 'object' && !Array.isArray(block) ? (block as Record<string, unknown>) : null
+  const time = block && typeof block === 'object' && !Array.isArray(block) ? block : null
   timeEnabled.value = time !== null
-  timezone.value = typeof time?.tz === 'string' && time.tz ? time.tz : 'Asia/Shanghai'
-  weekdays.value = Array.isArray(time?.weekdays) ? time.weekdays.filter((item): item is number => typeof item === 'number') : []
-  ranges.value = Array.isArray(time?.ranges)
-    ? time.ranges
-        .filter((item): item is unknown[] => Array.isArray(item) && item.length === 2)
-        .map((item) => ({ start: String(item[0]), end: String(item[1]) }))
-    : []
+  // 时段统一交给 TimeWindowEditor 承载，回填时收敛成编辑器可用的结构。
+  timeWindow.value = time ? toTimeWindow(time) : createTimeWindow()
   const incoming = value?.rates && typeof value.rates === 'object' ? (value.rates as Record<string, unknown>) : {}
   for (const { key } of rateFields) {
     const rate = incoming[key]
