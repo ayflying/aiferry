@@ -31,8 +31,17 @@ const editingId = ref(0)
 /** 被用户移除的既有键，提交时必须显式置空才算清除。 */
 const clearedNames = new Set<string>()
 let rowSeq = 0
-/** 上一次由本面板发出的负载，用于区分「父级外部重置」与「自己 emit 的回灌」。 */
-let lastEmitted = ''
+/**
+ * 上一次由本面板发出的负载对象，用于识别父级原样回灌的「回声」。
+ *
+ * 回声不能重建本地行：未选模型的新行不会进负载，重建会把它抹掉，正在编辑的时段也会被收起。
+ * 但识别**只能成功一次**——父级每次载入都是「先清空、再回填」（见 ChannelsView.discover），
+ * 若用「内容永久比较」的守卫，清空后的回填会因内容与上次提交相同而被继续当成回声吞掉，
+ * 面板就会一直停在清空后的空状态：页签徽标显示已配置、面板却写「暂无定时关闭配置」，
+ * 只有刷新页面才恢复。故这里记下回声后立即消费掉，此后一切外部赋值都按权威数据重建。
+ */
+let echoed: Record<string, TimeWindow> | null = null
+let echoedDigest = ''
 
 const configuredCount = computed(() => rows.value.filter((row) => row.publicName).length)
 
@@ -50,9 +59,12 @@ function rowsFromWindows(source: Record<string, TimeWindow>): WindowRow[] {
 }
 
 // 只有数据确实来自外部（切换渠道、重新打开弹窗）时才重建行；
-// 自己 emit 出去的回灌不动本地状态，否则编辑时段会被同步逻辑打断。
+// 父级原样回灌的自己的负载不动本地状态，否则新加的空行会被抹掉、编辑中的时段会被收起。
 watch(() => props.windows, (next) => {
-  if (serialize(next) === lastEmitted) return
+  const isEcho = echoed !== null && (next === echoed || serialize(next) === echoedDigest)
+  echoed = null
+  echoedDigest = ''
+  if (isEcho) return
   rows.value = rowsFromWindows(next)
   clearedNames.clear()
   editingId.value = 0
@@ -60,7 +72,8 @@ watch(() => props.windows, (next) => {
 
 function commit() {
   const payload = windowRowsToRecord(rows.value, clearedNames)
-  lastEmitted = serialize(payload)
+  echoed = payload
+  echoedDigest = serialize(payload)
   emit('update:windows', payload)
 }
 
