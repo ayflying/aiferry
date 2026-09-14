@@ -96,6 +96,10 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 				writeRetryableAvailabilityError(r)
 				return
 			}
+			if relaysvc.IsConcurrencyExhaustedError(err) {
+				writeConcurrencyExhaustedError(r)
+				return
+			}
 			if system.IsImageInputDisabled(err) {
 				writeError(r, http.StatusBadRequest, "invalid_request_error", err.Error())
 				return
@@ -293,6 +297,10 @@ func (c *Controller) writeRelayError(r *ghttp.Request, err error) {
 		writeRetryableAvailabilityError(r)
 		return
 	}
+	if relaysvc.IsConcurrencyExhaustedError(err) {
+		writeConcurrencyExhaustedError(r)
+		return
+	}
 	if user.IsInsufficientBalance(err) {
 		writeError(r, http.StatusPaymentRequired, "insufficient_balance", err.Error())
 		return
@@ -380,6 +388,16 @@ func copyUpstreamResponseHeaders(target, source http.Header) {
 
 func writeRetryableAvailabilityError(r *ghttp.Request) {
 	response := relaysvc.RetryableAvailabilityClientError()
+	if response.RetryAfter != "" {
+		r.Response.Header().Set("Retry-After", response.RetryAfter)
+	}
+	writeError(r, response.Status, response.Type, response.Message)
+}
+
+// writeConcurrencyExhaustedError 回写渠道并发额度耗尽：网关本地限流，
+// 以 429 + Retry-After 让客户端稍后重试，而不是把它当作上游故障。
+func writeConcurrencyExhaustedError(r *ghttp.Request) {
+	response := relaysvc.ConcurrencyExhaustedClientError()
 	if response.RetryAfter != "" {
 		r.Response.Header().Set("Retry-After", response.RetryAfter)
 	}

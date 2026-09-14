@@ -15,6 +15,7 @@ export function createDefaultChannelAdvancedConfig(): ChannelAdvancedConfig {
     allowSafetyIdentifier: false,
     allowInclude: false,
     allowInferenceGeo: false,
+    concurrencyLimit: 0,
   }
 }
 

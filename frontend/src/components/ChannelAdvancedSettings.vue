@@ -35,6 +35,14 @@ function setStoreAllowed(value: boolean | string | number) {
       </div>
     </div>
 
+    <div class="limit-field">
+      <div class="section-caption">转发并发限制</div>
+      <div class="setting-row">
+        <div><strong>每把密钥的并发上限</strong><span>同一时刻允许进行的转发请求数，0 表示不限制；额度按「渠道 × 密钥」独立计数，本渠道配 3 把密钥即 3 倍并发</span></div>
+        <el-input-number v-model="config.concurrencyLimit" :min="0" :max="1024" :step="1" controls-position="right" />
+      </div>
+    </div>
+
     <div class="proxy-field">
       <div class="field-label"><strong>代理地址</strong><el-button v-if="editing && hasProxy" text size="small" @click="emit('clearProxy')">清除已保存代理</el-button></div>
       <el-input v-model="proxyUrl" clearable :placeholder="editing && hasProxy ? '已配置（不回显）；留空保持原值，输入新值覆盖，清空保存即删除' : 'http://user:pass@host:port'" autocomplete="off" spellcheck="false" />
@@ -62,5 +70,5 @@ function setStoreAllowed(value: boolean | string | number) {
 </template>
 
 <style scoped>
-.advanced-settings { margin-top: 20px; border-top: 1px solid #dce2e7; }.advanced-heading { display: flex; align-items: center; gap: 8px; padding: 16px 0 10px; color: #15202b; }.advanced-heading svg { color: #1677ff; }.advanced-heading strong, .setting-row strong, .proxy-field strong, .prompt-field > strong { font-size: 13px; }.setting-group, .field-controls { border-top: 1px solid #dce2e7; }.setting-row { display: flex; min-height: 61px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #dce2e7; padding: 8px 0; }.setting-row > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.setting-row span, .proxy-field > span { color: #66717d; font-size: 11px; line-height: 1.45; }.setting-row :deep(.el-switch) { flex: 0 0 auto; }.proxy-field, .prompt-field { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.field-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.field-label :deep(.el-button) { height: auto; padding: 0; }.compact { min-height: 52px; margin-top: 4px; border-bottom: 0; }.section-caption { padding: 14px 0 5px; color: #40505f; font-size: 12px; font-weight: 600; }@media (max-width: 480px) { .setting-row { align-items: flex-start; padding: 12px 0; }.setting-row :deep(.el-switch) { margin-top: 4px; } }
+.advanced-settings { margin-top: 20px; border-top: 1px solid #dce2e7; }.advanced-heading { display: flex; align-items: center; gap: 8px; padding: 16px 0 10px; color: #15202b; }.advanced-heading svg { color: #1677ff; }.advanced-heading strong, .setting-row strong, .proxy-field strong, .prompt-field > strong { font-size: 13px; }.setting-group, .field-controls { border-top: 1px solid #dce2e7; }.setting-row { display: flex; min-height: 61px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #dce2e7; padding: 8px 0; }.setting-row > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.setting-row span, .proxy-field > span { color: #66717d; font-size: 11px; line-height: 1.45; }.setting-row :deep(.el-switch) { flex: 0 0 auto; }.proxy-field, .prompt-field { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.field-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.field-label :deep(.el-button) { height: auto; padding: 0; }.compact { min-height: 52px; margin-top: 4px; border-bottom: 0; }.section-caption { padding: 14px 0 5px; color: #40505f; font-size: 12px; font-weight: 600; }.limit-field { border-top: 1px solid #dce2e7; }.limit-field .setting-row :deep(.el-input-number) { flex: 0 0 auto; width: 132px; }@media (max-width: 480px) { .setting-row { align-items: flex-start; padding: 12px 0; }.setting-row :deep(.el-switch) { margin-top: 4px; } }
 </style>

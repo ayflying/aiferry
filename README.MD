@@ -9,6 +9,7 @@ AiFerry（AI 摆渡）是基于 GoFrame v2 和 Vue 3 的 OpenAI 兼容中转管�
 - Responses 与 Chat Completions 之间的协议自动转换（工具调用历史、多模态内容与思考内容的双向还原，见 `docs/protocol-conversion.md`）
 - 渠道优先级、权重路由、最多三渠道故障转移和 Redis 冷却
 - 渠道模型定时关闭：按「渠道 × 模型」配置星期与时段，关闭期间自动从路由摘除（见 `docs/model-closed-windows.md`）
+- 渠道并发限制：按「渠道 × 密钥」隔离的转发并发上限，满额先换空闲密钥再排队等待（见 `docs/channel-concurrency-limit.md`）
 - thinking 模式模型的 `reasoning_content` 回传（DeepSeek/Kimi 等要求发生过工具调用后必须回传，见 `docs/reasoning-echo.md`）
 - OpenAI 官方、Sub2API 和自定义 JSON 费用查询
 - Casdoor OAuth2 登录和 Redis Session

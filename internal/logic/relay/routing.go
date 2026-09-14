@@ -64,6 +64,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 			PublicName:          row.PublicName,
 			UpstreamName:        row.UpstreamName,
 			ClosedWindow:        row.ClosedWindowsJson,
+			ConcurrencyLimit:    advancedConfig.ConcurrencyLimit,
 		})
 	}
 	available := candidates[:0]

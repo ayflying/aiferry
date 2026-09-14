@@ -22,6 +22,9 @@ export interface ChannelAdvancedConfig {
   allowSafetyIdentifier: boolean
   allowInclude: boolean
   allowInferenceGeo: boolean
+  // concurrencyLimit 是每把上游密钥允许同时进行的转发请求数，0 表示不限制。
+  // 额度按「渠道 × 密钥」独立计数，多把密钥互不占用。
+  concurrencyLimit: number
 }
 
 export interface ChannelTypeModelConfig {

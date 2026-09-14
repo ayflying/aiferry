@@ -150,6 +150,7 @@ func (s *sRelay) routeStatic(ctx context.Context, model string) ([]Candidate, er
 			PublicName:          row.PublicName,
 			UpstreamName:        row.UpstreamName,
 			ClosedWindow:        row.ClosedWindowsJson,
+			ConcurrencyLimit:    advancedConfig.ConcurrencyLimit,
 			GroupIDs:            groupIDs,
 		})
 	}

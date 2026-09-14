@@ -10,6 +10,10 @@ import (
 
 const maxSystemPromptLength = 16 << 10
 
+// maxConcurrencyLimit 是单个上游密钥允许配置的并发上限。限制额度按密钥独立计数，
+// 因此渠道的总并发是「密钥数 × 该值」，这里只约束单把密钥的上限。
+const maxConcurrencyLimit = 1024
+
 // AdvancedConfig controls how a channel normalizes request and response payloads.
 // All optional request fields are blocked until explicitly enabled.
 type AdvancedConfig struct {
@@ -26,6 +30,10 @@ type AdvancedConfig struct {
 	AllowSafetyIdentifier  bool     `json:"allowSafetyIdentifier"`
 	AllowInclude           bool     `json:"allowInclude"`
 	AllowInferenceGeo      bool     `json:"allowInferenceGeo"`
+	// ConcurrencyLimit 是每把上游密钥允许同时进行的转发请求数，0 表示不限制。
+	// 额度按「渠道 × 密钥」独立计数，同一渠道的多把密钥互不占用：
+	// 配置 15 且渠道有 3 把密钥时，每把各 15 并发，渠道合计 45 并发。
+	ConcurrencyLimit int `json:"concurrencyLimit"`
 }
 
 func DefaultAdvancedConfig() AdvancedConfig {
@@ -57,6 +65,9 @@ func ParseAdvancedConfig(raw []byte) (AdvancedConfig, error) {
 	config.SystemPrompt = strings.TrimSpace(config.SystemPrompt)
 	if len(config.SystemPrompt) > maxSystemPromptLength {
 		return AdvancedConfig{}, gerror.New("system prompt exceeds 16 KiB")
+	}
+	if config.ConcurrencyLimit < 0 || config.ConcurrencyLimit > maxConcurrencyLimit {
+		return AdvancedConfig{}, gerror.New("concurrency limit must be between 0 and 1024")
 	}
 	return config, nil
 }

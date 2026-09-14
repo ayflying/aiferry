@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -31,6 +32,9 @@ type channelAttempt struct {
 	handled   bool
 	attempts  int
 	flow      []usage.AttemptFlowStep
+	// concurrencyExhausted 表示本次尝试根本没发出上游请求：渠道全部密钥的并发额度
+	// 都占满且等待窗口内没有空位。该情况由网关本地判定，不参与渠道失败评分。
+	concurrencyExhausted bool
 }
 
 // attemptChannel keeps retries inside one channel until no usable upstream key
@@ -39,8 +43,15 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 	candidate.ReasoningEffort = requestReasoningEffort(body)
 	last := channelAttempt{candidate: candidate}
 	for {
-		credential, err := s.channels.SelectCredential(ctx, apiKeyID, candidate.ChannelID, excluded)
+		// 占额度必须与选密钥一起做：同渠道其它密钥还有空位时直接换密钥，
+		// 全部占满才排队等待，避免把同一个密钥的等待强加给整个渠道。
+		credential, release, err := s.acquireKeySlot(ctx, apiKeyID, candidate, excluded)
 		if err != nil {
+			if errors.Is(err, ErrChannelConcurrencyExhausted) {
+				last.concurrencyExhausted = true
+				last.result = attemptResult{status: http.StatusTooManyRequests, errorMessage: err.Error(), attemptFlow: last.flow}
+				return last
+			}
 			if last.result.status == 0 {
 				last.result.status = http.StatusBadGateway
 				last.result.errorMessage = err.Error()
@@ -52,26 +63,36 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 		current := candidate
 		current.ChannelCredentialID = credential.ID
 		current.APIKeyCipher = credential.APIKeyCipher
-		for _, baseURL := range candidateBaseURLs(current) {
-			current.BaseURL = baseURL
-			attemptStartedAt := time.Now()
-			attemptWriter := writer
-			if !stream {
-				attemptWriter = nil
+		// 单把密钥的尝试放在闭包里，用 defer 归还额度：即使上游调用 panic，
+		// 也不会让这把密钥的额度永久丢失（额度泄漏只能靠重启进程恢复）。
+		last = func() channelAttempt {
+			defer release()
+			attempted := last
+			for _, baseURL := range candidateBaseURLs(current) {
+				current.BaseURL = baseURL
+				attemptStartedAt := time.Now()
+				attemptWriter := writer
+				if !stream {
+					attemptWriter = nil
+				}
+				result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, userID, apiKeyID, settings, sensitiveDataRestorer)
+				result.latency = time.Since(attemptStartedAt)
+				if attemptErr != nil {
+					result = failedAttemptResult(result, attemptErr.Error())
+					result.timedOut = isUpstreamTimeout(attemptErr)
+				}
+				flow := append(attempted.flow, newAttemptFlowStep(current.ChannelName, result))
+				attempted = channelAttempt{candidate: current, result: result, attempts: attempted.attempts + 1, flow: flow}
+				if attemptCompleted(attempted.result, attemptErr) || nonRetryableClientFailure(attempted.result, attemptErr, settings) {
+					attempted.handled = true
+					break
+				}
 			}
-			result, _, attemptErr := s.attempt(ctx, attemptWriter, incomingHeaders, endpoint, body, current, stream, userID, apiKeyID, settings, sensitiveDataRestorer)
-			result.latency = time.Since(attemptStartedAt)
-			if attemptErr != nil {
-				result = failedAttemptResult(result, attemptErr.Error())
-				result.timedOut = isUpstreamTimeout(attemptErr)
-			}
-			flow := append(last.flow, newAttemptFlowStep(current.ChannelName, result))
-			last = channelAttempt{candidate: current, result: result, attempts: last.attempts + 1, flow: flow}
-			if attemptCompleted(last.result, attemptErr) || nonRetryableClientFailure(last.result, attemptErr, settings) {
-				last.handled = true
-				last.result.attemptFlow = last.flow
-				return last
-			}
+			return attempted
+		}()
+		if last.handled {
+			last.result.attemptFlow = last.flow
+			return last
 		}
 		s.maybeAutoDisable(ctx, settings, current, last.result)
 		excluded[current.ChannelCredentialID] = struct{}{}

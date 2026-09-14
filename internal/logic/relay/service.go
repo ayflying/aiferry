@@ -40,6 +40,8 @@ type sRelay struct {
 	channels   *channel.Service
 	types      *channeltype.Service
 	locations  *iplocation.Service
+	// slots 按「渠道 × 密钥」统计在途转发请求，实现渠道的并发限制。
+	slots *keySlots
 }
 
 type Candidate struct {
@@ -65,9 +67,13 @@ type Candidate struct {
 	UpstreamName        string `orm:"upstream_name"`
 	// ClosedWindow 是该渠道模型的定时关闭时段原始 JSON。关闭判定随时间变化，
 	// 因此缓存里保存原值，由每次请求实时判定是否落在关闭时段内。
-	ClosedWindow    string `json:"closedWindow,omitempty"`
-	GroupIDs        []uint64
-	ReasoningEffort string `orm:"-"`
+	ClosedWindow string `json:"closedWindow,omitempty"`
+	// ConcurrencyLimit 是该渠道每把上游密钥的转发并发上限，0 表示不限制。
+	// 它是渠道高级配置项，随路由缓存一起传递；渠道写操作会递增路由版本号，
+	// 因此修改后无需等待缓存过期即生效。
+	ConcurrencyLimit int `json:"concurrencyLimit,omitempty"`
+	GroupIDs         []uint64
+	ReasoningEffort  string `orm:"-"`
 }
 
 type Model struct {
@@ -106,7 +112,7 @@ type attemptResult struct {
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, channelTypeSvc *channeltype.Service, locationSvc *iplocation.Service) *sRelay {
-	return &sRelay{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc, types: channelTypeSvc, locations: locationSvc}
+	return &sRelay{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc, types: channelTypeSvc, locations: locationSvc, slots: newKeySlots()}
 }
 
 // modelsListCacheKey 复用历史键名 aiferry:models:list 并嵌入路由版本号：
@@ -250,6 +256,14 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	for index := range candidates {
 		for {
 			outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, key.UserId, key.Id, settings, excludedCredentials, sensitiveDataRestorer)
+			if outcome.concurrencyExhausted {
+				// 该渠道每把密钥的并发额度都占满，且等待窗口内没有腾出空位。
+				// 这是网关本地限流而非上游故障：不写用量、不参与渠道失败评分
+				// （默认禁用状态码含 429），直接以 429 让客户端稍后重试。
+				channelName := candidates[index].ChannelName
+				g.Log().Warningf(ctx, "relay %s: channel %s (#%d) key concurrency exhausted for model %s", clientIP, channelName, candidates[index].ChannelID, requestedModel)
+				return gerror.Wrapf(ErrChannelConcurrencyExhausted, "channel %s (#%d) key concurrency exhausted", channelName, candidates[index].ChannelID)
+			}
 			attempts += outcome.attempts
 			if outcome.attempts > 0 {
 				last = outcome.result
