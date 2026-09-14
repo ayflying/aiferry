@@ -103,7 +103,7 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
     <div v-else-if="discoveryUnsupported" class="discovery-unsupported"><Info :size="14" /><span>该渠道不提供模型发现接口，可直接在下方搜索框输入模型 ID，点「添加」手动加入。</span></div>
       <el-tabs v-model="activeTab" class="model-tabs">
         <el-tab-pane label="选择模型" name="selection">
-          <div class="mapping-hint">勾选要启用的上游模型；自定义公开名称在“配置映射”页签中逐行添加，定时关闭在“关闭时间”页签配置。</div>
+          <div class="mapping-hint">勾选要启用的上游模型；自定义公开名称在“配置映射”页签中逐行添加，定时关闭在“关闭时间”页签中手动添加。</div>
           <div class="selection-toolbar"><el-input :model-value="discoveryKeyword" clearable placeholder="搜索上游模型" @update:model-value="emit('update:discoveryKeyword', $event)" /><el-button :disabled="!canAddKeyword" :title="addKeywordHint" @click="addKeywordAsModel">添加</el-button><el-button :disabled="!visibleDiscoveredModels.length" @click="toggleVisibleModels">{{ allVisibleSelected ? '取消全选' : '全选' }}</el-button></div>
           <div class="selection-summary"><span>已选择 {{ selectedModelNames.length }} 个</span><span>共发现 {{ discoveredModels.length }} 个</span></div>
           <el-checkbox-group v-if="visibleDiscoveredModels.length" :model-value="selectedModelNames" class="model-check-list" @update:model-value="emit('update:selectedModelNames', $event)"><div v-for="item in visibleDiscoveredModels" :key="item.name" class="model-selection-row"><el-checkbox :value="item.name"><code>{{ item.name }}</code><el-tag v-if="item.custom" size="small" type="warning" class="custom-tag">自定义</el-tag></el-checkbox></div></el-checkbox-group>

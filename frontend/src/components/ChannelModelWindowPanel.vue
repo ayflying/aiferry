@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Search } from '@lucide/vue'
+import { computed, ref, watch } from 'vue'
+import { Plus, Trash2 } from '@lucide/vue'
 
 import type { TimeWindow } from '../api/types'
-import { createClosedWindow, describeTimeWindow, timeWindowIsEmpty } from '../lib/time-window'
+import { createClosedWindow, describeTimeWindow, timeWindowIsEmpty, windowRowsFromRecord, windowRowsToRecord } from '../lib/time-window'
+import TableActionButton from './TableActionButton.vue'
 import TimeWindowEditor from './TimeWindowEditor.vue'
 
 /**
- * 渠道「关闭时间」页签：按「渠道 × 模型」配置定时关闭时段。
+ * 渠道「关闭时间」页签：按「渠道 × 模型」手动添加定时关闭时段。
  *
- * 选中模型并设置时段后，这些模型在该时段内不再通过本渠道提供；时段过去自动恢复。
- * 关闭判定在网关路由阶段实时进行，只影响本渠道，其他渠道仍可正常服务同一个模型。
+ * 与「配置映射」页签同构：默认空列表，点「添加关闭时段」才出现一行，行内选模型、
+ * 编辑时段、删除；同一模型只能占一行，已选模型不再出现在其他行的下拉选项里。
  *
  * windows 的语义：键存在即「本次提交了该字段」——值为空时间窗表示清除，
- * 键不存在表示保持库里原值。这样才能区分「没配过」与「显式清空」。
+ * 键不存在表示保持库里原值。因此删除一行时必须保留该键并置空；
+ * 直接删键会被后端理解为「保持原值」，清除就不生效。
  */
 const props = defineProps<{
   models: Array<{ publicName: string; upstreamName: string }>
@@ -22,49 +24,97 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (event: 'update:windows', value: Record<string, TimeWindow>): void }>()
 
-const keyword = ref('')
-const editing = ref('')
+type WindowRow = { id: number; publicName: string; window: TimeWindow }
 
-const visibleModels = computed(() => {
-  const trimmed = keyword.value.trim().toLowerCase()
-  if (!trimmed) return props.models
-  return props.models.filter((item) =>
-    item.publicName.toLowerCase().includes(trimmed) || item.upstreamName.toLowerCase().includes(trimmed))
-})
+const rows = ref<WindowRow[]>([])
+const editingId = ref(0)
+/** 被用户移除的既有键，提交时必须显式置空才算清除。 */
+const clearedNames = new Set<string>()
+let rowSeq = 0
+/** 上一次由本面板发出的负载，用于区分「父级外部重置」与「自己 emit 的回灌」。 */
+let lastEmitted = ''
 
-const closedModels = computed(() => props.models.filter((item) => hasWindow(item.publicName)))
+const configuredCount = computed(() => rows.value.filter((row) => row.publicName).length)
 
-function hasWindow(publicName: string): boolean {
-  const window = props.windows[publicName]
-  return Boolean(window) && !timeWindowIsEmpty(window)
+/** 稳定序列化：键排序后取参与判定的字段，避免比较时受对象键顺序影响。 */
+function serialize(record: Record<string, TimeWindow>): string {
+  return JSON.stringify(
+    Object.keys(record)
+      .sort()
+      .map((name) => [name, record[name]?.tz ?? '', record[name]?.weekdays ?? [], record[name]?.ranges ?? []]),
+  )
 }
 
-function summaryOf(publicName: string): string {
-  return hasWindow(publicName) ? describeTimeWindow(props.windows[publicName]) : '未关闭'
+function rowsFromWindows(source: Record<string, TimeWindow>): WindowRow[] {
+  return windowRowsFromRecord(source).map((item) => ({ id: (rowSeq += 1), ...item }))
 }
 
-function toggle(publicName: string, enabled: boolean) {
-  const next = { ...props.windows }
-  if (enabled) {
-    next[publicName] = createClosedWindow()
-    editing.value = publicName
-  } else {
-    // 置空对象而不是删键：删键后端会「保持原值」，无法表达清除。
-    next[publicName] = { tz: '', weekdays: [], ranges: [] }
-    if (editing.value === publicName) editing.value = ''
+// 只有数据确实来自外部（切换渠道、重新打开弹窗）时才重建行；
+// 自己 emit 出去的回灌不动本地状态，否则编辑时段会被同步逻辑打断。
+watch(() => props.windows, (next) => {
+  if (serialize(next) === lastEmitted) return
+  rows.value = rowsFromWindows(next)
+  clearedNames.clear()
+  editingId.value = 0
+}, { immediate: true, deep: true })
+
+function commit() {
+  const payload = windowRowsToRecord(rows.value, clearedNames)
+  lastEmitted = serialize(payload)
+  emit('update:windows', payload)
+}
+
+/** 下拉选项：排除已被其他行占用的模型；不在启用清单里的历史配置也要能回显，否则无法删除。 */
+function optionsFor(row: WindowRow): Array<{ publicName: string; upstreamName: string }> {
+  const taken = new Set(rows.value.filter((item) => item.id !== row.id && item.publicName).map((item) => item.publicName))
+  const options = props.models.filter((item) => !taken.has(item.publicName))
+  if (row.publicName && !options.some((item) => item.publicName === row.publicName)) {
+    options.unshift({ publicName: row.publicName, upstreamName: row.publicName })
   }
-  emit('update:windows', next)
+  return options
 }
 
-function updateWindow(publicName: string, value: TimeWindow) {
-  emit('update:windows', { ...props.windows, [publicName]: value })
+function addRow() {
+  const row: WindowRow = { id: (rowSeq += 1), publicName: '', window: createClosedWindow() }
+  rows.value = [...rows.value, row]
+  editingId.value = row.id
+  commit()
+}
+
+function removeRow(row: WindowRow) {
+  if (row.publicName) clearedNames.add(row.publicName)
+  rows.value = rows.value.filter((item) => item.id !== row.id)
+  if (editingId.value === row.id) editingId.value = 0
+  commit()
+}
+
+function updateRowModel(row: WindowRow, value: unknown) {
+  const next = typeof value === 'string' ? value.trim() : ''
+  // 改选模型等于删掉旧配置、新增新配置：旧键置空，新键从待清除集合里摘掉。
+  if (row.publicName && row.publicName !== next) clearedNames.add(row.publicName)
+  if (next) clearedNames.delete(next)
+  row.publicName = next
+  commit()
+}
+
+function updateRowWindow(row: WindowRow, value: TimeWindow) {
+  row.window = value
+  commit()
+}
+
+function toggleEditing(row: WindowRow) {
+  editingId.value = editingId.value === row.id ? 0 : row.id
+}
+
+function summaryOf(row: WindowRow): string {
+  return timeWindowIsEmpty(row.window) ? '未设置时段' : describeTimeWindow(row.window)
 }
 </script>
 
 <template>
   <div class="window-panel">
     <p class="panel-hint">
-      打开某个模型的开关并设置时段后，该模型在时段内不再通过本渠道提供服务，时段过去自动恢复。
+      手动添加需要定时关闭的模型并设置时段：这些模型在时段内不再通过本渠道提供服务，时段过去自动恢复。
       <strong>只影响本渠道</strong>：其他渠道仍可正常服务同一个模型。
     </p>
 
@@ -72,36 +122,46 @@ function updateWindow(publicName: string, value: TimeWindow) {
 
     <template v-else>
       <div class="panel-toolbar">
-        <el-input v-model="keyword" clearable placeholder="搜索模型" :prefix-icon="Search" />
-        <span class="panel-count">已关闭 {{ closedModels.length }} / {{ models.length }}</span>
+        <span class="panel-count">已配置 {{ configuredCount }} 条关闭时段</span>
+        <el-button type="primary" :icon="Plus" @click="addRow">添加关闭时段</el-button>
       </div>
 
-      <div class="window-list">
-        <div v-for="item in visibleModels" :key="item.publicName" class="window-entry">
-          <div class="window-entry__head">
-            <div class="window-entry__title">
-              <code>{{ item.publicName }}</code>
-              <span v-if="item.upstreamName !== item.publicName">{{ item.upstreamName }}</span>
-            </div>
-            <span class="window-entry__summary" :class="{ active: hasWindow(item.publicName) }">{{ summaryOf(item.publicName) }}</span>
-            <el-switch :model-value="hasWindow(item.publicName)" @update:model-value="toggle(item.publicName, $event)" />
-            <el-button text size="small" :disabled="!hasWindow(item.publicName)" @click="editing = editing === item.publicName ? '' : item.publicName">
-              {{ editing === item.publicName ? '收起' : '编辑时段' }}
+      <div v-if="rows.length" class="window-list">
+        <div v-for="row in rows" :key="row.id" class="window-entry">
+          <div class="window-entry__row">
+            <el-select
+              :model-value="row.publicName"
+              filterable
+              clearable
+              placeholder="选择要定时关闭的模型"
+              class="window-entry__model"
+              @update:model-value="updateRowModel(row, $event)"
+            >
+              <el-option v-for="item in optionsFor(row)" :key="item.publicName" :label="item.publicName" :value="item.publicName">
+                <span class="window-option__name">{{ item.publicName }}</span>
+                <span v-if="item.upstreamName !== item.publicName" class="window-option__upstream">{{ item.upstreamName }}</span>
+              </el-option>
+            </el-select>
+            <span class="window-entry__summary" :class="{ empty: timeWindowIsEmpty(row.window) }">{{ summaryOf(row) }}</span>
+            <el-button text size="small" :disabled="!row.publicName" @click="toggleEditing(row)">
+              {{ editingId === row.id ? '收起' : '编辑时段' }}
             </el-button>
+            <TableActionButton :icon="Trash2" label="删除关闭时段" danger :size="15" @click="removeRow(row)" />
           </div>
           <TimeWindowEditor
-            v-if="editing === item.publicName"
-            :model-value="props.windows[item.publicName] ?? createClosedWindow()"
+            v-if="editingId === row.id"
+            :model-value="row.window"
             class="window-entry__editor"
-            @update:model-value="updateWindow(item.publicName, $event)"
+            @update:model-value="updateRowWindow(row, $event)"
           />
         </div>
-        <div v-if="!visibleModels.length" class="panel-empty">没有匹配的模型。</div>
       </div>
+      <div v-else class="panel-empty">暂无定时关闭配置</div>
     </template>
   </div>
 </template>
 
 <style scoped>
-.window-panel { display: grid; gap: 10px; }.panel-hint { margin: 0; color: #66717d; font-size: 11px; line-height: 1.6; }.panel-hint strong { color: #33404c; }.panel-empty { padding: 14px; border: 1px dashed #dce2e7; border-radius: 6px; color: #66717d; font-size: 12px; text-align: center; }.panel-toolbar { display: flex; align-items: center; gap: 10px; }.panel-toolbar .el-input { max-width: 260px; }.panel-count { color: #66717d; font-size: 11px; }.window-list { display: grid; gap: 7px; max-height: 420px; overflow-y: auto; }.window-entry { display: grid; gap: 8px; padding: 9px 11px; border: 1px solid #dce2e7; border-radius: 6px; }.window-entry__head { display: flex; align-items: center; gap: 10px; }.window-entry__title { display: flex; min-width: 0; flex: 1; align-items: baseline; gap: 8px; }.window-entry__title code { overflow: hidden; color: #15202b; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.window-entry__title span { overflow: hidden; color: #66717d; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.window-entry__summary { flex: 0 0 auto; color: #66717d; font-size: 11px; }.window-entry__summary.active { color: #b45309; font-weight: 600; }.window-entry__editor { padding: 9px; border: 1px solid #e3e8ec; border-radius: 6px; background: #fbfcfd; }
+.window-panel { display: grid; gap: 10px; }.panel-hint { margin: 0; color: #66717d; font-size: 11px; line-height: 1.6; }.panel-hint strong { color: #33404c; }.panel-empty { padding: 14px; border: 1px dashed #dce2e7; border-radius: 6px; color: #66717d; font-size: 12px; text-align: center; }.panel-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; }.panel-count { color: #66717d; font-size: 12px; }.window-list { display: grid; gap: 7px; max-height: 420px; overflow-y: auto; }.window-entry { display: grid; gap: 8px; padding: 9px 11px; border: 1px solid #dce2e7; border-radius: 6px; }.window-entry__row { display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 1fr) auto 34px; align-items: center; gap: 10px; }.window-entry__model { min-width: 0; }.window-option__name { font-family: 'JetBrains Mono', monospace; font-size: 12px; }.window-option__upstream { margin-left: 8px; color: #8b959e; font-size: 11px; }.window-entry__summary { overflow: hidden; color: #b45309; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.window-entry__summary.empty { color: #8b959e; font-weight: 400; }.window-entry__editor { padding: 9px; border: 1px solid #e3e8ec; border-radius: 6px; background: #fbfcfd; }
+@media (max-width: 600px) { .window-entry__row { grid-template-columns: minmax(0, 1fr) auto 34px; }.window-entry__model { grid-column: 1 / -1; } }
 </style>

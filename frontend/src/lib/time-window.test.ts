@@ -8,6 +8,8 @@ import {
   readTimeWindow,
   timeWindowIsEmpty,
   toTimeWindow,
+  windowRowsFromRecord,
+  windowRowsToRecord,
 } from './time-window'
 
 describe('time window helpers', () => {
@@ -80,5 +82,42 @@ describe('time window helpers', () => {
     })
     // 显式清空：提交空时间窗，后端归一成空串并清列。
     expect(closedWindowPayload(windows, 'kimi-k2')).toEqual({ tz: 'Asia/Shanghai', weekdays: [], ranges: [] })
+  })
+
+  it('restores editable rows only for windows that really restrict the schedule', () => {
+    const rows = windowRowsFromRecord({
+      'deepseek-flash': { tz: 'Asia/Shanghai', weekdays: [1], ranges: [] },
+      'glm-5': { tz: 'Asia/Shanghai', weekdays: [], ranges: [] },
+      'kimi-k2': { tz: 'Asia/Shanghai', weekdays: [1, 2, 3, 4, 5, 6, 7], ranges: [] },
+    })
+    expect(rows.map((row) => row.publicName)).toEqual(['deepseek-flash'])
+  })
+
+  it('drops rows that have no model selected from the payload', () => {
+    const payload = windowRowsToRecord([
+      { publicName: '   ', window: createClosedWindow() },
+      { publicName: 'deepseek-flash', window: createClosedWindow() },
+    ])
+    expect(Object.keys(payload)).toEqual(['deepseek-flash'])
+  })
+
+  it('keeps a removed entry as an empty window so clearing survives the round trip', () => {
+    // 删除既有行必须留键置空：直接删键会被后端当成「保持原值」，清除就不生效。
+    const payload = windowRowsToRecord([], ['glm-5'])
+    expect(Object.keys(payload)).toEqual(['glm-5'])
+    expect(timeWindowIsEmpty(payload['glm-5'])).toBe(true)
+    expect(closedWindowPayload(payload, 'glm-5')).toEqual({ tz: 'Asia/Shanghai', weekdays: [], ranges: [] })
+    // 从未配置过的模型仍然不带该字段，后端保持库里原值。
+    expect(closedWindowPayload(payload, 'kimi-k2')).toBeUndefined()
+  })
+
+  it('prefers the row value when a model is edited and marked cleared at the same time', () => {
+    const payload = windowRowsToRecord([{ publicName: 'glm-5', window: createClosedWindow() }], ['glm-5'])
+    expect(payload['glm-5'].ranges).toEqual([['09:00', '12:00']])
+  })
+
+  it('round-trips editable rows through the record helpers', () => {
+    const rows = [{ publicName: 'deepseek-flash', window: createClosedWindow() }]
+    expect(windowRowsFromRecord(windowRowsToRecord(rows))).toEqual(rows)
   })
 })

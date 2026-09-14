@@ -117,3 +117,35 @@ export function closedWindowPayload(windows: Record<string, TimeWindow>, publicN
     ranges: window.ranges ?? [],
   }
 }
+
+/** 空时间窗：键存在但值不构成时段，提交后等价于清除该模型的关闭配置。 */
+export function emptyTimeWindow(): TimeWindow {
+  return { tz: '', weekdays: [], ranges: [] }
+}
+
+/** 从已保存记录里恢复编辑行：只保留真正收窄了范围的时段，没配过的不出现。 */
+export function windowRowsFromRecord(record: Record<string, TimeWindow>): Array<{ publicName: string; window: TimeWindow }> {
+  return Object.entries(record)
+    .filter(([, window]) => !timeWindowIsEmpty(window))
+    .map(([publicName, window]) => ({ publicName, window }))
+}
+
+/**
+ * 把编辑行合成为提交负载。键存在表示本次提交该字段（空时间窗即清除），
+ * 键不存在表示后端保持原值——所以被移除的既有键必须补一条空时间窗，
+ * 直接删键会被当成「保持原值」，清除就不生效。
+ */
+export function windowRowsToRecord(
+  rows: Array<{ publicName: string; window: TimeWindow }>,
+  clearedNames: Iterable<string> = [],
+): Record<string, TimeWindow> {
+  const payload: Record<string, TimeWindow> = {}
+  for (const row of rows) {
+    const name = row.publicName.trim()
+    if (name) payload[name] = row.window
+  }
+  for (const name of clearedNames) {
+    if (name && !(name in payload)) payload[name] = emptyTimeWindow()
+  }
+  return payload
+}
