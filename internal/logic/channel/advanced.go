@@ -38,6 +38,11 @@ type AdvancedConfig struct {
 	// 自动协议转换。nil 表示跟随系统设置（默认启用）；true 强制启用，
 	// false 强制关闭：关闭后请求直连客户端声明的端点，也不会再回退到转换。
 	ProtocolConversion *bool `json:"protocolConversion"`
+	// PromptCacheMode 决定本渠道如何处置请求体里的提示缓存字段："stable"（缺省）
+	// 剥离客户端字段并注入网关按用户与凭据生成的稳定缓存键；"off" 只剥离客户端
+	// 字段、不下发任何缓存字段，用于对未知字段严格校验的上游（例如返回
+	// UNKNOWN_FIELD 的供应商）；"passthrough" 完全不干预，由客户端自行控制。
+	PromptCacheMode string `json:"promptCacheMode"`
 }
 
 func DefaultAdvancedConfig() AdvancedConfig {
@@ -70,6 +75,12 @@ func ParseAdvancedConfig(raw []byte) (AdvancedConfig, error) {
 	config.SystemPrompt = strings.TrimSpace(config.SystemPrompt)
 	if len(config.SystemPrompt) > maxSystemPromptLength {
 		return AdvancedConfig{}, gerror.New("system prompt exceeds 16 KiB")
+	}
+	config.PromptCacheMode = strings.TrimSpace(config.PromptCacheMode)
+	switch config.PromptCacheMode {
+	case "", PromptCacheModeStable, PromptCacheModeOff, PromptCacheModePassthrough:
+	default:
+		return AdvancedConfig{}, gerror.New("prompt cache mode must be stable, off or passthrough")
 	}
 	if config.ConcurrencyLimit < 0 || config.ConcurrencyLimit > maxConcurrencyLimit {
 		return AdvancedConfig{}, gerror.New("concurrency limit must be between 0 and 1024")

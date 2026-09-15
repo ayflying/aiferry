@@ -55,13 +55,29 @@ func TestPromptCachePolicyUsesSystemKeyUnlessPassthroughEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if actual := gjson.GetBytes(systemBody, "prompt_cache_key").String(); actual != stablePromptCacheKey(42, candidate) {
+	if actual := gjson.GetBytes(systemBody, "prompt_cache_key").String(); actual != channel.PromptCacheKey(promptCacheIdentity(42, candidate)) {
 		t.Fatalf("system prompt_cache_key = %q", actual)
 	}
 	for _, path := range []string{"prompt_cache_options", "input.0.content.0.prompt_cache_breakpoint"} {
 		if gjson.GetBytes(systemBody, path).Exists() {
 			t.Fatalf("system-managed cache must remove %s: %s", path, systemBody)
 		}
+	}
+
+	disabled := channel.DefaultAdvancedConfig()
+	disabled.PromptCacheMode = channel.PromptCacheModeOff
+	offBody, err := applyPromptCachePolicy(body, candidate, 42, disabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gjson.GetBytes(offBody, "prompt_cache_key").Exists() {
+		t.Fatalf("prompt cache off must not send a cache key: %s", offBody)
+	}
+	if gjson.GetBytes(offBody, "prompt_cache_options").Exists() {
+		t.Fatalf("prompt cache off must strip client cache options: %s", offBody)
+	}
+	if gjson.GetBytes(offBody, "model").String() != "gpt-5.6-terra" {
+		t.Fatalf("prompt cache off must keep the rest of the body: %s", offBody)
 	}
 
 	config := channel.DefaultAdvancedConfig()

@@ -1,54 +1,20 @@
 package relay
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-
-	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/yunloli/aiferry/internal/logic/channel"
 )
 
-// applyPromptCachePolicy makes cache ownership explicit per channel.
-// When passthrough is enabled, callers fully control all prompt_cache fields.
-// Otherwise AiFerry removes caller-provided cache controls and sets one stable
-// cache key for the user, public model, selected channel, and selected credential.
+// applyPromptCachePolicy 让缓存归属在渠道层显式化：默认按用户、公开模型、渠道与
+// 凭据生成稳定缓存键；渠道声明 off 时只剥离、不下发任何缓存字段；声明 passthrough
+// 时不干预。策略实现放在渠道层，与模型测试共用同一份，避免「测试通过、正式被拒」。
 func applyPromptCachePolicy(body []byte, candidate Candidate, userID uint64, config channel.AdvancedConfig) ([]byte, error) {
-	if config.PassthroughPromptCache {
-		return body, nil
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, gerror.Wrap(err, "decode prompt cache request")
-	}
-	removePromptCacheControls(payload)
-	payload["prompt_cache_key"] = stablePromptCacheKey(userID, candidate)
-	result, err := json.Marshal(payload)
-	return result, gerror.Wrap(err, "encode prompt cache request")
+	return channel.ApplyPromptCachePolicy(body, config, promptCacheIdentity(userID, candidate))
 }
 
-func stablePromptCacheKey(userID uint64, candidate Candidate) string {
-	identity := fmt.Sprintf("v1|u:%d|m:%s|c:%d|k:%d", userID, candidate.PublicName, candidate.ChannelID, candidate.ChannelCredentialID)
-	digest := sha256.Sum256([]byte(identity))
-	return "aiferry:" + hex.EncodeToString(digest[:16])
-}
-
-func removePromptCacheControls(value any) {
-	switch current := value.(type) {
-	case map[string]any:
-		delete(current, "prompt_cache_key")
-		delete(current, "prompt_cache_options")
-		delete(current, "prompt_cache_retention")
-		delete(current, "prompt_cache_breakpoint")
-		for _, child := range current {
-			removePromptCacheControls(child)
-		}
-	case []any:
-		for _, child := range current {
-			removePromptCacheControls(child)
-		}
-	}
+// promptCacheIdentity 是稳定缓存键的隔离身份：四项全部相同才共享同一个缓存桶，
+// 因此同一用户的连续请求命中同一缓存，不同用户之间不会互相污染前缀缓存。
+func promptCacheIdentity(userID uint64, candidate Candidate) string {
+	return fmt.Sprintf("v1|u:%d|m:%s|c:%d|k:%d", userID, candidate.PublicName, candidate.ChannelID, candidate.ChannelCredentialID)
 }

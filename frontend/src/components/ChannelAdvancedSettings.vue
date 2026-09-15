@@ -19,6 +19,20 @@ const protocolConversion = computed({
 function setStoreAllowed(value: boolean | string | number) {
   config.value.blockStore = !Boolean(value)
 }
+
+// 缓存字段处置是三态的：默认由系统按用户与凭据生成稳定缓存键；上游对未知字段
+// 做白名单校验时选「不下发」（既不加字段，也不放客户端的字段漏过去）；需要客户端
+// 自行控制缓存时选「跟随客户端」，写回旧的透传开关以保持历史配置兼容。
+const promptCacheMode = computed({
+  get: () => {
+    if (config.value.passthroughPromptCache) return 'passthrough'
+    return config.value.promptCacheMode === 'off' ? 'off' : 'stable'
+  },
+  set: (value: string) => {
+    config.value.passthroughPromptCache = value === 'passthrough'
+    config.value.promptCacheMode = value === 'off' ? 'off' : ''
+  },
+})
 </script>
 
 <template>
@@ -38,9 +52,13 @@ function setStoreAllowed(value: boolean | string | number) {
         <div><strong>透传请求体</strong><span>默认关闭，仅转发已支持字段；下方字段开关仍优先执行</span></div>
         <el-switch v-model="config.passthroughRequestBody" />
       </div>
-      <div class="setting-row">
-        <div><strong>透传客户端缓存参数</strong><span>开启后原样转发 prompt_cache_* 与缓存断点；关闭时由系统按用户、模型和渠道凭据生成稳定缓存键</span></div>
-        <el-switch v-model="config.passthroughPromptCache" />
+      <div class="setting-row prompt-cache-row">
+        <div><strong>提示缓存字段</strong><span>系统生成＝按用户、模型和渠道凭据生成稳定缓存键；不下发＝剥离客户端字段且不发送缓存键，上游不认该字段时必须选它；跟随客户端＝原样转发 prompt_cache_* 与缓存断点</span></div>
+        <el-select v-model="promptCacheMode">
+          <el-option label="系统生成稳定键" value="stable" />
+          <el-option label="不下发缓存字段" value="off" />
+          <el-option label="跟随客户端" value="passthrough" />
+        </el-select>
       </div>
     </div>
 
@@ -91,5 +109,5 @@ function setStoreAllowed(value: boolean | string | number) {
 </template>
 
 <style scoped>
-.advanced-settings { margin-top: 20px; border-top: 1px solid #dce2e7; }.advanced-heading { display: flex; align-items: center; gap: 8px; padding: 16px 0 10px; color: #15202b; }.advanced-heading svg { color: #1677ff; }.advanced-heading strong, .setting-row strong, .proxy-field strong, .prompt-field > strong { font-size: 13px; }.setting-group, .field-controls { border-top: 1px solid #dce2e7; }.setting-row { display: flex; min-height: 61px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #dce2e7; padding: 8px 0; }.setting-row > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.setting-row span, .proxy-field > span { color: #66717d; font-size: 11px; line-height: 1.45; }.setting-row :deep(.el-switch) { flex: 0 0 auto; }.proxy-field, .prompt-field { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.field-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.field-label :deep(.el-button) { height: auto; padding: 0; }.compact { min-height: 52px; margin-top: 4px; border-bottom: 0; }.section-caption { padding: 14px 0 5px; color: #40505f; font-size: 12px; font-weight: 600; }.limit-field, .conversion-field { border-top: 1px solid #dce2e7; }.limit-field .setting-row :deep(.el-input-number), .conversion-field .setting-row :deep(.el-select) { flex: 0 0 auto; width: 132px; }@media (max-width: 480px) { .setting-row { align-items: flex-start; padding: 12px 0; }.setting-row :deep(.el-switch) { margin-top: 4px; } }
+.advanced-settings { margin-top: 20px; border-top: 1px solid #dce2e7; }.advanced-heading { display: flex; align-items: center; gap: 8px; padding: 16px 0 10px; color: #15202b; }.advanced-heading svg { color: #1677ff; }.advanced-heading strong, .setting-row strong, .proxy-field strong, .prompt-field > strong { font-size: 13px; }.setting-group, .field-controls { border-top: 1px solid #dce2e7; }.setting-row { display: flex; min-height: 61px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #dce2e7; padding: 8px 0; }.setting-row > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.setting-row span, .proxy-field > span { color: #66717d; font-size: 11px; line-height: 1.45; }.setting-row :deep(.el-switch) { flex: 0 0 auto; }.prompt-cache-row :deep(.el-select) { flex: 0 0 auto; width: 156px; }.proxy-field, .prompt-field { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: 1px solid #dce2e7; }.field-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.field-label :deep(.el-button) { height: auto; padding: 0; }.compact { min-height: 52px; margin-top: 4px; border-bottom: 0; }.section-caption { padding: 14px 0 5px; color: #40505f; font-size: 12px; font-weight: 600; }.limit-field, .conversion-field { border-top: 1px solid #dce2e7; }.limit-field .setting-row :deep(.el-input-number), .conversion-field .setting-row :deep(.el-select) { flex: 0 0 auto; width: 132px; }@media (max-width: 480px) { .setting-row { align-items: flex-start; padding: 12px 0; }.setting-row :deep(.el-switch) { margin-top: 4px; } }
 </style>

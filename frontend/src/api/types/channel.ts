@@ -14,6 +14,12 @@ export interface ChannelAdvancedConfig {
   reasoningToContent: boolean
   passthroughRequestBody: boolean
   passthroughPromptCache: boolean
+  // promptCacheMode 决定该渠道如何处置请求体里的提示缓存字段：'stable'（缺省）
+  // 或空值＝剥离客户端字段并注入网关按用户与凭据生成的稳定缓存键；'off'＝只剥离
+  // 客户端字段、不下发任何缓存字段（上游对未知字段严格校验时使用，例如返回
+  // UNKNOWN_FIELD 的供应商）；'passthrough'＝完全不干预，由客户端控制。
+  // 历史渠道的配置里可能没有这个键，读取时按缺省处理。
+  promptCacheMode?: 'stable' | 'off' | 'passthrough' | ''
   skipAsyncPollingDelay: boolean
   systemPrompt: string
   appendSystemPrompt: boolean

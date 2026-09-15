@@ -79,7 +79,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	finished := false
 	for index, endpoint := range endpoints {
 		for _, baseURL := range baseURLs {
-			current, currentPath, currentTokens, requestErr := s.testModelEndpoint(ctx, channel, credential, typeConfig, model, baseURL, endpoint, input.Stream)
+			current, currentPath, currentTokens, requestErr := s.testModelEndpoint(ctx, channel, credential, typeConfig, model, advancedConfig, baseURL, endpoint, input.Stream)
 			if requestErr != nil {
 				return TestResult{}, requestErr
 			}
@@ -124,7 +124,8 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 }
 
 // buildTestRequest 按 payload 类型构造测试请求：asrMultipartRequest 走 multipart 表单，其余走 JSON。
-func buildTestRequest(ctx context.Context, url string, payload any) (*http.Request, error) {
+// JSON 分支与转发链路共用 ApplyPromptCachePolicy，保证测试发出去的缓存字段与正式请求一致。
+func buildTestRequest(ctx context.Context, url string, payload any, config AdvancedConfig, identity string) (*http.Request, error) {
 	if asr, ok := payload.(asrMultipartRequest); ok {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
@@ -150,6 +151,10 @@ func buildTestRequest(ctx context.Context, url string, payload any) (*http.Reque
 	if err != nil {
 		return nil, err
 	}
+	body, err = ApplyPromptCachePolicy(body, config, identity)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -158,12 +163,15 @@ func buildTestRequest(ctx context.Context, url string, payload any) (*http.Reque
 	return req, nil
 }
 
-func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
+func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, config AdvancedConfig, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
 	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream)
 	if typeConfig.Audio.Adapter == channeltype.AudioAdapterChat {
 		path, payload = chatAdapterPayload(endpoint, model.UpstreamName, payload)
 	}
-	req, err := buildTestRequest(ctx, baseURL+path, payload)
+	// 模型测试复用转发链路的缓存字段处置，避免「测试通过、正式被上游拒绝」：
+	// 渠道声明 off 时测试同样不下发缓存字段，缺省时同样注入稳定键。
+	identity := fmt.Sprintf("v1|test|m:%s|c:%d|k:%d", model.UpstreamName, channel.Id, credential.ID)
+	req, err := buildTestRequest(ctx, baseURL+path, payload, config, identity)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}

@@ -35,6 +35,35 @@ func TestParseAdvancedConfigKeepsExplicitPromptCachePassthrough(t *testing.T) {
 	}
 }
 
+func TestParseAdvancedConfigValidatesPromptCacheMode(t *testing.T) {
+	for _, raw := range []string{`{"promptCacheMode":""}`, `{"promptCacheMode":"stable"}`, `{"promptCacheMode":"off"}`, `{"promptCacheMode":"passthrough"}`} {
+		config, err := ParseAdvancedConfig([]byte(raw))
+		if err != nil {
+			t.Fatalf("ParseAdvancedConfig(%s) error = %v", raw, err)
+		}
+		if config.ResolvePromptCacheMode() == "" {
+			t.Fatalf("ParseAdvancedConfig(%s) resolved to an empty mode", raw)
+		}
+	}
+	trimmed, err := ParseAdvancedConfig([]byte(`{"promptCacheMode":" off "}`))
+	if err != nil {
+		t.Fatalf("ParseAdvancedConfig() error = %v", err)
+	}
+	if trimmed.PromptCacheMode != PromptCacheModeOff {
+		t.Fatalf("prompt cache mode was not trimmed: %+v", trimmed)
+	}
+	if _, err = ParseAdvancedConfig([]byte(`{"promptCacheMode":"none"}`)); err == nil {
+		t.Fatal("unknown prompt cache mode must be rejected")
+	}
+	missing, err := ParseAdvancedConfig(nil)
+	if err != nil {
+		t.Fatalf("ParseAdvancedConfig() error = %v", err)
+	}
+	if missing.ResolvePromptCacheMode() != PromptCacheModeStable {
+		t.Fatalf("channels without the field must keep the stable default: %+v", missing)
+	}
+}
+
 func TestParseAdvancedConfigIgnoresRetiredProtocolConversion(t *testing.T) {
 	config, err := ParseAdvancedConfig([]byte(`{"enableProtocolConversion":false,"forceOpenAIFormat":true}`))
 	if err != nil {

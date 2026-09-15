@@ -7,6 +7,7 @@ export function createDefaultChannelAdvancedConfig(): ChannelAdvancedConfig {
     reasoningToContent: false,
     passthroughRequestBody: false,
     passthroughPromptCache: false,
+    promptCacheMode: '',
     skipAsyncPollingDelay: false,
     systemPrompt: '',
     appendSystemPrompt: false,
