@@ -47,6 +47,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 		if configErr != nil {
 			return nil, gerror.Wrap(configErr, "parse channel advanced config")
 		}
+		healthScore := row.HealthScore
 		candidates = append(candidates, Candidate{
 			ChannelModelID:      row.Id,
 			ChannelID:           channel.Id,
@@ -61,6 +62,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 			AdvancedConfig:      channel.AdvancedConfig,
 			Priority:            channel.Priority,
 			Weight:              channel.Weight,
+			HealthScore:         &healthScore,
 			PublicName:          row.PublicName,
 			UpstreamName:        row.UpstreamName,
 			ClosedWindow:        row.ClosedWindowsJson,
@@ -89,6 +91,28 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 	return weightedOrder(filterClosedCandidates(available, time.Now())), nil
 }
 
+// candidateWeight 是候选在加权随机里占的份额。健康分低于阈值时按分数比例降权，
+// 让持续出错的渠道逐步让出流量，而不是等分数归零才被禁用；分数未知（旧路由缓存
+// 缺字段）或处于健康区间的候选保持原权重，负载均衡行为不变。
+func candidateWeight(candidate Candidate) uint64 {
+	weight := uint64(max(candidate.Weight, 1))
+	if candidate.HealthScore == nil {
+		return weight
+	}
+	score := *candidate.HealthScore
+	if score >= system.ModelHealthWeightThreshold {
+		return weight
+	}
+	if score < 0 {
+		score = 0
+	}
+	scaled := weight * uint64(score) / uint64(system.ModelHealthWeightThreshold)
+	if scaled == 0 {
+		scaled = 1
+	}
+	return scaled
+}
+
 func weightedOrder(candidates []Candidate) []Candidate {
 	groups := make(map[int][]Candidate)
 	priorities := make([]int, 0)
@@ -105,12 +129,12 @@ func weightedOrder(candidates []Candidate) []Candidate {
 		for len(pool) > 0 {
 			total := uint64(0)
 			for _, item := range pool {
-				total += uint64(max(item.Weight, 1))
+				total += candidateWeight(item)
 			}
 			pick := mathrand.Uint64N(total)
 			selected := 0
 			for index, item := range pool {
-				weight := uint64(max(item.Weight, 1))
+				weight := candidateWeight(item)
 				if pick < weight {
 					selected = index
 					break
@@ -231,6 +255,8 @@ func (s *sRelay) maybeAutoDisable(ctx context.Context, settings adminapi.SystemR
 		Latency:        result.latency,
 		Message:        result.errorMessage,
 		TimedOut:       result.timedOut,
+		// 已向客户端写出内容后的失败同样要参与模型健康评分，只是不做渠道/密钥禁用。
+		Committed: result.wroteBytes,
 	})
 }
 

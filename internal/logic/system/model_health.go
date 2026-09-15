@@ -19,13 +19,23 @@ import (
 
 // 模型健康评分常量：初始 100 分；模型测试成功 +5（上限 100）；
 // 真实转发成功按响应耗时分级加分，越快加分越多；失败 -20，扣到 0 自动禁用该模型。
+// 响应已写字节后的失败同样计分但力度更轻（-10），且绝不做渠道/密钥级禁用。
+// 健康分同时作为路由加权系数：低于 80 分按比例降权，让持续出错的渠道逐步让出流量。
 // 账号级错误（余额/配额/组织停用）直接禁用渠道。
 const (
 	ModelHealthInitialScore   = 100
 	ModelHealthMaxScore       = 100
 	ModelHealthTestSuccess    = 5
 	ModelHealthFailurePenalty = 20
-	ModelHealthDisableScore   = 0
+	// ModelHealthCommittedFailurePenalty 是「响应已向客户端写出内容后失败」的扣分。
+	// 这类失败无法切换候选重放，但它同样是真实的上游质量信号；用比常规失败更温和
+	// 的力度，避免零散断流把渠道直接推到禁用。
+	ModelHealthCommittedFailurePenalty = 10
+	// ModelHealthWeightThreshold 是健康分参与路由加权排序的门槛：分数低于该值才降权。
+	// 正常渠道长期维持满分，行为不受影响；质量下滑的渠道按分数比例逐步让出流量，
+	// 不必等到归零被禁用才生效。
+	ModelHealthWeightThreshold = 80
+	ModelHealthDisableScore    = 0
 )
 
 // ModelHealthRelaySuccessByLatency 返回真实转发成功后的健康分增量。
@@ -55,6 +65,17 @@ type ModelDisableInput struct {
 	Message             string
 	TimedOut            bool
 	Latency             time.Duration
+	// Committed 表示本次失败发生在响应已向客户端写出内容之后。它只影响扣分力度，
+	// 不会把失败转移到渠道/密钥级禁用。
+	Committed bool
+}
+
+// modelHealthFailurePenalty 按失败性质选择扣分力度：已写字节后的失败更温和。
+func modelHealthFailurePenalty(input ModelDisableInput) int {
+	if input.Committed {
+		return ModelHealthCommittedFailurePenalty
+	}
+	return ModelHealthFailurePenalty
 }
 
 // isCredentialScopedFailure 判断失败是否可归因于单个密钥/账号级问题（余额耗尽、配额用尽、鉴权失败）。
@@ -165,7 +186,7 @@ func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.S
 	}
 	newScore := model.HealthScore
 	if input.TimedOut || input.Status >= 400 || (input.Status == 0 && input.Message != "") {
-		newScore -= ModelHealthFailurePenalty
+		newScore -= modelHealthFailurePenalty(input)
 	} else {
 		newScore = min(newScore+ModelHealthRelaySuccessByLatency(input.Latency), ModelHealthMaxScore)
 	}
@@ -176,7 +197,7 @@ func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.S
 		// 密钥级失败（欠费、配额用尽、鉴权失败）扣分扣到 0 时，若渠道排除当前失败密钥
 		// 后仍有其他可用密钥，说明模型本身没问题：改为立即禁用失败密钥并把模型分数
 		// 重置回初始值，而不是禁用模型导致整个渠道的模型被逐个拖垮。
-		if input.ChannelCredentialID > 0 && isCredentialScopedFailure(input) {
+		if input.ChannelCredentialID > 0 && !input.Committed && isCredentialScopedFailure(input) {
 			diverted, err := s.divertModelDisableToCredential(ctx, settings, model, input)
 			if err != nil {
 				return false, err
@@ -194,6 +215,12 @@ func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.S
 	}
 	if _, err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: model.Id}).Data(data).Update(); err != nil {
 		return false, gerror.Wrap(err, "update model health score")
+	}
+	if newScore < model.HealthScore {
+		// 健康分同时是路由候选的权重系数，而路由缓存里保存的是分数快照：分数下降
+		// 必须让下一次请求重新解析候选，否则扣分要等缓存 TTL 到期才影响流量分配。
+		// 加分不做失效——成功请求远多于失败，逐次失效会让路由缓存彻底失去意义。
+		s.invalidateRouteWeights(ctx)
 	}
 	if disabled {
 		s.clearModelRouteCache(ctx)
@@ -307,6 +334,13 @@ func (s *sSystem) scheduleChannelCloseIfAllModelsDown(ctx context.Context, chann
 			})
 		}
 	}
+}
+
+// invalidateRouteWeights 只递增路由版本号：健康分参与候选加权排序，分数下降后
+// 必须让下一次请求重新解析候选。与 clearModelRouteCache 的区别是不清理模型列表
+// 缓存——那属于模型可用性变化，与权重调整无关。
+func (s *sSystem) invalidateRouteWeights(ctx context.Context) {
+	_ = s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()
 }
 
 func (s *sSystem) clearModelRouteCache(ctx context.Context) {

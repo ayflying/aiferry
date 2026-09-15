@@ -133,6 +133,7 @@ func (s *sRelay) routeStatic(ctx context.Context, model string) ([]Candidate, er
 		if !hasCredential {
 			continue
 		}
+		healthScore := row.HealthScore
 		candidates = append(candidates, Candidate{
 			ChannelModelID:      row.Id,
 			ChannelID:           channel.Id,
@@ -147,6 +148,7 @@ func (s *sRelay) routeStatic(ctx context.Context, model string) ([]Candidate, er
 			AdvancedConfig:      channel.AdvancedConfig,
 			Priority:            channel.Priority,
 			Weight:              channel.Weight,
+			HealthScore:         &healthScore,
 			PublicName:          row.PublicName,
 			UpstreamName:        row.UpstreamName,
 			ClosedWindow:        row.ClosedWindowsJson,

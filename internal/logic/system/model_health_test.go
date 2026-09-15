@@ -118,3 +118,58 @@ func TestShouldSkipDisabledModelRetry(t *testing.T) {
 		t.Fatal("unknown source must not trigger skip")
 	}
 }
+
+// 回归：响应已向客户端写出内容后失败的场景。这类失败拿不到可判定的状态码
+// （上游给出的是流被截断、空闲超时这类中断，典型 502），过去既不进 disableStatusCodes
+// 也命中不了关键词，导致对应渠道永远保持满分与最高权重，坏渠道反复被选中。
+// 现在要求：它能进入扣分入口，但只走模型维度、扣分更轻、绝不触发渠道/密钥禁用。
+func TestMatchesAutoDisableCommittedFailure(t *testing.T) {
+	settings := DefaultResilienceSettings()
+	input := AutoDisableInput{
+		ChannelID:      9,
+		ChannelModelID: 188,
+		Status:         502,
+		Message:        "Backend buffer overflow.",
+		Committed:      true,
+	}
+	if !matchesAutoDisable(settings, input) {
+		t.Fatal("committed failure must reach the health scoring entry")
+	}
+
+	// 关闭自动禁用时，committed 失败同样不生效。
+	settings.AutoDisableEnabled = false
+	if IsAutoDisableMatch(settings, input) {
+		t.Fatal("auto disable disabled should suppress committed failures too")
+	}
+
+	// 同类失败在未写字节时本就走关键词/状态码之外的分支，确认 Committed 才是判据。
+	plain := input
+	plain.Committed = false
+	plain.Message = "Backend buffer overflow."
+	if matchesAutoDisable(DefaultResilienceSettings(), plain) {
+		t.Fatal("non-committed 502 without keywords must not match")
+	}
+}
+
+func TestModelHealthFailurePenalty(t *testing.T) {
+	cases := []struct {
+		name  string
+		input ModelDisableInput
+		want  int
+	}{
+		{name: "常规失败", input: ModelDisableInput{Status: 502}, want: ModelHealthFailurePenalty},
+		{name: "已写字节后失败", input: ModelDisableInput{Status: 502, Committed: true}, want: ModelHealthCommittedFailurePenalty},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modelHealthFailurePenalty(tc.input); got != tc.want {
+				t.Fatalf("modelHealthFailurePenalty(%+v) = %d, want %d", tc.input, got, tc.want)
+			}
+		})
+	}
+	// 已写字节后的失败必须更温和：力度的意义只在于别让零散断流把渠道直接推到禁用。
+	if ModelHealthCommittedFailurePenalty >= ModelHealthFailurePenalty {
+		t.Fatalf("committed penalty %d must be lighter than regular penalty %d",
+			ModelHealthCommittedFailurePenalty, ModelHealthFailurePenalty)
+	}
+}

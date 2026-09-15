@@ -72,8 +72,12 @@ type Candidate struct {
 	// 它是渠道高级配置项，随路由缓存一起传递；渠道写操作会递增路由版本号，
 	// 因此修改后无需等待缓存过期即生效。
 	ConcurrencyLimit int `json:"concurrencyLimit,omitempty"`
-	GroupIDs         []uint64
-	ReasoningEffort  string `orm:"-"`
+	// HealthScore 是渠道模型健康分快照，参与加权随机排序：分数低于阈值时按比例
+	// 降权，让持续出错的渠道逐步让出流量。用指针区分「分数确实是 0」与「旧路由
+	// 缓存未携带该字段」，nil 表示未知并按不降权处理。
+	HealthScore     *int `json:"healthScore,omitempty"`
+	GroupIDs        []uint64
+	ReasoningEffort string `orm:"-"`
 }
 
 type Model struct {

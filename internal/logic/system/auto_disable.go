@@ -32,9 +32,20 @@ type AutoDisableInput struct {
 	Latency             time.Duration
 	Message             string
 	TimedOut            bool
+	// Committed 表示这次失败发生在响应已向客户端写出内容之后。这类失败同样属于
+	// 严重失败，但绝不做渠道/密钥级禁用：上游已经产出过内容，禁用整条渠道的代价
+	// 远大于收益，只让它扣模型健康分。
+	Committed bool
 }
 
 func matchesAutoDisable(settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) bool {
+	if input.Committed {
+		// 已写字节后的失败拿不到可判定的状态码语义（上游给出的是流被截断、空闲
+		// 超时这类中断，典型是 502），既进不了 disableStatusCodes 也命中不了关键词。
+		// 但它确实是渠道质量信号，必须让模型健康分看到，否则坏渠道会一直保持满分
+		// 与最高权重。
+		return true
+	}
 	if input.TimedOut {
 		return true
 	}
@@ -107,7 +118,9 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 	}
 	// 模型维度：非账号级失败只影响单个模型健康评分，不再直接禁用渠道。
 	// 账号级失败（余额耗尽、配额用尽、组织停用等）影响整个渠道，继续走渠道禁用。
-	if input.ChannelModelID > 0 && !IsAccountLevelFailure(input.Message) {
+	// 已写字节后的失败一律收敛到模型扣分：它走到这里说明上游已经出过内容，
+	// 禁用整条渠道的代价远大于收益。
+	if input.ChannelModelID > 0 && (input.Committed || !IsAccountLevelFailure(input.Message)) {
 		return s.ApplyModelHealthScore(ctx, settings, ModelDisableInput{
 			ChannelID:           input.ChannelID,
 			ChannelCredentialID: input.ChannelCredentialID,
@@ -117,7 +130,12 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 			Message:             input.Message,
 			TimedOut:            input.TimedOut,
 			Latency:             input.Latency,
+			Committed:           input.Committed,
 		})
+	}
+	if input.Committed {
+		// 没有模型归属（例如渠道级探测）时不降级为渠道/密钥禁用，直接放弃处理。
+		return false, nil
 	}
 	if input.ChannelCredentialID > 0 {
 		return s.disableCredential(ctx, channel, settings, input)
