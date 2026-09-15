@@ -314,6 +314,27 @@ export interface SystemResilienceSettings {
 
 export interface BaseSettings {
   timeZone: string
+  // displayCurrency 是金额展示货币；只影响展示，不改写库内结算金额与结算币种。
+  displayCurrency: DisplayCurrency
+  // exchangeRateMode 决定汇率来源：auto 取公开汇率接口，manual 只用人工填写的汇率。
+  exchangeRateMode: ExchangeRateMode
+  // manualUsdToCnyRate 是人工 USD→CNY 汇率，也是自动汇率不可用时的兜底值。
+  manualUsdToCnyRate: number
+}
+
+export type DisplayCurrency = 'USD' | 'CNY'
+
+export type ExchangeRateMode = 'auto' | 'manual'
+
+// CurrencyRateSettings 是当前生效的折算汇率与其来源，管理端据此核对自动汇率是否取到。
+export interface CurrencyRateSettings {
+  display: DisplayCurrency
+  base: string
+  // rates 的语义是「1 个 base 能换多少该币种」。
+  rates: Record<string, number>
+  // source 取值 auto/manual/fallback：fallback 表示自动汇率取不到、正在用人工兜底值。
+  source: 'auto' | 'manual' | 'fallback'
+  updatedAt?: string
 }
 
 export interface MailSettings {

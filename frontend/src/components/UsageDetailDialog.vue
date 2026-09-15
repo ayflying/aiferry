@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import type { BillingItem, UsageLog } from '../api/types'
-import { formatLatency, formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
+import { displayCurrency, formatLatency, formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 import { channelCredentialReference } from '../lib/usage'
 
@@ -39,6 +39,12 @@ const billingItems = computed(() => billingDetails.value?.items ?? [])
 const resultMessage = computed(() => {
   if (!props.usage) return ''
   return props.usage.errorMessage || (isSuccess.value ? '模型响应正常' : '未返回错误详情')
+})
+// 金额已折算成展示货币，币种标签要跟着走，同时保留结算币种以便核对账单快照。
+const currencyLabel = computed(() => {
+  const settled = billingDetails.value?.currency || ''
+  if (!settled || settled.toUpperCase() === displayCurrency.value) return displayCurrency.value
+  return `${displayCurrency.value}（结算币种 ${settled.toUpperCase()}）`
 })
 const billingModeLabel = computed(() => {
   switch (billingDetails.value?.billingMode) {
@@ -131,7 +137,7 @@ function billingSummary() {
         <template v-if="billingDetails">
           <el-descriptions :column="2" border size="small" class="billing-summary">
             <el-descriptions-item label="计费方式">{{ billingModeLabel }}</el-descriptions-item>
-            <el-descriptions-item label="币种">{{ billingDetails.currency }}</el-descriptions-item>
+            <el-descriptions-item label="币种">{{ currencyLabel }}</el-descriptions-item>
             <el-descriptions-item label="价格来源">{{ billingSourceLabel }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="命中规则">{{ billingDetails.rule.name || `规则 #${billingDetails.rule.id}` }} · P{{ billingDetails.rule.priority }} · {{ billingDetails.rule.source === 'sync' ? '上游同步' : '人工规则' }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="规则条件"><span class="detail-value mono">{{ billingDetails.rule.conditions }}</span></el-descriptions-item>

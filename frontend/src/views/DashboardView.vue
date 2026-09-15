@@ -11,7 +11,7 @@ import type { Dashboard } from '../api/types'
 import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { dashboardPeriodQuery, type DashboardPeriod } from '../lib/dashboard-range'
-import { formatCost, formatNumber, successRate } from '../lib/format'
+import { convertAmount, displayCurrency, formatCost, formatNumber, successRate } from '../lib/format'
 import { isChannelRoutable } from '../lib/route-display'
 import DashboardPeriodControl from '../components/DashboardPeriodControl.vue'
 import RouteStrip from '../components/RouteStrip.vue'
@@ -114,7 +114,7 @@ function renderCostChart() {
     },
     yAxis: {
       type: 'value',
-      name: 'USD',
+      name: displayCurrency.value,
       nameTextStyle: { color: '#7b8792', padding: [0, 0, 0, -28] },
       axisLabel: { color: '#7b8792' },
       splitLine: { lineStyle: { color: '#edf0f2' } },
@@ -123,7 +123,8 @@ function renderCostChart() {
       name: model.name,
       type: area ? 'line' : 'bar',
       stack: 'cost',
-      data: model.points.map((point) => point.estimatedCost),
+      // 图表数值与 tooltip 的 formatCost 必须同口径，否则刻度写美元、浮层写人民币。
+      data: model.points.map((point) => convertAmount(point.estimatedCost, 'USD')),
       barMaxWidth: 34,
       smooth: area,
       showSymbol: false,
@@ -142,6 +143,8 @@ function resize() { chart?.resize(); costChart?.resize() }
 function showPeriodError(message: string) { showError(message, '时间范围无效') }
 watch(period, load)
 watch(costChartMode, renderCostChart)
+// 展示货币是全局设置，切换后图表数据不会自动跟随，需要重算一次。
+watch(displayCurrency, renderCostChart)
 onMounted(() => { load(); window.addEventListener('resize', resize) })
 onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dispose(); costChart?.dispose() })
 </script>

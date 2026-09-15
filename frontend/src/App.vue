@@ -4,7 +4,7 @@ import { onMounted, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { loadAuthConfig } from './api/auth'
 import AppShell from './components/AppShell.vue'
-import { setDisplayTimeZone } from './lib/format'
+import { setDisplayCurrency, setDisplayTimeZone } from './lib/format'
 import { useSystemStore } from './stores/system'
 
 const route = useRoute()
@@ -14,9 +14,11 @@ onMounted(async () => {
   try {
     const config = await loadAuthConfig()
     setDisplayTimeZone(config.timeZone)
+    setDisplayCurrency(config.currency)
     system.apply(config.system)
   } catch {
     setDisplayTimeZone()
+    setDisplayCurrency()
   }
 })
 watchEffect(() => {

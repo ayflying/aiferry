@@ -4,8 +4,9 @@ import { CircleAlert, Coins, Gauge, KeyRound, Plus, Settings2, Trash2 } from '@l
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelCredential, CostSummary } from '../api/types'
+import { mergeCostSummaries } from '../lib/cost'
 import { showError } from '../lib/error'
-import { formatCost, formatTime, formatNumber } from '../lib/format'
+import { formatBalance, formatCost, formatTime, formatNumber } from '../lib/format'
 import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
 
 const props = defineProps<{ modelValue: boolean; channel?: Channel; quotaSupported?: boolean; managementKeySupported?: boolean; managementKeyPair?: boolean }>()
@@ -31,6 +32,9 @@ const queryDetails = ref<ChannelCostResult['credentials']>([])
 const summaries = ref<CostSummary[]>([])
 const drawerSize = window.innerWidth <= 600 ? '94%' : '760px'
 const usageQuery = computed(() => isUsageMode(props.channel?.costQueryType, props.channel?.costQueryMode))
+// 各上游密钥可能挂在不同币种账户上，汇总卡片只展示折算合并后的一条，
+// 折算到同一货币再求和才是可比口径；每把密钥的原始币种仍保留在下方明细里。
+const mergedSummary = computed(() => mergeCostSummaries(summaries.value))
 const queryLabel = computed(() => {
   return `查询${channelQueryValueLabel(props.channel?.costQueryType, props.channel?.costQueryMode)}`
 })
@@ -225,12 +229,12 @@ function costDetail(item: ChannelCredential) {
       <el-button :icon="Coins" :loading="querying" :disabled="channel?.costQueryMode === 'none'" @click="queryCosts">{{ queryLabel }}</el-button>
     </div>
 
-    <div v-if="summaries.length" class="cost-summary-grid">
-      <div v-for="summary in summaries" :key="summary.currency" class="summary-item">
-        <strong>{{ summary.currency }}</strong>
-        <span v-if="!usageQuery && summary.usedAmount !== undefined">已用 {{ formatCost(summary.usedAmount, summary.currency) }}</span>
-        <span v-if="!usageQuery && summary.remainingAmount !== undefined">余额 {{ formatCost(summary.remainingAmount, summary.currency) }}</span>
-        <span v-if="summary.usage !== undefined || (usageQuery && summary.usedAmount !== undefined)">{{ summary.usageType || '用量' }} {{ formatNumber(summary.usage ?? summary.usedAmount) }} {{ summary.usageUnit || 'kToken' }}<small v-if="summary.usageDimension"> · {{ summary.usageDimension }}</small></span>
+    <div v-if="mergedSummary" class="cost-summary-grid">
+      <div class="summary-item">
+        <strong>{{ mergedSummary.currency }}</strong>
+        <span v-if="!usageQuery && mergedSummary.usedAmount !== undefined">已用 {{ formatCost(mergedSummary.usedAmount, mergedSummary.currency) }}</span>
+        <span v-if="!usageQuery && mergedSummary.remainingAmount !== undefined">余额 {{ formatBalance(mergedSummary.remainingAmount, mergedSummary.currency) }}</span>
+        <span v-if="mergedSummary.usage !== undefined || (usageQuery && mergedSummary.usedAmount !== undefined)">{{ mergedSummary.usageType || '用量' }} {{ formatNumber(mergedSummary.usage ?? mergedSummary.usedAmount) }} {{ mergedSummary.usageUnit || 'kToken' }}<small v-if="mergedSummary.usageDimension"> · {{ mergedSummary.usageDimension }}</small></span>
       </div>
     </div>
 
@@ -238,7 +242,7 @@ function costDetail(item: ChannelCredential) {
       <el-table :data="rows" row-key="id" size="small">
         <el-table-column label="上游密钥" min-width="145"><template #default="{ row }"><span class="mono key-prefix"><KeyRound :size="14" />{{ row.keyPrefix }}<el-tooltip v-if="props.managementKeySupported && row.hasManagementKey" content="已配置该账号的管理密钥"><span class="mgmt-badge">管</span></el-tooltip></span></template></el-table-column>
         <el-table-column label="状态" min-width="156"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="autoDisabledDetail(row)" placement="top-start"><div class="credential-status"><span class="status-dot warning">自动禁用</span><small v-if="row.autoDisabledAt">{{ formatTime(row.autoDisabledAt) }}</small></div></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
-        <el-table-column :label="usageQuery ? '用量与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else><span v-if="!usageQuery && row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="!usageQuery && row.lastCostRemaining !== undefined">余额 {{ formatCost(row.lastCostRemaining, row.lastCostCurrency) }}</span><span v-if="usageQuery && (row.lastCostUsage !== undefined || row.lastCostUsed !== undefined)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small><span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined && row.lastCostUsage === undefined" class="muted">尚未查询</span></template></div></template></el-table-column>
+        <el-table-column :label="usageQuery ? '用量与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else><span v-if="!usageQuery && row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="!usageQuery && row.lastCostRemaining !== undefined">余额 {{ formatBalance(row.lastCostRemaining, row.lastCostCurrency) }}</span><span v-if="usageQuery && (row.lastCostUsage !== undefined || row.lastCostUsed !== undefined)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small><span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined && row.lastCostUsage === undefined" class="muted">尚未查询</span></template></div></template></el-table-column>
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
         <el-table-column label="操作" width="118" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip v-if="props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询该密钥的套餐额度"><button class="icon-button" type="button" :aria-label="`查询 ${row.keyPrefix} 额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
       </el-table>
@@ -247,7 +251,7 @@ function costDetail(item: ChannelCredential) {
 
     <div v-if="props.managementKeySupported && queryDetails.some(item => item.shared)" class="shared-balance">
       <strong>管理密钥共享余额</strong>
-      <span v-for="item in queryDetails.filter(detail => detail.shared)" :key="item.queriedAt">{{ item.remainingAmount === undefined ? '未返回余额' : formatCost(item.remainingAmount, item.currency) }}</span>
+      <span v-for="item in queryDetails.filter(detail => detail.shared)" :key="item.queriedAt">{{ item.remainingAmount === undefined ? '未返回余额' : formatBalance(item.remainingAmount, item.currency) }}</span>
     </div>
 
     <el-dialog v-model="mgmtDialogVisible" :title="`管理密钥（AK/SK） · ${mgmtDialogTarget?.keyPrefix || ''}`" width="460px" append-to-body>

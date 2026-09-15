@@ -8,7 +8,7 @@ import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
 import { copyText } from '../lib/clipboard'
-import { formatTime } from '../lib/format'
+import { formatBalance, formatTime } from '../lib/format'
 import TableActionButton from '../components/TableActionButton.vue'
 import MobileRecordList from '../components/MobileRecordList.vue'
 import ResponsiveList from '../components/ResponsiveList.vue'
@@ -145,7 +145,7 @@ onMounted(load)
         <template #desktop><el-table v-loading="loading" :data="store.apiKeys" row-key="id">
         <el-table-column label="名称" min-width="170"><template #default="{ row }"><div class="key-name"><span class="key-icon"><KeyRound :size="15" /></span><strong>{{ row.name }}</strong></div></template></el-table-column>
         <el-table-column label="密钥" min-width="280"><template #default="{ row }"><div class="key-cell" :class="{ revealed: Boolean(revealedSecrets[row.id]) }"><span class="mono key-value">{{ secretLabel(row) }}</span><span class="table-actions"><TableActionButton :icon="Copy" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : '复制完整密钥')" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="copyListKey(row)" /><TableActionButton :icon="revealedSecrets[row.id] ? Eye : EyeOff" :label="unavailableSecretLabel(row) || (secretLoading[row.id] ? '正在读取完整密钥' : (revealedSecrets[row.id] ? '隐藏完整密钥' : '显示完整密钥'))" :disabled="!row.secretAvailable || secretLoading[row.id]" @click="toggleSecret(row)" /></span></div></template></el-table-column>
-        <el-table-column label="额度" min-width="180"><template #default="{ row }"><div class="amount-cell"><strong v-if="row.spendLimit != null">总 {{ row.availableAmount?.toFixed(6) }} / {{ row.spentAmount.toFixed(6) }}</strong><strong v-else>总 不限额</strong><small v-if="row.dailySpendLimit != null">每日 {{ row.dailyAvailableAmount?.toFixed(6) }} / {{ row.dailySpentAmount.toFixed(6) }}</small><small v-else>每日不限额</small></div></template></el-table-column>
+        <el-table-column label="额度" min-width="180"><template #default="{ row }"><div class="amount-cell"><strong v-if="row.spendLimit != null">总 {{ formatBalance(row.availableAmount) }} / {{ formatBalance(row.spentAmount) }}</strong><strong v-else>总 不限额</strong><small v-if="row.dailySpendLimit != null">每日 {{ formatBalance(row.dailyAvailableAmount) }} / {{ formatBalance(row.dailySpentAmount) }}</small><small v-else>每日不限额</small></div></template></el-table-column>
         <el-table-column label="权限" min-width="150"><template #default="{ row }"><span class="muted">模型 {{ row.allowedModels?.length || '全部' }} · 分组 {{ row.channelGroupIds?.length || '全部' }}</span></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="{ row }"><span class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ row.status === 1 ? '启用' : '停用' }}</span></template></el-table-column>
         <el-table-column label="过期时间" min-width="160"><template #default="{ row }">{{ row.expiresAt ? formatTime(row.expiresAt) : '永不过期' }}</template></el-table-column>
@@ -173,7 +173,7 @@ onMounted(load)
       <el-form v-else label-position="top">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="例如 开发环境" /></el-form-item>
         <el-form-item v-if="editing" label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item>
-        <div class="form-grid"><el-form-item label="总可用费用"><el-input-number v-model="form.spendLimit" :min="0" :precision="6" :controls="false" placeholder="不限额" style="width: 100%" /></el-form-item><el-form-item label="每日费用限额"><el-input-number v-model="form.dailySpendLimit" :min="0" :precision="6" :controls="false" placeholder="不限额" style="width: 100%" /></el-form-item></div>
+        <div class="form-grid"><el-form-item label="总可用费用（USD）"><el-input-number v-model="form.spendLimit" :min="0" :precision="6" :controls="false" placeholder="不限额" style="width: 100%" /></el-form-item><el-form-item label="每日费用限额（USD）"><el-input-number v-model="form.dailySpendLimit" :min="0" :precision="6" :controls="false" placeholder="不限额" style="width: 100%" /></el-form-item></div>
         <el-form-item label="过期时间"><el-date-picker v-model="form.expiresAt" type="datetime" clearable placeholder="永不过期" style="width: 100%" /></el-form-item>
         <el-form-item label="可用大模型"><el-select v-model="form.allowedModels" multiple filterable clearable collapse-tags collapse-tags-tooltip placeholder="不选择表示可用全部已启用模型"><el-option v-for="model in selectableModels" :key="model" :label="model" :value="model" /></el-select></el-form-item>
         <el-form-item v-if="isAdmin" label="可用渠道分组"><el-select v-model="form.channelGroupIds" multiple filterable clearable collapse-tags collapse-tags-tooltip placeholder="不选择表示可用全部渠道分组"><el-option v-for="group in store.channelGroups.filter(item => item.status === 1)" :key="group.id" :label="`${group.name} (${group.code})`" :value="group.id" /></el-select></el-form-item>

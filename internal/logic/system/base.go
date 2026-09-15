@@ -21,10 +21,23 @@ const (
 
 type BaseSettings struct {
 	TimeZone string `json:"timeZone"`
+	// DisplayCurrency 决定把所有金额折算成哪种货币展示。
+	// 只影响展示口径：库内的结算金额、账单快照与结算币种都不会被改写。
+	DisplayCurrency string `json:"displayCurrency"`
+	// ExchangeRateMode 决定汇率来源：auto 从公开汇率接口取并缓存，manual 只用人工填写的汇率。
+	ExchangeRateMode string `json:"exchangeRateMode"`
+	// ManualUsdToCnyRate 是人工填写的 USD→CNY 汇率，
+	// 既是 manual 模式的取值，也是 auto 模式取不到汇率时的兜底值。
+	ManualUsdToCnyRate float64 `json:"manualUsdToCnyRate"`
 }
 
 func DefaultBaseSettings() BaseSettings {
-	return BaseSettings{TimeZone: "Asia/Shanghai"}
+	return BaseSettings{
+		TimeZone:           "Asia/Shanghai",
+		DisplayCurrency:    CurrencyUSD,
+		ExchangeRateMode:   CurrencyRateModeAuto,
+		ManualUsdToCnyRate: DefaultManualUsdToCnyRate,
+	}
 }
 
 func (s *sSystem) GetBase(ctx context.Context) (BaseSettings, error) {
@@ -50,7 +63,12 @@ func (s *sSystem) GetBase(ctx context.Context) (BaseSettings, error) {
 }
 
 func (s *sSystem) UpdateBase(ctx context.Context, input adminapi.BaseSettingsInput) (BaseSettings, error) {
-	settings, err := normalizeBaseSettings(BaseSettings{TimeZone: input.TimeZone})
+	settings, err := normalizeBaseSettings(BaseSettings{
+		TimeZone:           input.TimeZone,
+		DisplayCurrency:    input.DisplayCurrency,
+		ExchangeRateMode:   input.ExchangeRateMode,
+		ManualUsdToCnyRate: input.ManualUsdToCnyRate,
+	})
 	if err != nil {
 		return BaseSettings{}, err
 	}
@@ -105,5 +123,10 @@ func normalizeBaseSettings(settings BaseSettings) (BaseSettings, error) {
 		return BaseSettings{}, gerror.Wrap(err, "timeZone is invalid")
 	}
 	settings.TimeZone = location.String()
+	// 货币相关字段一律「非法回落默认值」而不是报错：
+	// 旧版本前端只提交 timeZone，空值必须能兼容，不能让整个基础设置保存失败。
+	settings.DisplayCurrency = normalizeDisplayCurrency(settings.DisplayCurrency)
+	settings.ExchangeRateMode = normalizeExchangeRateMode(settings.ExchangeRateMode)
+	settings.ManualUsdToCnyRate = normalizeManualUsdToCnyRate(settings.ManualUsdToCnyRate)
 	return settings, nil
 }

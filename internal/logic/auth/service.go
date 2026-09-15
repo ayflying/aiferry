@@ -95,7 +95,20 @@ func (s *sAuth) Config(ctx context.Context) (authapi.ConfigView, error) {
 	if err != nil {
 		return authapi.ConfigView{}, err
 	}
-	return authapi.ConfigView{Enabled: true, Provider: "Casdoor", LoginPath: "/api/auth/login", TimeZone: settings.TimeZone}, nil
+	rate := s.settings.CurrencyRate(ctx)
+	return authapi.ConfigView{
+		Enabled:   true,
+		Provider:  "Casdoor",
+		LoginPath: "/api/auth/login",
+		TimeZone:  settings.TimeZone,
+		Currency: authapi.CurrencyView{
+			Display:   settings.DisplayCurrency,
+			Base:      rate.Base,
+			Rates:     rate.Rates,
+			Source:    rate.Source,
+			UpdatedAt: rate.UpdatedAt,
+		},
+	}, nil
 }
 
 // BeginLogin 创建一次性 OAuth 登录状态，并生成 Casdoor 授权地址。

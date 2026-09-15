@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { Coins, FlaskConical, Gauge, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, ScanSearch, Trash2 } from '@lucide/vue'
 
-import type { Channel } from '../api/types'
+import type { Channel, CostSummary } from '../api/types'
 import { channelStatusLabel, isChannelEnabled } from '../lib/channelDisplay'
-import { formatCost, formatLatency, formatNumber, formatTime } from '../lib/format'
+import { mergeCostSummaries } from '../lib/cost'
+import { formatBalance, formatCost, formatLatency, formatNumber, formatTime } from '../lib/format'
 import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
 import MobileRecordList from './MobileRecordList.vue'
 import ResponsiveList from './ResponsiveList.vue'
@@ -15,6 +16,12 @@ const props = defineProps<{
   queryingQuotaID?: number
   statusSaving: Record<number, boolean>
 }>()
+
+// costSummary 把渠道的多币种费用汇总折算合并成一条：
+// 列表只展示一行，避免同一渠道并列出现人民币与美元两种货币。
+function costSummary(row: Channel): CostSummary | undefined {
+  return mergeCostSummaries(row.costSummaries)
+}
 
 const emit = defineEmits<{
   create: []
@@ -71,8 +78,12 @@ const emit = defineEmits<{
           <el-table-column label="上游费用 / 余额 / 用量" min-width="168">
             <template #default="{ row }">
               <button class="cost-link" type="button" @click="emit('open-credentials', row)">
-                <div v-if="row.costSummaries?.length" class="cost-cell">
-                  <template v-for="summary in row.costSummaries" :key="summary.currency"><span v-if="!isUsageMode(row.costQueryType, row.costQueryMode) && summary.usedAmount !== undefined">{{ summary.currency }} 已用 {{ formatCost(summary.usedAmount, summary.currency) }}</span><span v-if="!isUsageMode(row.costQueryType, row.costQueryMode) && summary.remainingAmount !== undefined">{{ summary.currency }} 余额 {{ formatCost(summary.remainingAmount, summary.currency) }}</span><span v-if="summary.usage !== undefined">{{ summary.usageType || '用量' }} {{ formatNumber(summary.usage) }} {{ summary.usageUnit || '' }}</span></template>
+                <div v-if="costSummary(row)" class="cost-cell">
+                  <template v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">
+                    <span v-if="costSummary(row)!.usedAmount !== undefined">已用 {{ formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }}</span>
+                    <span v-if="costSummary(row)!.remainingAmount !== undefined">余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</span>
+                  </template>
+                  <span v-if="costSummary(row)!.usage !== undefined">{{ costSummary(row)!.usageType || '用量' }} {{ formatNumber(costSummary(row)!.usage) }} {{ costSummary(row)!.usageUnit || '' }}</span>
                   <small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small>
                 </div>
                 <span v-else class="muted">查看明细</span>
@@ -112,7 +123,7 @@ const emit = defineEmits<{
               <div><dt>路由</dt><dd class="mono">P{{ row.priority }} / W{{ row.weight }}</dd></div>
               <div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}<span v-if="row.disabledModelCount > 0">（被禁用 {{ row.disabledModelCount }}）</span></dd></div>
               <div><dt>最近测试</dt><dd>{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : row.lastTestStatus ? '失败' : '未测试' }}</dd></div>
-              <div class="mobile-record__wide"><dt>上游费用 / 余额 / 用量</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="row.costSummaries?.length"><template v-for="summary in row.costSummaries" :key="summary.currency"><span v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">{{ summary.currency }} 已用 {{ summary.usedAmount === undefined ? '—' : formatCost(summary.usedAmount, summary.currency) }} · 余额 {{ summary.remainingAmount === undefined ? '—' : formatCost(summary.remainingAmount, summary.currency) }}</span><span v-if="summary.usage !== undefined">{{ summary.usageType || '用量' }} {{ formatNumber(summary.usage) }} {{ summary.usageUnit || '' }}</span> </template></span><span v-else class="muted">查看明细</span></button></dd></div>
+              <div class="mobile-record__wide"><dt>上游费用 / 余额 / 用量</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="costSummary(row)"><template v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">已用 {{ costSummary(row)!.usedAmount === undefined ? '—' : formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }} · 余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</template><span v-if="costSummary(row)!.usage !== undefined">{{ costSummary(row)!.usageType || '用量' }} {{ formatNumber(costSummary(row)!.usage) }} {{ costSummary(row)!.usageUnit || '' }}</span></span><span v-else class="muted">查看明细</span></button></dd></div>
             </dl>
             <div class="mobile-record__footer">
               <span class="muted">渠道操作</span>

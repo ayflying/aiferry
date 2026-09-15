@@ -12,6 +12,7 @@ func (c *Controller) registerSystemRoutes(group *ghttp.RouterGroup) {
 	group.GET("/system", c.systemInfo)
 	group.GET("/system/basic", c.getBaseSettings)
 	group.PUT("/system/basic", c.updateBaseSettings)
+	group.GET("/system/currency-rate", c.getCurrencyRate)
 	group.GET("/system/information", c.getSystemInformation)
 	group.PUT("/system/information", c.updateSystemInformation)
 	group.GET("/system/settings", c.getSystemSettings)
@@ -56,6 +57,18 @@ func (c *Controller) updateBaseSettings(r *ghttp.Request) {
 	}
 	data, err := c.settings.UpdateBase(r.Context(), input)
 	respond(r, data, err)
+}
+
+// getCurrencyRate 返回当前生效的折算汇率：管理端用它确认自动汇率取到了没有。
+func (c *Controller) getCurrencyRate(r *ghttp.Request) {
+	rate := c.settings.CurrencyRate(r.Context())
+	respond(r, adminapi.CurrencyRateView{
+		Display:   c.settings.DisplayCurrency(r.Context()),
+		Base:      rate.Base,
+		Rates:     rate.Rates,
+		Source:    rate.Source,
+		UpdatedAt: rate.UpdatedAt,
+	}, nil)
 }
 
 func (c *Controller) getSystemInformation(r *ghttp.Request) {

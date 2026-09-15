@@ -203,6 +203,18 @@ type ModelQualitySettingsInput struct {
 	Enabled bool `json:"enabled"`
 }
 
+// CurrencyRateView 是当前生效的折算汇率与其来源，供管理端核对自动汇率是否取到。
+type CurrencyRateView struct {
+	// Display 是展示货币；Base 是汇率表基准货币。
+	Display string `json:"display"`
+	Base    string `json:"base"`
+	// Rates 的语义是「1 个 Base 能换多少该币种」。
+	Rates map[string]float64 `json:"rates"`
+	// Source 取值 auto/manual/fallback：fallback 表示自动汇率取不到、正在用人工兜底值。
+	Source    string `json:"source"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
 type ModelQualityEventsInput struct {
 	Page     int `json:"page"`
 	PageSize int `json:"pageSize"`
@@ -231,6 +243,12 @@ type ModelQualityEventList struct {
 
 type BaseSettingsInput struct {
 	TimeZone string `json:"timeZone" v:"required|length:1,64"`
+	// DisplayCurrency 是金额展示货币（USD/CNY）；非法值回落 USD。
+	DisplayCurrency string `json:"displayCurrency"`
+	// ExchangeRateMode 是汇率来源（auto/manual）；非法值回落 auto。
+	ExchangeRateMode string `json:"exchangeRateMode"`
+	// ManualUsdToCnyRate 是人工 USD→CNY 汇率，同时作为自动汇率不可用时的兜底值。
+	ManualUsdToCnyRate float64 `json:"manualUsdToCnyRate"`
 }
 
 type SensitiveWordSettingsInput struct {

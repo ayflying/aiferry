@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Clock3, Database, Gauge, HardDrive, Image as ImageIcon, Info, Mail, Send, ShieldAlert, ShieldCheck } from '@lucide/vue'
+import { CircleDollarSign, Clock3, Database, Gauge, HardDrive, Image as ImageIcon, Info, Mail, Send, ShieldAlert, ShieldCheck } from '@lucide/vue'
 import { apiGet, apiPost, apiPut } from '../api/client'
-import type { BaseSettings, MailSettings, RequestFirewallSettings, SensitiveWordSettings, SystemInformationSettings, SystemResilienceSettings } from '../api/types'
+import type { BaseSettings, CurrencyRateSettings, MailSettings, RequestFirewallSettings, SensitiveWordSettings, SystemInformationSettings, SystemResilienceSettings } from '../api/types'
 import ModelQualityObservationPanel from '../components/ModelQualityObservationPanel.vue'
 import { showError, showSuccess } from '../lib/error'
-import { setDisplayTimeZone } from '../lib/format'
+import { displayCurrencyOptions, setDisplayCurrency, setDisplayTimeZone } from '../lib/format'
 import { timeZoneOptionGroups } from '../lib/time-zones'
 import { useSystemStore } from '../stores/system'
 import { useModelQualityObservation } from '../composables/useModelQualityObservation'
@@ -26,7 +26,27 @@ const activeTab = computed<SettingsTab>(() => {
   return tab === 'basic' || tab === 'resilience' || tab === 'quality' || tab === 'security' || tab === 'mail' ? tab : 'overview'
 })
 const info = ref<SystemInfo>()
-const basicForm = reactive({ timeZone: 'Asia/Shanghai' })
+const basicForm = reactive({
+  timeZone: 'Asia/Shanghai',
+  displayCurrency: 'USD' as BaseSettings['displayCurrency'],
+  exchangeRateMode: 'auto' as BaseSettings['exchangeRateMode'],
+  manualUsdToCnyRate: 7.2,
+})
+// 汇率面板：显示当前生效的汇率与来源，方便确认自动汇率到底取到没有。
+const currencyRate = ref<CurrencyRateSettings>()
+const rateLoading = ref(false)
+const rateSourceLabel = computed(() => {
+  switch (currencyRate.value?.source) {
+    case 'auto': return '自动获取'
+    case 'manual': return '手动汇率'
+    case 'fallback': return '自动获取失败，正在使用手动汇率兜底'
+    default: return '未知'
+  }
+})
+const cnyRateText = computed(() => {
+  const rate = currencyRate.value?.rates?.CNY
+  return typeof rate === 'number' && rate > 0 ? `1 USD = ${rate.toFixed(4)} CNY` : '—'
+})
 const system = useSystemStore()
 const informationForm = reactive<SystemInformationSettings>({
   systemName: 'AiFerry', serverUrl: '', logoUrl: '', footer: '', about: '', homeContent: '', userAgreement: '', privacyPolicy: '', publicHomepageEnabled: false,
@@ -154,7 +174,16 @@ async function loadBasic() {
     ])
     Object.assign(basicForm, basicSettings)
     applySystemInformation(informationSettings)
+    await loadCurrencyRate()
   } catch (error) { showError(error, '加载基础设置失败') } finally { tabLoading.basic = false }
+}
+
+// loadCurrencyRate 读取当前生效汇率：展示货币与汇率的展示口径都来自这一份。
+async function loadCurrencyRate() {
+  rateLoading.value = true
+  try {
+    currencyRate.value = await apiGet<CurrencyRateSettings>('/system/currency-rate')
+  } catch (error) { showError(error, '加载折算汇率失败') } finally { rateLoading.value = false }
 }
 
 async function loadResilience() {
@@ -224,18 +253,31 @@ async function saveBasic() {
   informationSaving.value = true
   try {
     const [basicSettings, informationSettings] = await Promise.all([
-      apiPut<BaseSettings>('/system/basic', { timeZone: basicForm.timeZone }),
+      apiPut<BaseSettings>('/system/basic', {
+        timeZone: basicForm.timeZone,
+        displayCurrency: basicForm.displayCurrency,
+        exchangeRateMode: basicForm.exchangeRateMode,
+        manualUsdToCnyRate: basicForm.manualUsdToCnyRate,
+      }),
       apiPut<SystemInformationSettings>('/system/information', { ...informationForm }),
     ])
     Object.assign(basicForm, basicSettings)
     applySystemInformation(informationSettings)
     system.apply(informationSettings)
     setDisplayTimeZone(basicSettings.timeZone)
+    // 保存后立刻用新口径刷新页面金额，不用等下一次登录。
+    await loadCurrencyRate()
+    setDisplayCurrency(toCurrencyConfig(currencyRate.value))
     showSuccess('基础设置已保存', '保存成功')
   } catch (error) { showError(error, '保存基础设置失败') } finally {
     saving.value = false
     informationSaving.value = false
   }
+}
+
+function toCurrencyConfig(rate?: CurrencyRateSettings) {
+  if (!rate) return { display: basicForm.displayCurrency, base: 'USD', rates: { USD: 1 } }
+  return { display: rate.display, base: rate.base, rates: rate.rates, source: rate.source, updatedAt: rate.updatedAt }
 }
 
 async function saveMail() {
@@ -330,6 +372,7 @@ watch(activeTab, (tab) => {
 
     <template v-else-if="activeTab === 'basic'">
       <section class="settings-section"><div class="section-heading"><div><h2>系统时区</h2><span>历史调用时间固定按北京时间解释；切换后按所选时区重新展示历史记录和统计，不会修改历史发生时间。</span></div><Clock3 :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="时区"><el-select v-model="basicForm.timeZone" filterable style="max-width: 420px"><el-option-group v-for="group in timeZoneOptionGroups" :key="group.label" :label="group.label"><el-option v-for="item in group.options" :key="item.value" :label="item.label" :value="item.value" /></el-option-group></el-select></el-form-item><p class="field-hint">支持按城市或地区搜索。保存后当前页面立即刷新时间格式；其他已打开的页面刷新后应用新时区。</p></el-form></section>
+      <section class="settings-section"><div class="section-heading"><div><h2>金额展示货币与折算汇率</h2><span>上游余额和站内账单可能分别以人民币、美元计价。这里选定展示货币后，全站金额统一按汇率折算到该货币展示；库内结算金额、结算币种与历史账单快照不会被改写。</span></div><CircleDollarSign :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="展示货币"><el-select v-model="basicForm.displayCurrency" style="max-width: 240px"><el-option v-for="item in displayCurrencyOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item><el-form-item label="汇率来源"><el-radio-group v-model="basicForm.exchangeRateMode"><el-radio value="auto">自动获取（公开汇率接口，缓存 6 小时）</el-radio><el-radio value="manual">手动指定</el-radio></el-radio-group></el-form-item><el-form-item label="USD → CNY 汇率"><el-input-number v-model="basicForm.manualUsdToCnyRate" :min="0.0001" :max="100" :step="0.01" :precision="4" :controls="false" style="width: 200px" /></el-form-item><p class="field-hint">自动获取时该值仅作为接口不可用时的兜底；手动指定时始终使用该值。支持的折算币种为 USD 与 CNY，其他币种的上游余额按原币种展示，不会套用错误汇率。</p><div class="rate-panel"><div><span>当前生效汇率</span><strong class="mono">{{ rateLoading ? '加载中…' : cnyRateText }}</strong></div><div><span>汇率来源</span><strong>{{ rateSourceLabel }}</strong></div><div><span>汇率发布时间</span><strong>{{ currencyRate?.updatedAt || '—' }}</strong></div></div><p class="field-hint">保存后立即按新口径刷新当前页面的金额显示。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>应用身份</h2><span>系统名称和徽标会显示在登录页、导航和浏览器标题中。</span></div><Info :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="系统名称"><el-input v-model="informationForm.systemName" maxlength="96" show-word-limit /></el-form-item><p class="field-hint">在整个应用程序中显示的名称。</p><div class="form-grid"><el-form-item label="服务器地址"><el-input v-model="informationForm.serverUrl" placeholder="https://yourdomain.com" inputmode="url" /></el-form-item><el-form-item label="徽标 URL"><el-input v-model="informationForm.logoUrl" placeholder="https://example.com/logo.png" inputmode="url" /></el-form-item></div><p class="field-hint">服务器地址用于 Casdoor 回调和外部集成；徽标为空时使用内置图标。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>公开首页</h2><span>控制根地址是否展示公开首页。</span></div></div><div class="setting-switch"><div><strong>允许访问公开首页</strong><span>关闭后，根地址显示页面不可用；登录需直接访问 /login。默认关闭。</span></div><el-switch v-model="informationForm.publicHomepageEnabled" /></div></section>
       <section class="settings-section"><div class="section-heading"><div><h2>页面内容</h2><span>页脚按纯文本显示；其他内容支持 Markdown、HTML 或指定的完整 URL。</span></div></div><el-form label-position="top" class="settings-form"><el-form-item label="页脚"><el-input v-model="informationForm.footer" type="textarea" :rows="3" maxlength="4096" show-word-limit /></el-form-item><p class="field-hint">显示在页面底部的页脚文本。</p><el-form-item label="关于"><el-input v-model="informationForm.about" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">支持 Markdown 或 HTML；完整 HTTP(S) URL 会以受限页面嵌入。</p><el-form-item label="首页内容"><el-input v-model="informationForm.homeContent" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">显示在登录页下方，支持 Markdown。</p><el-form-item label="用户协议"><el-input v-model="informationForm.userAgreement" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">留空以不要求确认；可填写 Markdown、HTML 或完整 URL。</p><el-form-item label="隐私政策"><el-input v-model="informationForm.privacyPolicy" type="textarea" :rows="6" spellcheck="false" /></el-form-item><p class="field-hint">留空以不要求确认；可填写 Markdown、HTML 或完整 URL。</p></el-form></section>
@@ -404,4 +447,9 @@ watch(activeTab, (tab) => {
 .sensitive-switch { margin-top: 18px; }.sensitive-switch + .sensitive-switch { padding-top: 16px; border-top: 1px solid #dce2e7; }
 .firewall-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 720px) { .firewall-grid { grid-template-columns: 1fr; } }
+.rate-panel { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0 6px; }
+.rate-panel > div { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid #dce2e7; border-radius: 6px; }
+.rate-panel span { color: #7b8792; font-size: 11px; }
+.rate-panel strong { color: #15202b; font-size: 13px; }
+@media (max-width: 720px) { .rate-panel { grid-template-columns: 1fr; } }
 </style>

@@ -12,6 +12,7 @@ AiFerry（AI 摆渡）是基于 GoFrame v2 和 Vue 3 的 OpenAI 兼容中转管�
 - 渠道并发限制：按「渠道 × 密钥」隔离的转发并发上限，满额先换空闲密钥再排队等待（见 `docs/channel-concurrency-limit.md`）
 - 渠道组织 / 项目标识：仅 OpenAI 官方渠道展示，转发时注入 `OpenAI-Organization` / `OpenAI-Project` 头，成本查询按 `project_ids` 过滤（见 `docs/channel-organization-identity.md`）
 - thinking 模式模型的 `reasoning_content` 回传（DeepSeek/Kimi 等要求发生过工具调用后必须回传，见 `docs/reasoning-echo.md`）
+- 展示货币统一换算：跨币种渠道的费用与余额合并成一个币种显示，汇率可自动抓取或人工指定（见 `docs/currency-display.md`）
 - OpenAI 官方、Sub2API 和自定义 JSON 费用查询
 - Casdoor OAuth2 登录和 Redis Session
 

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { formatCost, formatLatency, formatNumber, formatReasoningEffort, formatTime, formatTokenSpeed, formatUsageDuration, setDisplayTimeZone, successRate } from './format'
+import { afterEach, describe, expect, it } from 'vitest'
+import { convertAmount, displayCurrency, formatBalance, formatCost, formatLatency, formatNumber, formatReasoningEffort, formatTime, formatTokenSpeed, formatUsageDuration, setDisplayCurrency, setDisplayTimeZone, successRate } from './format'
 
 describe('format helpers', () => {
   it('does not report missing prices as zero', () => {
@@ -51,5 +51,63 @@ describe('format helpers', () => {
     expect(formatUsageDuration(90_000)).toBe('1分30.0秒')
     expect(formatUsageDuration(84_000)).toBe('1分24.0秒')
     expect(formatUsageDuration(210_000)).toBe('3分30.0秒')
+  })
+})
+
+// displayCurrency 是全局 ref，用例之间必须复位，否则后面的用例会继承上一个用例的折算口径。
+afterEach(() => setDisplayCurrency())
+
+describe('currency conversion', () => {
+  const cnyRate = { display: 'USD', base: 'USD', rates: { USD: 1, CNY: 7.2 } }
+
+  it('converts a CNY amount into the USD display currency', () => {
+    setDisplayCurrency(cnyRate)
+    // 7.2 元按「1 USD = 7.2 CNY」折算应当是 1 美元。
+    expect(formatCost(7.2, 'CNY')).toBe('$1.00')
+    expect(convertAmount(7.2, 'CNY')).toBeCloseTo(1, 6)
+  })
+
+  it('keeps amounts already in the display currency unchanged', () => {
+    setDisplayCurrency({ ...cnyRate, display: 'CNY' })
+    expect(formatCost(7.2, 'CNY')).toBe('¥7.20')
+    expect(convertAmount(7.2, 'CNY')).toBeCloseTo(7.2, 6)
+  })
+
+  it('does not touch currencies it has no rate for', () => {
+    setDisplayCurrency(cnyRate)
+    // 没有汇率就不猜，原样返回才不会把金额算错。
+    expect(convertAmount(100, 'JPY')).toBe(100)
+  })
+
+  it('treats a missing currency as USD', () => {
+    setDisplayCurrency({ ...cnyRate, display: 'CNY' })
+    expect(convertAmount(1, undefined)).toBeCloseTo(7.2, 6)
+    expect(convertAmount(1, null)).toBeCloseTo(7.2, 6)
+  })
+})
+
+describe('display currency settings', () => {
+  it('falls back to USD for unsupported or missing values', () => {
+    setDisplayCurrency({ display: 'JPY', base: 'USD', rates: { USD: 1 } })
+    expect(displayCurrency.value).toBe('USD')
+    setDisplayCurrency()
+    expect(displayCurrency.value).toBe('USD')
+  })
+
+  it('ignores non-positive rates so conversion never divides by zero', () => {
+    setDisplayCurrency({ display: 'CNY', base: 'USD', rates: { USD: 1, CNY: 0 } })
+    expect(convertAmount(7.2, 'USD')).toBe(7.2)
+  })
+})
+
+describe('formatBalance', () => {
+  it('shows a dash when the upstream returned no balance', () => {
+    // 余额缺失是「上游没返回」，不能写成「未定价」，否则会被误读成没配价格。
+    expect(formatBalance(undefined)).toBe('—')
+    expect(formatBalance(null)).toBe('—')
+  })
+
+  it('formats a present balance like a cost', () => {
+    expect(formatBalance(1.5)).toBe('$1.50')
   })
 })

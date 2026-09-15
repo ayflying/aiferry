@@ -6,7 +6,7 @@ import { loadPersonalUsage, loadProfile, updateProfile } from '../api/auth'
 import { apiPost } from '../api/client'
 import type { AccountProfile, AccountUsageSummary, RedemptionResult } from '../api/types'
 import { showError } from '../lib/error'
-import { formatCost, formatNumber } from '../lib/format'
+import { displayCurrency, formatBalance, formatCost, formatNumber } from '../lib/format'
 import { useAuthStore } from '../stores/auth'
 import { useSystemStore } from '../stores/system'
 
@@ -68,7 +68,7 @@ onMounted(load)
     </div>
 
     <section class="metric-grid" aria-label="个人账户摘要">
-      <article class="metric-card"><div class="label"><CircleDollarSign :size="15" />账户余额</div><div class="value">{{ formatCost(profile?.balance) }}</div><div class="detail">USD</div></article>
+      <article class="metric-card"><div class="label"><CircleDollarSign :size="15" />账户余额</div><div class="value">{{ formatBalance(profile?.balance) }}</div><div class="detail">{{ displayCurrency }} 折算</div></article>
       <article class="metric-card"><div class="label"><Activity :size="15" />近 {{ usage.days }} 天调用</div><div class="value">{{ formatNumber(usage.requests) }}</div><div class="detail">成功率 {{ successRate }}</div></article>
       <article class="metric-card"><div class="label"><Activity :size="15" />Token 使用</div><div class="value">{{ formatNumber(usage.totalTokens) }}</div><div class="detail">输入 {{ formatNumber(usage.inputTokens) }} · 输出 {{ formatNumber(usage.outputTokens) }}</div></article>
       <article class="metric-card"><div class="label"><CircleDollarSign :size="15" />估算费用</div><div class="value">{{ formatCost(usage.estimatedCost) }}</div><div class="detail">近 {{ usage.days }} 天</div></article>
