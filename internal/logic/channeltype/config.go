@@ -79,6 +79,32 @@ func ParseConfig(raw []byte) (Config, error) {
 	return config, nil
 }
 
+// IsAbsoluteHTTPURL 报告 value 是否是 http(s)://host 形式的完整地址。渠道类型
+// 里「路径」类字段都接受完整地址：填完整地址时直接使用、不再拼接渠道根地址。
+// 这是必需的——部分上游的查询接口不在根地址的版本前缀之下（根地址是
+// https://host/v1，余额接口却是 https://host/api/user/self），甚至位于另一个
+// 域名，靠拼接无法得到正确地址。
+//
+// 配置校验与运行期地址解析共用这一个判定，避免出现「能存不能查」的偏差。
+func IsAbsoluteHTTPURL(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	return (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+}
+
+// validatePathField 校验「路径」类字段的形状：以 / 开头的相对路径，或完整
+// HTTP(S) 地址。用于额度查询路径——它的相对路径按根地址的 host 根解析
+// （而非拼在根地址之后），漏掉前导斜杠的写法无法判定意图，因此提前拦下。
+// 费用/模型/价格路径的解析层能容忍无斜杠写法（拼接时会补斜杠），故不套用。
+func validatePathField(field, value string) error {
+	if strings.HasPrefix(value, "/") || IsAbsoluteHTTPURL(value) {
+		return nil
+	}
+	return gerror.Newf("%s must start with / or be a full HTTP(S) URL", field)
+}
+
 func normalizeBaseURL(value *string) error {
 	*value = strings.TrimRight(strings.TrimSpace(*value), "/")
 	if *value == "" {
@@ -136,8 +162,10 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 	if config.Path == "" {
 		config.Path = "/api/monitor/usage/quota/limit"
 	}
-	if !strings.HasPrefix(config.Path, "/") {
-		return gerror.New("quota path must be an absolute path")
+	// 额度接口不一定挂在渠道根地址之下：以 / 开头时按根地址的 host 根解析
+	// （智谱 …/api/coding/paas/v4 + /api/monitor/…），填完整地址则直连。
+	if err := validatePathField("quota.path", config.Path); err != nil {
+		return err
 	}
 	config.AuthType = normalizeAuth(config.AuthType)
 	if config.AuthType == AuthNone {
@@ -150,7 +178,8 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 	return nil
 }
 
-func normalizeEndpointConfigs(configs map[string]EndpointConfig) error {	if len(configs) == 0 {
+func normalizeEndpointConfigs(configs map[string]EndpointConfig) error {
+	if len(configs) == 0 {
 		return gerror.New("endpoints must not be empty")
 	}
 	for name, config := range configs {

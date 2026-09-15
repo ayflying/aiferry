@@ -132,7 +132,7 @@ function useBuiltinEndpoints() {
 
         <el-collapse-item name="models">
           <template #title><span class="collapse-title">模型发现<i>{{ modelsSummary(form) }}</i></span></template>
-          <p class="section-hint">请求方法固定为 GET；路径相对上方 API 根地址解析。</p>
+          <p class="section-hint">请求方法固定为 GET。路径以 / 开头时拼接到上方 API 根地址之后；若模型列表不在该根地址下，填 http(s):// 开头的完整地址即直接使用、不再拼接。</p>
           <div class="field-grid">
             <el-form-item class="span-all" label="模型列表路径"><el-input v-model="form.models.path" placeholder="/models" spellcheck="false" /></el-form-item>
             <el-form-item label="列表所在字段"><el-input v-model="form.models.listPath" placeholder="data（响应本身是数组时留空）" spellcheck="false" /></el-form-item>
@@ -150,7 +150,7 @@ function useBuiltinEndpoints() {
             <el-form-item label="查询语义"><el-select v-model="form.costs.valueType"><el-option v-for="item in VALUE_TYPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
           </div>
           <template v-if="form.costs.adapter !== 'none'">
-            <p class="section-hint">请求方法固定为 GET；路径相对上方 API 根地址解析。</p>
+            <p class="section-hint">请求方法固定为 GET。路径以 / 开头时拼接到上方 API 根地址之后；余额/费用接口不在该根地址下时（如根地址带 /v1、接口在 /api 下），填 http(s):// 开头的完整地址即直接使用、不再拼接。</p>
             <div class="field-grid">
               <el-form-item class="span-all" label="查询路径"><el-input v-model="form.costs.path" placeholder="/organization/costs" spellcheck="false" /></el-form-item>
               <el-form-item label="鉴权方式"><el-select v-model="form.costs.authType"><el-option v-for="item in AUTH_TYPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
@@ -178,7 +178,7 @@ function useBuiltinEndpoints() {
             <el-form-item label="适配器"><el-select v-model="form.pricing.adapter"><el-option v-for="item in PRICING_ADAPTER_OPTIONS" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
           </div>
           <template v-if="showPricingDetail">
-            <p class="section-hint">从上游接口读取价格表并写入公共价格。请求方法固定为 GET。</p>
+            <p class="section-hint">从上游接口读取价格表并写入公共价格。请求方法固定为 GET；路径以 / 开头时拼接 API 根地址，填 http(s):// 开头的完整地址则直接使用、不再拼接。</p>
             <div class="field-grid">
               <el-form-item class="span-all" label="价格接口路径"><el-input v-model="form.pricing.path" placeholder="/api/pricing" spellcheck="false" /></el-form-item>
               <el-form-item label="鉴权方式"><el-select v-model="form.pricing.authType"><el-option v-for="item in AUTH_TYPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
@@ -199,12 +199,15 @@ function useBuiltinEndpoints() {
           </div>
           <template v-if="showQuotaDetail">
             <p v-if="quotaLocked" class="section-hint">该适配器的请求方式与鉴权由系统固定，以下字段无需填写。</p>
-            <div v-else class="field-grid">
-              <el-form-item class="span-all" label="额度查询路径"><el-input v-model="form.quota.path" placeholder="/api/monitor/usage/quota/limit" spellcheck="false" /></el-form-item>
-              <el-form-item label="鉴权方式"><el-select v-model="form.quota.authType"><el-option v-for="item in AUTH_TYPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
-              <el-form-item label="请求头名称"><el-input v-model="form.quota.headerName" placeholder="Authorization" spellcheck="false" /></el-form-item>
-              <el-form-item class="span-all" label="请求头前缀"><el-input v-model="form.quota.headerPrefix" placeholder="Bearer " spellcheck="false" /></el-form-item>
-            </div>
+            <template v-else>
+              <p class="section-hint">请求方法固定为 GET。路径以 / 开头时按 API 根地址的 host 根解析（不拼 /v1 等版本前缀）；填 http(s):// 开头的完整地址则直接使用、不再拼接。</p>
+              <div class="field-grid">
+                <el-form-item class="span-all" label="额度查询路径"><el-input v-model="form.quota.path" placeholder="/api/monitor/usage/quota/limit" spellcheck="false" /></el-form-item>
+                <el-form-item label="鉴权方式"><el-select v-model="form.quota.authType"><el-option v-for="item in AUTH_TYPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
+                <el-form-item label="请求头名称"><el-input v-model="form.quota.headerName" placeholder="Authorization" spellcheck="false" /></el-form-item>
+                <el-form-item class="span-all" label="请求头前缀"><el-input v-model="form.quota.headerPrefix" placeholder="Bearer " spellcheck="false" /></el-form-item>
+              </div>
+            </template>
           </template>
         </el-collapse-item>
 

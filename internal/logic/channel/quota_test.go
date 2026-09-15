@@ -257,4 +257,18 @@ func TestResolveQuotaURL(t *testing.T) {
 	if err != nil || endpoint != "https://open.bigmodel.cn/api/monitor/usage/quota/limit" {
 		t.Fatalf("relative path = %q, err %v", endpoint, err)
 	}
+	// 完整地址（余额接口在另一域名）：同样直连，不拼 baseUrl。
+	endpoint, err = resolveQuotaURL("https://tokenrhythm.studio/v1", "https://tokenrhythm.studio/api/user/self")
+	if err != nil || endpoint != "https://tokenrhythm.studio/api/user/self" {
+		t.Fatalf("cross-host absolute URL = %q, err %v", endpoint, err)
+	}
+	// scheme 大小写不敏感：配置校验放行的写法这里必须能解析，否则「能存不能查」。
+	endpoint, err = resolveQuotaURL("https://api.example.com/v1", "HTTPS://api.example.com/api/usage")
+	if err != nil || endpoint != "HTTPS://api.example.com/api/usage" {
+		t.Fatalf("upper-case scheme = %q, err %v", endpoint, err)
+	}
+	// 非 HTTP(S) 的 scheme 不能当直连地址放过去。
+	if _, err = resolveQuotaURL("https://api.example.com/v1", "ftp://api.example.com/api/usage"); err == nil {
+		t.Fatal("expected non-HTTP scheme rejection")
+	}
 }

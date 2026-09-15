@@ -571,12 +571,15 @@ func isQuotaUnauthorized(err error) bool {
 }
 
 // resolveQuotaURL 解析套餐额度接口地址。部分上游（如 OpenCode Go）的额度
-// 接口位于 baseUrl 路径之下（…/zen/go/v1/usage），此时配置 path 为完整 URL
-// 直连；其余上游（如智谱）额度接口在 host 根路径，path 为绝对路径，按
-// resolveHostURL 拼接。
+// 接口位于 baseUrl 路径之下（…/zen/go/v1/usage），或干脆在另一个域名，此时
+// 配置 path 为完整 URL 直连；其余上游（如智谱）额度接口在 host 根路径，path
+// 为绝对路径，按 resolveHostURL 拼接。
+//
+// 判定复用 channeltype.IsAbsoluteHTTPURL，与配置校验同源：校验放行的写法
+// 这里必须能解析，否则会出现「保存成功但查询永远失败」。
 func resolveQuotaURL(baseURL, path string) (string, error) {
 	path = strings.TrimSpace(path)
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+	if channeltype.IsAbsoluteHTTPURL(path) {
 		return path, nil
 	}
 	return resolveHostURL(baseURL, path)
