@@ -157,3 +157,32 @@ assistant 消息；`reasoning_content` 缺失/`null` 在已翻篇的历史消息
   id 回填、客户端已带标准字段时原样保留、聚合方言转写并删除、`null` 回填、无存档时 `null`
   归一成空串、当前轮每条 assistant 消息补空串、已翻篇的历史消息不动、非 assistant 消息不动、
   非 Chat 请求体不动、存档往返与旧格式兼容）。
+
+## 与渠道「思维到内容」开关的关系（不建议开启）
+
+渠道高级设置里的 `reasoningToContent`（前端标签「思维到内容」）是全仓**唯一**会把思考内容变成
+可见正文的地方（`internal/logic/relay/transform.go` 的 `moveReasoningToContent`）：
+
+```go
+container["content"] = " thinking" + reasoning + "" + content
+delete(container, "reasoning_content")
+```
+
+它存在的意义是给**不认识 `reasoning_content` 字段的老客户端**兜底。除此之外没有开启理由：
+默认 false，生产渠道全关，且没有任何全局开关。**保持现状即可——既不需要为它发版，也不需要删掉**
+（默认关闭时开销为零，删它反而会牵动配置兼容）。
+
+开启的代价都远重于收益：
+
+- 客户端拿到的是纯 content，**无法折叠、也无法区分思考与答案**。
+- 多轮里客户端会把整段（含思考）原样回传，上游把模型自己的思考当正文再读一遍，白烧输入
+  token；agent / 工具调用场景还可能污染后续推理。
+- **与本文的存档机制叠加成「双份思考」**：思考在响应改写之前就已被存档（`protocol_attempt.go`
+  的捕获点，注释里写明了这个顺序要求），下一轮 `restoreReasoningContent` 又会把
+  `reasoning_content` 补回去，于是上游同时收到正文内联的 ` thinking…` 与补回的字段。
+- 它只遍历 `choices[].message` / `choices[].delta`，**只对 Chat Completions 响应生效**：
+  客户端是 Responses 端点（思考以 reasoning summary 形式传递）时打开它等于没开。
+
+要改进的方向是把二态开关改成三态 `pass` / `merge` / `drop`——真正有需求的是 `drop`
+（对客户端彻底隐藏思考），而 `merge`（当前实现）在 2026 年已基本无用武之地。没有明确需求前
+不必投入。
