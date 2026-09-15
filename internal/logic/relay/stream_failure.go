@@ -1,14 +1,74 @@
 package relay
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
+
+	"github.com/yunloli/aiferry/internal/logic/protocol"
 )
 
 const maxPendingStreamBytes = 1 << 20
+
+// streamTruncatedReason 是流式响应被截断时统一对外的失败原因。它同时写入客户端
+// 终止帧与用量记录，便于管理端与客户端用同一句话对齐现象。
+const streamTruncatedReason = "上游流式响应未正常结束（缺少结束标记）"
+
+// streamTruncated 判断一次转发是否以「已经向客户端写出内容、但没等到结束标记」
+// 收尾。这种响应客户端拿到的是半截回答，既不能算成功，也无法切换候选重放。
+func streamTruncated(stream bool, result attemptResult) bool {
+	return stream && result.wroteBytes && !result.streamCompleted
+}
+
+// streamTerminal 描述一次流式截断的收尾信息：对外状态码与可展示的原因。
+type streamTerminal struct {
+	status  int
+	message string
+}
+
+// streamTerminalLines 按客户端所在协议生成显式终止帧：一个错误事件加一个结束标记。
+// 客户端据此提示「上游中断」，而不是只看到连接被断开后静默停下。
+func streamTerminalLines(clientEndpoint string, terminal streamTerminal) [][]byte {
+	status := terminal.status
+	if status < http.StatusBadRequest || status > 599 {
+		status = http.StatusBadGateway
+	}
+	message := strings.TrimSpace(terminal.message)
+	if message == "" {
+		message = streamTruncatedReason
+	}
+	payload, err := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"message": message,
+			"type":    "upstream_error",
+			"code":    status,
+		},
+	})
+	if err != nil {
+		return nil
+	}
+	if clientEndpoint == protocol.ResponsesEndpoint {
+		event, marshalErr := json.Marshal(map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"message": message,
+				"type":    "upstream_error",
+				"code":    status,
+			},
+		})
+		if marshalErr != nil {
+			return nil
+		}
+		return [][]byte{[]byte("event: error\ndata: " + string(event) + "\n\n")}
+	}
+	return [][]byte{
+		[]byte("data: " + string(payload) + "\n\n"),
+		[]byte("data: [DONE]\n\n"),
+	}
+}
 
 type streamFailure struct {
 	status  int

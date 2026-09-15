@@ -176,6 +176,9 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			writer.WriteHeader(resp.StatusCode)
 		}
 		if _, err = writer.Write(output); err != nil {
+			// 写入失败通常意味着下游客户端已经断开，标记出来避免把客户端行为
+			// 计入渠道与模型的失败评分。
+			result.writerFailed = true
 			return err
 		}
 		result.wroteBytes = true
@@ -194,6 +197,25 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		pendingSize = 0
 		return nil
 	}
+	// terminateTruncated 在流已经被截断时补发显式终止帧（错误事件 + 结束标记）。
+	// 只在系统设置允许、已经写出内容且客户端仍在连接时发送：客户端已断开时写什么
+	// 都不会被收到。客户端也不能再收到重放，只能据此提示「上游中断」。
+	terminateTruncated := func(terminal streamTerminal) {
+		if !settings.StreamFailureEventEnabled || !result.wroteBytes || result.writerFailed || ctx.Err() != nil {
+			return
+		}
+		for _, line := range streamTerminalLines(plan.ClientEndpoint(), terminal) {
+			for _, restored := range streamRestorer.restoreSSELine(line) {
+				if _, writeErr := writer.Write(restored); writeErr != nil {
+					result.writerFailed = true
+					return
+				}
+			}
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
 	firstByteTimeout := time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second - time.Since(requestStartedAt)
 	if firstByteTimeout <= 0 {
 		return result, false, upstreamTimeoutError{phase: "stream first-byte"}
@@ -211,9 +233,10 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			result.status = failure.status
 			result.body = failure.body
 			result.errorMessage = failure.message
-			// The client already received output; terminate this stream so it can retry.
-			// Sending an SSE error event here would stop Codex from retrying the request.
+			// 上游在流内报错。已经向客户端写出内容时无法切换候选重放，补发显式
+			// 终止帧后就地收尾；否则交回上层继续尝试下一个候选。
 			if result.wroteBytes {
+				terminateTruncated(streamTerminal{status: failure.status, message: failure.message})
 				return result, true, nil
 			}
 			return result, false, nil
@@ -312,6 +335,11 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	result.reasoningContent = reasoning.Reasoning()
 	result.reasoningField = reasoning.Field()
 	result.reasoningToolCallIDs = reasoning.ToolCallIDs()
+	// 上游先结束但没有给出结束标记（空闲超时、连接被半路关闭、干净 EOF）：
+	// 客户端收到的是半截回答，补发终止帧让它能明确提示，而不是静默停下。
+	if streamTruncated(true, result) {
+		terminateTruncated(streamTerminal{status: result.status, message: result.errorMessage})
+	}
 	return result, true, nil
 }
 

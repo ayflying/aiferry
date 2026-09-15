@@ -156,17 +156,22 @@ func TestUncommittedFailuresStayInsideCandidateRetry(t *testing.T) {
 		name       string
 		result     attemptResult
 		attemptErr error
+		stream     bool
 		complete   bool
 	}{
 		{name: "upstream 400", result: attemptResult{status: http.StatusBadRequest}},
 		{name: "upstream 401", result: attemptResult{status: http.StatusUnauthorized}},
 		{name: "transport error", attemptErr: gerror.New("call upstream")},
 		{name: "success", result: attemptResult{status: http.StatusOK}, complete: true},
-		{name: "stream already written", result: attemptResult{status: http.StatusBadGateway, wroteBytes: true}, complete: true},
+		{name: "stream already written", result: attemptResult{status: http.StatusBadGateway, wroteBytes: true}, stream: true, complete: true},
+		{name: "stream completed", result: attemptResult{status: http.StatusOK, wroteBytes: true, streamCompleted: true}, stream: true, complete: true},
+		{name: "stream truncated after output", result: attemptResult{status: http.StatusOK, wroteBytes: true}, stream: true, complete: true},
+		{name: "stream ended without output", result: attemptResult{status: http.StatusOK}, stream: true},
+		{name: "non-stream 200 without completion flag", result: attemptResult{status: http.StatusOK}, complete: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			completed := attemptCompleted(test.result, test.attemptErr)
+			completed := attemptCompleted(test.result, test.attemptErr, test.stream)
 			if completed != test.complete {
 				t.Fatalf("completed = %t, expected %t", completed, test.complete)
 			}

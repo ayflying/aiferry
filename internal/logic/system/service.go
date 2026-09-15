@@ -55,6 +55,7 @@ func DefaultResilienceSettings() adminapi.SystemResilienceSettingsInput {
 		DisableStatusCodes:             "401,429",
 		ModelQualityDetectionEnabled:   false,
 		ProtocolConversionEnabled:      true,
+		StreamFailureEventEnabled:      true,
 		FailureKeywords: []string{
 			"Your credit balance is too low",
 			"This organization has been disabled.",

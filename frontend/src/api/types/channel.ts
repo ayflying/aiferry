@@ -301,6 +301,9 @@ export interface SystemResilienceSettings {
   // protocolConversionEnabled 控制网关是否允许在 Chat Completions 与 Responses
   // 之间自动转换；关闭后请求直连客户端声明的端点，用于排查转换引入的问题。
   protocolConversionEnabled: boolean
+  // streamFailureEventEnabled 控制流式响应在已经写出内容后失败时，是否补发
+  // 显式错误事件与结束帧；关闭后保持直接断开流的历史行为。
+  streamFailureEventEnabled: boolean
 }
 
 export interface BaseSettings {

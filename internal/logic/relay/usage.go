@@ -2,6 +2,8 @@ package relay
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -24,8 +26,18 @@ func (s *sRelay) record(ctx context.Context, requestID string, key apikey.AuthKe
 	cost, chargeable := pricedUsageCost(s.requiresBalanceCheck(candidate.PublicName), billingDetails)
 	recordStatus := result.status
 	recordError := result.errorMessage
+	// 流式响应被截断时上游可能已经报了 200，但客户端拿到的不是完整回答：
+	// 按上游故障记录，并且不扣费。
+	billable := result.status >= http.StatusOK && result.status < http.StatusMultipleChoices
+	if billable && streamTruncated(stream, result) {
+		recordStatus = http.StatusBadGateway
+		billable = false
+		if strings.TrimSpace(recordError) == "" {
+			recordError = streamTruncatedReason
+		}
+	}
 	var chargeErr error
-	if result.status >= 200 && result.status < 300 {
+	if billable {
 		if cost == nil {
 			chargeErr = ErrUpstreamUsageNotBillable
 		} else if chargeable {

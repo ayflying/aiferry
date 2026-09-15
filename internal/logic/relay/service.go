@@ -104,6 +104,9 @@ type attemptResult struct {
 	responseModel      string
 	streamCompleted    bool
 	attemptFlow        []usage.AttemptFlowStep
+	// writerFailed 表示向客户端写响应时写入失败。这通常意味着下游客户端已经断开，
+	// 与上游故障无关，因此不参与渠道与模型的失败评分。
+	writerFailed bool
 	// reasoningContent / reasoningField / reasoningToolCallIDs 是上游本轮返回的思考内容、
 	// 其字段名（方言）以及绑定的工具调用 id，用于按需回传给要求回传思考内容的 thinking 模式上游。
 	reasoningContent     string
@@ -296,7 +299,14 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 				}
 				return nil
 			}
-			if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut {
+			// 流式响应在写出内容后被截断：客户端拿到的是半截回答，不能算成功，
+			// 也无法再切换候选重放。客户端主动断开（写入失败或请求上下文取消）
+			// 属于下游行为，不参与渠道与模型的失败评分。
+			truncated := streamTruncated(isStream, result)
+			if truncated && !result.writerFailed && ctx.Err() == nil {
+				s.maybeAutoDisable(ctx, settings, candidate, failedAttemptResult(result, streamTruncatedReason))
+			}
+			if !truncated && result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut {
 				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
 				// 流式响应被客户端中断时不存档半截思考内容，避免下一轮回传出残缺的推理。
 				if !isStream || result.streamCompleted {

@@ -193,6 +193,10 @@ type SystemResilienceSettingsInput struct {
 	// 之间自动转换。关闭后，除渠道高级配置显式覆盖的渠道外，请求一律直连客户端
 	// 声明的端点，用于排查协议转换引入的问题。字段缺省（历史数据）按启用处理。
 	ProtocolConversionEnabled bool `json:"protocolConversionEnabled"`
+	// StreamFailureEventEnabled 控制流式响应在已经向客户端写出内容之后失败时，
+	// 是否补发一个显式的错误事件与结束帧。关闭后保持历史行为（直接断开流），
+	// 适合依赖「断流即重试」的客户端（如 Codex）。字段缺省（历史数据）按启用处理。
+	StreamFailureEventEnabled bool `json:"streamFailureEventEnabled"`
 }
 
 type ModelQualitySettingsInput struct {

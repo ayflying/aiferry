@@ -83,7 +83,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 				}
 				flow := append(attempted.flow, newAttemptFlowStep(current.ChannelName, result))
 				attempted = channelAttempt{candidate: current, result: result, attempts: attempted.attempts + 1, flow: flow}
-				if attemptCompleted(attempted.result, attemptErr) || nonRetryableClientFailure(attempted.result, attemptErr, settings) {
+				if attemptCompleted(attempted.result, attemptErr, stream) || nonRetryableClientFailure(attempted.result, attemptErr, settings) {
 					attempted.handled = true
 					break
 				}
@@ -116,10 +116,22 @@ func candidateBaseURLs(candidate Candidate) []string {
 	return urls
 }
 
-func attemptCompleted(result attemptResult, attemptErr error) bool {
+func attemptCompleted(result attemptResult, attemptErr error, stream bool) bool {
 	// Chat/Responses relay requests are expected to return HTTP 200. Any other
 	// status is an upstream error and must remain in the retry/failover decision.
-	return result.wroteBytes || (attemptErr == nil && result.status == http.StatusOK)
+	if result.wroteBytes {
+		// 已经向客户端写出内容，无法重放，即使随后失败也只能就地收尾。
+		return true
+	}
+	if attemptErr != nil || result.status != http.StatusOK {
+		return false
+	}
+	if stream && !result.streamCompleted {
+		// 流式响应没有任何内容落地也没等到结束标记，等同一次失败的上游调用，
+		// 允许继续尝试下一个候选。
+		return false
+	}
+	return true
 }
 
 // nonRetryableClientFailure 对切换凭据或备用地址也无法修复的请求错误停止重试。
