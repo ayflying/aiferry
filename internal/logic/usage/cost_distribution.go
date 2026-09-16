@@ -4,11 +4,6 @@ import (
 	"context"
 	"sort"
 	"time"
-
-	"github.com/gogf/gf/v2/errors/gerror"
-
-	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 type costBucketUnit string
@@ -40,17 +35,20 @@ func (s *sUsage) costDistribution(ctx context.Context, dateRange DashboardRange,
 		return result, nil
 	}
 
-	rows := make([]entity.UsageLogs, 0)
-	if err := dao.UsageLogs.Ctx(ctx).
-		WhereGTE(dao.UsageLogs.Columns().CreatedAt, startAt).
-		WhereLT(dao.UsageLogs.Columns().CreatedAt, endAt).
-		Scan(&rows); err != nil {
-		return result, gerror.Wrap(err, "load cost distribution usage logs")
+	// 区间边界沿用 clamp 后的 endAt；总量与「模型 × 桶」都在数据库侧聚合，只回传小结果集。
+	scopedRange := DashboardRange{StartAt: startAt, EndAt: endAt}
+	total, err := s.costTotalAggregate(ctx, scopedRange)
+	if err != nil {
+		return result, err
+	}
+	result.TotalEstimatedCost = total
+	rows, err := s.costBucketAggregates(ctx, scopedRange, bucketUnit, startLocal, dashboardBucketShiftSeconds(location))
+	if err != nil {
+		return result, err
 	}
 	modelCosts := make(map[string]float64)
 	for _, row := range rows {
-		result.TotalEstimatedCost += row.EstimatedCost
-		modelCosts[row.RequestedModel] += row.EstimatedCost
+		modelCosts[row.Name] += row.EstimatedCost
 	}
 	if len(modelCosts) == 0 {
 		return result, nil
@@ -80,7 +78,7 @@ func (s *sUsage) costDistribution(ctx context.Context, dateRange DashboardRange,
 	costsByModel := make(map[string]map[string]float64, len(models)+1)
 	hasOtherModels := false
 	for _, row := range rows {
-		name := row.RequestedModel
+		name := row.Name
 		if _, selected := selectedNames[name]; !selected {
 			name = otherCostModelName
 			hasOtherModels = true
@@ -88,8 +86,7 @@ func (s *sUsage) costDistribution(ctx context.Context, dateRange DashboardRange,
 		if costsByModel[name] == nil {
 			costsByModel[name] = make(map[string]float64)
 		}
-		bucket := costBucketStart(row.CreatedAt.In(location), startLocal, bucketUnit).Format(costBucketLayout(bucketUnit))
-		costsByModel[name][bucket] += row.EstimatedCost
+		costsByModel[name][row.Bucket] += row.EstimatedCost
 	}
 	for _, model := range models {
 		result.Models = append(result.Models, RecentCostModel{

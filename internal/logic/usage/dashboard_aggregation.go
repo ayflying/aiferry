@@ -3,52 +3,76 @@ package usage
 import (
 	"sort"
 	"time"
-
-	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-func dashboardFromUsageLogs(rows []entity.UsageLogs, channelNames map[uint64]string, location *time.Location, dateRange DashboardRange, bucketUnit string) Dashboard {
-	result := Dashboard{TrendBucketUnit: bucketUnit}
-	modelBreakdowns := make(map[string]Breakdown)
-	channelBreakdowns := make(map[uint64]Breakdown)
-	durationTotal := uint64(0)
-	estimatedCost := 0.0
-	for _, row := range rows {
-		result.Summary.Requests++
-		if row.HttpStatus >= 200 && row.HttpStatus <= 299 {
-			result.Summary.Successes++
-		}
-		result.Summary.InputTokens += row.InputTokens
-		result.Summary.OutputTokens += row.OutputTokens
-		result.Summary.TotalTokens += row.TotalTokens
-		estimatedCost += row.EstimatedCost
-		durationTotal += row.DurationMs
-		modelBreakdowns[row.RequestedModel] = addUsageBreakdown(modelBreakdowns[row.RequestedModel], row.RequestedModel, row)
-		channelName := channelNames[row.ChannelId]
-		if channelName == "" {
-			channelName = "不可用渠道"
-		}
-		channelBreakdowns[row.ChannelId] = addUsageBreakdown(channelBreakdowns[row.ChannelId], channelName, row)
+// breakdownLimit 限制模型与渠道两个维度的展示条数。
+const breakdownLimit = 8
+
+// dashboardFromAggregates 用 SQL 聚合结果组装仪表盘。
+//
+// 聚合口径与原先把全部明细行拉进内存再统计的实现保持一致：
+// 总量、模型/渠道维度、趋势桶都由 dashboard_query.go 在数据库侧完成分组。
+func dashboardFromAggregates(
+	summary dashboardSummaryAggregate,
+	models []dashboardBreakdownAggregate,
+	channels []dashboardBreakdownAggregate,
+	trendRows []dashboardTrendAggregate,
+	channelNames map[uint64]string,
+	location *time.Location,
+	dateRange DashboardRange,
+	bucketUnit string,
+) Dashboard {
+	estimatedCost := summary.EstimatedCost
+	result := Dashboard{
+		TrendBucketUnit: bucketUnit,
+		Summary: Summary{
+			Requests:      summary.Requests,
+			Successes:     summary.Successes,
+			InputTokens:   summary.InputTokens,
+			OutputTokens:  summary.OutputTokens,
+			TotalTokens:   summary.TotalTokens,
+			EstimatedCost: &estimatedCost,
+		},
 	}
-	result.Summary.EstimatedCost = &estimatedCost
-	if result.Summary.Requests > 0 {
-		result.Summary.AverageLatency = float64(durationTotal) / float64(result.Summary.Requests)
+	if summary.Requests > 0 {
+		result.Summary.AverageLatency = float64(summary.DurationMs) / float64(summary.Requests)
 	}
-	result.Trend = usageTrend(rows, location, dateRange, bucketUnit)
-	result.ByModel = topUsageBreakdowns(modelUsageBreakdownValues(modelBreakdowns), 8)
-	result.ByChannel = topUsageBreakdowns(channelUsageBreakdownValues(channelBreakdowns), 8)
+	result.Trend = usageTrendFromAggregates(trendRows, location, dateRange, bucketUnit)
+	result.ByModel = topUsageBreakdowns(modelBreakdownsFromAggregates(models), breakdownLimit)
+	result.ByChannel = topUsageBreakdowns(channelBreakdownsFromAggregates(channels, channelNames), breakdownLimit)
 	return result
 }
 
-func addUsageBreakdown(current Breakdown, name string, row entity.UsageLogs) Breakdown {
-	if current.EstimatedCost == nil {
-		current.Name = name
-		current.EstimatedCost = new(float64)
+func modelBreakdownsFromAggregates(rows []dashboardBreakdownAggregate) []Breakdown {
+	result := make([]Breakdown, 0, len(rows))
+	for _, row := range rows {
+		estimatedCost := row.EstimatedCost
+		result = append(result, Breakdown{
+			Name:          row.Name,
+			Requests:      row.Requests,
+			TotalTokens:   row.TotalTokens,
+			EstimatedCost: &estimatedCost,
+		})
 	}
-	current.Requests++
-	current.TotalTokens += row.TotalTokens
-	*current.EstimatedCost += row.EstimatedCost
-	return current
+	return result
+}
+
+func channelBreakdownsFromAggregates(rows []dashboardBreakdownAggregate, channelNames map[uint64]string) []Breakdown {
+	result := make([]Breakdown, 0, len(rows))
+	for _, row := range rows {
+		name := channelNames[row.ChannelId]
+		if name == "" {
+			name = "不可用渠道"
+		}
+		estimatedCost := row.EstimatedCost
+		result = append(result, Breakdown{
+			Name:          name,
+			Requests:      row.Requests,
+			TotalTokens:   row.TotalTokens,
+			EstimatedCost: &estimatedCost,
+		})
+	}
+	return result
 }
 
 func topUsageBreakdowns(result []Breakdown, limit int) []Breakdown {
@@ -64,40 +88,24 @@ func topUsageBreakdowns(result []Breakdown, limit int) []Breakdown {
 	return result
 }
 
-func modelUsageBreakdownValues(values map[string]Breakdown) []Breakdown {
-	result := make([]Breakdown, 0, len(values))
-	for _, value := range values {
-		result = append(result, value)
-	}
-	return result
-}
-
-func channelUsageBreakdownValues(values map[uint64]Breakdown) []Breakdown {
-	result := make([]Breakdown, 0, len(values))
-	for _, value := range values {
-		result = append(result, value)
-	}
-	return result
-}
-
-func usageTrend(rows []entity.UsageLogs, location *time.Location, dateRange DashboardRange, bucketUnit string) []TrendPoint {
+// usageTrendFromAggregates 把趋势聚合结果补齐成连续桶序列。
+//
+// 小时档必须补齐区间内每个整点（含没有请求的桶）；天档只输出有数据的桶并按其排序。
+func usageTrendFromAggregates(rows []dashboardTrendAggregate, location *time.Location, dateRange DashboardRange, bucketUnit string) []TrendPoint {
 	bucketLayout := time.DateOnly
 	if bucketUnit == trendBucketHour {
 		bucketLayout = "2006-01-02 15:00:00"
 	}
-	values := make(map[string]TrendPoint)
+	values := make(map[string]TrendPoint, len(rows))
 	for _, row := range rows {
-		bucket := row.CreatedAt.In(location).Format(bucketLayout)
-		point := values[bucket]
-		point.Bucket = bucket
-		point.Requests++
-		point.InputTokens += row.InputTokens
-		point.OutputTokens += row.OutputTokens
-		if point.EstimatedCost == nil {
-			point.EstimatedCost = new(float64)
+		estimatedCost := row.EstimatedCost
+		values[row.Bucket] = TrendPoint{
+			Bucket:        row.Bucket,
+			Requests:      row.Requests,
+			InputTokens:   row.InputTokens,
+			OutputTokens:  row.OutputTokens,
+			EstimatedCost: &estimatedCost,
 		}
-		*point.EstimatedCost += row.EstimatedCost
-		values[bucket] = point
 	}
 	if bucketUnit == trendBucketHour {
 		start := dateRange.StartAt.In(location)

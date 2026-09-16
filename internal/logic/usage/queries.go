@@ -8,7 +8,6 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 const (
@@ -74,14 +73,22 @@ func parseLogTime(value string, location *time.Location) (time.Time, error) {
 func (s *sUsage) Dashboard(ctx context.Context, dateRange DashboardRange) (Dashboard, error) {
 	location := s.timeLocation(ctx)
 	now := time.Now().In(location)
-	rows := make([]entity.UsageLogs, 0)
-	if err := dao.UsageLogs.Ctx(ctx).
-		WhereGTE(dao.UsageLogs.Columns().CreatedAt, dateRange.StartAt).
-		WhereLT(dao.UsageLogs.Columns().CreatedAt, dateRange.EndAt).
-		Scan(&rows); err != nil {
-		return Dashboard{}, gerror.Wrap(err, "load dashboard usage logs")
+	// 库内 created_at 是进程本地时区的墙钟时间，分桶要按展示时区，两者不一致时才平移。
+	shiftSeconds := dashboardBucketShiftSeconds(location)
+
+	summary, err := s.dashboardSummaryAggregate(ctx, dateRange)
+	if err != nil {
+		return Dashboard{}, err
 	}
-	channelNames, err := loadUsageChannelNames(ctx, usageChannelIDs(rows))
+	models, err := s.dashboardModelAggregates(ctx, dateRange)
+	if err != nil {
+		return Dashboard{}, err
+	}
+	channels, err := s.dashboardChannelAggregates(ctx, dateRange)
+	if err != nil {
+		return Dashboard{}, err
+	}
+	channelNames, err := loadUsageChannelNames(ctx, channelAggregateChannelIDs(channels))
 	if err != nil {
 		return Dashboard{}, err
 	}
@@ -90,7 +97,13 @@ func (s *sUsage) Dashboard(ctx context.Context, dateRange DashboardRange) (Dashb
 		trendRange.EndAt = current
 	}
 	trendBucketUnit := dashboardTrendBucketUnit(trendRange, location)
-	result := dashboardFromUsageLogs(rows, channelNames, location, trendRange, trendBucketUnit)
+	trendRows, err := s.dashboardTrendAggregates(ctx, dateRange, trendBucketUnit, shiftSeconds)
+	if err != nil {
+		return Dashboard{}, err
+	}
+	result := dashboardFromAggregates(
+		summary, models, channels, trendRows, channelNames, location, trendRange, trendBucketUnit,
+	)
 	recentCost, err := s.costDistribution(ctx, dateRange, now, location)
 	if err != nil {
 		return result, err

@@ -206,16 +206,6 @@ func loadUsageUserNames(ctx context.Context, userIDs []uint64) (map[uint64]strin
 	return result, nil
 }
 
-func usageChannelIDs(rows []entity.UsageLogs) []uint64 {
-	ids := make(map[uint64]struct{})
-	for _, row := range rows {
-		if row.ChannelId > 0 {
-			ids[row.ChannelId] = struct{}{}
-		}
-	}
-	return usageReferenceIDs(ids)
-}
-
 func usageReferenceIDs(ids map[uint64]struct{}) []uint64 {
 	result := make([]uint64, 0, len(ids))
 	for id := range ids {
