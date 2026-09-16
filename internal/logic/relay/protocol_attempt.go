@@ -28,7 +28,11 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 		conversionEnabled = *advancedConfig.ProtocolConversion
 	}
 	primary := s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled)
+	primaryStartedAt := time.Now()
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
+	// 首跳耗时先记在结果上：协议回退时它会成为调用流程步骤的耗时快照；
+	// 不回退时调用方会用整次尝试的耗时覆盖它，不影响既有语义。
+	result.latency = time.Since(primaryStartedAt)
 	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	// 关闭协议转换时不做端点回退：AlternatePlan 给出的备选端点必然要求转换，
 	// 继续回退等于绕过开关。此时把上游的原始失败结果交还给客户端。
@@ -39,7 +43,12 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if !ok {
 		return result, handled, attemptErr
 	}
-	return s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, fallback, sensitiveDataRestorer)
+	// 协议回退是网关对同一候选发起的第二次真实上游调用：首跳的失败必须登记进
+	// 调用流程，否则用户只看到「上游尝试 N 次」，不知道网关换过端点重试并自愈。
+	primaryStep := newAttemptFlowStep(candidate.ChannelName, result)
+	fallbackResult, fallbackHandled, fallbackErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, fallback, sensitiveDataRestorer)
+	fallbackResult.precedingFlow = append(fallbackResult.precedingFlow, primaryStep)
+	return fallbackResult, fallbackHandled, fallbackErr
 }
 
 // preferredProtocolPlan 决定这次转发用哪个上游端点。allowConversion 为 false 时

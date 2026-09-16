@@ -108,6 +108,10 @@ type attemptResult struct {
 	responseModel      string
 	streamCompleted    bool
 	attemptFlow        []usage.AttemptFlowStep
+	// precedingFlow 保存本次尝试在协议回退前的那次上游请求（首跳）。协议回退是网关
+	// 对同一候选发起的第二次真实上游调用，两次都必须出现在调用流程里；只保留最终
+	// 结果会让用户在详情里看到「上游尝试 N 次」却不知道网关换过端点重试并自愈。
+	precedingFlow []usage.AttemptFlowStep
 	// writerFailed 表示向客户端写响应时写入失败。这通常意味着下游客户端已经断开，
 	// 与上游故障无关，因此不参与渠道与模型的失败评分。
 	writerFailed bool

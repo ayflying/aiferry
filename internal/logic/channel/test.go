@@ -70,10 +70,11 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	}
 	baseURLs := advancedConfig.UpstreamBaseURLs(channel.BaseUrl)
 	var (
-		result     TestResult
-		billingErr error
-		path       string
-		tokens     usage.TokenUsage
+		result      TestResult
+		billingErr  error
+		path        string
+		tokens      usage.TokenUsage
+		attemptFlow []usage.AttemptFlowStep
 	)
 	tested := false
 	finished := false
@@ -85,6 +86,9 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 			}
 			tested = true
 			result, path, tokens = current, currentPath, currentTokens
+			// 端点/地址的回退尝试逐条记入调用流程：只留最终结果会让「测试最终
+			// 通过、但中间换过端点」这类信息不可见。
+			attemptFlow = append(attemptFlow, testAttemptFlowStep(channel.Name, currentPath, current))
 			if result.Success {
 				finished = true
 				break
@@ -95,7 +99,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 		}
 	}
 	if tested {
-		billingErr = s.recordTestUsage(ctx, userID, channel, credential.ID, model, path, &result, tokens)
+		billingErr = s.recordTestUsage(ctx, userID, channel, credential.ID, model, path, &result, tokens, attemptFlow)
 	}
 	if result.Success {
 		s.clearCredentialTransient(ctx, credential.ID)
@@ -223,7 +227,7 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	return result, path, tokens, nil
 }
 
-func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel entity.Channels, credentialID uint64, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage) error {
+func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel entity.Channels, credentialID uint64, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage, attemptFlow []usage.AttemptFlowStep) error {
 	if s.usage == nil {
 		return nil
 	}
@@ -263,13 +267,29 @@ func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel e
 		Tokens:               tokens,
 		EstimatedCost:        cost,
 		DurationMs:           result.LatencyMs,
-		Attempts:             1,
+		Attempts:             len(attemptFlow),
+		AttemptFlow:          attemptFlow,
 		ErrorMessage:         recordMessage,
 	})
 	if recordErr != nil {
 		result.Message = truncate(result.Message+"；用量记录失败："+recordErr.Error(), 1024)
 	}
 	return chargeErr
+}
+
+// testAttemptFlowStep 把一次渠道测试的端点尝试快照成调用流程步骤。测试链路会按
+// 端点/地址逐个回退（如 /chat/completions 失败后改试 /responses），这些尝试必须
+// 能在「调用流程」里看到，而不是只留一个最终结果。
+func testAttemptFlowStep(channelName, endpoint string, result TestResult) usage.AttemptFlowStep {
+	step := usage.AttemptFlowStep{ChannelName: channelName, Endpoint: endpoint, DurationMs: result.LatencyMs}
+	if !result.Success {
+		if result.HTTPStatus > 0 {
+			status := uint(result.HTTPStatus)
+			step.Status = &status
+		}
+		step.Error = truncate(result.Message, 240)
+	}
+	return step
 }
 
 func testEndpoints(endpoint, model string) []string {

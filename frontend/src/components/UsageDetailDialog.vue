@@ -160,7 +160,7 @@ function billingSummary() {
             <div class="flow-step" :class="{ failed: stepFailed(step) }">
               <component :is="stepFailed(step) && step.error ? 'button' : 'div'" class="flow-step-main" :type="stepFailed(step) && step.error ? 'button' : undefined" :aria-expanded="stepFailed(step) && step.error ? expandedFlowSteps.includes(index) : undefined" @click="stepFailed(step) && step.error && toggleFlowStep(index)">
                 <strong>{{ step.channelName || '未知渠道' }}<span v-if="stepFailed(step)" class="flow-failed-tag">失败 {{ step.status }}</span></strong>
-                <small>耗时 {{ formatLatency(step.durationMs) }}<template v-if="step.firstTokenMs != null"> · 首字 {{ formatLatency(step.firstTokenMs) }}</template></small>
+                <small><template v-if="step.endpoint">{{ step.endpoint }} · </template>耗时 {{ formatLatency(step.durationMs) }}<template v-if="step.firstTokenMs != null"> · 首字 {{ formatLatency(step.firstTokenMs) }}</template></small>
               </component>
               <div v-if="stepFailed(step) && step.error && expandedFlowSteps.includes(index)" class="flow-step-error">{{ step.error }}</div>
               <ChevronDown v-if="stepFailed(step) && step.error" :size="13" class="flow-step-chevron" :class="{ expanded: expandedFlowSteps.includes(index) }" />

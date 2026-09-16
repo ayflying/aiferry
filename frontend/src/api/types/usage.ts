@@ -50,6 +50,7 @@ export interface Dashboard {
 
 export interface AttemptFlowStep {
   channelName: string
+  endpoint?: string
   durationMs: number
   firstTokenMs?: number
   status?: number

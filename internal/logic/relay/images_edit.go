@@ -95,9 +95,10 @@ func (s *sRelay) HandleImagesEdit(ctx context.Context, incomingHeaders http.Head
 		candidate := candidates[index]
 		credential, credentialErr := s.channels.SelectCredential(ctx, key.Id, candidate.ChannelID, nil)
 		if credentialErr != nil {
+			// 选密钥失败时请求没有发出：不计入「上游尝试次数」，也没有调用流程步骤，
+			// 与 chat/audio 链路保持一致（attempts 始终等于流程步数）。
 			last = attemptResult{errorMessage: credentialErr.Error()}
 			lastCandidate = candidate
-			attempts++
 			continue
 		}
 		candidate.ChannelCredentialID = credential.ID

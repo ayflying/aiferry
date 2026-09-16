@@ -19,13 +19,27 @@ import (
 // the gateway moved on to the next candidate. Errors are redacted and capped —
 // full bodies stay in the request's failure log.
 func newAttemptFlowStep(channelName string, result attemptResult) usage.AttemptFlowStep {
-	step := usage.AttemptFlowStep{ChannelName: channelName, DurationMs: result.latency.Milliseconds(), FirstTokenMs: result.firstTokenMs}
+	step := usage.AttemptFlowStep{
+		ChannelName:  channelName,
+		Endpoint:     result.upstreamEndpoint,
+		DurationMs:   result.latency.Milliseconds(),
+		FirstTokenMs: result.firstTokenMs,
+	}
 	if result.status != 0 && (result.status < http.StatusOK || result.status >= http.StatusMultipleChoices) {
 		status := uint(result.status)
 		step.Status = &status
 		step.Error = truncateFailureLog(redactFailureText(result.errorMessage), 240)
 	}
 	return step
+}
+
+// attemptFlowSteps 组装一次上游调用对应的调用流程步骤：协议回退时首跳的失败在前，
+// 本次端点调用的结果在后。返回的步数同时是「上游尝试次数」的计数依据——协议回退
+// 代表网关真实发出过两次上游请求，必须按两次计入。
+func attemptFlowSteps(channelName string, result attemptResult) []usage.AttemptFlowStep {
+	steps := make([]usage.AttemptFlowStep, 0, len(result.precedingFlow)+1)
+	steps = append(steps, result.precedingFlow...)
+	return append(steps, newAttemptFlowStep(channelName, result))
 }
 
 type channelAttempt struct {
@@ -83,8 +97,9 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 					result = failedAttemptResult(result, attemptErr.Error())
 					result.timedOut = isUpstreamTimeout(attemptErr)
 				}
-				flow := append(attempted.flow, newAttemptFlowStep(current.ChannelName, result))
-				attempted = channelAttempt{candidate: current, result: result, attempts: attempted.attempts + 1, flow: flow}
+				steps := attemptFlowSteps(current.ChannelName, result)
+				flow := append(attempted.flow, steps...)
+				attempted = channelAttempt{candidate: current, result: result, attempts: attempted.attempts + len(steps), flow: flow}
 				if attemptCompleted(attempted.result, attemptErr, stream) || nonRetryableClientFailure(attempted.result, attemptErr, settings) {
 					attempted.handled = true
 					break

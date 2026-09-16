@@ -43,7 +43,10 @@ type PriceRates struct {
 }
 
 type AttemptFlowStep struct {
-	ChannelName  string `json:"channelName"`
+	ChannelName string `json:"channelName"`
+	// Endpoint 是这一步实际请求的上游端点（如 /responses、/chat/completions）。
+	// 协议回退会在同一渠道内产生多个步骤，端点说明每一跳的去向。
+	Endpoint     string `json:"endpoint,omitempty"`
 	DurationMs   int64  `json:"durationMs"`
 	FirstTokenMs *int64 `json:"firstTokenMs,omitempty"`
 	Status       *uint  `json:"status,omitempty"`

@@ -3,8 +3,10 @@ package relay
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
+	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
 // 上游按有状态会话校验拒绝本会话的工具调用历史时，必须放行到下一个候选渠道：
@@ -82,5 +84,39 @@ func TestNonRetryableClientFailureAllowsPaymentRequired(t *testing.T) {
 	written := attemptResult{status: http.StatusPaymentRequired, wroteBytes: true}
 	if !attemptCompleted(written, nil, true) {
 		t.Fatal("a 402 after bytes were written must end the attempt")
+	}
+}
+
+// 协议回退会对同一候选发起两次真实上游调用（首跳失败 + 回退结果）：两次都必须进入
+// 调用流程，「上游尝试次数」也要按两步计——否则用户看到「上游尝试 1 次」，不知道
+// 网关换过端点重试并自愈。
+func TestAttemptFlowStepsIncludesPrecedingProtocolFallback(t *testing.T) {
+	notFound := uint(http.StatusNotFound)
+	result := attemptResult{
+		status:           http.StatusOK,
+		upstreamEndpoint: "/chat/completions",
+		latency:          1200 * time.Millisecond,
+		precedingFlow: []usage.AttemptFlowStep{{
+			ChannelName: "ch-flow",
+			Endpoint:    "/responses",
+			DurationMs:  300,
+			Status:      &notFound,
+			Error:       "responses endpoint not supported",
+		}},
+	}
+	steps := attemptFlowSteps("ch-flow", result)
+	if len(steps) != 2 {
+		t.Fatalf("steps = %d; want 2 (protocol fallback must count as a real upstream attempt)", len(steps))
+	}
+	if steps[0].Endpoint != "/responses" || steps[0].Status == nil || *steps[0].Status != http.StatusNotFound {
+		t.Fatalf("first step must keep the failed primary hop: %+v", steps[0])
+	}
+	if steps[1].Endpoint != "/chat/completions" || steps[1].Status != nil {
+		t.Fatalf("second step must be the successful final hop: %+v", steps[1])
+	}
+	// 没有协议回退时流程保持单步，尝试次数不受影响。
+	plain := attemptResult{status: http.StatusOK, upstreamEndpoint: "/chat/completions", latency: time.Second}
+	if steps := attemptFlowSteps("ch-flow", plain); len(steps) != 1 {
+		t.Fatalf("plain attempt steps = %d; want 1", len(steps))
 	}
 }
