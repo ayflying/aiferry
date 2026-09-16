@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,7 +35,7 @@ func TestTrendBucketExpressionOnlyShiftsWhenNeeded(t *testing.T) {
 			name:         "hour with shift wraps column",
 			bucketUnit:   trendBucketHour,
 			shiftSeconds: 28800,
-			want:         "DATE_FORMAT(DATE_ADD(created_at, INTERVAL 28800 SECOND), '%Y-%m-%d %H:00:00')",
+			want:         "DATE_FORMAT(FROM_UNIXTIME(UNIX_TIMESTAMP(created_at) + 28800), '%Y-%m-%d %H:00:00')",
 		},
 		{
 			name:       "day without shift keeps bare column",
@@ -44,7 +46,7 @@ func TestTrendBucketExpressionOnlyShiftsWhenNeeded(t *testing.T) {
 			name:         "day with negative shift",
 			bucketUnit:   trendBucketDay,
 			shiftSeconds: -28800,
-			want:         "DATE_FORMAT(DATE_ADD(created_at, INTERVAL -28800 SECOND), '%Y-%m-%d')",
+			want:         "DATE_FORMAT(FROM_UNIXTIME(UNIX_TIMESTAMP(created_at) + -28800), '%Y-%m-%d')",
 		},
 	}
 	for _, test := range tests {
@@ -76,7 +78,7 @@ func TestCostBucketExpressionMatchesGoBucketBoundaries(t *testing.T) {
 		{
 			name: "week anchors on range start day every seven days",
 			unit: costBucketWeek,
-			want: "DATE_FORMAT(DATE_SUB(DATE(created_at), INTERVAL MOD(DATEDIFF(DATE(created_at), '2026-07-01'), 7) DAY), '%Y-%m-%d')",
+			want: "DATE_FORMAT(FROM_DAYS(TO_DAYS(DATE(created_at)) - MOD(DATEDIFF(DATE(created_at), '2026-07-01'), 7)), '%Y-%m-%d')",
 		},
 	}
 	for _, test := range tests {
@@ -87,7 +89,7 @@ func TestCostBucketExpressionMatchesGoBucketBoundaries(t *testing.T) {
 		})
 	}
 	if got, want := costBucketExpression("created_at", costBucketDay, startLocal, 28800),
-		"DATE_FORMAT(DATE_ADD(created_at, INTERVAL 28800 SECOND), '%Y-%m-%d')"; got != want {
+		"DATE_FORMAT(FROM_UNIXTIME(UNIX_TIMESTAMP(created_at) + 28800), '%Y-%m-%d')"; got != want {
 		t.Fatalf("shifted costBucketExpression() = %q, want %q", got, want)
 	}
 }
@@ -112,10 +114,49 @@ func TestCostBucketWeekOffsetMatchesGoIntegerDivision(t *testing.T) {
 // 直接 GROUP BY requested_model 会把 Qwen3.8-Flash 与 qwen3.8-flash 合成一组，
 // 而改动前用 Go map 分组是区分大小写的，两者展示结果不同。
 func TestModelGroupingStaysCaseSensitive(t *testing.T) {
-	if got, want := modelGroupExpression("requested_model"), "BINARY requested_model"; got != want {
+	if got, want := modelGroupExpression("requested_model"), "CAST(requested_model AS BINARY)"; got != want {
 		t.Fatalf("modelGroupExpression() = %q, want %q", got, want)
 	}
 	if got, want := modelGroupNameExpression("requested_model"), "ANY_VALUE(requested_model) AS name"; got != want {
 		t.Fatalf("modelGroupNameExpression() = %q, want %q", got, want)
+	}
+}
+
+// bareGroupWord 复现 GoFrame gdb.quoteWordReg：只有纯标识符才会被 Group 加反引号。
+var bareGroupWord = regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`)
+
+// 分组表达式必须能安全通过 GoFrame Group 的改写。
+//
+// Group() 会对参数整体调用 QuoteString，因此写进 Group 的表达式不能在任何逗号段的
+// 开头出现裸标识符（详见 checkGroupExpressionQuoting）。历史上踩过三次同一个坑：
+// "BINARY requested_model"、"DATE_SUB(d, INTERVAL n DAY)"、"DATE_ADD(d, INTERVAL n SECOND)"。
+func TestGroupExpressionsSurviveQuoteString(t *testing.T) {
+	rangeStart := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	checkGroupExpressionQuoting(t, "模型分组", modelGroupExpression("requested_model"))
+	checkGroupExpressionQuoting(t, "渠道分组", "COALESCE(channel_id, 0)")
+	checkGroupExpressionQuoting(t, "小时桶", trendBucketExpression("created_at", trendBucketHour, 0))
+	checkGroupExpressionQuoting(t, "天桶", trendBucketExpression("created_at", trendBucketDay, 0))
+	checkGroupExpressionQuoting(t, "天桶(带时区偏移)", trendBucketExpression("created_at", trendBucketDay, 28800))
+	checkGroupExpressionQuoting(t, "周桶", costBucketExpression("created_at", costBucketWeek, rangeStart, 0))
+	checkGroupExpressionQuoting(t, "周桶(带时区偏移)", costBucketExpression("created_at", costBucketWeek, rangeStart, 28800))
+}
+
+// checkGroupExpressionQuoting 复现 Group 的 QuoteString 分段规则：先按逗号切段，
+// 再取每段空格前的第一个词；该词若为纯标识符就会被套上反引号，使原本的关键字或
+// 表达式片段变成列名（INTERVAL -> `INTERVAL`）而导致语法错误。
+func checkGroupExpressionQuoting(t *testing.T, name, expression string) {
+	t.Helper()
+	for _, commaSegment := range strings.Split(expression, ",") {
+		head := strings.TrimSpace(commaSegment)
+		if index := strings.Index(head, " "); index >= 0 {
+			head = head[:index]
+		}
+		if head == "" {
+			continue
+		}
+		if bareGroupWord.MatchString(head) {
+			t.Fatalf("%s 表达式 %q 逗号段的首词 %q 是裸标识符，会被 Group 加反引号破坏",
+				name, expression, head)
+		}
 	}
 }

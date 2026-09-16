@@ -36,6 +36,10 @@ type App struct {
 	CasdoorClientSecret    string
 	SessionTTL             int
 	AdminRoles             []string
+	// UsageRetentionDays 是使用明细的保留窗口（天）。0 表示不清理（默认）：
+	// 仪表盘、用户用量等消费统计都实时聚合自 usage_logs，删除明细会一并缩短
+	// 历史统计的可查询窗口，因此只能由部署方显式开启。
+	UsageRetentionDays int
 }
 
 func Load() (App, error) {
@@ -71,6 +75,7 @@ func Load() (App, error) {
 		CasdoorClientSecret:    os.Getenv("CASDOOR_CLIENT_SECRET"),
 		SessionTTL:             envInt("SESSION_TTL_HOURS", defaultSessionTTLHours),
 		AdminRoles:             envList("AIFERRY_ADMIN_ROLES", []string{"admin"}),
+		UsageRetentionDays:     envInt("USAGE_RETENTION_DAYS", 0),
 	}
 	if strings.TrimSpace(app.MySQLPassword) == "" {
 		return App{}, gerror.New("MYSQL_PASSWORD is required")

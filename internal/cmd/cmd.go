@@ -83,6 +83,7 @@ var (
 			}
 			channelSvc.StartHealthChecks(ctx)
 			channelSvc.StartCostSync(ctx)
+			usageSvc.StartRetentionCleanup(ctx, cfg.UsageRetentionDays)
 			s.SetAddr(":8080")
 			s.SetServerRoot(cfg.WebRoot)
 			s.SetFileServerEnabled(true)

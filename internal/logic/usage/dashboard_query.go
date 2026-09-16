@@ -55,15 +55,19 @@ type costBucketAggregate struct {
 //
 // MySQL 的字符串比较默认忽略大小写，直接 GROUP BY requested_model 会把
 // Qwen3.8-Flash 与 qwen3.8-flash 这类同形不同大小写的模型名合成一组；而改动前的
-// 实现是用 Go map 按原始字符串分组，两者结论不同。BINARY 按字节比较，还原原先的
-// 分组粒度。
+// 实现是用 Go map 按原始字符串分组，两者结论不同。CAST(... AS BINARY) 按字节比较，
+// 还原原先的分组粒度（MySQL 中 `BINARY expr` 本就是 CAST(expr AS BINARY) 的简写）。
+//
+// 必须保留「首个空格前含括号」这一形式：GoFrame 的 Group() 会对参数整体调用
+// QuoteString，它按逗号分段、再取每段空格前的第一个词当字段名加引号。若写成
+// "BINARY requested_model"，会被改写成 `BINARY` requested_model 而直接语法报错。
 func modelGroupExpression(column string) string {
-	return "BINARY " + column
+	return "CAST(" + column + " AS BINARY)"
 }
 
 // modelGroupNameExpression 取组内模型名作为展示名。
 //
-// BINARY 分组后 SELECT 直接写列名会违反 ONLY_FULL_GROUP_BY；而该分组下同组内模型名
+// CAST 分组后 SELECT 直接写列名会违反 ONLY_FULL_GROUP_BY；而该分组下同组内模型名
 // 必然只有一种取值，用 ANY_VALUE 取出即可，且结果保持字符集类型而非二进制串。
 func modelGroupNameExpression(column string) string {
 	return "ANY_VALUE(" + column + ") AS name"
@@ -91,11 +95,16 @@ func dashboardBucketShiftSeconds(location *time.Location) int {
 }
 
 // shiftedTimeExpression 在没有偏移时保持列名原样，避免给列套函数影响索引可用性。
+//
+// 有偏移时用 FROM_UNIXTIME(UNIX_TIMESTAMP(col) + n) 而不是
+// DATE_ADD(col, INTERVAL n SECOND)：后者经 Group 的 QuoteString 时，逗号段
+// ` INTERVAL 28800 SECOND)` 的首词是裸关键字 INTERVAL，会被改写成 `INTERVAL` 而语法报错。
+// UNIX_TIMESTAMP 与 FROM_UNIXTIME 用同一会话时区做往返，净效果即墙钟时间加 n 秒。
 func shiftedTimeExpression(column string, shiftSeconds int) string {
 	if shiftSeconds == 0 {
 		return column
 	}
-	return fmt.Sprintf("DATE_ADD(%s, INTERVAL %d SECOND)", column, shiftSeconds)
+	return fmt.Sprintf("FROM_UNIXTIME(UNIX_TIMESTAMP(%s) + %d)", column, shiftSeconds)
 }
 
 // trendBucketExpression 生成与 Go 侧 usageTrend 对齐的桶表达式。
@@ -111,6 +120,11 @@ func trendBucketExpression(column, bucketUnit string, shiftSeconds int) string {
 //
 // 天与小时按墙钟截断；周桶以区间起始本地日为锚点每 7 天一个桶，等价于 Go 侧的
 // dashboardDayCount/7*7 偏移。
+//
+// 周桶刻意用 FROM_DAYS(TO_DAYS(d) - n) 而不是 DATE_SUB(d, INTERVAL n DAY)：
+// Group() 的 QuoteString 按逗号分段后，会取每段空格前的第一个词当字段名加引号，
+// 而 `, INTERVAL MOD(...)` 这类写法的段首正是裸关键字 INTERVAL，会被改写成
+// `INTERVAL` 而语法报错。FROM_DAYS 形式里所有逗号段的首个词都含括号或引号，安全。
 func costBucketExpression(column string, unit costBucketUnit, startLocal time.Time, shiftSeconds int) string {
 	shifted := shiftedTimeExpression(column, shiftSeconds)
 	if unit == costBucketHour {
@@ -121,7 +135,7 @@ func costBucketExpression(column string, unit costBucketUnit, startLocal time.Ti
 	}
 	localDate := fmt.Sprintf("DATE(%s)", shifted)
 	return fmt.Sprintf(
-		"DATE_FORMAT(DATE_SUB(%s, INTERVAL MOD(DATEDIFF(%s, '%s'), 7) DAY), '%%Y-%%m-%%d')",
+		"DATE_FORMAT(FROM_DAYS(TO_DAYS(%s) - MOD(DATEDIFF(%s, '%s'), 7)), '%%Y-%%m-%%d')",
 		localDate, localDate, startLocal.Format(time.DateOnly),
 	)
 }
@@ -149,7 +163,7 @@ func (s *sUsage) dashboardModelAggregates(ctx context.Context, dateRange Dashboa
 	columns := dao.UsageLogs.Columns()
 	// 模型名是字符串，库默认 collation 大小写不敏感：直接 GROUP BY 会把
 	// Qwen3.8-Flash 与 qwen3.8-flash 合成一组，而原先的 Go map 是区分大小写的。
-	// 用 BINARY 分组还原逐行聚合的分组粒度，再取组内原值作为展示名。
+	// 用 CAST 分组还原逐行聚合的分组粒度，再取组内原值作为展示名。
 	result := make([]dashboardBreakdownAggregate, 0)
 	if err := usageRangeQuery(ctx, dateRange).
 		Fields(
@@ -216,14 +230,15 @@ func (s *sUsage) costBucketAggregates(ctx context.Context, dateRange DashboardRa
 	columns := dao.UsageLogs.Columns()
 	bucket := costBucketExpression(columns.CreatedAt, unit, startLocal, shiftSeconds)
 	result := make([]costBucketAggregate, 0)
-	// GoFrame 的 Group 是覆盖语义，多列分组必须拼成一个字符串。
+	// GoFrame 的 Group 是覆盖语义，多列分组必须一次传入（内部用逗号连接）。
+	// 这里直接传分组表达式而不是 SELECT 别名，省掉一层 MySQL 别名解析依赖。
 	if err := usageRangeQuery(ctx, dateRange).
 		Fields(
 			modelGroupNameExpression(columns.RequestedModel),
 			bucket+" AS bucket",
 			"COALESCE(SUM("+columns.EstimatedCost+"), 0) AS estimated_cost",
 		).
-		Group(modelGroupExpression(columns.RequestedModel) + ", bucket").
+		Group(modelGroupExpression(columns.RequestedModel), bucket).
 		Scan(&result); err != nil {
 		return nil, gerror.Wrap(err, "aggregate cost distribution buckets")
 	}
