@@ -138,8 +138,10 @@ func attemptCompleted(result attemptResult, attemptErr error, stream bool) bool 
 
 // nonRetryableClientFailure 对切换凭据或备用地址也无法修复的请求错误停止重试。
 // 上游鉴权失败表示当前密钥不可用，不能继续用同一请求轮换密钥或地址；
-// 只有明确表示接口不支持的响应才允许协议回退；另有状态会话校验类 4xx 虽然也是
-// 4xx，但成因在渠道侧，同样放行给下一个候选（见 upstreamStatefulSessionRejection）。
+// 只有明确表示接口不支持的响应才允许协议回退；另有两类 4xx 虽然也是 4xx，
+// 但成因在渠道侧，同样放行给下一个候选：状态会话校验拒绝（见
+// upstreamStatefulSessionRejection）与余额不足 402（账号级失败，换渠道自愈
+// 并触发密钥级禁用）。
 func nonRetryableClientFailure(result attemptResult, attemptErr error, settings adminapi.SystemResilienceSettingsInput) bool {
 	if attemptErr != nil || result.wroteBytes || result.status < http.StatusBadRequest || result.status >= http.StatusInternalServerError {
 		return false
@@ -155,6 +157,12 @@ func nonRetryableClientFailure(result attemptResult, attemptErr error, settings 
 		// 有状态会话校验类拒绝的根源在渠道侧，不在请求体：换候选渠道重放即可自愈，
 		// 不能当成对客户端请求的最终判决（详见 upstreamStatefulSessionRejection）。
 		if upstreamStatefulSessionRejection(result.status, result.body, result.errorMessage) {
+			return false
+		}
+		// 402（余额不足）是账号级失败：成因在渠道密钥，与客户端请求无关。放行给候选
+		// 循环换渠道自愈；同时让 maybeAutoDisable 走密钥级禁用分支（isCredentialScopedFailure
+		// 已把 402 归为凭证级，见 model_health.go），避免后续请求继续撞同一面余额墙。
+		if result.status == http.StatusPaymentRequired {
 			return false
 		}
 		switch result.status {

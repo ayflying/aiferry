@@ -63,3 +63,24 @@ func TestUpstreamStatefulSessionRejectionIgnoresOtherStatuses(t *testing.T) {
 		}
 	}
 }
+
+// 402（余额不足）是账号级失败：成因在渠道密钥，与客户端请求无关。必须放行到下一个
+// 候选渠道换路自愈，并让 maybeAutoDisable 走密钥级禁用分支；若在这里判成对客户端
+// 请求的最终判决，渠道余额空了之后每次请求都会原样撞墙一次。
+func TestNonRetryableClientFailureAllowsPaymentRequired(t *testing.T) {
+	// 故意不把 402 放进 RetryStatusCodes：放行依据是「上游归因」，不是管理端配置。
+	settings := adminapi.SystemResilienceSettingsInput{RetryStatusCodes: "401,403,404,408,429,500-599"}
+	result := attemptResult{
+		status:       http.StatusPaymentRequired,
+		body:         []byte(`{"error":{"code":"INSUFFICIENT_BALANCE","message":"余额不足"}}`),
+		errorMessage: "error: code=\"INSUFFICIENT_BALANCE\" message=\"余额不足\"",
+	}
+	if nonRetryableClientFailure(result, nil, settings) {
+		t.Fatal("402 insufficient balance must keep routing to the next candidate")
+	}
+	// 已写出内容后收到的 402 无法重放：attemptCompleted 先行短路，同样不会换候选。
+	written := attemptResult{status: http.StatusPaymentRequired, wroteBytes: true}
+	if !attemptCompleted(written, nil, true) {
+		t.Fatal("a 402 after bytes were written must end the attempt")
+	}
+}
