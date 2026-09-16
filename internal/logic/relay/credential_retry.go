@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tidwall/gjson"
+
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/logic/protocol"
 	"github.com/yunloli/aiferry/internal/logic/usage"
@@ -136,7 +138,8 @@ func attemptCompleted(result attemptResult, attemptErr error, stream bool) bool 
 
 // nonRetryableClientFailure 对切换凭据或备用地址也无法修复的请求错误停止重试。
 // 上游鉴权失败表示当前密钥不可用，不能继续用同一请求轮换密钥或地址；
-// 只有明确表示接口不支持的响应才允许协议回退。
+// 只有明确表示接口不支持的响应才允许协议回退；另有状态会话校验类 4xx 虽然也是
+// 4xx，但成因在渠道侧，同样放行给下一个候选（见 upstreamStatefulSessionRejection）。
 func nonRetryableClientFailure(result attemptResult, attemptErr error, settings adminapi.SystemResilienceSettingsInput) bool {
 	if attemptErr != nil || result.wroteBytes || result.status < http.StatusBadRequest || result.status >= http.StatusInternalServerError {
 		return false
@@ -149,6 +152,11 @@ func nonRetryableClientFailure(result attemptResult, attemptErr error, settings 
 		if (result.status == http.StatusBadRequest || result.status == http.StatusUnprocessableEntity) && protocol.ShouldFallback(result.status, result.body) {
 			return false
 		}
+		// 有状态会话校验类拒绝的根源在渠道侧，不在请求体：换候选渠道重放即可自愈，
+		// 不能当成对客户端请求的最终判决（详见 upstreamStatefulSessionRejection）。
+		if upstreamStatefulSessionRejection(result.status, result.body, result.errorMessage) {
+			return false
+		}
 		switch result.status {
 		case http.StatusNotFound, http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
 			// 404 can mean that this channel/group does not expose the requested
@@ -157,6 +165,35 @@ func nonRetryableClientFailure(result attemptResult, attemptErr error, settings 
 			// current credential may be retried.
 			return !retryableStatusForRules(result.status, settings.RetryStatusCodes)
 		default:
+			return true
+		}
+	}
+	return false
+}
+
+// statefulSessionRejectionField 是上游在有状态会话校验失败时点名的字段。各家措辞不同
+// （DeepSeek：「The `reasoning_content` in the thinking mode must be passed back to the
+// API.」；Kimi：「thinking is enabled but reasoning_content is missing in assistant tool
+// call message at index N」），但都会点名这个字段，因此只认字段名、不绑定整句——宁可在
+// 上游改措辞后多换一次渠道，也不要漏判成「客户端请求错」。
+const statefulSessionRejectionField = "reasoning_content"
+
+// upstreamStatefulSessionRejection 判定一次 4xx 响应是否为「上游按有状态会话校验，拒绝了
+// 本会话的工具调用历史」。
+//
+// Console Go 系的聚合上游（生产中为 sub2api 渠道）只承认自己生成过的 tool_call 记录：
+// 认不出就返回 400，并提示思考内容必须回传。这类失败与请求体本身无关——实测同一份请求
+// 换到无状态上游（ch30/31/32 共 63 次）全部 200，而空串兜底在该渠道无效（回传「缺字段 /
+// 空串 / 真实内容」的 400 率为 5/10、5/10、4/10，与内容无关）。因此这里必须放行到下一个
+// 候选，否则会把一个本可自愈的渠道问题直接暴露给用户，且与多渠道无状态轮转天然冲突。
+//
+// 上游把错误写进 error.message，个别链路只留下纯文本错误信息，三者都查。
+func upstreamStatefulSessionRejection(status int, body []byte, errorMessage string) bool {
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+		return false
+	}
+	for _, candidate := range []string{gjson.GetBytes(body, "error.message").String(), string(body), errorMessage} {
+		if strings.Contains(strings.ToLower(candidate), statefulSessionRejectionField) {
 			return true
 		}
 	}

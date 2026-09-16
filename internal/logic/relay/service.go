@@ -342,7 +342,11 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		if recordErr := s.record(ctx, requestID, key, lastCandidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, last); recordErr != nil {
 			g.Log().Errorf(ctx, "record failed request %s: %v", requestID, recordErr)
 		}
-		if !last.wroteBytes && last.status >= http.StatusBadRequest && last.status < http.StatusInternalServerError && !retryableStatusForRules(last.status, settings.RetryStatusCodes) {
+		// 所有候选都失败后，只要最后一次是「尚未向客户端写出任何内容的 4xx」，就把上游响应
+		// 原样透传。4xx 表示请求本身被上游拒绝，改写成网关级 5xx（503 server_error，客户端
+		// 会据此重试）属于误导；某状态码是否列在 RetryStatusCodes 里，只决定「要不要继续换
+		// 候选」，不应改变最终对客户端的表达。
+		if !last.wroteBytes && last.status >= http.StatusBadRequest && last.status < http.StatusInternalServerError {
 			s.writeBufferedResponse(writer, last.status, sensitiveDataRestorer.restoreBufferedResponse(last.body), last.headers)
 			return nil
 		}
