@@ -40,6 +40,16 @@ type App struct {
 	// 仪表盘、用户用量等消费统计都实时聚合自 usage_logs，删除明细会一并缩短
 	// 历史统计的可查询窗口，因此只能由部署方显式开启。
 	UsageRetentionDays int
+	// PayloadLogEnabled 控制「收发原始报文」落盘（默认开启）。每条请求一个 JSON 文件：
+	// 客户端请求体 + 聚合后的响应内容，用于事后排查正文污染、参数改写等问题；
+	// 文件只含 body，不含任何鉴权头。
+	PayloadLogEnabled bool
+	// PayloadLogDir 是报文文件的存储目录，容器内必须位于持久化挂载卷下
+	//（默认 /app/data/relay-payloads，落在 aiferry_data 卷内），否则容器重建即丢。
+	PayloadLogDir string
+	// PayloadLogMaxFiles 是目录内最多保留的报文文件数。清理任务每小时按文件修改时间
+	// 从旧到新删除超出部分（默认 9999）。
+	PayloadLogMaxFiles int
 }
 
 func Load() (App, error) {
@@ -76,6 +86,9 @@ func Load() (App, error) {
 		SessionTTL:             envInt("SESSION_TTL_HOURS", defaultSessionTTLHours),
 		AdminRoles:             envList("AIFERRY_ADMIN_ROLES", []string{"admin"}),
 		UsageRetentionDays:     envInt("USAGE_RETENTION_DAYS", 0),
+		PayloadLogEnabled:      envBool("PAYLOAD_LOG_ENABLED", true),
+		PayloadLogDir:          env("PAYLOAD_LOG_DIR", "/app/data/relay-payloads"),
+		PayloadLogMaxFiles:     envInt("PAYLOAD_LOG_MAX_FILES", 9999),
 	}
 	if strings.TrimSpace(app.MySQLPassword) == "" {
 		return App{}, gerror.New("MYSQL_PASSWORD is required")
@@ -127,6 +140,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func envList(key string, fallback []string) []string {

@@ -120,6 +120,9 @@ type attemptResult struct {
 	reasoningContent     string
 	reasoningField       string
 	reasoningToolCallIDs []string
+	// payloadCapture 聚合流式响应中实际写给客户端的正文与思考（客户端视角），供收发
+	// 报文落盘读取；非流式为 nil，由 service 层直接取 body。
+	payloadCapture *payloadStreamCapture
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, channelTypeSvc *channeltype.Service, locationSvc *iplocation.Service) *sRelay {
@@ -329,13 +332,19 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 					Latency:   result.latency,
 				})
 			}
-			if !isStream {
+			// 收发报文落盘：非流式存还原后的完整响应体，流式存客户端视角的聚合内容。
+			var payloadResponse json.RawMessage
+			if isStream {
+				payloadResponse = payloadAggregatedResponse(result)
+			} else {
 				responseBody := result.body
 				if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices {
 					responseBody = sensitiveDataRestorer.restoreBufferedResponse(responseBody)
 				}
 				s.writeBufferedResponse(writer, result.status, responseBody, result.headers)
+				payloadResponse = json.RawMessage(responseBody)
 			}
+			s.savePayloadLog(requestID, candidate, requestedModel, endpoint, isStream, attempts, body, result, payloadResponse)
 			s.scheduleModelQualityAnalysis(ctx, requestID, candidate, requestedModel, endpoint, body, isStream, settings.ModelQualityDetectionEnabled, result)
 			return nil
 		}
@@ -354,6 +363,9 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			s.writeBufferedResponse(writer, last.status, sensitiveDataRestorer.restoreBufferedResponse(last.body), last.headers)
 			return nil
 		}
+		// 失败请求同样落盘：上游的错误响应本身就是排查素材（例如内容级 400 的原始报文）。
+		s.savePayloadLog(requestID, lastCandidate, requestedModel, endpoint, isStream, attempts, body, last, json.RawMessage(last.body))
+		return nil
 	} else {
 		last = failedAttemptResult(last, "All eligible channels failed")
 		// attempts==0 意味着所有候选渠道在选凭证阶段就被跳过（凭证冷却或无可用密钥），

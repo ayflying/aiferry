@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import type { BillingItem, UsageLog } from '../api/types'
+import { apiGet } from '../api/client'
 import { displayCurrency, formatLatency, formatNumber, formatPreciseCost, formatReasoningEffort, formatTime } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 import { channelCredentialReference } from '../lib/usage'
@@ -57,9 +58,33 @@ const billingModeLabel = computed(() => {
 const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '历史价格快照复原' : '调用时价格快照')
 const attemptFlow = computed(() => props.usage?.attemptFlow ?? [])
 const expandedFlowSteps = ref<number[]>([])
+// 原始报文懒加载：点按钮才请求落盘文件，避免每次打开详情都打后端。
+const payloadLoading = ref(false)
+const payloadError = ref('')
+const payloadText = ref('')
+const payloadRequestId = ref('')
 watch(() => props.modelValue, (open) => {
-  if (open) expandedFlowSteps.value = []
+  expandedFlowSteps.value = []
+  payloadLoading.value = false
+  payloadError.value = ''
+  payloadText.value = ''
+  payloadRequestId.value = ''
 })
+
+async function loadPayload() {
+  if (!props.usage?.requestId || payloadLoading.value) return
+  payloadLoading.value = true
+  payloadError.value = ''
+  try {
+    const data = await apiGet<unknown>('/usage/payload', { requestId: props.usage.requestId })
+    payloadText.value = JSON.stringify(data, null, 2)
+    payloadRequestId.value = props.usage.requestId
+  } catch (error) {
+    payloadError.value = error instanceof Error ? error.message : '加载失败'
+  } finally {
+    payloadLoading.value = false
+  }
+}
 
 function stepFailed(step: { status?: number }) {
   return step.status != null && (step.status < 200 || step.status >= 300)
@@ -170,6 +195,14 @@ function billingSummary() {
         </div>
       </section>
 
+      <section class="detail-section payload-section">
+        <h3>原始报文</h3>
+        <p class="payload-hint">收发正文按请求落盘（保留最近 9999 份，每小时滚动清理），仅管理员可查看，用于排查正文污染与参数改写。</p>
+        <div v-if="payloadError" class="payload-error">{{ payloadError }}</div>
+        <el-button v-else-if="!payloadText" size="small" :loading="payloadLoading" @click="loadPayload">加载原始报文</el-button>
+        <pre v-if="payloadText" class="payload-view">{{ payloadText }}</pre>
+      </section>
+
       <section class="detail-section result-section">
         <h3>{{ isSuccess ? '处理结果' : '失败日志' }}</h3>
         <p v-if="isSuccess" class="result-message">{{ resultMessage }}</p>
@@ -215,6 +248,9 @@ button.flow-step-main { cursor: pointer; }
 .flow-step-chevron { position: absolute; top: 10px; right: 9px; color: #b23030; transition: transform 0.15s ease; }
 .flow-step-chevron.expanded { transform: rotate(180deg); }
 .flow-arrow { color: #7f8b97; font-size: 20px; font-weight: 700; }
+.payload-hint { margin: 0 0 10px; color: #66717d; font-size: 12px; }
+.payload-error { padding: 8px 10px; border: 1px solid #f1cccc; border-radius: 5px; background: #fff5f5; color: #9f2f2f; font-size: 12px; }
+.payload-view { max-height: 320px; margin: 0; padding: 12px; overflow: auto; color: #15202b; background: #f5f7fa; border: 1px solid #dce2e7; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .result-section { padding-bottom: 0; }
 .result-message { margin: 0 0 6px; color: #40505f; overflow-wrap: anywhere; }
 .failure-log { max-height: 300px; margin: 0 0 8px; padding: 12px; overflow: auto; color: #9f2f2f; background: #fff5f5; border: 1px solid #f1cccc; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -174,11 +174,16 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	}
 	capture := newStreamResponseCapture(plan.UpstreamEndpoint())
 	reasoning := newReasoningCapture(plan.UpstreamEndpoint())
+	payloadCapture := newPayloadStreamCapture(plan.ClientEndpoint())
 	streamRestorer := newSensitiveDataStreamRestorer(sensitiveDataRestorer)
 	pending := make([][]byte, 0)
 	pendingSize := 0
 	committed := false
+	result.payloadCapture = payloadCapture
 	writeOutput := func(output []byte) error {
+		// 报文聚合必须在写入前观察：output 已经过协议转换与敏感数据还原，
+		// 与客户端实际收到的字节一致，正文污染问题以这份内容定性。
+		payloadCapture.observe(output)
 		if !result.wroteBytes {
 			recordFirstStreamOutput(&result, requestStartedAt)
 			copyResponseHeaders(writer.Header(), result.headers)

@@ -84,6 +84,8 @@ var (
 			channelSvc.StartHealthChecks(ctx)
 			channelSvc.StartCostSync(ctx)
 			usageSvc.StartRetentionCleanup(ctx, cfg.UsageRetentionDays)
+			relay.InitPayloadLog(cfg.PayloadLogEnabled, cfg.PayloadLogDir, cfg.PayloadLogMaxFiles)
+			relay.StartPayloadCleanup(ctx)
 			s.SetAddr(":8080")
 			s.SetServerRoot(cfg.WebRoot)
 			s.SetFileServerEnabled(true)

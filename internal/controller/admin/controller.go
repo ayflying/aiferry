@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -15,6 +17,7 @@ import (
 	mailservice "github.com/yunloli/aiferry/internal/logic/mail"
 	"github.com/yunloli/aiferry/internal/logic/pricesource"
 	"github.com/yunloli/aiferry/internal/logic/redemption"
+	"github.com/yunloli/aiferry/internal/logic/relay"
 	"github.com/yunloli/aiferry/internal/logic/requestfirewall"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
@@ -82,6 +85,7 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
 	group.GET("/channels/{id}/quota", c.queryChannelQuota)
 	c.registerPriceRoutes(group)
+	group.GET("/usage/payload", c.getUsagePayload)
 	group.GET("/models", c.listModels)
 	group.PUT("/models/{id}", c.updateModel)
 	group.POST("/models/{id}/price-rules", c.createPriceRule)
@@ -322,6 +326,17 @@ func parse(r *ghttp.Request, target any) bool {
 		return false
 	}
 	return true
+}
+
+// getUsagePayload 按 requestId 返回落盘的收发原始报文（仅管理员）。
+// 报文可能因开关关闭、已滚动清理或写入失败而不存在，统一以错误语义返回。
+func (c *Controller) getUsagePayload(r *ghttp.Request) {
+	data, err := relay.ReadPayload(r.GetQuery("requestId").String())
+	if err != nil {
+		respond(r, nil, errors.New("报文不存在：可能未开启落盘或已按保留上限滚动清理"))
+		return
+	}
+	respond(r, json.RawMessage(data), nil)
 }
 
 func respond(r *ghttp.Request, data any, err error) {
