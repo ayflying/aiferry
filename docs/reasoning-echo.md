@@ -202,6 +202,17 @@ assistant 消息；`reasoning_content` 缺失/`null` 在已翻篇的历史消息
 单测见 `internal/logic/relay/credential_retry_test.go`（两家厂商的错误文案都放行、普通 400 仍终止、
 已写出内容的失败仍终止、非 400/422 不命中）。
 
+上线后生产实测（0.5.124，同一 key，用历史上 400 率约 50% 的自造 `tool_call_id` 形态连打 12 次）：
+
+- 客户端侧 **12/12 全 200**（修复前同形态约一半返回 400）。
+- `attempt_flow_json` 直接记录了切换过程，例如
+  `[{channelName: adesk, status: 400, error: ...reasoning_content...}, {channelName: opencodeGo}]`
+  —— 12 次里有 **7 次**在 adesk 被拒后落到 ch30（火山 agent）/ ch31（opencodeGo）/ ch32（基元律动）
+  并成功返回，其余 5 次轮转本就未经 ch9。
+- 一个副作用：ch9 是在**拖了很久之后**才报这个 400 的（观测到单次 `durationMs` 达 35s、90s），
+  所以走到切换的那几次总耗时会被拉长（37s、93s）。这是 ch9 自身的慢响应，与本次改动无关；
+  若这类超长等待变得频繁，可考虑在渠道级给 ch9 设更短的上游超时。
+
 ## 排障
 
 - 失败日志里出现「协议转换：」行时，说明请求经过了 Responses/Chat 协议转换：方向是
