@@ -32,6 +32,30 @@
 | 流内 error 事件且尚未写出内容 | `return result, false, nil` → 切换 |
 | 流式响应没有任何内容也没等到结束标记 | `attemptCompleted` 返回 false → 切换 |
 
+### 为什么 `reasoning_content` 也算「可见输出」（2026-09-16 复核）
+
+`streamPayloadHasVisibleOutput` 把 `delta.reasoning_content` 与 `delta.content` 同等对待，
+所以**思考模型的第一个 token 通常就是思考内容**——实测 `deepseek-flash` + `reasoning_effort=high`
+的流式响应，首包（8.4s）之后紧接着就是 `{"reasoning_content": "..."}`，`content` 要晚得多。
+
+这直接决定了一个反直觉的结果：**「首包很晚」不等于「还没写字节」**。生产中
+`upstream stream idle timeout` 的样本里，`first_token_ms` 有的为 NULL，有的高达 24s，
+两者走的是完全相反的路径：
+
+| 形态 | `first_token_ms` | `attempts` | 说明 |
+| --- | --- | --- | --- |
+| 首包之前上游就卡死 | NULL | 期望 ≥2（切换） | 这条线是**通的**，实测有 `first-byte timeout → 换渠道 → 200` 的样本 |
+| 首包是思考内容、之后上游卡死 | 有值（如 24035） | 1 | `wroteBytes=true` → 就地收尾 502，**按设计不切换** |
+
+排查这类「没切换」时，**先看 `first_token_ms` 有没有值**，不要一上来就怀疑路由缺陷：
+有值就说明内容已经交付给客户端，重放会造成重复输出（工具调用场景还会产生重复的
+`tool_call_id`），属于既定取舍而非漏判。
+
+若要缩小这一段，方向是「仅思考内容已写出时也允许切换」（把 `reasoning_content` 挪出
+`streamPayloadHasVisibleOutput` 的可见集合，或单独标记），但要客户端能容忍思考重来，
+且需加默认关闭的开关。**2026-09-16 讨论后决定暂不实施**：收益不确定而重复输出风险明确。
+更稳的替代是放宽 `streamIdleTimeoutSeconds`（当前 30s），让慢但能出结果的思考请求活下来。
+
 ## 三、已写字节后的三种收场
 
 历史上这三条都是**静默断流**：客户端只看到连接结束，网关也不认为请求失败。
