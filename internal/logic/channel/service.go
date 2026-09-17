@@ -97,23 +97,23 @@ type ModelView struct {
 	AutoDisabled       bool       `json:"autoDisabled"`
 	AutoDisabledAt     *time.Time `json:"autoDisabledAt"`
 	AutoDisabledReason string     `json:"autoDisabledReason"`
-	// ClosedWindow 是该「渠道 × 模型」的定时关闭时段；未配置时为 nil。
-	ClosedWindow      *timewindow.Window `json:"closedWindow" orm:"-"`
-	InputPrice        *float64           `json:"inputPrice" orm:"input_price"`
-	CachedInputPrice  *float64           `json:"cachedInputPrice" orm:"cached_input_price"`
-	CacheWritePrice   *float64           `json:"cacheWritePrice" orm:"cache_write_price"`
-	OutputPrice       *float64           `json:"outputPrice" orm:"output_price"`
-	ImageInputPrice   *float64           `json:"imageInputPrice" orm:"image_input_price"`
-	AudioInputPrice   *float64           `json:"audioInputPrice" orm:"audio_input_price"`
-	AudioOutputPrice  *float64           `json:"audioOutputPrice" orm:"audio_output_price"`
-	RequestPrice      *float64           `json:"requestPrice" orm:"request_price"`
-	BillingMode       string             `json:"billingMode" orm:"billing_mode"`
-	LastTestEndpoint  string             `json:"lastTestEndpoint" orm:"last_test_endpoint"`
-	LastTestStatus    string             `json:"lastTestStatus" orm:"last_test_status"`
-	LastTestLatencyMs uint               `json:"lastTestLatencyMs" orm:"last_test_latency_ms"`
-	LastTestError     string             `json:"lastTestError" orm:"last_test_error"`
-	LastTestAt        *time.Time         `json:"lastTestAt" orm:"last_test_at"`
-	UpdatedAt         time.Time          `json:"updatedAt" orm:"updated_at"`
+	// ClosedWindows 是该「渠道 × 模型」的定时关闭时段列表，任一命中即关闭；未配置时为空。
+	ClosedWindows     []timewindow.Window `json:"closedWindows" orm:"-"`
+	InputPrice        *float64            `json:"inputPrice" orm:"input_price"`
+	CachedInputPrice  *float64            `json:"cachedInputPrice" orm:"cached_input_price"`
+	CacheWritePrice   *float64            `json:"cacheWritePrice" orm:"cache_write_price"`
+	OutputPrice       *float64            `json:"outputPrice" orm:"output_price"`
+	ImageInputPrice   *float64            `json:"imageInputPrice" orm:"image_input_price"`
+	AudioInputPrice   *float64            `json:"audioInputPrice" orm:"audio_input_price"`
+	AudioOutputPrice  *float64            `json:"audioOutputPrice" orm:"audio_output_price"`
+	RequestPrice      *float64            `json:"requestPrice" orm:"request_price"`
+	BillingMode       string              `json:"billingMode" orm:"billing_mode"`
+	LastTestEndpoint  string              `json:"lastTestEndpoint" orm:"last_test_endpoint"`
+	LastTestStatus    string              `json:"lastTestStatus" orm:"last_test_status"`
+	LastTestLatencyMs uint                `json:"lastTestLatencyMs" orm:"last_test_latency_ms"`
+	LastTestError     string              `json:"lastTestError" orm:"last_test_error"`
+	LastTestAt        *time.Time          `json:"lastTestAt" orm:"last_test_at"`
+	UpdatedAt         time.Time           `json:"updatedAt" orm:"updated_at"`
 	// CredentialHealth 是「渠道 × 模型 × 密钥」组合的健康只读展示；
 	// 列表原分数（HealthScore）取其中有效密钥的最高分，本数组供展开/tooltip 查看每把 key 的组合分与隔离到期。
 	// 不暴露密钥密文/明文，仅含 keyPrefix 等展示所需信息。

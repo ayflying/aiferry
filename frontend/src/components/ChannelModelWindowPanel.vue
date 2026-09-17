@@ -3,28 +3,29 @@ import { computed, ref, watch } from 'vue'
 import { ChevronUp, Pencil, Plus, Trash2 } from '@lucide/vue'
 
 import type { TimeWindow } from '../api/types'
-import { createClosedWindow, describeTimeWindow, timeWindowIsEmpty, windowRowsFromRecord, windowRowsToRecord } from '../lib/time-window'
+import { createClosedWindow, createClosedWindows, describeTimeWindows, timeWindowListIsEmpty, windowRowsFromRecord, windowRowsToRecord } from '../lib/time-window'
 import TableActionButton from './TableActionButton.vue'
 import TimeWindowEditor from './TimeWindowEditor.vue'
 
 /**
  * 渠道「关闭时间」页签：按「渠道 × 模型」手动添加定时关闭时段。
  *
- * 与「配置映射」页签同构：默认空列表，点「添加关闭时段」才出现一行，行内选模型、
- * 编辑时段、删除；同一模型只能占一行，已选模型不再出现在其他行的下拉选项里。
+ * 每个模型占一行，行内可配置多条规则（规则列表，任一命中即关闭）——
+ * 例如「工作日白天关闭」与「周末全天关闭」就是同一模型下的两条规则。
+ * 同一模型只能占一行，已选模型不再出现在其他行的下拉选项里。
  *
- * windows 的语义：键存在即「本次提交了该字段」——值为空时间窗表示清除，
+ * windows 的语义：键存在即「本次提交了该字段」——值为空数组表示清除，
  * 键不存在表示保持库里原值。因此删除一行时必须保留该键并置空；
  * 直接删键会被后端理解为「保持原值」，清除就不生效。
  */
 const props = defineProps<{
   models: Array<{ publicName: string; upstreamName: string }>
-  windows: Record<string, TimeWindow>
+  windows: Record<string, TimeWindow[]>
 }>()
 
-const emit = defineEmits<{ (event: 'update:windows', value: Record<string, TimeWindow>): void }>()
+const emit = defineEmits<{ (event: 'update:windows', value: Record<string, TimeWindow[]>): void }>()
 
-type WindowRow = { id: number; publicName: string; window: TimeWindow }
+type WindowRow = { id: number; publicName: string; windows: TimeWindow[] }
 
 const rows = ref<WindowRow[]>([])
 const editingId = ref(0)
@@ -40,21 +41,21 @@ let rowSeq = 0
  * 面板就会一直停在清空后的空状态：页签徽标显示已配置、面板却写「暂无定时关闭配置」，
  * 只有刷新页面才恢复。故这里记下回声后立即消费掉，此后一切外部赋值都按权威数据重建。
  */
-let echoed: Record<string, TimeWindow> | null = null
+let echoed: Record<string, TimeWindow[]> | null = null
 let echoedDigest = ''
 
 const configuredCount = computed(() => rows.value.filter((row) => row.publicName).length)
 
 /** 稳定序列化：键排序后取参与判定的字段，避免比较时受对象键顺序影响。 */
-function serialize(record: Record<string, TimeWindow>): string {
+function serialize(record: Record<string, TimeWindow[]>): string {
   return JSON.stringify(
     Object.keys(record)
       .sort()
-      .map((name) => [name, record[name]?.tz ?? '', record[name]?.weekdays ?? [], record[name]?.ranges ?? []]),
+      .map((name) => [name, record[name]?.map((window) => [window?.tz ?? '', window?.weekdays ?? [], window?.ranges ?? []]) ?? []]),
   )
 }
 
-function rowsFromWindows(source: Record<string, TimeWindow>): WindowRow[] {
+function rowsFromWindows(source: Record<string, TimeWindow[]>): WindowRow[] {
   return windowRowsFromRecord(source).map((item) => ({ id: (rowSeq += 1), ...item }))
 }
 
@@ -88,7 +89,7 @@ function optionsFor(row: WindowRow): Array<{ publicName: string; upstreamName: s
 }
 
 function addRow() {
-  const row: WindowRow = { id: (rowSeq += 1), publicName: '', window: createClosedWindow() }
+  const row: WindowRow = { id: (rowSeq += 1), publicName: '', windows: createClosedWindows() }
   rows.value = [...rows.value, row]
   editingId.value = row.id
   commit()
@@ -110,8 +111,18 @@ function updateRowModel(row: WindowRow, value: unknown) {
   commit()
 }
 
-function updateRowWindow(row: WindowRow, value: TimeWindow) {
-  row.window = value
+function addRule(row: WindowRow) {
+  row.windows = [...row.windows, createClosedWindow()]
+  commit()
+}
+
+function removeRule(row: WindowRow, index: number) {
+  row.windows = row.windows.filter((_, current) => current !== index)
+  commit()
+}
+
+function updateRule(row: WindowRow, index: number, value: TimeWindow) {
+  row.windows = row.windows.map((item, current) => (current === index ? value : item))
   commit()
 }
 
@@ -120,7 +131,7 @@ function toggleEditing(row: WindowRow) {
 }
 
 function summaryOf(row: WindowRow): string {
-  return timeWindowIsEmpty(row.window) ? '未设置时段' : describeTimeWindow(row.window)
+  return timeWindowListIsEmpty(row.windows) ? '未设置时段' : describeTimeWindows(row.windows)
 }
 </script>
 
@@ -128,6 +139,7 @@ function summaryOf(row: WindowRow): string {
   <div class="window-panel">
     <p class="panel-hint">
       手动添加需要定时关闭的模型并设置时段：这些模型在时段内不再通过本渠道提供服务，时段过去自动恢复。
+      同一模型可配置多条规则（任一命中即关闭），例如「工作日白天关闭」再加「周末全天关闭」。
       <strong>只影响本渠道</strong>：其他渠道仍可正常服务同一个模型。
     </p>
 
@@ -155,7 +167,7 @@ function summaryOf(row: WindowRow): string {
                 <span v-if="item.upstreamName !== item.publicName" class="window-option__upstream">{{ item.upstreamName }}</span>
               </el-option>
             </el-select>
-            <span class="window-entry__summary" :class="{ empty: timeWindowIsEmpty(row.window) }">{{ summaryOf(row) }}</span>
+            <span class="window-entry__summary" :class="{ empty: timeWindowListIsEmpty(row.windows) }">{{ summaryOf(row) }}</span>
             <!-- 与旁边的删除按钮同为一枚图标按钮：展开时换成上箭头，补回文字按钮原有的「收起」提示。 -->
             <TableActionButton
               :icon="editingId === row.id ? ChevronUp : Pencil"
@@ -166,12 +178,23 @@ function summaryOf(row: WindowRow): string {
             />
             <TableActionButton :icon="Trash2" label="删除关闭时段" danger :size="15" @click="removeRow(row)" />
           </div>
-          <TimeWindowEditor
-            v-if="editingId === row.id"
-            :model-value="row.window"
-            class="window-entry__editor"
-            @update:model-value="updateRowWindow(row, $event)"
-          />
+          <div v-if="editingId === row.id" class="window-entry__editor">
+            <div v-for="(rule, index) in row.windows" :key="`rule-${row.id}-${index}`" class="rule-card">
+              <div class="rule-card__head">
+                <span class="rule-card__label">规则 {{ index + 1 }}</span>
+                <TableActionButton
+                  v-if="row.windows.length > 1"
+                  :icon="Trash2"
+                  :label="`删除规则 ${index + 1}`"
+                  danger
+                  :size="14"
+                  @click="removeRule(row, index)"
+                />
+              </div>
+              <TimeWindowEditor :model-value="rule" :show-summary="false" @update:model-value="updateRule(row, index, $event)" />
+            </div>
+            <el-button size="small" :icon="Plus" class="rule-add" @click="addRule(row)">添加规则</el-button>
+          </div>
         </div>
       </div>
       <div v-else class="panel-empty">暂无定时关闭配置</div>
@@ -180,6 +203,6 @@ function summaryOf(row: WindowRow): string {
 </template>
 
 <style scoped>
-.window-panel { display: grid; gap: 10px; }.panel-hint { margin: 0; color: #66717d; font-size: 11px; line-height: 1.6; }.panel-hint strong { color: #33404c; }.panel-empty { padding: 14px; border: 1px dashed #dce2e7; border-radius: 6px; color: #66717d; font-size: 12px; text-align: center; }.panel-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; }.panel-count { color: #66717d; font-size: 12px; }.window-list { display: grid; gap: 7px; max-height: 420px; overflow-y: auto; }.window-entry { display: grid; gap: 8px; padding: 9px 11px; border: 1px solid #dce2e7; border-radius: 6px; }.window-entry__row { display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 1fr) 34px 34px; align-items: center; gap: 10px; }.window-entry__model { min-width: 0; }.window-option__name { font-family: 'JetBrains Mono', monospace; font-size: 12px; }.window-option__upstream { margin-left: 8px; color: #8b959e; font-size: 11px; }.window-entry__summary { overflow: hidden; color: #b45309; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.window-entry__summary.empty { color: #8b959e; font-weight: 400; }.window-entry__editor { padding: 9px; border: 1px solid #e3e8ec; border-radius: 6px; background: #fbfcfd; }
+.window-panel { display: grid; gap: 10px; }.panel-hint { margin: 0; color: #66717d; font-size: 11px; line-height: 1.6; }.panel-hint strong { color: #33404c; }.panel-empty { padding: 14px; border: 1px dashed #dce2e7; border-radius: 6px; color: #66717d; font-size: 12px; text-align: center; }.panel-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; }.panel-count { color: #66717d; font-size: 12px; }.window-list { display: grid; gap: 7px; max-height: 420px; overflow-y: auto; }.window-entry { display: grid; gap: 8px; padding: 9px 11px; border: 1px solid #dce2e7; border-radius: 6px; }.window-entry__row { display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 1fr) 34px 34px; align-items: center; gap: 10px; }.window-entry__model { min-width: 0; }.window-option__name { font-family: 'JetBrains Mono', monospace; font-size: 12px; }.window-option__upstream { margin-left: 8px; color: #8b959e; font-size: 11px; }.window-entry__summary { overflow: hidden; color: #b45309; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.window-entry__summary.empty { color: #8b959e; font-weight: 400; }.window-entry__editor { display: grid; gap: 8px; padding: 9px; border: 1px solid #e3e8ec; border-radius: 6px; background: #fbfcfd; }.rule-card { display: grid; gap: 8px; padding: 9px; border: 1px solid #e3e8ec; border-radius: 6px; background: #fff; }.rule-card__head { display: flex; min-height: 20px; align-items: center; justify-content: space-between; gap: 8px; }.rule-card__label { color: #4b5763; font-size: 11px; font-weight: 600; }.rule-add { justify-self: start; }
 @media (max-width: 600px) { .window-entry__row { grid-template-columns: minmax(0, 1fr) 34px 34px; }.window-entry__model { grid-column: 1 / -1; } }
 </style>

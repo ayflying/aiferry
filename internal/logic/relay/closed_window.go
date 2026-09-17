@@ -30,14 +30,15 @@ func filterClosedCandidates(candidates []Candidate, at time.Time) []Candidate {
 }
 
 // candidateClosedAt 判断单个候选在给定时刻是否被定时关闭。
+// 关闭时段是窗口列表语义：任一窗口命中即视为关闭。
 // 时段 JSON 异常时按未关闭处理（fail-open）：配置脏数据不应静默摘掉可用模型。
 func candidateClosedAt(candidate Candidate, at time.Time) bool {
 	if candidate.ClosedWindow == "" {
 		return false
 	}
-	window, err := timewindow.Parse(candidate.ClosedWindow)
+	windows, err := timewindow.ParseList(candidate.ClosedWindow)
 	if err != nil {
 		return false
 	}
-	return window.Contains(at)
+	return timewindow.AnyContains(windows, at)
 }

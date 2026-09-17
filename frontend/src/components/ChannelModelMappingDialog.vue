@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Info, Plus, RefreshCw, Trash2 } from '@lucide/vue'
 
 import type { DiscoveredModel, TimeWindow } from '../api/types'
-import { timeWindowIsEmpty } from '../lib/time-window'
+import { timeWindowListIsEmpty } from '../lib/time-window'
 import ChannelModelWindowPanel from './ChannelModelWindowPanel.vue'
 
 type ModelMappingRow = { id: number; upstreamName: string; publicName: string }
@@ -20,7 +20,7 @@ const props = defineProps<{
   discoveryKeyword: string
   modelMappings: ModelMappingRow[]
   windowModels: Array<{ publicName: string; upstreamName: string }>
-  closedWindows: Record<string, TimeWindow>
+  closedWindows: Record<string, TimeWindow[]>
 }>()
 
 const emit = defineEmits<{
@@ -28,7 +28,7 @@ const emit = defineEmits<{
   'update:selectedModelNames': [value: string[]]
   'update:discoveryKeyword': [value: string]
   'update:modelMappings': [value: ModelMappingRow[]]
-  'update:closedWindows': [value: Record<string, TimeWindow>]
+  'update:closedWindows': [value: Record<string, TimeWindow[]>]
   'add-custom-model': [name: string]
   retry: []
   addMapping: []
@@ -39,7 +39,7 @@ const emit = defineEmits<{
 const activeTab = ref<'selection' | 'mapping' | 'window'>('selection')
 
 // 已配置定时关闭的模型数量，用于在页签上给出可见提示。
-const closedModelCount = computed(() => props.windowModels.filter((item) => !timeWindowIsEmpty(props.closedWindows[item.publicName])).length)
+const closedModelCount = computed(() => props.windowModels.filter((item) => !timeWindowListIsEmpty(props.closedWindows[item.publicName])).length)
 const visibleDiscoveredModels = computed(() => {
   const keyword = props.discoveryKeyword.trim().toLowerCase()
   return keyword

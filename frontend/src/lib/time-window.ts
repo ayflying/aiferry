@@ -28,12 +28,28 @@ export function readTimeWindow(value: unknown): TimeWindow | null {
   return timeWindowIsEmpty(window) ? null : window
 }
 
+/**
+ * 读取已配置的时间窗列表，任一窗口命中即关闭。
+ * 兼容新版数组与旧版单对象（存量数据无需迁移）；全部窗口都不构成限制时返回 null。
+ */
+export function readTimeWindows(value: unknown): TimeWindow[] | null {
+  if (value === null || value === undefined) return null
+  const list = Array.isArray(value) ? value : [value]
+  const windows = list.map((item) => readTimeWindow(item)).filter((item): item is TimeWindow => item !== null)
+  return windows.length ? windows : null
+}
+
 /** 判断时间窗是否收窄了范围：没有任何时段、且星期要么没选要么全选，都等价于全天。 */
 export function timeWindowIsEmpty(window?: TimeWindow | null): boolean {
   if (!window) return true
   const weekdays = window.weekdays ?? []
   const hasWeekdayLimit = weekdays.length > 0 && weekdays.length < 7
   return !hasWeekdayLimit && !(window.ranges ?? []).length
+}
+
+/** 判断时间窗列表是否收窄了范围：所有窗口都不构成限制时视为未配置。 */
+export function timeWindowListIsEmpty(windows?: TimeWindow[] | null): boolean {
+  return !windows?.length || windows.every((window) => timeWindowIsEmpty(window))
 }
 
 function readWeekdays(record: Record<string, unknown>): number[] {
@@ -86,66 +102,75 @@ export function describeTimeWindow(window?: TimeWindow | null): string {
   return `${weekdays || '每天'} ${ranges}`
 }
 
-/** 新建一个已收敛的关闭时段：默认从 09:00 关到 12:00，由使用方再改。 */
+/** 生成时间窗列表摘要：多条规则用「；」拼接，如「周一至周五 09:00–18:00；周六至周日 全天」。 */
+export function describeTimeWindows(windows?: TimeWindow[] | null): string {
+  if (!windows?.length) return '不限时段'
+  const parts = windows
+    .map((window) => describeTimeWindow(window))
+    .filter((part) => part && part !== '不限时段')
+  return parts.length ? parts.join('；') : '未设置时段'
+}
+
+/** 新建一条已收敛的关闭规则：默认从 09:00 关到 12:00，由使用方再改。 */
 export function createClosedWindow(): TimeWindow {
   return { ...createTimeWindow(), ranges: [['09:00', '12:00']] }
+}
+
+/** 新建一组关闭规则：默认一条规则，由使用方再追加。 */
+export function createClosedWindows(): TimeWindow[] {
+  return [createClosedWindow()]
 }
 
 /**
  * 从渠道模型列表里恢复已配置的关闭时段，作为编辑态初值。
  * 只有真正收窄了范围的才进结果：没配过的模型不出现，保存时也就不会提交该字段。
  */
-export function closedWindowsFromModels(models: Array<{ publicName: string; closedWindow?: TimeWindow | null }>): Record<string, TimeWindow> {
-  const result: Record<string, TimeWindow> = {}
+export function closedWindowsFromModels(models: Array<{ publicName: string; closedWindows?: TimeWindow[] | null }>): Record<string, TimeWindow[]> {
+  const result: Record<string, TimeWindow[]> = {}
   for (const model of models) {
-    const window = readTimeWindow(model.closedWindow)
-    if (window) result[model.publicName] = window
+    const windows = readTimeWindows(model.closedWindows)
+    if (windows) result[model.publicName] = windows
   }
   return result
 }
 
 /**
- * 生成请求负载里的关闭时段。
- * 返回 undefined 表示不提交该字段（后端保持原值）；返回空时间窗表示清除已配置的时段。
+ * 生成请求负载里的关闭时段列表。
+ * 返回 undefined 表示不提交该字段（后端保持原值）；返回空数组表示清除已配置的全部时段。
  */
-export function closedWindowPayload(windows: Record<string, TimeWindow>, publicName: string): TimeWindow | undefined {
-  const window = windows[publicName]
-  if (!window) return undefined
-  return {
+export function closedWindowPayload(windows: Record<string, TimeWindow[]>, publicName: string): TimeWindow[] | undefined {
+  const list = windows[publicName]
+  if (!list) return undefined
+  return list.map((window) => ({
     tz: window.tz?.trim() || defaultTimeWindowTimezone,
     weekdays: window.weekdays ?? [],
     ranges: window.ranges ?? [],
-  }
-}
-
-/** 空时间窗：键存在但值不构成时段，提交后等价于清除该模型的关闭配置。 */
-export function emptyTimeWindow(): TimeWindow {
-  return { tz: '', weekdays: [], ranges: [] }
+  }))
 }
 
 /** 从已保存记录里恢复编辑行：只保留真正收窄了范围的时段，没配过的不出现。 */
-export function windowRowsFromRecord(record: Record<string, TimeWindow>): Array<{ publicName: string; window: TimeWindow }> {
+export function windowRowsFromRecord(record: Record<string, TimeWindow[]>): Array<{ publicName: string; windows: TimeWindow[] }> {
   return Object.entries(record)
-    .filter(([, window]) => !timeWindowIsEmpty(window))
-    .map(([publicName, window]) => ({ publicName, window }))
+    .filter(([, windows]) => !timeWindowListIsEmpty(windows))
+    .map(([publicName, windows]) => ({ publicName, windows }))
 }
 
 /**
- * 把编辑行合成为提交负载。键存在表示本次提交该字段（空时间窗即清除），
- * 键不存在表示后端保持原值——所以被移除的既有键必须补一条空时间窗，
+ * 把编辑行合成为提交负载。键存在表示本次提交该字段（空数组即清除），
+ * 键不存在表示后端保持原值——所以被移除的既有键必须补一条空数组，
  * 直接删键会被当成「保持原值」，清除就不生效。
  */
 export function windowRowsToRecord(
-  rows: Array<{ publicName: string; window: TimeWindow }>,
+  rows: Array<{ publicName: string; windows: TimeWindow[] }>,
   clearedNames: Iterable<string> = [],
-): Record<string, TimeWindow> {
-  const payload: Record<string, TimeWindow> = {}
+): Record<string, TimeWindow[]> {
+  const payload: Record<string, TimeWindow[]> = {}
   for (const row of rows) {
     const name = row.publicName.trim()
-    if (name) payload[name] = row.window
+    if (name) payload[name] = row.windows
   }
   for (const name of clearedNames) {
-    if (name && !(name in payload)) payload[name] = emptyTimeWindow()
+    if (name && !(name in payload)) payload[name] = []
   }
   return payload
 }

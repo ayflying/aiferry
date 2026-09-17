@@ -68,6 +68,49 @@ func TestNormalizeModelMappingsRejectsDuplicateMapping(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelClosedWindowsNormalizesList(t *testing.T) {
+	input := adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{
+			UpstreamName: "deepseek-flash",
+			ClosedWindows: []adminapi.ModelClosedWindowInput{
+				{TZ: "Asia/Shanghai", Weekdays: []int{5, 1}, Ranges: [][]string{{"14:00", "18:00"}, {"09:00", "12:00"}}},
+				{TZ: "Asia/Shanghai", Weekdays: []int{6, 7}, Ranges: [][]string{{"00:00", "00:00"}}},
+			},
+		},
+		// 只带时区的窗口等价于不限制，整条映射应被剔除并落成空串（清除）。
+		{UpstreamName: "glm-5", ClosedWindows: []adminapi.ModelClosedWindowInput{{TZ: "Asia/Shanghai"}}},
+		// 缺省字段：不进结果，保存时保持库里原值。
+		{UpstreamName: "kimi-k2"},
+	}}
+	windows, err := normalizeModelClosedWindows(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 2 {
+		t.Fatalf("应只有显式提交的 2 条映射进结果：%#v", windows)
+	}
+	key := modelMapping{UpstreamName: "deepseek-flash", PublicName: "deepseek-flash"}
+	want := `[{"tz":"Asia/Shanghai","weekdays":[1,5],"ranges":[["14:00","18:00"],["09:00","12:00"]]},{"tz":"Asia/Shanghai","weekdays":[6,7],"ranges":[["00:00","00:00"]]}]`
+	if windows[key] != want {
+		t.Fatalf("多规则归一化结果异常：got %s, want %s", windows[key], want)
+	}
+	cleared := modelMapping{UpstreamName: "glm-5", PublicName: "glm-5"}
+	if windows[cleared] != "" {
+		t.Fatalf("全不限制的窗口应归一成空串表示清除，got %q", windows[cleared])
+	}
+}
+
+func TestNormalizeModelClosedWindowsRejectsInvalidRule(t *testing.T) {
+	input := adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{UpstreamName: "deepseek-flash", ClosedWindows: []adminapi.ModelClosedWindowInput{
+			{Weekdays: []int{8}, Ranges: [][]string{{"09:00", "12:00"}}},
+		}},
+	}}
+	if _, err := normalizeModelClosedWindows(input); err == nil {
+		t.Fatal("星期越界的规则应报错")
+	}
+}
+
 func TestModelNamesFromCustomJSONPaths(t *testing.T) {
 	names, err := modelNamesFromJSON([]byte(`{"payload":{"models":[{"name":"zeta"},{"name":"alpha"},{"name":"alpha"}]}}`), "payload.models", "name")
 	if err != nil {

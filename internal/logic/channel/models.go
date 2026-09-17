@@ -215,13 +215,13 @@ func normalizeModelMappings(input adminapi.ModelSelectionInput) ([]modelMapping,
 	return result, nil
 }
 
-// normalizeModelClosedWindows 解析每条映射随请求带上的定时关闭时段。
+// normalizeModelClosedWindows 解析每条映射随请求带上的定时关闭时段列表。
 // 返回值只包含「本次显式提交了该字段」的映射：字段缺省（nil）不进结果，
-// 保存时保持库里原值；提交空对象得到空串，表示清除已配置的时段。
+// 保存时保持库里原值；提交空数组得到空串，表示清除已配置的全部时段。
 func normalizeModelClosedWindows(input adminapi.ModelSelectionInput) (map[modelMapping]string, error) {
 	windows := make(map[modelMapping]string, len(input.Models))
 	for _, item := range input.Models {
-		if item.ClosedWindow == nil {
+		if item.ClosedWindows == nil {
 			continue
 		}
 		upstreamName := strings.TrimSpace(item.UpstreamName)
@@ -236,11 +236,11 @@ func normalizeModelClosedWindows(input adminapi.ModelSelectionInput) (map[modelM
 		if _, exists := windows[key]; exists {
 			continue
 		}
-		normalized, err := timewindow.NormalizeWindow(timewindow.Window{
-			TZ:       item.ClosedWindow.TZ,
-			Weekdays: item.ClosedWindow.Weekdays,
-			Ranges:   item.ClosedWindow.Ranges,
-		})
+		converted := make([]timewindow.Window, 0, len(item.ClosedWindows))
+		for _, window := range item.ClosedWindows {
+			converted = append(converted, timewindow.Window{TZ: window.TZ, Weekdays: window.Weekdays, Ranges: window.Ranges})
+		}
+		normalized, err := timewindow.NormalizeWindows(converted)
 		if err != nil {
 			return nil, gerror.Wrapf(err, "模型 %s 的关闭时段无效", publicName)
 		}
@@ -249,14 +249,14 @@ func normalizeModelClosedWindows(input adminapi.ModelSelectionInput) (map[modelM
 	return windows, nil
 }
 
-// modelClosedWindow 把库里存的时段 JSON 转成视图结构；内容异常时按「未配置」
-// 处理（fail-open，不因配置脏数据阻断该模型的正常转发）。
-func modelClosedWindow(raw string) *timewindow.Window {
-	window, err := timewindow.Parse(raw)
-	if err != nil || window.IsZero() {
+// modelClosedWindows 把库里存的时段 JSON 转成视图列表（任一命中即关闭）；
+// 内容异常或为空时按「未配置」处理（fail-open，不因配置脏数据阻断该模型的正常转发）。
+func modelClosedWindows(raw string) []timewindow.Window {
+	windows, err := timewindow.ParseList(raw)
+	if err != nil || len(windows) == 0 {
 		return nil
 	}
-	return &window
+	return windows
 }
 
 func stringOrDefault(value, fallback string) string {

@@ -43,8 +43,8 @@ const customModels = ref<DiscoveredModel[]>([])
 const discoveryKeyword = ref('')
 const selectedModelNames = ref<string[]>([])
 const modelMappings = ref<Array<{ id: number; upstreamName: string; publicName: string }>>([])
-// 定时关闭时段，按公开模型名索引；键存在表示本次提交该字段（空时间窗 = 清除）。
-const closedWindows = ref<Record<string, TimeWindow>>({})
+// 定时关闭时段（规则列表，任一命中即关闭），按公开模型名索引；键存在表示本次提交该字段（空数组 = 清除）。
+const closedWindows = ref<Record<string, TimeWindow[]>>({})
 let nextMappingID = 0
 const discoveryError = ref('')
 // 渠道上游没有模型发现接口（HTTP 404，如火山 Agent Plan）时置位：
@@ -402,9 +402,9 @@ async function saveModelSelection() {
       const aliases = mappings.filter((item) => item.upstreamName === upstreamName)
       const entries = aliases.length ? aliases : [{ upstreamName, publicName: upstreamName }]
       return entries.map((entry) => {
-        const closedWindow = closedWindowPayload(closedWindows.value, entry.publicName)
-        // 没配置过的模型不带 closedWindow，后端保持库里原值；改过的按新值覆盖。
-        return closedWindow ? { ...entry, closedWindow } : entry
+        const closedWindowRules = closedWindowPayload(closedWindows.value, entry.publicName)
+        // 没配置过的模型不带 closedWindows，后端保持库里原值；改过的按新值覆盖（空数组 = 清除）。
+        return closedWindowRules ? { ...entry, closedWindows: closedWindowRules } : entry
       })
     })
     await apiPut(`/channels/${discoveryChannel.value.id}/models/selection`, { models })

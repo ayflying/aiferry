@@ -22,8 +22,8 @@ export interface ChannelModel {
   autoDisabled: boolean
   autoDisabledAt?: string
   autoDisabledReason: string
-  /** 定时关闭时段；未配置时为 null */
-  closedWindow?: TimeWindow | null
+  /** 定时关闭时段列表（任一窗口命中即关闭）；未配置时为 null 或空 */
+  closedWindows?: TimeWindow[] | null
   inputPrice?: number
   cachedInputPrice?: number
   cacheWritePrice?: number

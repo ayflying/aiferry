@@ -66,3 +66,24 @@ func TestFilterClosedCandidatesHandlesEmptyInput(t *testing.T) {
 		t.Fatalf("空输入应原样返回：%+v", available)
 	}
 }
+
+func TestFilterClosedCandidatesSupportsLegacyObjectAndRuleList(t *testing.T) {
+	// 2026-09-19 是周六：老的单对象配置（工作日规则）不应摘掉周六的候选，
+	// 新的多规则列表（工作日白天 + 周末全天）任一命中即摘掉。
+	saturday := relayTestTime(t, 2026, time.September, 19, 3, 0)
+	mondayMorning := relayTestTime(t, 2026, time.September, 14, 10, 0)
+	candidates := []Candidate{
+		{ChannelModelID: 1, PublicName: "legacy-weekday-only", ClosedWindow: `{"tz":"Asia/Shanghai","weekdays":[1,2,3,4,5],"ranges":[["09:00","18:00"]]}`},
+		{ChannelModelID: 2, PublicName: "multi-rule", ClosedWindow: `[{"tz":"Asia/Shanghai","weekdays":[1,2,3,4,5],"ranges":[["09:00","18:00"]]},{"tz":"Asia/Shanghai","weekdays":[6,7],"ranges":[["00:00","00:00"]]}]`},
+	}
+
+	available := filterClosedCandidates(candidates, saturday)
+	if len(available) != 1 || available[0].ChannelModelID != 1 {
+		t.Fatalf("周六：老单对象候选应保留、多规则（周末全天）候选应摘掉：%+v", available)
+	}
+
+	available = filterClosedCandidates(candidates, mondayMorning)
+	if len(available) != 0 {
+		t.Fatalf("周一上午：老单对象与多规则（工作日白天）都应命中关闭：%+v", available)
+	}
+}

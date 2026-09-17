@@ -16,13 +16,13 @@ const models = [
  * （对象身份保持，供面板识别自己的回声），并在切换渠道时先清空再回填。
  */
 function mountPanel() {
-  const windows = ref<Record<string, TimeWindow>>({})
+  const windows = ref<Record<string, TimeWindow[]>>({})
   const Host = defineComponent({
     setup() {
       return () => h(ChannelModelWindowPanel, {
         models,
         windows: windows.value,
-        'onUpdate:windows': (value: Record<string, TimeWindow>) => { windows.value = value },
+        'onUpdate:windows': (value: Record<string, TimeWindow[]>) => { windows.value = value },
       })
     },
   })
@@ -59,7 +59,7 @@ describe('ChannelModelWindowPanel', () => {
     expect(wrapper.text()).toContain('已配置 1 条关闭时段')
 
     // 保存后重新打开弹窗：ChannelsView.discover 先置空、再把库里的值回填回来。
-    const saved = JSON.parse(JSON.stringify(windows.value)) as Record<string, TimeWindow>
+    const saved = JSON.parse(JSON.stringify(windows.value)) as Record<string, TimeWindow[]>
     windows.value = {}
     await nextTick()
     windows.value = saved
@@ -94,14 +94,38 @@ describe('ChannelModelWindowPanel', () => {
     await nextTick()
     expect(wrapper.findComponent(TimeWindowEditor).exists()).toBe(true)
 
-    // 编辑器每次修改都回抛一个新的时间窗，面板据此提交、父级随即回灌。
+    // 编辑器每次修改都回抛一个新的时间窗，面板把它写进规则列表、父级随即回灌。
     wrapper.findComponent(TimeWindowEditor).vm.$emit('update:modelValue', { tz: 'UTC', weekdays: [1], ranges: [['08:00', '09:00']] })
     await nextTick()
     await nextTick()
 
-    expect(windows.value['gpt-x']).toEqual({ tz: 'UTC', weekdays: [1], ranges: [['08:00', '09:00']] })
+    expect(windows.value['gpt-x']).toEqual([{ tz: 'UTC', weekdays: [1], ranges: [['08:00', '09:00']] }])
     expect(wrapper.findComponent(TimeWindowEditor).exists()).toBe(true)
     expect(wrapper.text()).toContain('已配置 1 条关闭时段')
+  })
+
+  it('同一模型可追加多条规则，任一命中即关闭', async () => {
+    const { wrapper, windows } = mountPanel()
+
+    await addButton(wrapper).trigger('click')
+    selectModel(wrapper, 'gpt-x')
+    await nextTick()
+    expect(wrapper.findAllComponents(TimeWindowEditor)).toHaveLength(1)
+
+    // 追加一条规则：周末全天关闭。两条规则以列表形式一起提交。
+    const addRule = wrapper.findAll('button').find((item) => item.text().includes('添加规则'))
+    if (!addRule) throw new Error('未找到「添加规则」按钮')
+    await addRule.trigger('click')
+    await nextTick()
+
+    expect(windows.value['gpt-x']).toHaveLength(2)
+    expect(wrapper.findAllComponents(TimeWindowEditor)).toHaveLength(2)
+
+    // 删除第一条规则后回到单条。
+    await actionButton(wrapper, '删除规则 1').trigger('click')
+    await nextTick()
+    expect(windows.value['gpt-x']).toHaveLength(1)
+    expect(wrapper.findAllComponents(TimeWindowEditor)).toHaveLength(1)
   })
 
   it('编辑时段改为图标按钮后仍可收起/展开，未选模型时保持禁用', async () => {
