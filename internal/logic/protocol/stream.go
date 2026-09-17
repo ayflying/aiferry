@@ -14,9 +14,12 @@ type StreamConverter struct {
 	model            string
 	created          int64
 	started          bool
+	chatRoleSent     bool
+	anthropicFinished bool
 	contentStarted   bool
 	completed        bool
 	sawToolCall      bool
+	stopReason       string
 	outputText       strings.Builder
 	usage            map[string]any
 	chatToolIndexes  map[string]int
@@ -46,21 +49,36 @@ func (c *StreamConverter) Transform(line []byte) [][]byte {
 		return c.responsesToChat(payload)
 	case responsesToChatConversion:
 		return c.chatToResponses(payload)
+	case chatToAnthropicConversion:
+		return c.anthropicToChat(payload)
+	case responsesToAnthropicConversion:
+		return c.anthropicToResponses(payload)
 	default:
 		return [][]byte{line}
 	}
 }
 
 func (c *StreamConverter) Complete() [][]byte {
-	if c.completed {
-		return nil
+	switch c.plan.Conversion() {
+	case chatToAnthropicConversion, responsesToAnthropicConversion:
+		// anthropic 方向的幂等由 completeChunks 的 anthropFinished 保证：
+		// message_stop/error 已把 completed 置位，这里不能因它短路——
+		// responses 客户端方向还欠一段合成收尾（completed 事件）。
+	default:
+		if c.completed {
+			return nil
+		}
+		c.completed = true
 	}
-	c.completed = true
 	switch c.plan.Conversion() {
 	case chatToResponsesConversion:
 		return c.completeChatStream()
 	case responsesToChatConversion:
 		return c.completeResponsesStream()
+	case chatToAnthropicConversion:
+		return c.completeAnthropicChatStream()
+	case responsesToAnthropicConversion:
+		return c.completeAnthropicResponsesStream()
 	default:
 		return nil
 	}

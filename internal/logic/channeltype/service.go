@@ -116,6 +116,15 @@ type ProtocolConfig struct {
 	// 适用于 Command Code 这类只暴露单一 OpenAI 兼容端点的聚合上游：
 	// 先转投 /responses 必然失败再回退，等于每次请求多一次上游往返。
 	ChatCompletionsOnly bool `json:"chatCompletionsOnly"`
+	// MessagesPath 声明 Anthropic Messages 端点地址：相对路径（拼在渠道
+	// 根地址后）或完整 URL。聚合网关常把 Messages 挂在与 Chat 不同的路径
+	// 前缀下（如 opencode zen 的 …/zen/v1/messages），相对路径表达不了，
+	// 因此允许完整 URL。留空回退缺省 /v1/messages。
+	MessagesPath string `json:"messagesPath"`
+	// MessagesModels 声明走 Anthropic Messages 协议的模型名单：`前缀-*`
+	// 通配（如 union-*）或精确名（如 qwen3.7-max）。只在命中名单时把该
+	// 模型的请求与测试切往 Messages 端点，其余模型不受影响。
+	MessagesModels []string `json:"messagesModels"`
 }
 
 type Config struct {

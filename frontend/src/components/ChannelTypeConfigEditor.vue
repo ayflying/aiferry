@@ -54,6 +54,15 @@ const showQuotaDetail = computed(() => quotaDetailVisible(form.value))
 const quotaLocked = computed(() => quotaDetailLocked(form.value))
 const endpoints = computed(() => endpointNames(form.value))
 
+// Messages 模型名单以逗号分隔的文本输入，提交时拆成数组；后端按
+// 「前缀-* 通配或精确名」匹配。空输入归一为空数组。
+const messagesModelsText = computed({
+  get: () => (Array.isArray(form.value.protocol?.messagesModels) ? form.value.protocol.messagesModels.join(', ') : ''),
+  set: (value: string) => {
+    form.value.protocol.messagesModels = value.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean)
+  },
+})
+
 function setMode(next: 'form' | 'json') {
   if (next === mode.value) return
   if (next === 'form') form.value = configForForm(parseTypeConfigText(text.value).config)
@@ -127,6 +136,16 @@ function useBuiltinEndpoints() {
           <div class="setting-row">
             <div><strong>仅提供 Chat Completions</strong><span>上游没有 /responses 端点时开启，避免每次请求先转投再回退</span></div>
             <el-switch v-model="form.protocol.chatCompletionsOnly" />
+          </div>
+          <div class="field-grid protocol-extra">
+            <el-form-item class="span-all" label="Anthropic Messages 端点路径">
+              <el-input v-model="form.protocol.messagesPath" placeholder="/v1/messages 或 https://opencode.ai/zen/v1/messages（留空不启用）" spellcheck="false" />
+              <span class="field-hint">/ 开头拼接到上方 API 根地址；端点不在该根地址下时填 http(s):// 开头的完整地址。仅下方名单命中的模型走该协议。</span>
+            </el-form-item>
+            <el-form-item class="span-all" label="Messages 协议模型名单">
+              <el-input v-model="messagesModelsText" placeholder="union-*, claude-*, qwen3.7-max（前缀-* 通配或精确名，逗号分隔）" spellcheck="false" />
+              <span class="field-hint">命中名单的模型自动以 Anthropic Messages 协议转发与测试；名单为空时全部模型不受影响。</span>
+            </el-form-item>
           </div>
         </el-collapse-item>
 
@@ -282,6 +301,7 @@ function useBuiltinEndpoints() {
 .setting-row strong { color: #15202b; font-size: 13px; }
 .setting-row span { color: #66717d; font-size: 11px; line-height: 1.45; }
 .setting-row :deep(.el-switch) { flex: 0 0 auto; }
+.protocol-extra { border-top: 1px solid #e4e9ed; padding-top: 8px; }
 .empty-endpoints { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 10px 12px; border: 1px dashed #cfd8df; border-radius: 6px; color: #66717d; background: #fbfcfd; font-size: 11px; line-height: 1.5; }
 .endpoint-row { display: grid; gap: 8px; margin-bottom: 10px; padding: 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fbfcfd; }
 .endpoint-line { display: grid; grid-template-columns: minmax(0, 1fr) 96px 116px 34px; align-items: center; gap: 8px; }

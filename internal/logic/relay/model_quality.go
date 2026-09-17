@@ -110,6 +110,17 @@ func captureBufferedResponse(endpoint string, body []byte) (string, string) {
 			return utf8.RuneCountInString(text.String()) < maxQualityTextRunes
 		})
 		return truncateQualityText(text.String(), maxQualityTextRunes), model
+	case protocol.MessagesEndpoint:
+		// Anthropic 响应的正文在顶层 content 数组里，只取 text 块
+		// （thinking 块与 tool_use 块不参与质量观察）。
+		var text strings.Builder
+		gjson.GetBytes(body, "content").ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() == "text" {
+				text.WriteString(block.Get("text").String())
+			}
+			return utf8.RuneCountInString(text.String()) < maxQualityTextRunes
+		})
+		return truncateQualityText(text.String(), maxQualityTextRunes), model
 	default:
 		return "", model
 	}

@@ -14,8 +14,15 @@ const (
 	ChatCompletionsEndpoint = "/chat/completions"
 	ResponsesEndpoint       = "/responses"
 
-	chatToResponsesConversion = "chat_to_responses"
-	responsesToChatConversion = "responses_to_chat"
+	// MessagesEndpoint 是 Anthropic Messages 协议的缺省上游路径。渠道类型声明的
+	// messagesPath 可覆盖为其他相对路径或完整 URL——聚合网关常把 Messages 挂在
+	// 与 Chat 不同的路径前缀下（如 opencode zen 的 …/zen/v1/messages）。
+	MessagesEndpoint = "/v1/messages"
+
+	chatToResponsesConversion      = "chat_to_responses"
+	responsesToChatConversion      = "responses_to_chat"
+	chatToAnthropicConversion      = "chat_to_anthropic"
+	responsesToAnthropicConversion = "responses_to_anthropic"
 )
 
 type Plan struct {
@@ -71,6 +78,23 @@ func PreferredChatCompletionsPlan(endpoint string) Plan {
 	}
 }
 
+// PreferredAnthropicPlan 把上游锁定在 Anthropic Messages 端点。messagesURL 是
+// 渠道类型声明的端点地址：完整 URL 原样携带（由转发层跳过根地址拼接），相对
+// 路径由转发层拼在渠道根地址后，留空回退缺省 /v1/messages。Chat 客户端经
+// chat_to_anthropic 转换，Responses 客户端经 responses_to_anthropic 转换。
+func PreferredAnthropicPlan(endpoint, messagesURL string) Plan {
+	upstream := strings.TrimSpace(messagesURL)
+	if upstream == "" {
+		upstream = MessagesEndpoint
+	}
+	switch endpoint {
+	case ResponsesEndpoint:
+		return Plan{clientEndpoint: endpoint, upstreamEndpoint: upstream, conversion: responsesToAnthropicConversion}
+	default:
+		return Plan{clientEndpoint: endpoint, upstreamEndpoint: upstream, conversion: chatToAnthropicConversion}
+	}
+}
+
 func AlternatePlan(endpoint string, primary Plan) (Plan, bool) {
 	if primary.Converts() {
 		return directPlan(endpoint), true
@@ -109,6 +133,12 @@ func (p Plan) Converts() bool {
 	return p.conversion != ""
 }
 
+// IsAnthropicUpstream 表示这次转发的上游是 Anthropic Messages 端点，
+// 调用方据此补协议版本头等 Anthropic 专属处理。
+func (p Plan) IsAnthropicUpstream() bool {
+	return p.conversion == chatToAnthropicConversion || p.conversion == responsesToAnthropicConversion
+}
+
 func (p Plan) ConvertRequest(body []byte) ([]byte, error) {
 	switch p.conversion {
 	case "":
@@ -117,6 +147,10 @@ func (p Plan) ConvertRequest(body []byte) ([]byte, error) {
 		return chatRequestToResponses(body)
 	case responsesToChatConversion:
 		return responsesRequestToChat(body)
+	case chatToAnthropicConversion:
+		return chatRequestToAnthropic(body)
+	case responsesToAnthropicConversion:
+		return responsesRequestToAnthropic(body)
 	default:
 		return nil, gerror.New("unsupported protocol conversion")
 	}
@@ -131,6 +165,12 @@ func (p Plan) ConvertResponse(body []byte) []byte {
 		return responsesResponseToChat(body)
 	case responsesToChatConversion:
 		return chatResponseToResponses(body)
+	case chatToAnthropicConversion:
+		return anthropicResponseToChat(body)
+	case responsesToAnthropicConversion:
+		// Responses 客户端复用同一份 Anthropic 响应：先还原成 Chat 形态，
+		// 再走既有 chat→responses 转换，维护一份输出 schema 即可。
+		return chatResponseToResponses(anthropicResponseToChat(body))
 	default:
 		return body
 	}

@@ -14,6 +14,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/logic/channel"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/logic/protocol"
 )
 
@@ -57,10 +58,17 @@ func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, can
 	if !allowConversion {
 		return protocol.DirectPlan(endpoint)
 	}
-	// 只提供 Chat Completions 的聚合上游先于模型名推断判定：转投 /responses
-	// 必然失败再回退，等于每次请求多一次上游往返。
-	if s.chatCompletionsOnly(ctx, candidate) {
-		return protocol.PreferredChatCompletionsPlan(endpoint)
+	// 渠道类型声明的协议偏好先于模型名推断判定：转投必然失败的端点
+	// 等于每次请求多一次上游往返。
+	if typeConfig, ok := s.protocolTypeConfig(ctx, candidate); ok {
+		if typeConfig.Protocol.ChatCompletionsOnly {
+			return protocol.PreferredChatCompletionsPlan(endpoint)
+		}
+		// 声明了 Messages 名单且模型命中时，该模型切到 Anthropic Messages
+		// 端点（union-*、claude-* 等以 /messages 承载的模型）。
+		if channeltype.MatchesMessagesModel(typeConfig, candidate.UpstreamName) {
+			return protocol.PreferredAnthropicPlan(endpoint, channeltype.MessagesEndpointURL(typeConfig))
+		}
 	}
 	if candidate.ChannelType == "zhipu" && isZhipuResponsesBaseURL(candidate.BaseURL) {
 		return protocol.PreferredResponsesPlan(endpoint)
@@ -69,21 +77,30 @@ func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, can
 	return protocol.PreferredPlan(endpoint, candidate.UpstreamName)
 }
 
-// chatCompletionsOnly 判断渠道类型是否声明「该上游只提供 Chat Completions 端点」。
-// 渠道类型配置读取失败按未声明处理，退回按模型名推断，不阻断转发。
-func (s *sRelay) chatCompletionsOnly(ctx context.Context, candidate Candidate) bool {
+// protocolTypeConfig 读取候选渠道的类型配置，供协议端点判定使用。
+// 读取失败按未声明处理，退回按模型名推断，不阻断转发。
+func (s *sRelay) protocolTypeConfig(ctx context.Context, candidate Candidate) (channeltype.Config, bool) {
 	if s.types == nil {
-		return false
+		return channeltype.Config{}, false
 	}
 	_, typeConfig, err := s.types.GetByCode(ctx, candidate.ChannelType)
 	if err != nil {
-		return false
+		return channeltype.Config{}, false
 	}
-	return typeConfig.Protocol.ChatCompletionsOnly
+	return typeConfig, true
 }
 
 func isZhipuResponsesBaseURL(baseURL string) bool {
 	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "https://open.bigmodel.cn/api/v1")
+}
+
+// resolveUpstreamURL 拼接上游地址：端点是完整 URL（如渠道类型声明的
+// Messages 地址）时原样使用，否则拼在渠道根地址之后。
+func resolveUpstreamURL(baseURL, endpoint string) string {
+	if channeltype.IsAbsoluteHTTPURL(endpoint) {
+		return endpoint
+	}
+	return baseURL + endpoint
 }
 
 func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, originalBody []byte, candidate Candidate, stream bool, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, advancedConfig channel.AdvancedConfig, plan protocol.Plan, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
@@ -114,7 +131,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(settings.NonStreamTimeoutSeconds)*time.Second)
 	}
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, candidate.BaseURL+plan.UpstreamEndpoint(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, resolveUpstreamURL(candidate.BaseURL, plan.UpstreamEndpoint()), bytes.NewReader(body))
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "create upstream request")
 	}
@@ -124,6 +141,10 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		return attemptResult{}, false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Anthropic Messages 上游要求显式协议版本头，缺失时部分网关直接 400。
+	if plan.IsAnthropicUpstream() {
+		req.Header.Set("anthropic-version", "2023-06-01")
+	}
 	// OpenCode Go 等上游要求稳定的会话标识头，缺失时直接 400。
 	applyOpencodeGoHeaders(req.Header, incomingHeaders, candidate, userID)
 	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)

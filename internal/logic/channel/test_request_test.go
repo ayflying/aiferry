@@ -5,41 +5,92 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
 
 func TestTestEndpointsUsesModelCapabilitiesForAutoMode(t *testing.T) {
-	endpoints := testEndpoints("auto", "gpt-4.1-mini")
+	endpoints := testEndpoints("auto", "gpt-4.1-mini", channeltype.Config{})
 	if len(endpoints) != 3 || endpoints[0] != "chat" || endpoints[1] != "responses" || endpoints[2] != "embeddings" {
 		t.Fatalf("unexpected auto endpoints: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("auto", "gpt-5.6-luna"); len(endpoints) != 2 || endpoints[0] != "responses" || endpoints[1] != "chat" {
+	if endpoints = testEndpoints("auto", "gpt-5.6-luna", channeltype.Config{}); len(endpoints) != 2 || endpoints[0] != "responses" || endpoints[1] != "chat" {
 		t.Fatalf("new GPT models should test Responses first: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("auto", "gpt-image-2"); len(endpoints) != 1 || endpoints[0] != "images" {
+	if endpoints = testEndpoints("auto", "gpt-image-2", channeltype.Config{}); len(endpoints) != 1 || endpoints[0] != "images" {
 		t.Fatalf("image models should use the image endpoint: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("auto", "text-embedding-3-large"); len(endpoints) != 1 || endpoints[0] != "embeddings" {
+	if endpoints = testEndpoints("auto", "text-embedding-3-large", channeltype.Config{}); len(endpoints) != 1 || endpoints[0] != "embeddings" {
 		t.Fatalf("embedding models should use the embeddings endpoint: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("auto", "mimo-v2.5-tts"); len(endpoints) != 1 || endpoints[0] != "tts" {
+	if endpoints = testEndpoints("auto", "mimo-v2.5-tts", channeltype.Config{}); len(endpoints) != 1 || endpoints[0] != "tts" {
 		t.Fatalf("TTS models should use the tts endpoint: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("auto", "mimo-v2.5-tts-voicedesign"); len(endpoints) != 1 || endpoints[0] != "tts" {
+	if endpoints = testEndpoints("auto", "mimo-v2.5-tts-voicedesign", channeltype.Config{}); len(endpoints) != 1 || endpoints[0] != "tts" {
 		t.Fatalf("TTS voicedesign variants should use the tts endpoint: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("auto", "mimo-v2.5-asr"); len(endpoints) != 1 || endpoints[0] != "asr" {
+	if endpoints = testEndpoints("auto", "mimo-v2.5-asr", channeltype.Config{}); len(endpoints) != 1 || endpoints[0] != "asr" {
 		t.Fatalf("ASR models should use the asr endpoint: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("auto", "whisper-large-v3"); len(endpoints) != 1 || endpoints[0] != "asr" {
+	if endpoints = testEndpoints("auto", "whisper-large-v3", channeltype.Config{}); len(endpoints) != 1 || endpoints[0] != "asr" {
 		t.Fatalf("whisper models should use the asr endpoint: %#v", endpoints)
 	}
-	if endpoints = testEndpoints("responses", "gpt-5.6-luna"); len(endpoints) != 1 || endpoints[0] != "responses" {
+	if endpoints = testEndpoints("responses", "gpt-5.6-luna", channeltype.Config{}); len(endpoints) != 1 || endpoints[0] != "responses" {
 		t.Fatalf("explicit endpoint should not expand: %#v", endpoints)
 	}
 }
 
+func TestTestEndpointsPrefersMessagesForDeclaredModels(t *testing.T) {
+	config := channeltype.Config{Protocol: channeltype.ProtocolConfig{
+		MessagesModels: []string{"union-*", "qwen3.7-max"},
+	}}
+	endpoints := testEndpoints("auto", "union-alpha", config)
+	if len(endpoints) != 4 || endpoints[0] != "messages" || endpoints[1] != "chat" {
+		t.Fatalf("declared messages model should test messages first: %#v", endpoints)
+	}
+	if endpoints = testEndpoints("auto", "qwen3.7-max", config); endpoints[0] != "messages" {
+		t.Fatalf("exact-name match should test messages first: %#v", endpoints)
+	}
+	// 名单外模型不受影响；`union-*` 也不能命中 unionx- 这类跨边界前缀。
+	if endpoints = testEndpoints("auto", "deepseek-flash", config); endpoints[0] != "chat" {
+		t.Fatalf("undeclared model should keep default order: %#v", endpoints)
+	}
+	if endpoints = testEndpoints("auto", "unionx-other", config); endpoints[0] != "chat" {
+		t.Fatalf("prefix must respect the dash boundary: %#v", endpoints)
+	}
+}
+
+func TestTestPayloadBuildsMessagesRequest(t *testing.T) {
+	config := channeltype.Config{Protocol: channeltype.ProtocolConfig{
+		MessagesPath: "https://opencode.ai/zen/v1/messages",
+	}}
+	path, payload, streamed := testPayload("messages", "union-alpha", true, config)
+	if path != "https://opencode.ai/zen/v1/messages" || !streamed {
+		t.Fatalf("unexpected messages payload metadata: path=%q streamed=%t", path, streamed)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err = json.Unmarshal(body, &value); err != nil {
+		t.Fatal(err)
+	}
+	if value["model"] != "union-alpha" || value["max_tokens"] != float64(16) || value["stream"] != true {
+		t.Fatalf("unexpected messages test payload: %#v", value)
+	}
+	messages, ok := value["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("unexpected messages array: %#v", value["messages"])
+	}
+	// Messages 端点是完整 URL：resolveTestURL 必须原样使用，不拼渠道根地址。
+	if got := resolveTestURL("https://opencode.ai/zen/go/v1", path); got != path {
+		t.Fatalf("absolute messages url should pass through: %q", got)
+	}
+}
+
 func TestTestPayloadAddsStreamUsageForChat(t *testing.T) {
-	path, payload, streamed := testPayload("chat", "gpt-test", true)
+	path, payload, streamed := testPayload("chat", "gpt-test", true, channeltype.Config{})
 	if path != "/chat/completions" || !streamed {
 		t.Fatalf("unexpected chat payload metadata: path=%q streamed=%t", path, streamed)
 	}
@@ -61,14 +112,14 @@ func TestTestPayloadAddsStreamUsageForChat(t *testing.T) {
 }
 
 func TestTestPayloadKeepsEmbeddingsNonStreaming(t *testing.T) {
-	path, _, streamed := testPayload("embeddings", "text-embedding-3-small", true)
+	path, _, streamed := testPayload("embeddings", "text-embedding-3-small", true, channeltype.Config{})
 	if path != "/embeddings" || streamed {
 		t.Fatalf("embeddings should remain non-streaming: path=%q streamed=%t", path, streamed)
 	}
 }
 
 func TestTestPayloadUsesImageGenerationEndpoint(t *testing.T) {
-	path, payload, streamed := testPayload("images", "gpt-image-2", true)
+	path, payload, streamed := testPayload("images", "gpt-image-2", true, channeltype.Config{})
 	if path != "/images/generations" || streamed {
 		t.Fatalf("image testing should use the non-streaming image endpoint: path=%q streamed=%t", path, streamed)
 	}
@@ -88,7 +139,7 @@ func TestTestPayloadUsesImageGenerationEndpoint(t *testing.T) {
 }
 
 func TestTestPayloadBuildsTTSAndASRRequests(t *testing.T) {
-	path, payload, streamed := testPayload("tts", "mimo-v2.5-tts", true)
+	path, payload, streamed := testPayload("tts", "mimo-v2.5-tts", true, channeltype.Config{})
 	if path != "/audio/speech" || streamed {
 		t.Fatalf("tts testing should use the non-streaming speech endpoint: path=%q streamed=%t", path, streamed)
 	}
@@ -104,7 +155,7 @@ func TestTestPayloadBuildsTTSAndASRRequests(t *testing.T) {
 		t.Fatalf("unexpected tts test payload: %#v", value)
 	}
 
-	path, asrPayload, streamed := testPayload("asr", "mimo-v2.5-asr", true)
+	path, asrPayload, streamed := testPayload("asr", "mimo-v2.5-asr", true, channeltype.Config{})
 	if path != "/audio/transcriptions" || streamed {
 		t.Fatalf("asr testing should use the non-streaming transcriptions endpoint: path=%q streamed=%t", path, streamed)
 	}
@@ -152,7 +203,7 @@ func TestChatAdapterPayloadConvertsTTSAndASR(t *testing.T) {
 	}
 
 	// ASR：multipart payload 的 WAV 内容被 base64 后经 input_audio 传入。
-	_, _, _ = testPayload("asr", "mimo-v2.5-asr", false)
+	_, _, _ = testPayload("asr", "mimo-v2.5-asr", false, channeltype.Config{})
 	asrPath, asrChat := chatAdapterPayload("asr", "mimo-v2.5-asr", asrTestPayload("mimo-v2.5-asr"))
 	if asrPath != "/chat/completions" {
 		t.Fatalf("unexpected chat adapter asr path: %q", asrPath)

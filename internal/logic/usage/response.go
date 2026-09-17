@@ -41,8 +41,38 @@ func ParseSSEUsage(line []byte, target *TokenUsage) {
 		return
 	}
 	parsed := ParseJSONUsage([]byte(payload))
-	if hasTokenUsage(parsed) {
-		*target = parsed
+	if !hasTokenUsage(parsed) {
+		return
+	}
+	// Anthropic 把 usage 拆在两帧：message_start 给输入侧、message_delta 给
+	// 输出侧。按字段合并而不是整体覆盖，避免后帧把前帧已拿到的字段清掉；
+	// Chat 上游 usage 只在末帧出现一次，合并语义与之完全兼容。
+	if parsed.Input != nil {
+		target.Input = parsed.Input
+	}
+	if parsed.CachedInput != nil {
+		target.CachedInput = parsed.CachedInput
+	}
+	if parsed.CacheWrite != nil {
+		target.CacheWrite = parsed.CacheWrite
+	}
+	if parsed.CacheMiss != nil {
+		target.CacheMiss = parsed.CacheMiss
+	}
+	if parsed.ImageInput != nil {
+		target.ImageInput = parsed.ImageInput
+	}
+	if parsed.AudioInput != nil {
+		target.AudioInput = parsed.AudioInput
+	}
+	if parsed.Output != nil {
+		target.Output = parsed.Output
+	}
+	if parsed.AudioOutput != nil {
+		target.AudioOutput = parsed.AudioOutput
+	}
+	if parsed.Total != nil {
+		target.Total = parsed.Total
 	}
 }
 

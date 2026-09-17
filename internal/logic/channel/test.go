@@ -63,7 +63,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	if err != nil {
 		return TestResult{}, err
 	}
-	endpoints := testEndpoints(input.Endpoint, model.UpstreamName)
+	endpoints := testEndpoints(input.Endpoint, model.UpstreamName, typeConfig)
 	advancedConfig, err := ParseAdvancedConfig([]byte(channel.AdvancedConfig))
 	if err != nil {
 		return TestResult{}, err
@@ -167,14 +167,14 @@ func buildTestRequest(ctx context.Context, url string, payload any, config Advan
 }
 
 func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, config AdvancedConfig, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
-	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream)
+	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream, typeConfig)
 	if typeConfig.Audio.Adapter == channeltype.AudioAdapterChat {
 		path, payload = chatAdapterPayload(endpoint, model.UpstreamName, payload)
 	}
 	// 模型测试复用转发链路的缓存字段处置，避免「测试通过、正式被上游拒绝」：
 	// 渠道声明 off 时测试同样不下发缓存字段，缺省时同样注入稳定键。
 	identity := fmt.Sprintf("v1|test|m:%s|c:%d|k:%d", model.UpstreamName, channel.Id, credential.ID)
-	req, err := buildTestRequest(ctx, baseURL+path, payload, config, identity)
+	req, err := buildTestRequest(ctx, resolveTestURL(baseURL, path), payload, config, identity)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}
@@ -190,6 +190,10 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 		ProjectID:           channel.ProjectId,
 	}); err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, err
+	}
+	// Anthropic Messages 端点与转发链路同样要求显式协议版本头。
+	if endpoint == "messages" {
+		req.Header.Set("anthropic-version", "2023-06-01")
 	}
 	// OpenCode Go 等上游要求稳定的客户端标识头，缺失时会直接返回 400
 	// MissingSessionID，模型测试与巡检链路同样必须补齐。
@@ -291,11 +295,16 @@ func testAttemptFlowStep(channelName, endpoint string, result TestResult) usage.
 	return step
 }
 
-func testEndpoints(endpoint, model string) []string {
+func testEndpoints(endpoint, model string, typeConfig channeltype.Config) []string {
 	if endpoint != "auto" {
 		return []string{endpoint}
 	}
 	modelName := strings.ToLower(strings.TrimSpace(model))
+	// 渠道类型声明了 Messages 模型名单且命中：该模型只认 Anthropic Messages
+	// 端点，放在序列首位；后续端点仅在 404/405 等可回退失败时才会尝试。
+	if channeltype.MatchesMessagesModel(typeConfig, model) {
+		return []string{"messages", "chat", "responses", "embeddings"}
+	}
 	switch {
 	case containsAny(modelName, "tts", "speech"):
 		return []string{"tts"}
@@ -310,6 +319,15 @@ func testEndpoints(endpoint, model string) []string {
 	default:
 		return []string{"chat", "responses", "embeddings"}
 	}
+}
+
+// resolveTestURL 与转发链路的 resolveUpstreamURL 同一语义：端点是完整 URL
+// （如渠道类型声明的 Messages 地址）时原样使用。
+func resolveTestURL(baseURL, endpoint string) string {
+	if channeltype.IsAbsoluteHTTPURL(endpoint) {
+		return endpoint
+	}
+	return baseURL + endpoint
 }
 
 func containsAny(model string, keywords ...string) bool {
@@ -336,8 +354,18 @@ func canTryAlternativeEndpoint(result TestResult) bool {
 	return false
 }
 
-func testPayload(endpoint, model string, stream bool) (string, any, bool) {
+func testPayload(endpoint, model string, stream bool, typeConfig channeltype.Config) (string, any, bool) {
 	switch endpoint {
+	case "messages":
+		payload := map[string]any{
+			"model":      model,
+			"max_tokens": 16,
+			"messages":   []map[string]string{{"role": "user", "content": "Reply with exactly OK."}},
+		}
+		if stream {
+			payload["stream"] = true
+		}
+		return channeltype.MessagesEndpointURL(typeConfig), payload, stream
 	case "tts":
 		return "/audio/speech", map[string]any{
 			"model":           model,

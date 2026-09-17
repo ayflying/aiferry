@@ -20,7 +20,7 @@ const SECTION_SKELETONS: Record<string, () => TypeConfigRecord> = {
   quota: () => ({ adapter: 'none', method: 'GET', path: '', authType: 'channel_key', headerName: 'Authorization', headerPrefix: 'Bearer ' }),
   audio: () => ({ adapter: 'openai' }),
   video: () => ({ adapter: 'openai' }),
-  protocol: () => ({ chatCompletionsOnly: false }),
+  protocol: () => ({ chatCompletionsOnly: false, messagesPath: '', messagesModels: [] }),
 }
 
 /** 可以在表单里维护的分组（endpoints 结构特殊，另行处理）。 */
@@ -240,5 +240,10 @@ export function audioVideoSummary(config: TypeConfigRecord): string {
 }
 
 export function protocolSummary(config: TypeConfigRecord): string {
-  return config?.protocol?.chatCompletionsOnly ? '仅 Chat Completions' : '按模型名自动选择端点'
+  const summary = config?.protocol?.chatCompletionsOnly ? '仅 Chat Completions' : '按模型名自动选择端点'
+  const models = Array.isArray(config?.protocol?.messagesModels) ? config.protocol.messagesModels.filter(Boolean) : []
+  if (String(config?.protocol?.messagesPath ?? '').trim() || models.length) {
+    return `${summary} · Messages 协议（${models.length} 项名单）`
+  }
+  return summary
 }
