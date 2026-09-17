@@ -198,6 +198,14 @@ type SystemResilienceSettingsInput struct {
 	// 是否补发一个显式的错误事件与结束帧。关闭后保持历史行为（直接断开流），
 	// 适合依赖「断流即重试」的客户端（如 Codex）。字段缺省（历史数据）按启用处理。
 	StreamFailureEventEnabled bool `json:"streamFailureEventEnabled"`
+	// MessagesModels 是全局 Anthropic Messages 模型名单（`前缀-*` 通配或精确名）。
+	// 渠道启用协议转换后，上游模型命中名单即改走 Messages 端点，无需改渠道类型。
+	// 空名单表示不启用全局名单转换，判定退回渠道类型声明与模型名推断。
+	MessagesModels []string `json:"messagesModels"`
+	// MessagesPath 是全局 Messages 端点地址：相对路径拼在渠道 BaseURL 之后，
+	// 完整 URL 直接使用（如 Zen 的 https://opencode.ai/zen/v1/messages）。
+	// 留空使用协议缺省值 /v1/messages。
+	MessagesPath string `json:"messagesPath"`
 }
 
 type ModelQualitySettingsInput struct {

@@ -69,6 +69,8 @@ const form = reactive({
   modelQualityDetectionEnabled: false,
   protocolConversionEnabled: true,
   streamFailureEventEnabled: true,
+  messagesModelsText: '',
+  messagesPath: '',
 })
 const {
   eventsLoading: qualityEventsLoading,
@@ -130,6 +132,8 @@ function applySettings(settings: SystemResilienceSettings) {
     ...settings,
     healthCheckMode: settings.healthCheckMode,
     failureKeywordsText: settings.failureKeywords.join('\n'),
+    messagesModelsText: (settings.messagesModels || []).join('\n'),
+    messagesPath: settings.messagesPath || '',
   })
 }
 
@@ -242,6 +246,8 @@ async function saveReliability() {
       modelQualityDetectionEnabled: form.modelQualityDetectionEnabled,
       protocolConversionEnabled: form.protocolConversionEnabled,
       streamFailureEventEnabled: form.streamFailureEventEnabled,
+      messagesModels: form.messagesModelsText.split('\n').map((item) => item.trim()).filter(Boolean),
+      messagesPath: form.messagesPath.trim(),
     })
     applySettings(settings)
     showSuccess('系统设置已保存', '保存成功')
@@ -382,7 +388,7 @@ watch(activeTab, (tab) => {
       <section class="settings-section"><div class="section-heading"><div><h2>故障转移</h2><span>可恢复失败会按路由顺序尝试所有可用渠道</span></div><Gauge :size="19" /></div><el-form label-position="top" class="settings-form"><el-form-item label="可故障转移状态码"><el-input v-model="form.retryStatusCodes" placeholder="401,429,500-599" /></el-form-item><p class="field-hint">状态码支持逗号分隔和包含范围，例如 401,429,500-599。所有可用渠道都失败后，客户端会收到可重试响应。</p></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>超时配置</h2><span>请求超时会按现有故障转移与密钥级冷却规则处理。</span></div></div><el-form label-position="top" class="settings-form"><div class="timeout-grid"><el-form-item label="流式首字节超时"><el-input-number v-model="form.streamFirstByteTimeoutSeconds" :min="1" :max="120" controls-position="right" /><p class="field-hint">等待首个数据块的最大时间，范围 1-120 秒。</p></el-form-item><el-form-item label="流式静默超时"><el-input-number v-model="form.streamIdleTimeoutSeconds" :min="0" :max="600" controls-position="right" /><p class="field-hint">数据块之间的最大间隔，范围 0-600 秒，填 0 禁用。</p></el-form-item><el-form-item label="非流式超时"><el-input-number v-model="form.nonStreamTimeoutSeconds" :min="60" :max="1200" controls-position="right" /><p class="field-hint">非流式请求的总超时时间，范围 60-1200 秒。</p></el-form-item></div></el-form></section>
       <section class="settings-section"><div class="section-heading"><div><h2>流式失败提示</h2><span>流式响应已经写出部分内容之后失败时，是否补发显式错误事件与结束帧。</span></div><el-switch v-model="form.streamFailureEventEnabled" /></div><p class="field-hint">流式响应一旦向客户端写出可见内容就无法再切换候选渠道，只能就地收尾。开启后网关会补发错误事件和结束标记，客户端可以提示「上游中断」而不是只看到连接被断开；关闭后保持直接断开流的历史行为，适合依赖「断流即重试」的客户端（如 Codex）。无论开关如何，截断的响应都不会再记为成功，也不会计费。</p></section>
-      <section class="settings-section"><div class="section-heading"><div><h2>协议转换</h2><span>网关在 Chat Completions 与 Responses 之间自动转换请求与响应：gpt-* 模型默认转投上游 /responses，上游不支持对应端点时自动回退。</span></div><el-switch v-model="form.protocolConversionEnabled" /></div><p class="field-hint">关闭后，未在渠道高级配置里单独指定的渠道一律直连客户端声明的端点，不再做任何转换，可用于排查转换引入的问题。若某上游只支持 Responses 端点，关闭后它的 Chat 请求会直接返回该端点的错误。</p></section>
+      <section class="settings-section"><div class="section-heading"><div><h2>协议转换</h2><span>网关在 Chat Completions 与 Responses 之间自动转换请求与响应：gpt-* 模型默认转投上游 /responses，上游不支持对应端点时自动回退。</span></div><el-switch v-model="form.protocolConversionEnabled" /></div><p class="field-hint">关闭后，未在渠道高级配置里单独指定的渠道一律直连客户端声明的端点，不再做任何转换，可用于排查转换引入的问题。若某上游只支持 Responses 端点，关闭后它的 Chat 请求会直接返回该端点的错误。</p><el-form label-position="top" class="settings-form" style="margin-top: 12px;"><div class="form-grid"><el-form-item label="Messages 端点"><el-input v-model="form.messagesPath" :disabled="!form.protocolConversionEnabled" placeholder="留空使用 /v1/messages；可为相对路径或完整 URL（如 https://opencode.ai/zen/v1/messages）" /></el-form-item></div><el-form-item label="Messages 模型名单"><el-input v-model="form.messagesModelsText" :disabled="!form.protocolConversionEnabled" type="textarea" :rows="5" spellcheck="false" placeholder="每行一个：前缀-* 通配（如 union-*）或精确模型名" /></el-form-item><p class="field-hint">渠道开启协议转换后（渠道高级配置里的「协议转换」，缺省跟随本开关），上游模型命中名单即自动改走 Anthropic Messages 协议——就像 gpt-* 自动转 Responses 一样，一个渠道内同时兼容多种协议的模型。名单不区分大小写；留空表示不启用全局名单转换。</p></el-form></section>
       <section class="settings-section probe-settings"><div class="section-heading"><div><h2>后台渠道探测</h2><span>使用已启用模型执行最小请求，不保存提示词或响应正文。仅用于主动巡检正常渠道；关闭不影响自动恢复。</span></div><el-switch v-model="form.healthCheckEnabled" /></div><div class="probe-controls"><div class="probe-interval"><strong>检查间隔</strong><el-input-number v-model="form.healthCheckIntervalMinutes" :disabled="!form.healthCheckEnabled" :min="1" :max="1440" controls-position="right" /><small>分钟</small></div><div class="probe-option"><div><strong>仅被动恢复</strong><span>只探测自动禁用的渠道；探测全部渠道时切换为全量巡检</span></div><el-switch :model-value="form.healthCheckMode === 'passive'" :disabled="!form.healthCheckEnabled" @update:model-value="form.healthCheckMode = $event ? 'passive' : 'all'" /></div></div></section>
       <section class="settings-section"><div class="section-heading"><div><h2>自动恢复</h2><span>定期自动测试被自动禁用的渠道、密钥和模型，成功即解除禁用并重置健康评分。独立于上方探测开关，默认开启。</span></div><el-switch v-model="form.recoveryEnabled" /></div><p class="field-hint">恢复探测范围跟随上方「仅被动恢复」：被动模式只恢复转发请求触发的禁用，全量模式恢复所有来源的禁用。已自动关闭的渠道（所有模型被禁用）中的模型同样参与恢复测试。</p></section>
 	  <section class="settings-section"><div class="section-heading"><div><h2>上游异常自动下线</h2><span>同一上游密钥连续命中规则后才会停止参与路由，并保存触发原因。</span></div><el-switch v-model="form.autoDisableEnabled" /></div><el-form label-position="top" class="settings-form"><div class="form-grid"><el-form-item label="连续失败阈值"><el-input-number v-model="form.autoDisableFailureThreshold" :disabled="!form.autoDisableEnabled" :min="1" :max="20" controls-position="right" /></el-form-item><el-form-item label="慢响应阈值（秒）"><el-input-number v-model="form.disableLatencySeconds" :disabled="!form.autoDisableEnabled" :min="1" :max="3600" controls-position="right" /></el-form-item><el-form-item label="自动禁用状态码"><el-input v-model="form.disableStatusCodes" :disabled="!form.autoDisableEnabled" placeholder="401,429" /></el-form-item></div><el-form-item label="失败关键词"><el-input v-model="form.failureKeywordsText" :disabled="!form.autoDisableEnabled" type="textarea" :rows="10" spellcheck="false" placeholder="每行一个关键词" /></el-form-item><div class="probe-option"><div><strong>管理员邮件通知</strong><span>渠道或其上游密钥自动禁用、探测成功自动恢复时，通知所有启用的管理员邮箱。</span></div><el-switch v-model="form.autoDisableNotificationEnabled" :disabled="!form.autoDisableEnabled" /></div><p class="field-hint">同一上游密钥连续命中任一禁用规则达到阈值才会自动下线；任意一次成功会清零。关键词不区分大小写；状态码支持逗号分隔和包含范围。</p></el-form></section>

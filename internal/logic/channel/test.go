@@ -63,7 +63,13 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	if err != nil {
 		return TestResult{}, err
 	}
-	endpoints := testEndpoints(input.Endpoint, model.UpstreamName, typeConfig)
+	// 全局协议设置参与测试端点判定：与转发链路同一语义（类型级名单优先、
+	// 全局名单兜底），保证「测试与正式一致」。
+	settings, err := s.resilience.Get(ctx)
+	if err != nil {
+		return TestResult{}, err
+	}
+	endpoints := testEndpoints(input.Endpoint, model.UpstreamName, typeConfig, settings)
 	advancedConfig, err := ParseAdvancedConfig([]byte(channel.AdvancedConfig))
 	if err != nil {
 		return TestResult{}, err
@@ -80,7 +86,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	finished := false
 	for index, endpoint := range endpoints {
 		for _, baseURL := range baseURLs {
-			current, currentPath, currentTokens, requestErr := s.testModelEndpoint(ctx, channel, credential, typeConfig, model, advancedConfig, baseURL, endpoint, input.Stream)
+			current, currentPath, currentTokens, requestErr := s.testModelEndpoint(ctx, channel, credential, typeConfig, settings, model, advancedConfig, baseURL, endpoint, input.Stream)
 			if requestErr != nil {
 				return TestResult{}, requestErr
 			}
@@ -166,8 +172,8 @@ func buildTestRequest(ctx context.Context, url string, payload any, config Advan
 	return req, nil
 }
 
-func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, model entity.ChannelModels, config AdvancedConfig, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
-	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream, typeConfig)
+func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, settings adminapi.SystemResilienceSettingsInput, model entity.ChannelModels, config AdvancedConfig, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
+	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream, typeConfig, settings)
 	if typeConfig.Audio.Adapter == channeltype.AudioAdapterChat {
 		path, payload = chatAdapterPayload(endpoint, model.UpstreamName, payload)
 	}
@@ -295,14 +301,15 @@ func testAttemptFlowStep(channelName, endpoint string, result TestResult) usage.
 	return step
 }
 
-func testEndpoints(endpoint, model string, typeConfig channeltype.Config) []string {
+func testEndpoints(endpoint, model string, typeConfig channeltype.Config, settings adminapi.SystemResilienceSettingsInput) []string {
 	if endpoint != "auto" {
 		return []string{endpoint}
 	}
 	modelName := strings.ToLower(strings.TrimSpace(model))
-	// 渠道类型声明了 Messages 模型名单且命中：该模型只认 Anthropic Messages
-	// 端点，放在序列首位；后续端点仅在 404/405 等可回退失败时才会尝试。
-	if channeltype.MatchesMessagesModel(typeConfig, model) {
+	// Messages 模型名单命中（渠道类型声明优先、全局名单兜底）：该模型只认
+	// Anthropic Messages 端点，放在序列首位；后续端点仅在 404/405 等可回退
+	// 失败时才会尝试。
+	if channeltype.ResolveMessagesEndpoint(typeConfig, settings, model) != "" {
 		return []string{"messages", "chat", "responses", "embeddings"}
 	}
 	switch {
@@ -354,7 +361,7 @@ func canTryAlternativeEndpoint(result TestResult) bool {
 	return false
 }
 
-func testPayload(endpoint, model string, stream bool, typeConfig channeltype.Config) (string, any, bool) {
+func testPayload(endpoint, model string, stream bool, typeConfig channeltype.Config, settings adminapi.SystemResilienceSettingsInput) (string, any, bool) {
 	switch endpoint {
 	case "messages":
 		payload := map[string]any{
@@ -365,7 +372,13 @@ func testPayload(endpoint, model string, stream bool, typeConfig channeltype.Con
 		if stream {
 			payload["stream"] = true
 		}
-		return channeltype.MessagesEndpointURL(typeConfig), payload, stream
+		// 名单命中时用解析出的端点（类型级/全局）；显式指定 messages 但名单
+		// 未配置时退回类型级或协议缺省值，保持手动测试可用。
+		url := channeltype.ResolveMessagesEndpoint(typeConfig, settings, model)
+		if url == "" {
+			url = channeltype.MessagesEndpointURL(typeConfig)
+		}
+		return url, payload, stream
 	case "tts":
 		return "/audio/speech", map[string]any{
 			"model":           model,

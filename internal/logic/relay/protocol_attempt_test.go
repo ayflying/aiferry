@@ -17,6 +17,8 @@ import (
 )
 
 func TestPreferredProtocolPlanUsesUpstreamModel(t *testing.T) {
+	settings := adminapi.SystemResilienceSettingsInput{}
+
 	tests := []struct {
 		name             string
 		clientEndpoint   string
@@ -91,7 +93,7 @@ func TestPreferredProtocolPlanUsesUpstreamModel(t *testing.T) {
 	service := &sRelay{}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			plan := service.preferredProtocolPlan(context.Background(), test.clientEndpoint, test.candidate, true)
+			plan := service.preferredProtocolPlan(context.Background(), test.clientEndpoint, test.candidate, true, settings)
 			if plan.UpstreamEndpoint() != test.upstreamEndpoint || plan.Converts() != test.converts {
 				t.Fatalf("plan = endpoint %q, converts %t; want endpoint %q, converts %t", plan.UpstreamEndpoint(), plan.Converts(), test.upstreamEndpoint, test.converts)
 			}

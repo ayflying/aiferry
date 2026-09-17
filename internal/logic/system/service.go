@@ -167,6 +167,9 @@ func normalizeSettings(input adminapi.SystemResilienceSettingsInput) (adminapi.S
 		return input, gerror.Wrap(err, "disableStatusCodes is invalid")
 	}
 	input.FailureKeywords = normalizeKeywords(input.FailureKeywords)
+	// Messages 名单与 FailureKeywords 同构：去重、限长、归一小写（匹配本就忽略大小写）。
+	input.MessagesModels = normalizeKeywords(input.MessagesModels)
+	input.MessagesPath = strings.TrimSpace(input.MessagesPath)
 	return input, nil
 }
 

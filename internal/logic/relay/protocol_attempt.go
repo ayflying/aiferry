@@ -28,7 +28,7 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if advancedConfig.ProtocolConversion != nil {
 		conversionEnabled = *advancedConfig.ProtocolConversion
 	}
-	primary := s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled)
+	primary := s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled, settings)
 	primaryStartedAt := time.Now()
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
 	// 首跳耗时先记在结果上：协议回退时它会成为调用流程步骤的耗时快照；
@@ -54,21 +54,24 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 
 // preferredProtocolPlan 决定这次转发用哪个上游端点。allowConversion 为 false 时
 // 锁定直连，不再把 gpt-* 请求转投 /responses，但也不阻断转发。
-func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, candidate Candidate, allowConversion bool) protocol.Plan {
+func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, candidate Candidate, allowConversion bool, settings adminapi.SystemResilienceSettingsInput) protocol.Plan {
 	if !allowConversion {
 		return protocol.DirectPlan(endpoint)
 	}
 	// 渠道类型声明的协议偏好先于模型名推断判定：转投必然失败的端点
 	// 等于每次请求多一次上游往返。
-	if typeConfig, ok := s.protocolTypeConfig(ctx, candidate); ok {
-		if typeConfig.Protocol.ChatCompletionsOnly {
-			return protocol.PreferredChatCompletionsPlan(endpoint)
-		}
-		// 声明了 Messages 名单且模型命中时，该模型切到 Anthropic Messages
-		// 端点（union-*、claude-* 等以 /messages 承载的模型）。
-		if channeltype.MatchesMessagesModel(typeConfig, candidate.UpstreamName) {
-			return protocol.PreferredAnthropicPlan(endpoint, channeltype.MessagesEndpointURL(typeConfig))
-		}
+	typeConfig, typeOK := s.protocolTypeConfig(ctx, candidate)
+	if typeOK && typeConfig.Protocol.ChatCompletionsOnly {
+		return protocol.PreferredChatCompletionsPlan(endpoint)
+	}
+	// Messages 名单判定：渠道类型声明的名单优先（类型专属知识），类型级
+	// 未配置或读取失败时退回全局名单（系统设置，union-*、claude-* 等）。
+	// 命中即把该模型切到 Anthropic Messages 端点。
+	if !typeOK {
+		typeConfig = channeltype.Config{}
+	}
+	if messagesURL := channeltype.ResolveMessagesEndpoint(typeConfig, settings, candidate.UpstreamName); messagesURL != "" {
+		return protocol.PreferredAnthropicPlan(endpoint, messagesURL)
 	}
 	if candidate.ChannelType == "zhipu" && isZhipuResponsesBaseURL(candidate.BaseURL) {
 		return protocol.PreferredResponsesPlan(endpoint)

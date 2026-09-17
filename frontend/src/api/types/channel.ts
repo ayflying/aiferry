@@ -310,6 +310,12 @@ export interface SystemResilienceSettings {
   // streamFailureEventEnabled 控制流式响应在已经写出内容后失败时，是否补发
   // 显式错误事件与结束帧；关闭后保持直接断开流的历史行为。
   streamFailureEventEnabled: boolean
+  // messagesModels 是全局 Anthropic Messages 模型名单（前缀-* 通配或精确名）；
+  // 渠道启用协议转换后命中即自动转 messages，无需改渠道类型。空名单不启用。
+  messagesModels: string[]
+  // messagesPath 是全局 messages 端点：相对路径拼渠道 baseUrl，完整 URL 直接
+  // 使用（如 Zen 的跨源 /zen/v1/messages）；留空用协议缺省 /v1/messages。
+  messagesPath: string
 }
 
 export interface BaseSettings {
