@@ -2,8 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import { CircleAlert, CircleCheck, Gauge, Info, LoaderCircle, Trash2 } from '@lucide/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import dayjs from 'dayjs'
 import { apiDelete, apiGet, apiPost } from '../api/client'
-import type { Channel, ChannelModel, ModelTestResult } from '../api/types'
+import type { Channel, ChannelModel, CredentialHealth, ModelTestResult } from '../api/types'
 import { showError } from '../lib/error'
 import { formatLatency } from '../lib/format'
 import { enabledChannelModels } from '../lib/models'
@@ -114,6 +115,36 @@ function healthScoreClass(model: ChannelModel) {
   if (model.healthScore >= 80) return 'good'
   if (model.healthScore >= 40) return 'warn'
   return 'bad'
+}
+
+function credScoreClass(score: number) {
+  if (score >= 80) return 'good'
+  if (score >= 40) return 'warn'
+  return 'bad'
+}
+
+function formatCooldown(value?: string | null) {
+  if (!value) return ''
+  const t = dayjs(value)
+  return t.isValid() ? t.format('YYYY-MM-DD HH:mm:ss') : value
+}
+
+function isCredentialCooling(value?: string | null) {
+  if (!value) return false
+  const t = dayjs(value)
+  return t.isValid() && t.isAfter(dayjs())
+}
+
+type CredHealthState = 'none' | 'available' | 'unavailable'
+
+// none：该模型所属渠道没有有效密钥（不展示组合健康）。
+// available：存在未隔离的有效密钥，原分数即其最高分。
+// unavailable：有有效密钥但全部处于隔离/冷却中，后端已返回 0 分，前端展示"暂无可用组合"。
+function credentialHealthState(row: ChannelModel): CredHealthState {
+  const h = row.credentialHealth
+  if (!h || h.length === 0) return 'none'
+  const hasAvailable = h.some((c) => !isCredentialCooling(c.cooldownUntil))
+  return hasAvailable ? 'available' : 'unavailable'
 }
 
 function startTesting(model: ChannelModel) {
@@ -278,7 +309,32 @@ async function deleteFailedModels() {
         <el-table v-if="pagedModels.length" :data="pagedModels" :show-header="false" size="small" class="test-model-table" height="360">
           <el-table-column width="44" align="center"><template #default="{ row }"><el-radio v-model="selectedModelID" :value="row.id" :disabled="running" :aria-label="`选择 ${row.publicName}`" /></template></el-table-column>
           <el-table-column min-width="260"><template #default="{ row }"><div class="model-name"><strong>{{ row.publicName }}</strong><small v-if="row.upstreamName !== row.publicName">{{ row.upstreamName }}</small></div></template></el-table-column>
-          <el-table-column width="110" align="center"><template #default="{ row }"><el-tooltip :content="row.autoDisabled ? `已自动禁用：${row.autoDisabledReason || '健康评分降至 0'}` : `健康评分 ${row.healthScore}/100`" placement="top"><span class="health-score" :class="healthScoreClass(row)">{{ row.autoDisabled ? '已禁用' : `${row.healthScore}分` }}</span></el-tooltip></template></el-table-column>
+          <el-table-column width="132" align="center">
+            <template #default="{ row }">
+              <el-popover v-if="credentialHealthState(row) !== 'none'" placement="left" :width="320" trigger="hover">
+                <template #reference>
+                  <span v-if="credentialHealthState(row) === 'unavailable'" class="health-badge health-badge--none">暂无可用组合</span>
+                  <span v-else class="health-score" :class="healthScoreClass(row)">{{ row.autoDisabled ? '已禁用' : `${row.healthScore}分` }}</span>
+                </template>
+                <div class="cred-health-pop">
+                  <div class="cred-health-head">
+                    <template v-if="credentialHealthState(row) === 'unavailable'">密钥组合健康 · 全部处于隔离中</template>
+                    <template v-else>密钥组合健康（最高分 {{ row.healthScore }}）</template>
+                    <template v-if="row.autoDisabled"> · 已自动禁用{{ row.autoDisabledReason ? `：${row.autoDisabledReason}` : '' }}</template>
+                  </div>
+                  <div v-for="c in (row.credentialHealth as CredentialHealth[])" :key="c.credentialId" class="cred-health-row" :class="{ 'cred-health-row--cooling': isCredentialCooling(c.cooldownUntil) }">
+                    <span class="cred-prefix mono">{{ c.keyPrefix }}</span>
+                    <span class="cred-score" :class="`cred-score--${credScoreClass(c.healthScore)}`">{{ c.healthScore }}分</span>
+                    <span v-if="c.cooldownUntil" class="cred-cool" :class="{ 'cred-cool--active': isCredentialCooling(c.cooldownUntil) }">隔离至 {{ formatCooldown(c.cooldownUntil) }}</span>
+                    <span v-if="c.lastError" class="cred-err" :title="c.lastError">{{ c.lastError }}</span>
+                  </div>
+                </div>
+              </el-popover>
+              <el-tooltip v-else :content="row.autoDisabled ? `已自动禁用：${row.autoDisabledReason || '健康评分降至 0'}` : `健康评分 ${row.healthScore}/100`" placement="top">
+                <span class="health-score" :class="healthScoreClass(row)">{{ row.autoDisabled ? '已禁用' : `${row.healthScore}分` }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
           <el-table-column width="104"><template #default="{ row }"><span v-if="statusOf(row) === 'testing'" class="test-status testing"><LoaderCircle :size="15" class="spinner" />测试中...</span><span v-else-if="statusOf(row) === 'success'" class="test-status success">成功</span><span v-else-if="statusOf(row) === 'failed'" class="test-status failed">失败</span><span v-else class="test-status idle">未测试</span></template></el-table-column>
           <el-table-column min-width="235"><template #default="{ row }"><div v-if="statusOf(row) === 'testing'" class="test-outcome testing"><span>测试中...</span><small>{{ endpointOf(row) }}</small></div><div v-else-if="statusOf(row) === 'success'" class="test-outcome"><span>{{ formatLatency(latencyOf(row)) }}</span><small>{{ endpointOf(row) }}</small></div><div v-else-if="statusOf(row) === 'failed'" class="test-outcome failed"><span>{{ messageOf(row) }}</span><el-popover v-if="messageOf(row)" trigger="hover" placement="top" :width="360"><template #reference><button class="detail-button" type="button"><Info :size="15" />详情</button></template><p class="error-detail">{{ messageOf(row) }}</p></el-popover></div><span v-else class="muted">—</span></template></el-table-column>
           <el-table-column width="54" align="center"><template #default="{ row }"><el-tooltip :content="isTesting(row) ? '测试中' : '测试此模型'"><button class="icon-button" type="button" :aria-label="`${isTesting(row) ? '正在测试' : '测试'} ${row.publicName}`" :disabled="isTesting(row)" @click="runTest(row)"><LoaderCircle v-if="isTesting(row)" :size="17" class="spinner" /><Gauge v-else :size="17" /></button></el-tooltip></template></el-table-column>
@@ -298,7 +354,7 @@ async function deleteFailedModels() {
 .health-score.good { color: #16866f; background: #e6f5f1; }
 .health-score.warn { color: #b7791f; background: #fdf3e0; }
 .health-score.bad { color: #c83e4d; background: #fbeaec; }
-.health-score.danger { color: #fff; background: #c83e4d; }.test-outcome.failed { display: flex; flex-direction: row; align-items: center; color: #66717d; }.test-outcome.failed > span { flex: 1; }.detail-button { display: inline-flex; align-items: center; gap: 4px; border: 0; color: #40505f; background: transparent; cursor: pointer; font: inherit; font-size: 11px; }.detail-button:hover { color: #1677ff; }.spinner { animation: test-spin 0.9s linear infinite; }.error-detail { margin: 0; color: #40505f; overflow-wrap: anywhere; line-height: 1.55; }.test-empty { display: flex; min-height: 210px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.test-pagination { justify-content: end; min-height: 48px; color: #7b8792; font-size: 11px; }.page-size { width: 68px; }@keyframes test-spin { to { transform: rotate(360deg); } }@media (max-width: 680px) { .test-settings { grid-template-columns: 1fr; gap: 14px; }.test-section-heading { align-items: stretch; flex-direction: column; gap: 12px; }.model-filter { width: 100%; }.test-table-wrap { overflow-x: auto; }.test-model-table { min-width: 700px; }.test-pagination { justify-content: flex-start; flex-wrap: wrap; } }@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+.health-score.danger { color: #fff; background: #c83e4d; }.test-outcome.failed { display: flex; flex-direction: row; align-items: center; color: #66717d; }.test-outcome.failed > span { flex: 1; }.detail-button { display: inline-flex; align-items: center; gap: 4px; border: 0; color: #40505f; background: transparent; cursor: pointer; font: inherit; font-size: 11px; }.detail-button:hover { color: #1677ff; }.spinner { animation: test-spin 0.9s linear infinite; }.error-detail { margin: 0; color: #40505f; overflow-wrap: anywhere; line-height: 1.55; }.test-empty { display: flex; min-height: 210px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.test-pagination { justify-content: end; min-height: 48px; color: #7b8792; font-size: 11px; }.page-size { width: 68px; }.cred-health-pop { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }.cred-health-head { font-weight: 600; color: #15202b; padding-bottom: 4px; border-bottom: 1px solid #eef1f4; margin-bottom: 2px; }.cred-health-row { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 8px; padding: 2px 0; }.cred-prefix { font-size: 11px; color: #40505f; }.cred-score { display: inline-block; min-width: 38px; padding: 1px 7px; border-radius: 9px; font-size: 11px; font-weight: 600; text-align: center; }.cred-score--good { color: #16866f; background: #e6f5f1; }.cred-score--warn { color: #b7791f; background: #fdf3e0; }.cred-score--bad { color: #c83e4d; background: #fbeaec; }.cred-cool { grid-column: 1 / -1; color: #b7791f; font-size: 11px; }.cred-err { grid-column: 1 / -1; color: #c83e4d; font-size: 11px; overflow-wrap: anywhere; line-height: 1.45; }.health-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }.health-badge--none { color: #b7791f; background: #fdf3e0; }.cred-health-row--cooling { opacity: 0.72; }.cred-cool--active { color: #c83e4d; font-weight: 600; }@keyframes test-spin { to { transform: rotate(360deg); } }@media (max-width: 680px) { .test-settings { grid-template-columns: 1fr; gap: 14px; }.test-section-heading { align-items: stretch; flex-direction: column; gap: 12px; }.model-filter { width: 100%; }.test-table-wrap { overflow-x: auto; }.test-model-table { min-width: 700px; }.test-pagination { justify-content: flex-start; flex-wrap: wrap; } }@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 @media (max-width: 600px) {
   :deep(.channel-test-dialog) {
     width: calc(100vw - 16px) !important;

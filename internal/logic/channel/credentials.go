@@ -14,6 +14,8 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
@@ -24,10 +26,10 @@ import (
 )
 
 type CredentialView struct {
-	Id                 uint64     `json:"id"`
-	KeyPrefix          string     `json:"keyPrefix"`
-	HasManagementKey   bool       `json:"hasManagementKey"`
-	Status             int        `json:"status"`
+	Id                     uint64     `json:"id"`
+	KeyPrefix              string     `json:"keyPrefix"`
+	HasManagementKey       bool       `json:"hasManagementKey"`
+	Status                 int        `json:"status"`
 	AutoDisabled           bool       `json:"autoDisabled"`
 	AutoDisabledAt         *time.Time `json:"autoDisabledAt"`
 	AutoDisabledReason     string     `json:"autoDisabledReason"`
@@ -49,13 +51,13 @@ type RouteCredential struct {
 }
 
 type credentialRow struct {
-	Id                  uint64     `orm:"id"`
-	ChannelId           uint64     `orm:"channel_id"`
-	KeyPrefix           string     `orm:"key_prefix"`
-	KeyHash             string     `orm:"key_hash"`
-	ApiKeyCipher        string     `orm:"api_key_cipher"`
-	ManagementKeyCipher string     `orm:"management_key_cipher"`
-	Status              int        `orm:"status"`
+	Id                     uint64     `orm:"id"`
+	ChannelId              uint64     `orm:"channel_id"`
+	KeyPrefix              string     `orm:"key_prefix"`
+	KeyHash                string     `orm:"key_hash"`
+	ApiKeyCipher           string     `orm:"api_key_cipher"`
+	ManagementKeyCipher    string     `orm:"management_key_cipher"`
+	Status                 int        `orm:"status"`
 	AutoDisabledAt         *time.Time `orm:"auto_disabled_at"`
 	AutoDisabledReason     string     `orm:"auto_disabled_reason"`
 	AutoDisabledStatusCode *uint      `orm:"auto_disabled_status_code"`
@@ -274,12 +276,26 @@ func (s *sChannel) invalidateCredentialBinding(ctx context.Context, apiKeyID, ch
 	_ = s.app.Redis.Del(ctx, credentialBindingCacheKey(apiKeyID, channelID)).Err()
 }
 
-func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID uint64, excluded map[uint64]struct{}) (RouteCredential, error) {
+// SelectCredential 为本请求挑选一把上游密钥。modelID 用于读取「模型 × 凭证」组合的健康分
+// 与冷却：处于组合冷却中的密钥被排除（冷却到期后可被真实流量探测恢复，不被 0 分永久排除）；
+// 组合分数越低被选中的概率越低（低分加权），但不直接归零，仍为恢复探测保留窗口。
+// 绑定亲和优先：若 apiKey 已绑定某券且它当前可选（未被排除、未冷却），直接复用，绑定亲和
+// 不得绕过冷却。
+func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID, modelID uint64, excluded map[uint64]struct{}) (RouteCredential, error) {
 	credentials, err := s.availableCredentials(ctx, channelID, excluded)
 	if err != nil {
 		return RouteCredential{}, err
 	}
-	if len(credentials) == 0 {
+	// 按 (channel, model) 组合分数/冷却过滤：排除冷却中的组合。
+	comboHealth := s.comboHealthByCredential(ctx, channelID, modelID)
+	available := make([]credentialRow, 0, len(credentials))
+	for _, credential := range credentials {
+		if ch, ok := comboHealth[credential.Id]; ok && ch.cooling {
+			continue
+		}
+		available = append(available, credential)
+	}
+	if len(available) == 0 {
 		return RouteCredential{}, gerror.New("channel has no available upstream credential")
 	}
 	var binding entity.ApiKeyChannelCredentials
@@ -295,17 +311,19 @@ func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID uin
 				s.writeCredentialBindingCache(ctx, apiKeyID, channelID, binding)
 			}
 		}
+		// 绑定亲和：仅当绑定凭证当前仍可选（已被上面的冷却过滤放过）时才复用，
+		// 否则退化为加权随机选择，亲和不得绕过冷却。
 		if binding.ChannelCredentialId > 0 {
-			for _, credential := range credentials {
+			for _, credential := range available {
 				if credential.Id == binding.ChannelCredentialId {
 					return RouteCredential{ID: credential.Id, APIKeyCipher: credential.ApiKeyCipher}, nil
 				}
 			}
 		}
 	}
-	selected := credentials[mathrand.IntN(len(credentials))]
+	selected := weightedSelect(available, comboHealth)
 	if excluded == nil && binding.ChannelCredentialId == 0 {
-		selected, err = s.bindFirstCredential(ctx, apiKeyID, channelID, selected, credentials)
+		selected, err = s.bindFirstCredential(ctx, apiKeyID, channelID, selected, available)
 		if err != nil {
 			return RouteCredential{}, err
 		}
@@ -313,6 +331,66 @@ func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID uin
 		return RouteCredential{}, err
 	}
 	return RouteCredential{ID: selected.Id, APIKeyCipher: selected.ApiKeyCipher}, nil
+}
+
+// comboHealth 是单个「模型 × 凭证」组合的瞬时健康状态。
+type comboHealth struct {
+	score   int
+	cooling bool
+}
+
+// comboHealthByCredential 读取某 (channel, model) 下各凭证组合的健康分与冷却状态。
+// 返回以 channel_credential_id 为键的映射；缺失组合视为满分、未冷却。
+func (s *sChannel) comboHealthByCredential(ctx context.Context, channelID, modelID uint64) map[uint64]comboHealth {
+	result := make(map[uint64]comboHealth)
+	if modelID == 0 {
+		return result
+	}
+	rows := make([]entity.ChannelModelCredentials, 0)
+	if err := dao.ChannelModelCredentials.Ctx(ctx).
+		Where(do.ChannelModelCredentials{ChannelId: channelID, ChannelModelId: modelID}).
+		Scan(&rows); err != nil {
+		g.Log().Warningf(ctx, "load combo health for channel %d model %d: %v", channelID, modelID, err)
+		return result
+	}
+	now := gtime.Now()
+	for _, row := range rows {
+		cooling := row.CooldownUntil != nil && row.CooldownUntil.After(now)
+		result[row.ChannelCredentialId] = comboHealth{score: row.HealthScore, cooling: cooling}
+	}
+	return result
+}
+
+// weightedSelect 按组合健康分加权随机选择：分数越高权重越大，0 分仍保留极小被选中概率，
+// 以便冷却到期后的真实流量能试探恢复（不被永久排除）。缺失组合按满分处理。
+func weightedSelect(available []credentialRow, comboHealth map[uint64]comboHealth) credentialRow {
+	if len(available) == 1 {
+		return available[0]
+	}
+	weights := make([]int, len(available))
+	total := 0
+	for i, credential := range available {
+		w := system.ModelHealthMaxScore
+		if ch, ok := comboHealth[credential.Id]; ok {
+			w = ch.score
+		}
+		if w < 1 {
+			w = 1
+		}
+		weights[i] = w
+		total += w
+	}
+	if total <= 0 {
+		return available[mathrand.IntN(len(available))]
+	}
+	r := mathrand.IntN(total)
+	for i, w := range weights {
+		r -= w
+		if r < 0 {
+			return available[i]
+		}
+	}
+	return available[len(available)-1]
 }
 
 func (s *sChannel) CredentialForTest(ctx context.Context, channelID, credentialID uint64) (RouteCredential, error) {

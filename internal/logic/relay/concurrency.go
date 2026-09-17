@@ -114,7 +114,7 @@ type credentialPicker func(excluded map[uint64]struct{}) (channel.RouteCredentia
 // 未配置并发限制（limit<=0）时只做挑选，不占用额度，行为与历史完全一致。
 func (s *sRelay) acquireKeySlot(ctx context.Context, apiKeyID uint64, candidate Candidate, excluded map[uint64]struct{}) (channel.RouteCredential, func(), error) {
 	pick := func(pickExcluded map[uint64]struct{}) (channel.RouteCredential, error) {
-		return s.channels.SelectCredential(ctx, apiKeyID, candidate.ChannelID, pickExcluded)
+		return s.channels.SelectCredential(ctx, apiKeyID, candidate.ChannelID, candidate.ChannelModelID, pickExcluded)
 	}
 	return acquireKeySlotWith(ctx, s.slots, candidate.ChannelID, candidate.ConcurrencyLimit, keyConcurrencyWaitWindow, excluded, pick)
 }

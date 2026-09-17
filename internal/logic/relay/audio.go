@@ -280,7 +280,7 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 	)
 	for index := range candidates {
 		candidate := candidates[index]
-		credential, credentialErr := s.channels.SelectCredential(ctx, key.Id, candidate.ChannelID, nil)
+		credential, credentialErr := s.channels.SelectCredential(ctx, key.Id, candidate.ChannelID, candidate.ChannelModelID, nil)
 		if credentialErr != nil {
 			last = attemptResult{status: 0, errorMessage: credentialErr.Error()}
 			lastCandidate = candidate
@@ -295,11 +295,12 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 		if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" {
 			// 成功请求按上游响应速度加分，与 chat 链路保持一致。
 			_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{
-				ChannelID: candidate.ChannelID,
-				ModelID:   candidate.ChannelModelID,
-				Source:    system.AutoDisableSourceRelayRequest,
-				Status:    result.status,
-				Latency:   result.latency,
+				ChannelID:           candidate.ChannelID,
+				ChannelCredentialID: candidate.ChannelCredentialID,
+				ModelID:             candidate.ChannelModelID,
+				Source:              system.AutoDisableSourceRelayRequest,
+				Status:              result.status,
+				Latency:             result.latency,
 			})
 		} else {
 			s.maybeAutoDisable(ctx, settings, candidate, result)

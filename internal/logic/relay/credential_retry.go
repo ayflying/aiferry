@@ -97,6 +97,10 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 					result = failedAttemptResult(result, attemptErr.Error())
 					result.timedOut = isUpstreamTimeout(attemptErr)
 				}
+				// 未写出响应的失败在每次真实尝试后记分；已写出的截流交由外层处理。
+				if !result.wroteBytes && !result.writerFailed && ctx.Err() == nil && (result.status != http.StatusOK || attemptErr != nil) {
+					s.maybeAutoDisable(ctx, settings, current, result)
+				}
 				steps := attemptFlowSteps(current.ChannelName, result)
 				flow := append(attempted.flow, steps...)
 				attempted = channelAttempt{candidate: current, result: result, attempts: attempted.attempts + len(steps), flow: flow}
@@ -111,7 +115,6 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			last.result.attemptFlow = last.flow
 			return last
 		}
-		s.maybeAutoDisable(ctx, settings, current, last.result)
 		excluded[current.ChannelCredentialID] = struct{}{}
 	}
 }

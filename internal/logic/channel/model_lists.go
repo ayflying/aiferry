@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -44,6 +45,26 @@ func (s *sChannel) listModelViews(ctx context.Context, channelID uint64) ([]Mode
 	result := make([]ModelView, 0, len(models))
 	for _, model := range models {
 		result = append(result, modelViewFromEntity(model, channelNames[model.ChannelId], prices[model.PublicName]))
+	}
+	// 追加密钥组合健康只读视图，并把列表原分数对齐到「可用 key 的最高分」。
+	// 隔离/冷却中的组合不计入最高分；若没有任何可用组合，分数置 0 并交由前端展示"暂无可用组合"。
+	healthByModel, err := s.loadModelCredentialHealth(ctx, models)
+	if err != nil {
+		return nil, err
+	}
+	now := gtime.Now()
+	for i := range result {
+		views := healthByModel[result[i].Id]
+		if len(views) == 0 {
+			continue
+		}
+		result[i].CredentialHealth = views
+		best, available := summarizeCredentialHealth(views, now)
+		if available {
+			result[i].HealthScore = best
+		} else {
+			result[i].HealthScore = 0
+		}
 	}
 	return result, nil
 }

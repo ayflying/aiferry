@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/os/gtime"
 
 	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/logic/channelgroup"
@@ -113,6 +114,20 @@ type ModelView struct {
 	LastTestError     string             `json:"lastTestError" orm:"last_test_error"`
 	LastTestAt        *time.Time         `json:"lastTestAt" orm:"last_test_at"`
 	UpdatedAt         time.Time          `json:"updatedAt" orm:"updated_at"`
+	// CredentialHealth 是「渠道 × 模型 × 密钥」组合的健康只读展示；
+	// 列表原分数（HealthScore）取其中有效密钥的最高分，本数组供展开/tooltip 查看每把 key 的组合分与隔离到期。
+	// 不暴露密钥密文/明文，仅含 keyPrefix 等展示所需信息。
+	CredentialHealth []*CredentialHealthView `json:"credentialHealth,omitempty"`
+}
+
+// CredentialHealthView 是单个「渠道 × 模型 × 密钥」组合的健康展示，只读。
+// cooldownUntil 为隔离（冷却）截至时间，NULL 表示未隔离；lastError 为最近一次错误摘要（不泄露密钥）。
+type CredentialHealthView struct {
+	CredentialId  uint64      `json:"credentialId"`
+	KeyPrefix     string      `json:"keyPrefix"`
+	HealthScore   int         `json:"healthScore"`
+	CooldownUntil *gtime.Time `json:"cooldownUntil,omitempty"`
+	LastError     string      `json:"lastError,omitempty"`
 }
 
 type PublicModelView struct {

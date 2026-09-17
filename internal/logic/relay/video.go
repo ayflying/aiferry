@@ -19,6 +19,7 @@ import (
 
 	"github.com/yunloli/aiferry/internal/logic/apikey"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
+	"github.com/yunloli/aiferry/internal/logic/system"
 )
 
 const (
@@ -141,19 +142,34 @@ func (s *sRelay) createVideo(ctx context.Context, incomingHeaders http.Header, b
 	if len(candidates) == 0 {
 		return 0, nil, nil, gerror.Wrapf(ErrNoAvailableChannel, "no available channel for model %s", requestedModel)
 	}
+	settings, err := s.resilience.Get(ctx)
+	if err != nil {
+		return 0, nil, nil, err
+	}
 	var last videoUpstreamResult
 	for _, candidate := range candidates {
-		credential, credentialErr := s.channels.SelectCredential(ctx, key.Id, candidate.ChannelID, nil)
+		credential, credentialErr := s.channels.SelectCredential(ctx, key.Id, candidate.ChannelID, candidate.ChannelModelID, nil)
 		if credentialErr != nil {
 			last = videoUpstreamResult{err: credentialErr}
 			continue
 		}
 		candidate.ChannelCredentialID = credential.ID
 		candidate.APIKeyCipher = credential.APIKeyCipher
+		started := time.Now()
 		result := s.createVideoUpstream(ctx, incomingHeaders, body, mode, candidate)
+		latency := time.Since(started)
 		last = result
 		if result.err != nil || result.status < http.StatusOK || result.status >= http.StatusMultipleChoices {
+			failure := attemptResult{status: result.status, latency: latency, errorMessage: "视频创建上游失败"}
+			if result.err != nil {
+				failure = failedAttemptResult(failure, result.err.Error())
+				failure.timedOut = isUpstreamTimeout(result.err)
+			}
+			s.maybeAutoDisable(ctx, settings, candidate, failure)
 			continue
+		}
+		if ctx.Err() == nil {
+			_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{ChannelID: candidate.ChannelID, ModelID: candidate.ChannelModelID, ChannelCredentialID: credential.ID, Status: result.status, Latency: latency})
 		}
 		videoID := videoResponseID(result.body, mode)
 		if videoID == "" {

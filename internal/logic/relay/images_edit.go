@@ -93,7 +93,7 @@ func (s *sRelay) HandleImagesEdit(ctx context.Context, incomingHeaders http.Head
 	)
 	for index := range candidates {
 		candidate := candidates[index]
-		credential, credentialErr := s.channels.SelectCredential(ctx, key.Id, candidate.ChannelID, nil)
+		credential, credentialErr := s.channels.SelectCredential(ctx, key.Id, candidate.ChannelID, candidate.ChannelModelID, nil)
 		if credentialErr != nil {
 			// 选密钥失败时请求没有发出：不计入「上游尝试次数」，也没有调用流程步骤，
 			// 与 chat/audio 链路保持一致（attempts 始终等于流程步数）。
@@ -110,11 +110,12 @@ func (s *sRelay) HandleImagesEdit(ctx context.Context, incomingHeaders http.Head
 		attemptFlow = append(attemptFlow, newAttemptFlowStep(candidate.ChannelName, result))
 		if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" {
 			_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{
-				ChannelID: candidate.ChannelID,
-				ModelID:   candidate.ChannelModelID,
-				Source:    system.AutoDisableSourceRelayRequest,
-				Status:    result.status,
-				Latency:   result.latency,
+				ChannelID:           candidate.ChannelID,
+				ChannelCredentialID: candidate.ChannelCredentialID,
+				ModelID:             candidate.ChannelModelID,
+				Source:              system.AutoDisableSourceRelayRequest,
+				Status:              result.status,
+				Latency:             result.latency,
 			})
 		} else {
 			s.maybeAutoDisable(ctx, settings, candidate, result)

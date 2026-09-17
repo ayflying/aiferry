@@ -40,6 +40,7 @@ case "${1:-}" in
     mysql --protocol=tcp --host="${MYSQL_HOST}" --port="${MYSQL_PORT:-3306}" --user="${MYSQL_USER}" "${MYSQL_DATABASE}" <<'SQL'
 DELETE u FROM usage_logs u INNER JOIN api_keys k ON k.id=u.api_key_id WHERE k.name LIKE 'acceptance-%';
 DELETE s FROM channel_cost_snapshots s INNER JOIN channels c ON c.id=s.channel_id WHERE c.name LIKE 'acceptance-%';
+DELETE h FROM channel_model_credentials h INNER JOIN channels c ON c.id=h.channel_id WHERE c.name LIKE 'acceptance-%';
 DELETE m FROM channel_models m INNER JOIN channels c ON c.id=m.channel_id WHERE c.name LIKE 'acceptance-%';
 DELETE FROM channels WHERE name LIKE 'acceptance-%';
 DELETE FROM api_keys WHERE name LIKE 'acceptance-%';

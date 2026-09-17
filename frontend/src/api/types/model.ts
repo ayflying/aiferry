@@ -39,6 +39,25 @@ export interface ChannelModel {
   lastTestError: string
   lastTestAt?: string
   updatedAt: string
+  /**
+   * 密钥组合健康（只读展示）。存在时，列表的健康分取其中有效密钥的最高分；
+   * 可展开/悬浮查看每把 key 的组合分与隔离到期。不暴露密钥密文/明文。
+   */
+  credentialHealth?: CredentialHealth[]
+}
+
+/** 单个「渠道 × 模型 × 密钥」组合的健康只读信息 */
+export interface CredentialHealth {
+  /** 渠道密钥 ID */
+  credentialId: number
+  /** 密钥前缀（展示用，非密钥本身） */
+  keyPrefix: string
+  /** 组合健康分（0-100） */
+  healthScore: number
+  /** 隔离/冷却截至时间；未隔离为 null */
+  cooldownUntil?: string | null
+  /** 最近一次错误摘要（不泄露密钥） */
+  lastError?: string
 }
 
 export interface PublicModel {

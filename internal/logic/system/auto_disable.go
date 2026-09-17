@@ -103,7 +103,7 @@ func (s *sSystem) DisableIfNeeded(ctx context.Context, input AutoDisableInput) (
 }
 
 func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, input AutoDisableInput) (bool, error) {
-	if !IsAutoDisableMatch(settings, input) {
+	if !settings.AutoDisableEnabled {
 		return false, nil
 	}
 	var channel entity.Channels
@@ -116,11 +116,20 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 	if channel.AutoDisableEnabled != 1 || channel.Status == 0 {
 		return false, nil
 	}
-	// 模型维度：非账号级失败只影响单个模型健康评分，不再直接禁用渠道。
-	// 账号级失败（余额耗尽、配额用尽、组织停用等）影响整个渠道，继续走渠道禁用。
-	// 已写字节后的失败一律收敛到模型扣分：它走到这里说明上游已经出过内容，
-	// 禁用整条渠道的代价远大于收益。
-	if input.ChannelModelID > 0 && (input.Committed || !IsAccountLevelFailure(input.Message)) {
+	// 模型维度计分：不依赖 disableStatusCodes 前置门禁。任何模型维度的结果（成功或失败）
+	// 都进入「模型 × 凭证」组合计分——保证 429 等未列入禁用状态码的失败也能正常扣分，
+	// 也不会因为某个状态码恰好命中禁用规则而把计分流程截断。渠道/密钥维度的禁用仍走原门禁。
+	if !input.Committed && input.ChannelCredentialID > 0 && definitiveCredentialFailure(input) {
+		var credential entity.ChannelCredentials
+		if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: input.ChannelCredentialID, ChannelId: input.ChannelID}).Scan(&credential); err != nil {
+			return false, err
+		}
+		if credential.Id > 0 && credential.Status == 1 {
+			return s.disableCredentialNow(ctx, channel, settings, credential, input)
+		}
+		return false, nil
+	}
+	if input.ChannelModelID > 0 {
 		return s.ApplyModelHealthScore(ctx, settings, ModelDisableInput{
 			ChannelID:           input.ChannelID,
 			ChannelCredentialID: input.ChannelCredentialID,
@@ -132,6 +141,9 @@ func (s *sSystem) DisableIfNeededWithSettings(ctx context.Context, settings admi
 			Latency:             input.Latency,
 			Committed:           input.Committed,
 		})
+	}
+	if !IsAutoDisableMatch(settings, input) {
+		return false, nil
 	}
 	if input.Committed {
 		// 没有模型归属（例如渠道级探测）时不降级为渠道/密钥禁用，直接放弃处理。

@@ -11,22 +11,29 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gtime"
 
-	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 // 模型健康评分常量：初始 100 分；模型测试成功 +5（上限 100）；
-// 真实转发成功按响应耗时分级加分，越快加分越多；失败 -20，扣到 0 自动禁用该模型。
+// 真实转发成功按响应耗时分级加分，越快加分越多；失败 -20，扣到 0 自动隔离该组合。
 // 响应已写字节后的失败同样计分但力度更轻（-10），且绝不做渠道/密钥级禁用。
 // 健康分同时作为路由加权系数：低于 80 分按比例降权，让持续出错的渠道逐步让出流量。
-// 账号级错误（余额/配额/组织停用）直接禁用渠道。
+// 明确账号级错误仅禁用实际凭证。
+//
+// 评分单元：以 (channel_model_id, channel_credential_id) 组合为准，每个组合独立持有
+// 健康分、冷却时间与最近错误，落到 channel_model_credentials 表。一个组合的失败只影响
+// 它自己，不波及同模型的其它密钥、也不波及同密钥的其它模型。channel_models.health_score
+// 仅作为该模型下「可用组合最高分」的投影，供路由加权使用。
 const (
 	ModelHealthInitialScore   = 100
 	ModelHealthMaxScore       = 100
 	ModelHealthTestSuccess    = 5
 	ModelHealthFailurePenalty = 20
+	// ModelHealthRateLimitPenalty 是限流（429）的扣分。限流与账号级/内容级失败性质不同，
+	// 不应按常规失败 -20 的力度重罚，否则正常流量高峰会被快速打到隔离。
+	ModelHealthRateLimitPenalty = 10
 	// ModelHealthCommittedFailurePenalty 是「响应已向客户端写出内容后失败」的扣分。
 	// 这类失败无法切换候选重放，但它同样是真实的上游质量信号；用比常规失败更温和
 	// 的力度，避免零散断流把渠道直接推到禁用。
@@ -36,6 +43,9 @@ const (
 	// 不必等到归零被禁用才生效。
 	ModelHealthWeightThreshold = 80
 	ModelHealthDisableScore    = 0
+	// ComboCooldownMinutes 是组合健康分归零后的隔离时长：冷却期间该组合不参与选凭证，
+	// 冷却到期后可被真实流量试探，避免被 0 分永久排除。
+	ComboCooldownMinutes = 5
 )
 
 // ModelHealthRelaySuccessByLatency 返回真实转发成功后的健康分增量。
@@ -89,7 +99,7 @@ func isCredentialScopedFailure(input ModelDisableInput) bool {
 }
 
 // IsAccountLevelFailure 判断错误是否属于账号级问题。这类问题影响渠道内所有模型，
-// 仍按原逻辑禁用整个渠道，而不是只扣单个模型的分。
+// 由凭证级禁用策略处理，不将单把凭证错误扩大到整个渠道。
 func IsAccountLevelFailure(message string) bool {
 	lower := strings.ToLower(message)
 	accountKeywords := []string{
@@ -129,6 +139,14 @@ func IsAccountLevelFailure(message string) bool {
 		"该令牌无权使用模型",
 		"访问凭证已过期",
 		"无效的访问密钥",
+		// 账号明确欠费 / 套餐到期的精准关键词：只命中「账号或套餐本身已失效」的措辞，
+		// 不纳入宽泛的「续订」「expired」等易与正常响应（如"订阅即将到期提醒"）误匹配的词。
+		"套餐已到期",
+		"套餐已过期",
+		"账户已欠费",
+		"已欠费停机",
+		"账号已欠费",
+		"账户余额不足",
 		"access key has been disabled",
 		"api key has been disabled",
 		"invalid api key",
@@ -169,125 +187,6 @@ func modelDisableReason(input ModelDisableInput) string {
 // 生产曾出现恢复巡检连测 190 次、每次都撞限流又每次都归零的死循环。
 func shouldSkipDisabledModelRetry(source string, autoDisabledAt *time.Time) bool {
 	return source == AutoDisableSourceModelTest && autoDisabledAt != nil
-}
-
-// ApplyModelHealthScore 记录一次模型请求结果：成功加分、失败扣分。
-// 返回是否触发了模型自动禁用。
-func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, input ModelDisableInput) (bool, error) {
-	var model entity.ChannelModels
-	if err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: input.ModelID}).Scan(&model); err != nil {
-		return false, gerror.Wrap(err, "load channel model for health score")
-	}
-	if model.Id == 0 || model.Enabled != 1 {
-		return false, nil
-	}
-	if shouldSkipDisabledModelRetry(input.Source, model.AutoDisabledAt) {
-		return false, nil
-	}
-	newScore := model.HealthScore
-	if input.TimedOut || input.Status >= 400 || (input.Status == 0 && input.Message != "") {
-		newScore -= modelHealthFailurePenalty(input)
-	} else {
-		newScore = min(newScore+ModelHealthRelaySuccessByLatency(input.Latency), ModelHealthMaxScore)
-	}
-	newScore = max(newScore, ModelHealthDisableScore)
-	data := do.ChannelModels{HealthScore: newScore}
-	disabled := false
-	if newScore <= ModelHealthDisableScore && model.AutoDisabledAt == nil {
-		// 密钥级失败（欠费、配额用尽、鉴权失败）扣分扣到 0 时，若渠道排除当前失败密钥
-		// 后仍有其他可用密钥，说明模型本身没问题：改为立即禁用失败密钥并把模型分数
-		// 重置回初始值，而不是禁用模型导致整个渠道的模型被逐个拖垮。
-		if input.ChannelCredentialID > 0 && !input.Committed && isCredentialScopedFailure(input) {
-			diverted, err := s.divertModelDisableToCredential(ctx, settings, model, input)
-			if err != nil {
-				return false, err
-			}
-			if diverted {
-				return true, nil
-			}
-		}
-		disabled = true
-		reason := modelDisableReason(input)
-		source := autoDisableSource(input.Source)
-		data.AutoDisabledAt = gtime.Now()
-		data.AutoDisabledReason = reason
-		data.AutoDisabledSource = source
-	}
-	if _, err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: model.Id}).Data(data).Update(); err != nil {
-		return false, gerror.Wrap(err, "update model health score")
-	}
-	if newScore < model.HealthScore {
-		// 健康分同时是路由候选的权重系数，而路由缓存里保存的是分数快照：分数下降
-		// 必须让下一次请求重新解析候选，否则扣分要等缓存 TTL 到期才影响流量分配。
-		// 加分不做失效——成功请求远多于失败，逐次失效会让路由缓存彻底失去意义。
-		s.invalidateRouteWeights(ctx)
-	}
-	if disabled {
-		s.clearModelRouteCache(ctx)
-		s.notifyAutoDisableTransition(ctx, settings, AutoDisableNotification{
-			ChannelID:   input.ChannelID,
-			ChannelName: s.autoDisableNotificationChannelName(ctx, input.ChannelID),
-			Reason:      "模型 " + model.PublicName + " 健康评分降至 0：" + modelDisableReason(input),
-			Source:      autoDisableSource(input.Source),
-			StatusCode:  notificationStatusCode(input.Status),
-			ModelName:   model.PublicName,
-			ModelID:     model.Id,
-		})
-		s.scheduleChannelCloseIfAllModelsDown(ctx, input.ChannelID)
-	}
-	return disabled, nil
-}
-
-// ResetModelHealthScore 重置模型健康评分（手动恢复或测试成功恢复时使用）。
-func (s *sSystem) ResetModelHealthScore(ctx context.Context, modelID uint64) error {
-	_, err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: modelID}).Data(do.ChannelModels{
-		HealthScore:        ModelHealthInitialScore,
-		AutoDisabledAt:     gdb.Raw("NULL"),
-		AutoDisabledReason: gdb.Raw("NULL"),
-		AutoDisabledSource: gdb.Raw("NULL"),
-	}).Update()
-	if err != nil {
-		return gerror.Wrap(err, "reset model health score")
-	}
-	s.clearModelRouteCache(ctx)
-	return nil
-}
-
-// RecoverModelIfAllowed 恢复被自动禁用的模型（清空禁用标记并重置评分）。
-func (s *sSystem) RecoverModelIfAllowed(ctx context.Context, modelID uint64) (bool, error) {
-	var model entity.ChannelModels
-	if err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: modelID}).Scan(&model); err != nil {
-		return false, gerror.Wrap(err, "load channel model for recovery")
-	}
-	if model.Id == 0 || model.AutoDisabledAt == nil {
-		return false, nil
-	}
-	result, err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: modelID, Enabled: 1}).Data(do.ChannelModels{
-		HealthScore:        ModelHealthInitialScore,
-		AutoDisabledAt:     gdb.Raw("NULL"),
-		AutoDisabledReason: gdb.Raw("NULL"),
-		AutoDisabledSource: gdb.Raw("NULL"),
-	}).Update()
-	if err != nil {
-		return false, gerror.Wrap(err, "automatically recover channel model")
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		return false, nil
-	}
-	s.clearModelRouteCache(ctx)
-	// 模型自动恢复与渠道/密钥恢复保持一致，向管理员发送恢复通知邮件。
-	if settings, settingsErr := s.Get(ctx); settingsErr == nil {
-		s.notifyAutoDisableTransition(ctx, settings, AutoDisableNotification{
-			Recovered:   true,
-			ChannelID:   model.ChannelId,
-			ChannelName: s.autoDisableNotificationChannelName(ctx, model.ChannelId),
-			Reason:      model.AutoDisabledReason,
-			Source:      model.AutoDisabledSource,
-			ModelName:   model.PublicName,
-			ModelID:     model.Id,
-		})
-	}
-	return true, nil
 }
 
 // scheduleChannelCloseIfAllModelsDown 渠道内已无可用启用模型时自动关闭渠道。
@@ -346,58 +245,6 @@ func (s *sSystem) invalidateRouteWeights(ctx context.Context) {
 func (s *sSystem) clearModelRouteCache(ctx context.Context) {
 	_ = s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()
 	_ = s.app.Redis.Del(ctx, "aiferry:models:list").Err()
-}
-
-// divertModelDisableToCredential 将模型禁用转移为密钥禁用：渠道排除当前失败密钥后
-// 仍存在可用密钥时，立即禁用失败密钥并把模型健康分重置回初始值。
-// 返回 true 表示已完成转移，调用方不再禁用模型。
-func (s *sSystem) divertModelDisableToCredential(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, model entity.ChannelModels, input ModelDisableInput) (bool, error) {
-	hasSpare, err := s.hasAvailableCredentialExcept(ctx, input.ChannelID, input.ChannelCredentialID)
-	if err != nil {
-		return false, err
-	}
-	if !hasSpare {
-		return false, nil
-	}
-	var channel entity.Channels
-	if err := dao.Channels.Ctx(ctx).Where(do.Channels{Id: input.ChannelID}).Scan(&channel); err != nil {
-		return false, gerror.Wrap(err, "load channel for credential divert")
-	}
-	if channel.Id == 0 {
-		return false, nil
-	}
-	var credential entity.ChannelCredentials
-	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: input.ChannelCredentialID}).Scan(&credential); err != nil {
-		return false, gerror.Wrap(err, "load channel credential for credential divert")
-	}
-	if credential.Id == 0 {
-		return false, nil
-	}
-	if credential.Status == 1 {
-		// 扣分到 0 本身已代表该密钥连续多次失败，直接禁用，不再走阈值计数。
-		if _, err := s.disableCredentialNow(ctx, channel, settings, credential, AutoDisableInput{
-			ChannelID:           input.ChannelID,
-			ChannelCredentialID: input.ChannelCredentialID,
-			ChannelModelID:      input.ModelID,
-			Source:              input.Source,
-			Status:              input.Status,
-			Latency:             input.Latency,
-			Message:             input.Message,
-			TimedOut:            input.TimedOut,
-		}); err != nil {
-			return false, err
-		}
-	}
-	if _, err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: model.Id}).Data(do.ChannelModels{
-		HealthScore:        ModelHealthInitialScore,
-		AutoDisabledAt:     gdb.Raw("NULL"),
-		AutoDisabledReason: gdb.Raw("NULL"),
-		AutoDisabledSource: gdb.Raw("NULL"),
-	}).Update(); err != nil {
-		return false, gerror.Wrap(err, "reset model health score after credential divert")
-	}
-	s.clearModelRouteCache(ctx)
-	return true, nil
 }
 
 // hasAvailableCredentialExcept 判断渠道是否存在指定密钥之外的其他可用密钥（启用且不在冷却中）。

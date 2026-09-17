@@ -314,22 +314,27 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			// 也无法再切换候选重放。客户端主动断开（写入失败或请求上下文取消）
 			// 属于下游行为，不参与渠道与模型的失败评分。
 			truncated := streamTruncated(isStream, result)
-			if truncated && !result.writerFailed && ctx.Err() == nil {
+			success := !truncated && result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut
+			switch {
+			case truncated && !result.writerFailed && ctx.Err() == nil:
+				// 流式响应被客户端截断：上游已出过内容，作为一次失败计入组合健康分。
 				s.maybeAutoDisable(ctx, settings, candidate, failedAttemptResult(result, streamTruncatedReason))
-			}
-			if !truncated && result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut {
+			case success:
 				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
 				// 流式响应被客户端中断时不存档半截思考内容，避免下一轮回传出残缺的推理。
 				if !isStream || result.streamCompleted {
 					s.rememberReasoningContent(ctx, key.Id, result)
 				}
 				// 成功请求按上游响应速度加分：响应越快，模型健康分增长越多。
+				// 必须带上实际的 ChannelCredentialID，使成功加分与失败扣分落在同一组合上，
+				// 否则成功路径缺密钥会落到 (model, 0) 幽灵组合，与失败组合错配造成双计。
 				_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{
-					ChannelID: candidate.ChannelID,
-					ModelID:   candidate.ChannelModelID,
-					Source:    system.AutoDisableSourceRelayRequest,
-					Status:    result.status,
-					Latency:   result.latency,
+					ChannelID:           candidate.ChannelID,
+					ChannelCredentialID: candidate.ChannelCredentialID,
+					ModelID:             candidate.ChannelModelID,
+					Source:              system.AutoDisableSourceRelayRequest,
+					Status:              result.status,
+					Latency:             result.latency,
 				})
 			}
 			// 收发报文落盘：非流式存还原后的完整响应体，流式存客户端视角的聚合内容。

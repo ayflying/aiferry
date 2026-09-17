@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
@@ -247,7 +248,10 @@ func containsString(values []string, target string) bool {
 }
 
 func (s *sRelay) maybeAutoDisable(ctx context.Context, settings adminapi.SystemResilienceSettingsInput, candidate Candidate, result attemptResult) {
-	_, _ = s.resilience.DisableIfNeededWithSettings(ctx, settings, system.AutoDisableInput{
+	if ctx.Err() != nil || result.writerFailed {
+		return
+	}
+	_, err := s.resilience.DisableIfNeededWithSettings(ctx, settings, system.AutoDisableInput{
 		ChannelID: candidate.ChannelID, ChannelCredentialID: candidate.ChannelCredentialID,
 		ChannelModelID: candidate.ChannelModelID,
 		Source:         system.AutoDisableSourceRelayRequest,
@@ -258,6 +262,9 @@ func (s *sRelay) maybeAutoDisable(ctx context.Context, settings adminapi.SystemR
 		// 已向客户端写出内容后的失败同样要参与模型健康评分，只是不做渠道/密钥禁用。
 		Committed: result.wroteBytes,
 	})
+	if err != nil {
+		g.Log().Warningf(ctx, "组合评分写入失败 channel=%d model=%d credential=%d: %v", candidate.ChannelID, candidate.ChannelModelID, candidate.ChannelCredentialID, err)
+	}
 }
 
 func retryableStatus(status int) bool {

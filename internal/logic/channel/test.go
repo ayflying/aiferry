@@ -107,8 +107,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 		_, _ = s.resilience.RecoverCredentialIfAllowed(ctx, credential.ID)
 		_, _ = s.resilience.RecoverIfAllowed(ctx, channel.Id)
 		// 测试成功同时恢复该模型本身并加分，让被禁用的模型有机会重新可用。
-		_, _ = s.resilience.RecoverModelIfAllowed(ctx, model.Id)
-		s.bumpModelHealthScore(ctx, model.Id, system.ModelHealthTestSuccess)
+		_ = s.resilience.BumpComboHealthScore(ctx, model.Id, credential.ID, system.ModelHealthTestSuccess)
 	} else {
 		_, _ = s.resilience.DisableIfNeeded(ctx, system.AutoDisableInput{
 			ChannelID:           channel.Id,
