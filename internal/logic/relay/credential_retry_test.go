@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -90,6 +91,53 @@ func TestNonRetryableClientFailureAllowsPaymentRequired(t *testing.T) {
 // 协议回退会对同一候选发起两次真实上游调用（首跳失败 + 回退结果）：两次都必须进入
 // 调用流程，「上游尝试次数」也要按两步计——否则用户看到「上游尝试 1 次」，不知道
 // 网关换过端点重试并自愈。
+// 429 限流退避重试只在「最后一个候选、且本候选已无别的密钥可换」时生效：
+// 仍有候选可切换时必须保持原有的「换个候选立刻重试」语义，否则会给上游额外放大
+// 限流压力，也会让本来可以立刻自愈的请求白等一个退避窗口。
+func TestShouldRetryThrottledCandidateOnlyForLastCandidate(t *testing.T) {
+	ctxErr := error(nil)
+	cases := []struct {
+		name      string
+		options   attemptOptions
+		retried   bool
+		status    int
+		credID    uint64
+		ctxErr    error
+		wantRetry bool
+	}{
+		{"最后一个候选遇上 429", attemptOptions{throttleRetry: true}, false, http.StatusTooManyRequests, 22, ctxErr, true},
+		{"还有候选可切换时不退避", attemptOptions{throttleRetry: false}, false, http.StatusTooManyRequests, 22, ctxErr, false},
+		{"同一候选只退避一次", attemptOptions{throttleRetry: true}, true, http.StatusTooManyRequests, 22, ctxErr, false},
+		{"非 429 失败不退避", attemptOptions{throttleRetry: true}, false, http.StatusInternalServerError, 22, ctxErr, false},
+		{"没发出过真实尝试不退避", attemptOptions{throttleRetry: true}, false, http.StatusTooManyRequests, 0, ctxErr, false},
+		{"客户端已断开不退避", attemptOptions{throttleRetry: true}, false, http.StatusTooManyRequests, 22, context.Canceled, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			last := channelAttempt{
+				candidate: Candidate{ChannelCredentialID: tc.credID},
+				result:    attemptResult{status: tc.status},
+			}
+			if got := shouldRetryThrottledCandidate(tc.options, tc.retried, last, tc.ctxErr); got != tc.wantRetry {
+				t.Fatalf("shouldRetryThrottledCandidate = %v, want %v", got, tc.wantRetry)
+			}
+		})
+	}
+}
+
+// 退避等待必须尊重请求上下文：客户端已经断开时立刻返回，不再占用退避窗口。
+func TestWaitForThrottleRetryStopsOnCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	startedAt := time.Now()
+	if waitForThrottleRetry(ctx) {
+		t.Fatal("waitForThrottleRetry = true, want false for canceled context")
+	}
+	if elapsed := time.Since(startedAt); elapsed > candidateThrottleRetryDelay/2 {
+		t.Fatalf("waitForThrottleRetry 在已取消的上下文上等待了 %v，应立即返回", elapsed)
+	}
+}
+
 func TestAttemptFlowStepsIncludesPrecedingProtocolFallback(t *testing.T) {
 	notFound := uint(http.StatusNotFound)
 	result := attemptResult{

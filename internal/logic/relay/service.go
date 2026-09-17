@@ -267,91 +267,104 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		attemptFlow         []usage.AttemptFlowStep
 		excludedCredentials = make(map[uint64]struct{})
 	)
-	for index := range candidates {
-		for {
-			outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, key.UserId, key.Id, settings, excludedCredentials, sensitiveDataRestorer)
-			if outcome.concurrencyExhausted {
-				// 该渠道每把密钥的并发额度都占满，且等待窗口内没有腾出空位。
-				// 这是网关本地限流而非上游故障：不写用量、不参与渠道失败评分
-				// （默认禁用状态码含 429），直接以 429 让客户端稍后重试。
-				channelName := candidates[index].ChannelName
-				g.Log().Warningf(ctx, "relay %s: channel %s (#%d) key concurrency exhausted for model %s", clientIP, channelName, candidates[index].ChannelID, requestedModel)
-				return gerror.Wrapf(ErrChannelConcurrencyExhausted, "channel %s (#%d) key concurrency exhausted", channelName, candidates[index].ChannelID)
-			}
-			attempts += outcome.attempts
-			if outcome.attempts > 0 {
-				last = outcome.result
-				lastCandidate = outcome.candidate
-				attemptFlow = append(attemptFlow, outcome.result.attemptFlow...)
-			}
-			if !outcome.handled {
-				break
-			}
-			candidate := outcome.candidate
-			result := outcome.result
-			if !result.wroteBytes && s.missingBillableUsage(candidate, endpoint, result) {
-				last = failedAttemptResult(result, ErrUpstreamUsageNotBillable.Error())
-				lastCandidate = candidate
-				s.maybeAutoDisable(ctx, settings, candidate, last)
-				excludedCredentials[candidate.ChannelCredentialID] = struct{}{}
-				continue
-			}
-			result.attemptFlow = attemptFlow
-			if recordErr := s.record(ctx, requestID, key, candidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, result); recordErr != nil {
-				if !result.wroteBytes && errors.Is(recordErr, ErrUpstreamUsageNotBillable) {
-					last = failedAttemptResult(result, recordErr.Error())
+	// 最多两轮候选尝试：第一轮按常规规则（处于组合冷却的密钥在选密钥阶段会被排除）。若第一轮
+	// 「零尝试」——全部候选都在选密钥阶段被跳过，说明本次请求每个候选的密钥组合都处于冷却中
+	// ——再跑一轮兜底并忽略组合冷却放行，把「零尝试直接失败」变成至少一次真实上游尝试。
+	for pass := 0; pass < candidateAttemptPasses && attempts == 0; pass++ {
+		if pass > 0 {
+			g.Log().Warningf(ctx, "relay %s: model %s: every candidate was skipped before any upstream attempt, retrying once with combo cooldown ignored", clientIP, requestedModel)
+		}
+		for index := range candidates {
+			for {
+				outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, key.UserId, key.Id, settings, excludedCredentials, sensitiveDataRestorer, attemptOptions{
+					ignoreComboCooldown: pass > 0,
+					// 只有最后一个候选才允许对 429 退避重试：仍有候选可切换时保持原有的
+					// 「换个候选立刻重试」语义，不给上游额外放大限流压力。
+					throttleRetry: index == len(candidates)-1,
+				})
+				if outcome.concurrencyExhausted {
+					// 该渠道每把密钥的并发额度都占满，且等待窗口内没有腾出空位。
+					// 这是网关本地限流而非上游故障：不写用量、不参与渠道失败评分
+					// （默认禁用状态码含 429），直接以 429 让客户端稍后重试。
+					channelName := candidates[index].ChannelName
+					g.Log().Warningf(ctx, "relay %s: channel %s (#%d) key concurrency exhausted for model %s", clientIP, channelName, candidates[index].ChannelID, requestedModel)
+					return gerror.Wrapf(ErrChannelConcurrencyExhausted, "channel %s (#%d) key concurrency exhausted", channelName, candidates[index].ChannelID)
+				}
+				attempts += outcome.attempts
+				if outcome.attempts > 0 {
+					last = outcome.result
+					lastCandidate = outcome.candidate
+					attemptFlow = append(attemptFlow, outcome.result.attemptFlow...)
+				}
+				if !outcome.handled {
+					break
+				}
+				candidate := outcome.candidate
+				result := outcome.result
+				if !result.wroteBytes && s.missingBillableUsage(candidate, endpoint, result) {
+					last = failedAttemptResult(result, ErrUpstreamUsageNotBillable.Error())
 					lastCandidate = candidate
 					s.maybeAutoDisable(ctx, settings, candidate, last)
 					excludedCredentials[candidate.ChannelCredentialID] = struct{}{}
 					continue
 				}
-				if !isStream {
-					s.writeBufferedResponse(writer, http.StatusPaymentRequired, openAIError("insufficient_balance", recordErr.Error()), http.Header{"Content-Type": []string{"application/json"}})
+				result.attemptFlow = attemptFlow
+				if recordErr := s.record(ctx, requestID, key, candidate, clientIP, endpoint, requestedModel, isStream, attempts, startedAt, result); recordErr != nil {
+					if !result.wroteBytes && errors.Is(recordErr, ErrUpstreamUsageNotBillable) {
+						last = failedAttemptResult(result, recordErr.Error())
+						lastCandidate = candidate
+						s.maybeAutoDisable(ctx, settings, candidate, last)
+						excludedCredentials[candidate.ChannelCredentialID] = struct{}{}
+						continue
+					}
+					if !isStream {
+						s.writeBufferedResponse(writer, http.StatusPaymentRequired, openAIError("insufficient_balance", recordErr.Error()), http.Header{"Content-Type": []string{"application/json"}})
+					}
+					return nil
 				}
+				// 流式响应在写出内容后被截断：客户端拿到的是半截回答，不能算成功，
+				// 也无法再切换候选重放。客户端主动断开（写入失败或请求上下文取消）
+				// 属于下游行为，不参与渠道与模型的失败评分。
+				truncated := streamTruncated(isStream, result)
+				success := !truncated && result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut
+				switch {
+				case truncated && !result.writerFailed && ctx.Err() == nil:
+					// 流式响应被客户端截断：上游已出过内容，作为一次失败计入组合健康分。
+					s.maybeAutoDisable(ctx, settings, candidate, failedAttemptResult(result, streamTruncatedReason))
+				case success:
+					s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
+					// 流式响应被客户端中断时不存档半截思考内容，避免下一轮回传出残缺的推理。
+					if !isStream || result.streamCompleted {
+						s.rememberReasoningContent(ctx, key.Id, result)
+					}
+					// 成功请求按上游响应速度加分：响应越快，模型健康分增长越多。
+					// 必须带上实际的 ChannelCredentialID，使成功加分与失败扣分落在同一组合上，
+					// 否则成功路径缺密钥会落到 (model, 0) 幽灵组合，与失败组合错配造成双计。
+					_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{
+						ChannelID:           candidate.ChannelID,
+						ChannelCredentialID: candidate.ChannelCredentialID,
+						ModelID:             candidate.ChannelModelID,
+						Source:              system.AutoDisableSourceRelayRequest,
+						Status:              result.status,
+						Latency:             result.latency,
+					})
+				}
+				// 收发报文落盘：非流式存还原后的完整响应体，流式存客户端视角的聚合内容。
+				var payloadResponse json.RawMessage
+				if isStream {
+					payloadResponse = payloadAggregatedResponse(result)
+				} else {
+					responseBody := result.body
+					if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices {
+						responseBody = sensitiveDataRestorer.restoreBufferedResponse(responseBody)
+					}
+					s.writeBufferedResponse(writer, result.status, responseBody, result.headers)
+					payloadResponse = json.RawMessage(responseBody)
+				}
+				s.savePayloadLog(requestID, candidate, requestedModel, endpoint, isStream, attempts, body, result, payloadResponse)
+				s.scheduleModelQualityAnalysis(ctx, requestID, candidate, requestedModel, endpoint, body, isStream, settings.ModelQualityDetectionEnabled, result)
 				return nil
 			}
-			// 流式响应在写出内容后被截断：客户端拿到的是半截回答，不能算成功，
-			// 也无法再切换候选重放。客户端主动断开（写入失败或请求上下文取消）
-			// 属于下游行为，不参与渠道与模型的失败评分。
-			truncated := streamTruncated(isStream, result)
-			success := !truncated && result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && result.errorMessage == "" && !result.timedOut
-			switch {
-			case truncated && !result.writerFailed && ctx.Err() == nil:
-				// 流式响应被客户端截断：上游已出过内容，作为一次失败计入组合健康分。
-				s.maybeAutoDisable(ctx, settings, candidate, failedAttemptResult(result, streamTruncatedReason))
-			case success:
-				s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
-				// 流式响应被客户端中断时不存档半截思考内容，避免下一轮回传出残缺的推理。
-				if !isStream || result.streamCompleted {
-					s.rememberReasoningContent(ctx, key.Id, result)
-				}
-				// 成功请求按上游响应速度加分：响应越快，模型健康分增长越多。
-				// 必须带上实际的 ChannelCredentialID，使成功加分与失败扣分落在同一组合上，
-				// 否则成功路径缺密钥会落到 (model, 0) 幽灵组合，与失败组合错配造成双计。
-				_, _ = s.resilience.ApplyModelHealthScore(ctx, settings, system.ModelDisableInput{
-					ChannelID:           candidate.ChannelID,
-					ChannelCredentialID: candidate.ChannelCredentialID,
-					ModelID:             candidate.ChannelModelID,
-					Source:              system.AutoDisableSourceRelayRequest,
-					Status:              result.status,
-					Latency:             result.latency,
-				})
-			}
-			// 收发报文落盘：非流式存还原后的完整响应体，流式存客户端视角的聚合内容。
-			var payloadResponse json.RawMessage
-			if isStream {
-				payloadResponse = payloadAggregatedResponse(result)
-			} else {
-				responseBody := result.body
-				if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices {
-					responseBody = sensitiveDataRestorer.restoreBufferedResponse(responseBody)
-				}
-				s.writeBufferedResponse(writer, result.status, responseBody, result.headers)
-				payloadResponse = json.RawMessage(responseBody)
-			}
-			s.savePayloadLog(requestID, candidate, requestedModel, endpoint, isStream, attempts, body, result, payloadResponse)
-			s.scheduleModelQualityAnalysis(ctx, requestID, candidate, requestedModel, endpoint, body, isStream, settings.ModelQualityDetectionEnabled, result)
-			return nil
 		}
 	}
 	if attempts > 0 {
@@ -374,9 +387,9 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	} else {
 		last = failedAttemptResult(last, "All eligible channels failed")
 		// attempts==0 意味着所有候选渠道在选凭证阶段就被跳过（凭证冷却或无可用密钥），
-		// 请求从未到达上游、也不会出现在用量列表里。这里补一条用量记录（503）+ WARN 日志，
-		// 避免客户端看到 503 而管理端查无此请求。渠道信息取第一个候选（仅为落库展示），
-		// 计费按未定价处理，不会扣费。
+		// 忽略组合冷却的兜底轮也没能发出任何上游请求。请求从未到达上游、也不会出现在用量
+		// 列表里。这里补一条用量记录（503）+ WARN 日志，避免客户端看到 503 而管理端查无此
+		// 请求。渠道信息取第一个候选（仅为落库展示），计费按未定价处理，不会扣费。
 		last.attemptFlow = attemptFlow
 		last.status = http.StatusServiceUnavailable
 		last.body = openAIError("server_error", retryableAvailabilityMessage)

@@ -112,9 +112,16 @@ type credentialPicker func(excluded map[uint64]struct{}) (channel.RouteCredentia
 
 // acquireKeySlot 为一次上游尝试占用「渠道 × 密钥」的并发额度并返回释放函数。
 // 未配置并发限制（limit<=0）时只做挑选，不占用额度，行为与历史完全一致。
-func (s *sRelay) acquireKeySlot(ctx context.Context, apiKeyID uint64, candidate Candidate, excluded map[uint64]struct{}) (channel.RouteCredential, func(), error) {
+// ignoreComboCooldown 为真时不做「模型 × 密钥」组合冷却过滤：渠道层在 modelID 为 0 时
+// 会跳过该过滤（见 channel.SelectCredential），仅供「本次请求的全部候选都在组合冷却中」
+// 的兜底轮使用，以免为这一罕见场景扩宽渠道服务接口。
+func (s *sRelay) acquireKeySlot(ctx context.Context, apiKeyID uint64, candidate Candidate, excluded map[uint64]struct{}, ignoreComboCooldown bool) (channel.RouteCredential, func(), error) {
 	pick := func(pickExcluded map[uint64]struct{}) (channel.RouteCredential, error) {
-		return s.channels.SelectCredential(ctx, apiKeyID, candidate.ChannelID, candidate.ChannelModelID, pickExcluded)
+		modelID := candidate.ChannelModelID
+		if ignoreComboCooldown {
+			modelID = 0
+		}
+		return s.channels.SelectCredential(ctx, apiKeyID, candidate.ChannelID, modelID, pickExcluded)
 	}
 	return acquireKeySlotWith(ctx, s.slots, candidate.ChannelID, candidate.ConcurrencyLimit, keyConcurrencyWaitWindow, excluded, pick)
 }

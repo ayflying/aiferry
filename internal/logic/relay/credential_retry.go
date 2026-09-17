@@ -42,6 +42,26 @@ func attemptFlowSteps(channelName string, result attemptResult) []usage.AttemptF
 	return append(steps, newAttemptFlowStep(channelName, result))
 }
 
+// candidateAttemptPasses 是单次请求允许的候选尝试轮数：第一轮按常规规则，第二轮仅在第一轮
+// 「零上游尝试」时作为兜底（忽略组合冷却）触发，因此上限为 2。
+const candidateAttemptPasses = 2
+
+// candidateThrottleRetryDelay 是最后一个候选遭遇 429 限流后、再次发起尝试前的退避时长。
+// 上游限流文案通常建议「稍后重试」（OpenRouter 等聚合上游的共享池限流即如此），1.5 秒足以
+// 错开突发的配额窗口，又不会让已经等过的客户端明显变慢。
+const candidateThrottleRetryDelay = 1500 * time.Millisecond
+
+// attemptOptions 控制单次候选尝试的可选行为。两个开关都只服务「已经无路可走」的兜底场景，
+// 正常的多候选切换流程一律使用零值。
+type attemptOptions struct {
+	// ignoreComboCooldown 为真时不做「模型 × 密钥」组合冷却过滤。仅供「本次请求的全部候选
+	// 都在组合冷却中、零上游尝试就会直接失败」的兜底轮使用。
+	ignoreComboCooldown bool
+	// throttleRetry 为真时允许对 429 在同一候选同一密钥上退避重试一次。仅由最后一个候选
+	// 携带：上游明确建议稍后重试时给最后一条路一次自愈机会；仍有候选可切换时不额外放大限流。
+	throttleRetry bool
+}
+
 type channelAttempt struct {
 	candidate Candidate
 	result    attemptResult
@@ -55,14 +75,25 @@ type channelAttempt struct {
 
 // attemptChannel keeps retries inside one channel until no usable upstream key
 // remains. Those retries do not consume the cross-channel failover budget.
-func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, candidate Candidate, stream bool, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, excluded map[uint64]struct{}, sensitiveDataRestorer *sensitiveDataRestorer) channelAttempt {
+func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, candidate Candidate, stream bool, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, excluded map[uint64]struct{}, sensitiveDataRestorer *sensitiveDataRestorer, options attemptOptions) channelAttempt {
 	candidate.ReasoningEffort = requestReasoningEffort(body)
 	last := channelAttempt{candidate: candidate}
+	throttleRetried := false
 	for {
 		// 占额度必须与选密钥一起做：同渠道其它密钥还有空位时直接换密钥，
 		// 全部占满才排队等待，避免把同一个密钥的等待强加给整个渠道。
-		credential, release, err := s.acquireKeySlot(ctx, apiKeyID, candidate, excluded)
+		credential, release, err := s.acquireKeySlot(ctx, apiKeyID, candidate, excluded, options.ignoreComboCooldown)
 		if err != nil {
+			// 上游以 429 限流（例如 OpenRouter 共享池的「请稍后重试」）而本候选已没有别的
+			// 密钥或备用地址可换：退避一次再试，把上游的建议落地。只由最后一个候选启用、
+			// 每个候选最多退避一次；客户端已断开时不再发起上游请求，按原错误路径收尾。
+			if shouldRetryThrottledCandidate(options, throttleRetried, last, ctx.Err()) {
+				throttleRetried = true
+				delete(excluded, last.candidate.ChannelCredentialID)
+				if waitForThrottleRetry(ctx) {
+					continue
+				}
+			}
 			if errors.Is(err, ErrChannelConcurrencyExhausted) {
 				last.concurrencyExhausted = true
 				last.result = attemptResult{status: http.StatusTooManyRequests, errorMessage: err.Error(), attemptFlow: last.flow}
@@ -116,6 +147,28 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			return last
 		}
 		excluded[current.ChannelCredentialID] = struct{}{}
+	}
+}
+
+// shouldRetryThrottledCandidate 判断一次「挑选密钥失败」是否应改判为 429 退避重试：
+// 只有最后一个候选（options.throttleRetry）、本候选尚未退避过、上一次真实尝试确实是 429，
+// 且客户端仍在等待时才成立。抽成纯函数便于单测覆盖边界。
+func shouldRetryThrottledCandidate(options attemptOptions, throttleRetried bool, last channelAttempt, ctxErr error) bool {
+	return !throttleRetried && options.throttleRetry &&
+		last.result.status == http.StatusTooManyRequests &&
+		last.candidate.ChannelCredentialID > 0 && ctxErr == nil
+}
+
+// waitForThrottleRetry 等待一次 429 退避窗口。客户端在退避期间断开时返回 false，
+// 调用方按原错误路径收尾，不再发起上游请求。
+func waitForThrottleRetry(ctx context.Context) bool {
+	timer := time.NewTimer(candidateThrottleRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
