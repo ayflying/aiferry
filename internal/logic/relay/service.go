@@ -266,6 +266,9 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		attempts            int
 		attemptFlow         []usage.AttemptFlowStep
 		excludedCredentials = make(map[uint64]struct{})
+		// skipReasons 记录每个候选渠道在选凭证阶段被跳过的真实原因（按渠道去重取最后一次），
+		// 供「零上游尝试」时写出与实际过滤条件一致的诊断文案。
+		skipReasons = make(map[uint64]string, len(candidates))
 	)
 	// 最多两轮候选尝试：第一轮按常规规则（处于组合冷却的密钥在选密钥阶段会被排除）。若第一轮
 	// 「零尝试」——全部候选都在选密钥阶段被跳过，说明本次请求每个候选的密钥组合都处于冷却中
@@ -289,6 +292,11 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 					channelName := candidates[index].ChannelName
 					g.Log().Warningf(ctx, "relay %s: channel %s (#%d) key concurrency exhausted for model %s", clientIP, channelName, candidates[index].ChannelID, requestedModel)
 					return gerror.Wrapf(ErrChannelConcurrencyExhausted, "channel %s (#%d) key concurrency exhausted", channelName, candidates[index].ChannelID)
+				}
+				if outcome.attempts == 0 && outcome.skipReason != "" {
+					// 第二轮（忽略组合冷却）仍失败时会覆盖第一轮的原因——最终阻塞请求的
+					// 真实条件在那时才是准确的。
+					skipReasons[candidates[index].ChannelID] = outcome.skipReason
 				}
 				attempts += outcome.attempts
 				if outcome.attempts > 0 {
@@ -386,10 +394,10 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		return nil
 	} else {
 		last = failedAttemptResult(last, "All eligible channels failed")
-		// attempts==0 意味着所有候选渠道在选凭证阶段就被跳过（凭证冷却或无可用密钥），
-		// 忽略组合冷却的兜底轮也没能发出任何上游请求。请求从未到达上游、也不会出现在用量
-		// 列表里。这里补一条用量记录（503）+ WARN 日志，避免客户端看到 503 而管理端查无此
-		// 请求。渠道信息取第一个候选（仅为落库展示），计费按未定价处理，不会扣费。
+		// attempts==0 意味着所有候选渠道在选凭证阶段就被跳过（组合冷却、凭证冷却或无可用
+		// 密钥），忽略组合冷却的兜底轮也没能发出任何上游请求。请求从未到达上游、也不会出现
+		// 在用量列表里。这里补一条用量记录（503）+ WARN 日志，避免客户端看到 503 而管理端
+		// 查无此请求。渠道信息取第一个候选（仅为落库展示），计费按未定价处理，不会扣费。
 		last.attemptFlow = attemptFlow
 		last.status = http.StatusServiceUnavailable
 		last.body = openAIError("server_error", retryableAvailabilityMessage)
@@ -398,8 +406,8 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		lastCandidate.APIKeyCipher = ""
 		requestID := newRequestID()
 		startedAt := time.Now()
-		skippedBy := s.summarizeCredentialSkips(ctx, candidates)
-		last.errorMessage = "全部候选渠道凭证不可用：" + skippedBy
+		skippedBy := summarizeCandidateSkips(candidates, skipReasons)
+		last.errorMessage = "全部候选渠道在选凭证阶段被跳过：" + skippedBy
 		if recordErr := s.record(ctx, requestID, key, lastCandidate, clientIP, endpoint, requestedModel, isStream, 0, startedAt, last); recordErr != nil {
 			g.Log().Errorf(ctx, "record no-attempt request %s: %v", requestID, recordErr)
 		}

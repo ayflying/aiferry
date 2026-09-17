@@ -10,6 +10,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
+	"github.com/yunloli/aiferry/internal/logic/channel"
 	"github.com/yunloli/aiferry/internal/logic/protocol"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
@@ -71,6 +72,10 @@ type channelAttempt struct {
 	// concurrencyExhausted 表示本次尝试根本没发出上游请求：渠道全部密钥的并发额度
 	// 都占满且等待窗口内没有空位。该情况由网关本地判定，不参与渠道失败评分。
 	concurrencyExhausted bool
+	// skipReason 是本次尝试在选凭证阶段被跳过时的具体原因（渠道层直接给出，例如
+	// 「3 把密钥在该模型下全部处于组合冷却」）。仅在从未发出上游请求时非空，
+	// 供 Handle 组装「零尝试」诊断文案，避免事后按渠道重查得出相矛盾的结论。
+	skipReason string
 }
 
 // attemptChannel keeps retries inside one channel until no usable upstream key
@@ -104,6 +109,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 				last.result.errorMessage = err.Error()
 				last.result.body = openAIError("upstream_error", err.Error())
 			}
+			last.skipReason = credentialSkipReasonFromError(err)
 			last.result.attemptFlow = last.flow
 			return last
 		}
@@ -277,4 +283,16 @@ func upstreamStatefulSessionRejection(status int, body []byte, errorMessage stri
 		}
 	}
 	return false
+}
+
+// credentialSkipReasonFromError 从选凭证失败的错误里取出可直接展示的原因。渠道层能区分
+// 「模型 × 密钥组合冷却」「渠道级凭证冷却」「无启用密钥」「本次请求已排除全部密钥」等具体
+// 情形；不认识的错误（数据库、Redis、上下文取消）返回空串，由调用方兜底，不把内部错误
+// 原文写进面向排障的文案。
+func credentialSkipReasonFromError(err error) string {
+	var unavailable *channel.CredentialUnavailableError
+	if errors.As(err, &unavailable) {
+		return unavailable.Reason
+	}
+	return ""
 }

@@ -2,13 +2,56 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
+
 	adminapi "github.com/yunloli/aiferry/api/admin"
+	"github.com/yunloli/aiferry/internal/logic/channel"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
+
+// 选凭证失败的原因必须从渠道层带出来（渠道层才看得到「模型 × 密钥」组合冷却），
+// 而不是事后按渠道重查；不认识的错误不得把内部错误原文写进排障文案。
+func TestCredentialSkipReasonFromError(t *testing.T) {
+	direct := credentialSkipReasonFromError(&channel.CredentialUnavailableError{ChannelID: 31, Reason: "3 把密钥在该模型下全部处于组合冷却"})
+	if direct != "3 把密钥在该模型下全部处于组合冷却" {
+		t.Fatalf("direct reason = %q", direct)
+	}
+	wrapped := credentialSkipReasonFromError(gerror.Wrap(&channel.CredentialUnavailableError{ChannelID: 31, Reason: "无启用密钥"}, "select credential"))
+	if wrapped != "无启用密钥" {
+		t.Fatalf("wrapped reason = %q", wrapped)
+	}
+	if unknown := credentialSkipReasonFromError(errors.New("redis: connection refused")); unknown != "" {
+		t.Fatalf("unknown error should yield empty reason, got %q", unknown)
+	}
+	if nilReason := credentialSkipReasonFromError(nil); nilReason != "" {
+		t.Fatalf("nil error should yield empty reason, got %q", nilReason)
+	}
+}
+
+// 零尝试 503 的文案按渠道汇总真实原因，同渠道只出现一次，缺原因时不写空串。
+func TestSummarizeCandidateSkips(t *testing.T) {
+	candidates := []Candidate{
+		{ChannelID: 31, ChannelName: "opencodeGo"},
+		{ChannelID: 25, ChannelName: "OpenRouter"},
+		{ChannelID: 31, ChannelName: "opencodeGo"},
+	}
+	reasons := map[uint64]string{
+		31: "3 把密钥在该模型下全部处于组合冷却",
+		25: "无启用密钥",
+	}
+	want := "opencodeGo(#31): 3 把密钥在该模型下全部处于组合冷却；OpenRouter(#25): 无启用密钥"
+	if got := summarizeCandidateSkips(candidates, reasons); got != want {
+		t.Fatalf("summary = %q, want %q", got, want)
+	}
+	if got := summarizeCandidateSkips([]Candidate{{ChannelID: 9, ChannelName: "solo"}}, nil); got != "solo(#9): 原因未知" {
+		t.Fatalf("missing reason fallback = %q", got)
+	}
+}
 
 // 上游按有状态会话校验拒绝本会话的工具调用历史时，必须放行到下一个候选渠道：
 // 这类失败的根源在渠道侧（它只认自己生成过的 tool_call 记录），实测换到无状态上游

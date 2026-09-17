@@ -48,10 +48,12 @@ type (
 		DeleteCredential(ctx context.Context, channelID uint64, credentialID uint64) error
 		HasAvailableCredential(ctx context.Context, channelID uint64) (bool, error)
 		// CredentialSkipReason 返回渠道在选凭证阶段会被整体跳过的具体原因，
-		// 供 relay 的 attempts==0 诊断日志与用量记录使用：
+		// 供选凭证失败的诊断文案使用（渠道层内部调用）：
 		//   - "N 把密钥全部冷却中"：启用密钥存在但都在 Redis 冷却（连续失败触发）；
 		//   - "无启用密钥"：渠道没有 status=1 的密钥（被手动禁用或自动禁用）；
 		//   - "有可用密钥"：不应出现——出现说明排除集合（excluded）把密钥全部排掉。
+		// 注意这里只看渠道级凭证冷却；「模型 × 密钥」组合冷却由 SelectCredential 直接
+		// 给出原因，不走这里（渠道级查不到组合维度）。
 		CredentialSkipReason(ctx context.Context, channelID uint64) (string, error)
 		// SelectCredential 为本请求挑选一把上游密钥。modelID 用于读取「模型 × 凭证」组合的健康分
 		// 与冷却：处于组合冷却中的密钥被排除（冷却到期后可被真实流量探测恢复，不被 0 分永久排除）；

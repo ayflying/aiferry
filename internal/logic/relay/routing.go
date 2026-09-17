@@ -278,10 +278,15 @@ func retryableStatusForRules(status int, rules string) bool {
 	return system.MatchesStatusCodeRules(rules, status)
 }
 
-// summarizeCredentialSkips 汇总候选渠道在选凭证阶段被整体跳过的原因，
-// 用于 attempts==0 的 503 诊断日志与用量记录：每个渠道标注"全部 N 把密钥冷却中"
-// 或"无启用密钥"。查询失败时降级为不含原因的渠道名列表，不阻断主流程。
-func (s *sRelay) summarizeCredentialSkips(ctx context.Context, candidates []Candidate) string {
+// summarizeCandidateSkips 汇总候选渠道在选凭证阶段被整段跳过的原因，用于 attempts==0 的
+// 503 诊断日志与用量记录：每个渠道标注自己被跳过的具体原因。
+//
+// 原因来自当轮选密钥返回的错误（见 credentialSkipReasonFromError），与真实过滤条件一致——
+// 组合冷却、渠道级凭证冷却、无启用密钥、被本次请求的排除集合挡下都会被区分开。历史实现
+// 按渠道级重查（不带模型维度），看不到「模型 × 密钥」组合冷却，会把组合冷却写成
+// 「有可用密钥」，于是整条文案变成「全部候选渠道凭证不可用：xxx: 有可用密钥」这种自相
+// 矛盾的说法，把排查引向错误方向；因此这里不再重查，只做汇总。
+func summarizeCandidateSkips(candidates []Candidate, reasons map[uint64]string) string {
 	seen := make(map[uint64]struct{}, len(candidates))
 	parts := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -289,9 +294,9 @@ func (s *sRelay) summarizeCredentialSkips(ctx context.Context, candidates []Cand
 			continue
 		}
 		seen[candidate.ChannelID] = struct{}{}
-		reason, err := s.channels.CredentialSkipReason(ctx, candidate.ChannelID)
-		if err != nil {
-			reason = "查询失败"
+		reason := reasons[candidate.ChannelID]
+		if reason == "" {
+			reason = "原因未知"
 		}
 		parts = append(parts, fmt.Sprintf("%s(#%d): %s", candidate.ChannelName, candidate.ChannelID, reason))
 	}
