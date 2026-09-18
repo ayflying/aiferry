@@ -73,6 +73,47 @@ read request body failed: endpoint=/chat/completions client=<ip> contentType="ap
 `/app/data/relay-payloads` 下按文件大小分桶统计，若出现大量 7–8MB 的文件，
 说明请求体长期贴着上限运行。
 
+## 这些超大请求到底是什么
+
+2026-09-18 对生产 `/app/data/relay-payloads`（1071 份）做了画像，结论是**它们不是文件上传，
+而是 agent 类客户端的长会话对话请求**：
+
+| 体积档 | 份数 |
+| --- | --- |
+| > 8 MB | 23 |
+| 6–8 MB | 204 |
+| 4–6 MB | 221 |
+| 1–4 MB | 339 |
+| ≤ 1 MB | 285 |
+
+最大一份 8,394,359 字节（`afreq_b9b44d2ad111ae5d8592b155`）：
+
+- **94.1% 是内联 base64 图片**（7,895,026 字节，30 张 JPEG）；
+- 去掉所有 `data:image/...` 后只剩 499,333 字节，其中 system 提示词仅 2,721 字节；
+- 消息结构：1 条 system、31 条 user、97 条 assistant（带 `tool_calls`）、97 条 tool 结果；
+  最大的样本达到 112 条 user / 213 条 assistant / 213 条 tool / 109 张 JPEG。
+
+即请求体大小由**会话历史长度 × 历史截图数量**决定：客户端每一轮都把全部历史（每张截图以
+base64 重新内联、每次工具调用的完整输出）重放一遍，会话越长就越贴近上限。
+
+渠道侧没有异常：超 6MB 的样本来自 `adesk`（GLM Coding Plan）与 `opencodeGo`，模型
+`glm-5.3-flash`，`httpStatus=200`、`attempts=1`，都属于**正常成功**的请求。代价体现在延迟：
+这些请求 `first_token_ms` 为 24.4–36.9 秒；近 24 小时同模型下 `adesk` 平均首字 16.1 秒，
+而「智谱」渠道仅 7.4 秒。
+
+体积画像的取法（容器内单遍扫描，不下载报文到本地）：
+
+```sh
+cd /app/data/relay-payloads
+BIG=$(ls -S | head -1)
+awk '{n=length($0); t=$0; gsub(/data:image\/[^"]*/,"",t);
+  printf "总=%d 去图后=%d 图片占比=%.1f%%\n", n, length(t), (n-length(t))*100/n}' "$BIG"
+grep -o 'iVBORw0KGgo' "$BIG" | wc -l   # PNG 头计数
+grep -o '/9j/4AAQ' "$BIG" | wc -l      # JPEG 头计数
+```
+
+遍历上千份文件时逐个 `grep`（每份 8MB）会超时，优先 `ls -S | head` 取头部样本再细看。
+
 ## 调整上限时的检查清单
 
 1. 改端点上限 → 确认仍小于 `clientMaxBodySize`，跑 `go test ./internal/controller/relay/`。
