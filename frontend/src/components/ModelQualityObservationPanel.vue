@@ -23,8 +23,7 @@ const emit = defineEmits<{
 function reasonLabel(reason: string): string {
   return {
     upstream_model_tier_lower: '上游模型级别降低',
-    answer_too_short_for_prompt: '回答明显过短',
-    tool_call_without_final_answer: '工具调用后没有最终回答',
+    answer_too_short_for_prompt: '回答明显过短（旧规则）',
     empty_answer: '成功响应但没有正文',
   }[reason] || reason
 }
@@ -37,7 +36,7 @@ function observedModel(event: ModelQualityEvent): string {
 <template>
   <section class="settings-section">
     <div class="section-heading">
-      <div><h2>降智检测</h2><span>仅记录成功文本请求中的可疑结果，不自动处理渠道。</span></div>
+      <div><h2>模型质量观测</h2><span>仅记录成功文本请求中的可疑信号，不自动处理渠道。</span></div>
       <ScanSearch :size="19" />
     </div>
     <div class="setting-switch">

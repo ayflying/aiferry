@@ -214,14 +214,10 @@ func inspectModelQuality(input modelQualityInput) []modelQualitySignal {
 	if modelTierLower(input.expectedModel, input.observedModel) {
 		signals = append(signals, modelQualitySignal{reason: "upstream_model_tier_lower"})
 	}
-	if input.answer == "" {
-		if input.hasToolCalls {
-			signals = append(signals, modelQualitySignal{reason: "tool_call_without_final_answer"})
-		} else {
-			signals = append(signals, modelQualitySignal{reason: "empty_answer"})
-		}
+	if input.answer == "" && !input.hasToolCalls {
+		signals = append(signals, modelQualitySignal{reason: "empty_answer"})
 	}
-	if answerIsUnexpectedlyShort(input.question, input.answer) {
+	if answerIsUnexpectedlyShort(input.question, input.answer) && !input.hasToolCalls {
 		signals = append(signals, modelQualitySignal{reason: "answer_too_short_for_prompt"})
 	}
 	return signals

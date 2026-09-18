@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/yunloli/aiferry/internal/logic/protocol"
@@ -27,7 +28,7 @@ func TestStreamResponseCaptureResponses(t *testing.T) {
 }
 
 func TestModelQualitySignals(t *testing.T) {
-	question := "请分析这个服务连续出现超时的根因，并给出至少三个可执行的排查步骤、修复方案和回滚方案。"
+	question := strings.Repeat("请分析这个服务连续出现超时的根因，并给出可执行的排查步骤、修复方案和回滚方案。", 10)
 	signals := inspectModelQuality(modelQualityInput{
 		expectedModel: "gpt-5",
 		observedModel: "gpt-4o-mini",
@@ -39,13 +40,13 @@ func TestModelQualitySignals(t *testing.T) {
 	}
 }
 
-func TestModelQualitySignalsToolCallWithoutFinalAnswer(t *testing.T) {
+func TestModelQualitySignalsIgnoreToolCallWithoutFinalAnswer(t *testing.T) {
 	signals := inspectModelQuality(modelQualityInput{
-		question:    "请执行这个工具并总结结果。",
+		question:     strings.Repeat("请执行这个工具并总结结果。", 10),
 		hasToolCalls: true,
 	})
-	if len(signals) != 1 || signals[0].reason != "tool_call_without_final_answer" {
-		t.Fatalf("expected tool_call_without_final_answer signal, got %#v", signals)
+	if len(signals) != 0 {
+		t.Fatalf("tool call without final answer must be ignored, got %#v", signals)
 	}
 }
 
@@ -53,6 +54,15 @@ func TestModelQualitySignalsEmptyAnswer(t *testing.T) {
 	signals := inspectModelQuality(modelQualityInput{question: "请回答这个问题。"})
 	if len(signals) != 1 || signals[0].reason != "empty_answer" {
 		t.Fatalf("expected empty_answer signal, got %#v", signals)
+	}
+}
+
+func TestModelQualityShortAnswerRequiresLongQuestion(t *testing.T) {
+	if answerIsUnexpectedlyShort("请回答这个问题。", "不知道") {
+		t.Fatal("short question must not be flagged")
+	}
+	if !answerIsUnexpectedlyShort(strings.Repeat("请详细分析并给出可执行方案。", 24), "不知道") {
+		t.Fatal("long detailed question with tiny answer should be flagged")
 	}
 }
 
