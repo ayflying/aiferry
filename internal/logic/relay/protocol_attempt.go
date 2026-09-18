@@ -370,6 +370,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	result.responseText = capture.Text()
 	result.responseModel = capture.Model()
 	result.streamCompleted = capture.Completed()
+	result.responseHasToolCalls = capture.HasToolCalls()
 	result.reasoningContent = reasoning.Reasoning()
 	result.reasoningField = reasoning.Field()
 	result.reasoningToolCallIDs = reasoning.ToolCallIDs()

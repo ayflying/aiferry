@@ -107,6 +107,7 @@ type attemptResult struct {
 	responseText       string
 	responseModel      string
 	streamCompleted    bool
+	responseHasToolCalls bool
 	attemptFlow        []usage.AttemptFlowStep
 	// precedingFlow 保存本次尝试在协议回退前的那次上游请求（首跳）。协议回退是网关
 	// 对同一候选发起的第二次真实上游调用，两次都必须出现在调用流程里；只保留最终

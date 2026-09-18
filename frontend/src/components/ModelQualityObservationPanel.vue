@@ -23,6 +23,9 @@ const emit = defineEmits<{
 function reasonLabel(reason: string): string {
   return {
     upstream_model_tier_lower: '上游模型级别降低',
+    answer_too_short_for_prompt: '回答明显过短',
+    tool_call_without_final_answer: '工具调用后没有最终回答',
+    empty_answer: '成功响应但没有正文',
   }[reason] || reason
 }
 

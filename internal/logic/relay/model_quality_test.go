@@ -34,8 +34,25 @@ func TestModelQualitySignals(t *testing.T) {
 		question:      question,
 		answer:        "不知道。",
 	})
-	if len(signals) != 1 || signals[0].reason != "upstream_model_tier_lower" {
-		t.Fatalf("expected upstream_model_tier_lower signal, got %#v", signals)
+	if len(signals) != 2 || signals[0].reason != "upstream_model_tier_lower" || signals[1].reason != "answer_too_short_for_prompt" {
+		t.Fatalf("expected tier and short answer signals, got %#v", signals)
+	}
+}
+
+func TestModelQualitySignalsToolCallWithoutFinalAnswer(t *testing.T) {
+	signals := inspectModelQuality(modelQualityInput{
+		question:    "请执行这个工具并总结结果。",
+		hasToolCalls: true,
+	})
+	if len(signals) != 1 || signals[0].reason != "tool_call_without_final_answer" {
+		t.Fatalf("expected tool_call_without_final_answer signal, got %#v", signals)
+	}
+}
+
+func TestModelQualitySignalsEmptyAnswer(t *testing.T) {
+	signals := inspectModelQuality(modelQualityInput{question: "请回答这个问题。"})
+	if len(signals) != 1 || signals[0].reason != "empty_answer" {
+		t.Fatalf("expected empty_answer signal, got %#v", signals)
 	}
 }
 

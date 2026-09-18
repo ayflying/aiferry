@@ -31,10 +31,11 @@ func relaySSEDataPayload(line []byte) (payload []byte, done, valid bool) {
 }
 
 type streamResponseCapture struct {
-	endpoint  string
-	text      strings.Builder
-	model     string
-	completed bool
+	endpoint       string
+	text           strings.Builder
+	model          string
+	completed      bool
+	hasToolCalls   bool
 }
 
 type modelQualitySignal struct {
@@ -57,6 +58,9 @@ func (c *streamResponseCapture) Observe(line []byte) {
 	if c.endpoint == protocol.ChatCompletionsEndpoint {
 		if c.model == "" {
 			c.model = gjson.GetBytes(payload, "model").String()
+		}
+		if gjson.GetBytes(payload, "choices.0.delta.tool_calls").Exists() {
+			c.hasToolCalls = true
 		}
 		c.append(gjson.GetBytes(payload, "choices.0.delta.content").String())
 		return
@@ -86,6 +90,10 @@ func (c *streamResponseCapture) Model() string {
 
 func (c *streamResponseCapture) Completed() bool {
 	return c.completed
+}
+
+func (c *streamResponseCapture) HasToolCalls() bool {
+	return c.hasToolCalls
 }
 
 func (c *streamResponseCapture) append(value string) {
@@ -147,7 +155,7 @@ func (s *sRelay) scheduleModelQualityAnalysis(ctx context.Context, requestID str
 	}
 	question := requestQuestionText(endpoint, body)
 	answer := strings.TrimSpace(result.responseText)
-	if question == "" || answer == "" {
+	if question == "" {
 		return
 	}
 	input := modelQualityInput{
@@ -159,6 +167,7 @@ func (s *sRelay) scheduleModelQualityAnalysis(ctx context.Context, requestID str
 		observedModel:  result.responseModel,
 		question:       question,
 		answer:         answer,
+		hasToolCalls:   result.responseHasToolCalls || responseHasToolCalls(endpoint, result.body),
 	}
 	go func() {
 		signals := inspectModelQuality(input)
@@ -190,6 +199,7 @@ type modelQualityInput struct {
 	observedModel  string
 	question       string
 	answer         string
+	hasToolCalls   bool
 }
 
 func isNormalModelQualityResult(stream bool, result attemptResult) bool {
@@ -204,7 +214,38 @@ func inspectModelQuality(input modelQualityInput) []modelQualitySignal {
 	if modelTierLower(input.expectedModel, input.observedModel) {
 		signals = append(signals, modelQualitySignal{reason: "upstream_model_tier_lower"})
 	}
+	if input.answer == "" {
+		if input.hasToolCalls {
+			signals = append(signals, modelQualitySignal{reason: "tool_call_without_final_answer"})
+		} else {
+			signals = append(signals, modelQualitySignal{reason: "empty_answer"})
+		}
+	}
+	if answerIsUnexpectedlyShort(input.question, input.answer) {
+		signals = append(signals, modelQualitySignal{reason: "answer_too_short_for_prompt"})
+	}
 	return signals
+}
+
+func responseHasToolCalls(endpoint string, body []byte) bool {
+	if endpoint == protocol.ChatCompletionsEndpoint {
+		return gjson.GetBytes(body, "choices.0.message.tool_calls").Exists()
+	}
+	return false
+}
+
+func answerIsUnexpectedlyShort(question, answer string) bool {
+	question = strings.TrimSpace(question)
+	answer = strings.TrimSpace(answer)
+	questionSize := utf8.RuneCountInString(question)
+	answerSize := utf8.RuneCountInString(answer)
+	if questionSize < 240 {
+		return false
+	}
+	if answerSize < 60 {
+		return true
+	}
+	return questionSize >= 600 && answerSize*12 < questionSize
 }
 
 func requestQuestionText(endpoint string, body []byte) string {
