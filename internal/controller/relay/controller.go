@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -86,12 +85,11 @@ func (c *Controller) proxy(endpoint string) ghttp.HandlerFunc {
 			return
 		}
 		defer keyRelease()
-		body, err := io.ReadAll(io.LimitReader(r.Body, (16<<20)+1))
-		if err != nil {
-			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+		body, ok := readRequestBody(r, maxChatRequestBodyLimit)
+		if !ok {
 			return
 		}
-		if err = c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, clientIP(r), r.Host, endpoint, body, key); err != nil {
+		if err := c.relay.Handle(r.Context(), r.Response.RawWriter(), r.Header, clientIP(r), r.Host, endpoint, body, key); err != nil {
 			if relaysvc.IsRetryableAvailabilityError(err) {
 				writeRetryableAvailabilityError(r)
 				return
@@ -137,9 +135,8 @@ func (c *Controller) audioProxy(endpoint string) ghttp.HandlerFunc {
 			return
 		}
 		defer keyRelease()
-		body, err := io.ReadAll(io.LimitReader(r.Body, (24<<20)+1))
-		if err != nil {
-			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+		body, ok := readRequestBody(r, maxAudioRequestBodyLimit)
+		if !ok {
 			return
 		}
 		var relayErr error
@@ -168,9 +165,8 @@ func (c *Controller) audioProxy(endpoint string) ghttp.HandlerFunc {
 // 无法走要求 JSON 的通用 proxy，故同步缓冲后交给 relay 层的 multipart 链路解析与重建。
 func (c *Controller) imagesEdits(r *ghttp.Request) {
 	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, (32<<20)+1))
-		if err != nil {
-			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+		body, ok := readRequestBody(r, maxImagesRequestBodyLimit)
+		if !ok {
 			return
 		}
 		relayErr := c.relay.HandleImagesEdit(r.Context(), r.Header, clientIP(r), "/images/edits", body, r.Header.Get("Content-Type"), key, r.Response.RawWriter())
@@ -200,9 +196,8 @@ func (c *Controller) imagesEdits(r *ghttp.Request) {
 
 func (c *Controller) videoGenerations(r *ghttp.Request) {
 	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, (64<<20)+1))
-		if err != nil {
-			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+		body, ok := readRequestBody(r, maxVideoRequestBodyLimit)
+		if !ok {
 			return
 		}
 		status, response, headers, err := c.relay.CreateVideo(r.Context(), r.Header, body, key)
@@ -238,9 +233,8 @@ func (c *Controller) videoTaskContent(r *ghttp.Request) {
 
 func (c *Controller) videos(r *ghttp.Request) {
 	c.withAuthenticatedKey(r, func(key apikey.AuthKey) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, (64<<20)+1))
-		if err != nil {
-			writeError(r, http.StatusBadRequest, "invalid_request_error", "Unable to read request body")
+		body, ok := readRequestBody(r, maxVideoRequestBodyLimit)
+		if !ok {
 			return
 		}
 		status, response, headers, err := c.relay.CreateVideos(r.Context(), r.Header, body, key)

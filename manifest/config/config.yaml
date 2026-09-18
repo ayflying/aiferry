@@ -4,6 +4,11 @@ server:
   openapiPath: "/api.json"
   swaggerPath: "/swagger"
   serverRoot:  "./web"
+  # 请求体上限必须大于控制器层各端点自身的缓冲上限（chat/images 32MiB、
+  # audio 24MiB、video 64MiB）。GoFrame 默认只有 8MiB，会在控制器读取前
+  # 直接拦掉请求，对外表现为 400 "Unable to read request body"，
+  # 客户端对话会当场中断且不落库、不切渠道。
+  clientMaxBodySize: "96m"
 
 # https://goframe.org/docs/core/glog-config
 logger:
