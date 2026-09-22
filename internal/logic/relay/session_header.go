@@ -15,5 +15,6 @@ func applyOpencodeGoHeaders(target, incoming http.Header, candidate Candidate, u
 		CredentialID: candidate.ChannelCredentialID,
 		ModelName:    candidate.PublicName,
 		UserID:       userID,
+		BaseURL:      candidate.BaseURL,
 	})
 }

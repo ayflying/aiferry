@@ -47,6 +47,7 @@ func (s *sChannel) fetchUpstreamJSON(ctx context.Context, channel entity.Channel
 	ApplyUpstreamClientHeaders(req.Header, nil, UpstreamClientIdentity{
 		ChannelType: channel.Type,
 		ChannelID:   channel.Id,
+		BaseURL:     channel.BaseUrl,
 	})
 	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
 	if err != nil {

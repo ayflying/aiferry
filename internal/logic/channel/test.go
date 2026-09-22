@@ -134,7 +134,8 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 
 // buildTestRequest 按 payload 类型构造测试请求：asrMultipartRequest 走 multipart 表单，其余走 JSON。
 // JSON 分支与转发链路共用 ApplyPromptCachePolicy，保证测试发出去的缓存字段与正式请求一致。
-func buildTestRequest(ctx context.Context, url string, payload any, config AdvancedConfig, identity string) (*http.Request, error) {
+// 免费层（…/zen/v1）再注入三件套并返回 forcedStream，调用方据此解析 SSE 回包的 usage。
+func buildTestRequest(ctx context.Context, url string, payload any, config AdvancedConfig, identity string) (*http.Request, bool, error) {
 	if asr, ok := payload.(asrMultipartRequest); ok {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
@@ -147,29 +148,36 @@ func buildTestRequest(ctx context.Context, url string, payload any, config Advan
 			err = writer.Close()
 		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body.Bytes()))
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		req.Header.Set("Content-Type", writer.FormDataContentType())
-		return req, nil
+		return req, false, nil
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	body, err = ApplyPromptCachePolicy(body, config, identity)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	forcedStream := false
+	if IsOpenCodeFreeLane(url) {
+		body, forcedStream, err = ApplyOpenCodeFreeBody(body)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return req, nil
+	return req, forcedStream, nil
 }
 
 func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, settings adminapi.SystemResilienceSettingsInput, model entity.ChannelModels, config AdvancedConfig, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
@@ -180,7 +188,7 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	// 模型测试复用转发链路的缓存字段处置，避免「测试通过、正式被上游拒绝」：
 	// 渠道声明 off 时测试同样不下发缓存字段，缺省时同样注入稳定键。
 	identity := fmt.Sprintf("v1|test|m:%s|c:%d|k:%d", model.UpstreamName, channel.Id, credential.ID)
-	req, err := buildTestRequest(ctx, resolveTestURL(baseURL, path), payload, config, identity)
+	req, forcedStream, err := buildTestRequest(ctx, resolveTestURL(baseURL, path), payload, config, identity)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}
@@ -208,6 +216,7 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 		ChannelID:    channel.Id,
 		CredentialID: credential.ID,
 		ModelName:    model.UpstreamName,
+		BaseURL:      baseURL,
 	})
 	startedAt := time.Now()
 	client, clientErr := s.HTTPClientForProxy(channel.ProxyUrlCipher)
@@ -225,7 +234,8 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	result.HTTPStatus = resp.StatusCode
 	result.Success = resp.StatusCode >= 200 && resp.StatusCode < 300
-	tokens := parseTestUsage(responseBody, streamed)
+	// 免费层强制流式后回包是 SSE，即使用例选了非流式也要按流式解析 usage。
+	tokens := parseTestUsage(responseBody, streamed || forcedStream)
 	result.InputTokens = int64(testTokenValue(tokens.Input))
 	result.OutputTokens = int64(testTokenValue(tokens.Output))
 	if result.Success {

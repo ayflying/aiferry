@@ -125,6 +125,18 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if err != nil {
 		return attemptResult{}, false, err
 	}
+	// OpenCode Zen 免费层指纹校验只认 chat completions 形态：注入请求体三件套
+	// （强制 stream、bash/read 工具桩、无工具时 tool_choice=none）。协议转换到
+	// responses/messages 的请求不注入，避免破坏非 chat 结构。
+	openCodeForcedStream := false
+	if channel.IsOpenCodeFreeLane(candidate.BaseURL) && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
+		var forced bool
+		body, forced, err = channel.ApplyOpenCodeFreeBody(body)
+		if err != nil {
+			return attemptResult{}, false, err
+		}
+		openCodeForcedStream = forced
+	}
 	if stream && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
@@ -167,11 +179,22 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if !stream || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+		// 免费层强制流式：客户端要非流式 JSON，但请求体已被改成 stream=true，
+		// 上游回的是 SSE。把分片聚合成 chat.completion 后再走非流式回包/计费。
+		forcedStreamAggregate := openCodeForcedStream && !stream && resp.StatusCode >= 200 && resp.StatusCode < 300 && readErr == nil
+		if forcedStreamAggregate {
+			responseBody = aggregateOpenCodeFreeSSE(responseBody)
+		}
 		// 思考内容必须在响应改写前捕获：ReasoningToContent 会把 reasoning_content
 		// 合并进 content 并删除原字段，改写后再读就拿不到了。
 		reasoningContent, reasoningField, reasoningToolCallIDs := captureBufferedReasoning(plan.UpstreamEndpoint(), responseBody)
 		responseBody = normalizeResponseBody(plan.UpstreamEndpoint(), responseBody, candidate.UpstreamName, advancedConfig)
 		result := attemptResult{status: resp.StatusCode, body: plan.ConvertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
+		if forcedStreamAggregate {
+			// 上游按流式回了 text/event-stream，聚合后给客户端的是 JSON，必须改写
+			// Content-Type，否则客户端按 SSE 解析 JSON 会直接报错。
+			result.headers.Set("Content-Type", "application/json")
+		}
 		result.upstreamEndpoint = plan.UpstreamEndpoint()
 		result.protocolConversion = plan.Conversion()
 		result.reasoningContent = reasoningContent
