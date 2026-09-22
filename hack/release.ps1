@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-  [string]$BuildHost = 'root@192.168.50.217',
+  [string]$BuildHost = 'root@<原构建机>',
   [string]$DeployDir = '/root/aiferry-dev',
   [string]$Image = 'ghcr.io/ayflying/aiferry',
   [string]$ComposeProject = 'aiferry-dev'

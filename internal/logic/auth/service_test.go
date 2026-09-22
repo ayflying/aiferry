@@ -67,12 +67,12 @@ func TestSanitizeReturnTo(t *testing.T) {
 }
 
 func TestCallbackURLPreservesHostPort(t *testing.T) {
-	request := httptest.NewRequest("GET", "http://192.168.50.217:8080/api/auth/login", nil)
+	request := httptest.NewRequest("GET", "http://192.168.50.117:8080/api/auth/login", nil)
 	callbackURL, err := CallbackURL(&ghttp.Request{Request: request})
 	if err != nil {
 		t.Fatalf("CallbackURL() error = %v", err)
 	}
-	if callbackURL != "http://192.168.50.217:8080/auth/casdoor/callback" {
+	if callbackURL != "http://192.168.50.117:8080/auth/casdoor/callback" {
 		t.Fatalf("CallbackURL() = %q", callbackURL)
 	}
 }

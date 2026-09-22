@@ -17,7 +17,7 @@
 
 ## 远程构建与发布
 
-- 禁止在本机安装 Go、Node、MySQL 或 Redis。所有检查、镜像构建和部署均在 `root@192.168.50.217` 完成。
+- 禁止在本机安装 Go、Node、MySQL 或 Redis。所有检查、镜像构建和部署均在 `root@<原构建机>` 完成。
 - 源码必须以独立临时目录同步到远程；构建结束后清理该临时源码和临时归档，不执行全局 Docker prune。
 - 宿主机服务端口固定为 `38517`，容器内仍监听 `8080`。部署后验证 `http://127.0.0.1:38517/healthz`。
 - 生产 Compose 只能引用 `ghcr.io/ayflying/aiferry:<版本>`，不得包含 `build`。运行前执行 `docker compose pull aiferry`，再执行 `docker compose up -d --no-deps aiferry`。
