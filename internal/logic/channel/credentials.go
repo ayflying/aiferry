@@ -26,7 +26,10 @@ import (
 )
 
 type CredentialView struct {
-	Id                     uint64     `json:"id"`
+	Id uint64 `json:"id"`
+	// Index 是该密钥在渠道内的固定序号（按创建顺序，含已软删密钥占位），
+	// 与用量明细/模型质量里的「渠道 #N」同口径：删除不重排，历史日志不会错位。
+	Index                  uint       `json:"index"`
 	KeyPrefix              string     `json:"keyPrefix"`
 	HasManagementKey       bool       `json:"hasManagementKey"`
 	Status                 int        `json:"status"`
@@ -126,14 +129,52 @@ func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]Cre
 	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID}).OrderAsc(dao.ChannelCredentials.Columns().Id).Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list channel credentials")
 	}
+	indexes, err := s.credentialDisplayIndexes(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
 	views := make([]CredentialView, 0, len(rows))
 	for _, row := range rows {
 		if err := s.ensureCredentialMetadata(ctx, &row); err != nil {
 			return nil, err
 		}
-		views = append(views, credentialView(row, channelTypeConfig.Costs))
+		view := credentialView(row, channelTypeConfig.Costs)
+		view.Index = indexes[row.Id]
+		views = append(views, view)
 	}
 	return views, nil
+}
+
+// credentialDisplayIndexes 计算渠道内每把密钥的固定展示序号。
+// 口径与用量明细 loadUsageCredentialIndexes、模型质量
+// loadModelQualityCredentialIndexes 一致：Unscoped 含已软删密钥、按 id
+// 升序从 1 编号——已删密钥继续占位，删除后其余密钥编号不重排，
+// 保证密钥列表上标注的 #N 与历史 usage_logs 里的「渠道 #N」始终对得上。
+func (s *sChannel) credentialDisplayIndexes(ctx context.Context, channelID uint64) (map[uint64]uint, error) {
+	columns := dao.ChannelCredentials.Columns()
+	credentials := make([]entity.ChannelCredentials, 0)
+	if err := dao.ChannelCredentials.Ctx(ctx).Unscoped().
+		Fields(columns.Id).
+		Where(columns.ChannelId, channelID).
+		OrderAsc(columns.Id).
+		Scan(&credentials); err != nil {
+		return nil, gerror.Wrap(err, "load channel credential display indexes")
+	}
+	orderedIDs := make([]uint64, 0, len(credentials))
+	for _, credential := range credentials {
+		orderedIDs = append(orderedIDs, credential.Id)
+	}
+	return credentialDisplayIndexes(orderedIDs), nil
+}
+
+// credentialDisplayIndexes 把按 id 升序的密钥 ID 列表编成 1..N 的固定序号。
+// 入参必须包含已软删密钥，否则删除后编号会漂移。
+func credentialDisplayIndexes(orderedIDs []uint64) map[uint64]uint {
+	indexes := make(map[uint64]uint, len(orderedIDs))
+	for position, id := range orderedIDs {
+		indexes[id] = uint(position + 1)
+	}
+	return indexes
 }
 
 // SetCredentialManagementKey 为单把凭证设置或清除管理密钥。传 nil 或空白
