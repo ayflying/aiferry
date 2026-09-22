@@ -241,6 +241,18 @@ export interface ChannelCredential {
   createdAt: string
 }
 
+/** 查看上游密钥明文的邮箱验证状态（10 分钟窗口）。 */
+export interface CredentialRevealStatus {
+  /** true＝验证窗口仍有效，可直接揭示密钥。 */
+  verified: boolean
+  /** false＝个人资料未填邮箱，无法发送验证码。 */
+  emailReady: boolean
+  /** 脱敏邮箱，如 a***@example.com。 */
+  emailMasked: string
+  /** 验证窗口剩余秒数（仅 verified 时有意义）。 */
+  expiresInSeconds?: number
+}
+
 export interface ChannelCredentialCost {
   credentialId: number
   keyPrefix: string

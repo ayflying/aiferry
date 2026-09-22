@@ -145,6 +145,24 @@ func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]Cre
 	return views, nil
 }
 
+// RevealCredential 解密并返回单把上游密钥明文，仅供管理端「显示密钥」用。
+// 调用方（控制器）必须先通过邮箱验证窗口检查；明文只经 HTTPS 响应下发，
+// 不落日志、不缓存。
+func (s *sChannel) RevealCredential(ctx context.Context, channelID, credentialID uint64) (string, error) {
+	credential, err := s.credentialByID(ctx, channelID, credentialID)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(credential.ApiKeyCipher) == "" {
+		return "", gerror.New("该密钥未保存密文，无法恢复明文")
+	}
+	plainText, err := s.app.Secrets.Decrypt(credential.ApiKeyCipher)
+	if err != nil {
+		return "", gerror.Wrap(err, "decrypt channel credential")
+	}
+	return plainText, nil
+}
+
 // credentialDisplayIndexes 计算渠道内每把密钥的固定展示序号。
 // 口径与用量明细 loadUsageCredentialIndexes、模型质量
 // loadModelQualityCredentialIndexes 一致：Unscoped 含已软删密钥、按 id

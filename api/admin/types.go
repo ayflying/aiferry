@@ -38,6 +38,11 @@ type ChannelCredentialStatusInput struct {
 	Status int `json:"status" v:"in:0,1"`
 }
 
+// CredentialRevealVerifyInput 校验查看上游密钥明文的邮箱验证码。
+type CredentialRevealVerifyInput struct {
+	Code string `json:"code" v:"required|length:6,6#请输入验证码|验证码必须为 6 位"`
+}
+
 type ChannelStatusInput struct {
 	Status int `json:"status" v:"in:0,1"`
 }
