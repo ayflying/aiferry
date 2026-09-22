@@ -16,7 +16,7 @@ func TestIsOpenCodeFreeLaneDistinguishesLanes(t *testing.T) {
 		"https://opencode.ai/api/zen/v1/chat/completions",
 	}
 	for _, url := range free {
-		if !IsOpenCodeFreeLane(url) {
+		if !IsOpenCodeFreeLane("", url) {
 			t.Fatalf("expected free lane for %q", url)
 		}
 	}
@@ -28,9 +28,26 @@ func TestIsOpenCodeFreeLaneDistinguishesLanes(t *testing.T) {
 		"https://opencode.ai/zen",
 	}
 	for _, url := range notFree {
-		if IsOpenCodeFreeLane(url) {
+		if IsOpenCodeFreeLane("", url) {
 			t.Fatalf("expected non-free lane for %q", url)
 		}
+	}
+}
+
+func TestIsOpenCodeFreeLaneChannelTypeWins(t *testing.T) {
+	// 渠道类型 opencode_zen 是主判据：即便地址被改写（或为空），只要类型
+	// 命中就走免费层指纹；其他类型即使地址为空也绝不误判。
+	if !IsOpenCodeFreeLane(OpenCodeZenChannelType, "") {
+		t.Fatal("expected opencode_zen type with empty URL to hit free lane")
+	}
+	if !IsOpenCodeFreeLane(OpenCodeZenChannelType, "https://example.com/whatever") {
+		t.Fatal("expected opencode_zen type to hit free lane regardless of URL")
+	}
+	if IsOpenCodeFreeLane(OpenCodeGoChannelType, "https://opencode.ai/zen/go/v1") {
+		t.Fatal("expected opencode_go go-lane URL to stay non-free")
+	}
+	if IsOpenCodeFreeLane("openai", "") {
+		t.Fatal("expected unrelated type with empty URL to stay non-free")
 	}
 }
 

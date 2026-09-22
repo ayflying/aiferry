@@ -12,7 +12,7 @@ func TestLoadBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.ChannelTypes) != 21 {
+	if len(registry.ChannelTypes) != 22 {
 		t.Fatalf("unexpected built-in registry: %+v", registry)
 	}
 	for code, id := range map[string]uint64{
@@ -20,10 +20,10 @@ func TestLoadBuiltins(t *testing.T) {
 		"aws_bedrock": 9000000000000009, "gemini": 9000000000000010,
 		"newapi": 9000000000000012, "qiniu": 9000000000000013, "siliconflow": 9000000000000014,
 		"opencode_go": 9000000000000015, "openrouter": 9000000000000016, "zhipu": 9000000000000017,
-		"zhipu_api": 9000000000000018,
+		"zhipu_api":      9000000000000018,
 		"volcengine_ark": 9000000000000004, "volcengine_ark_coding": 9000000000000019,
 		"volcengine_ark_agent": 9000000000000020, "volcengine_ark_video": 9000000000000021,
-		"commandcode": 9000000000000022,
+		"commandcode": 9000000000000022, "opencode_zen": 9000000000000023,
 	} {
 		if item, exists := registry.ChannelTypeByCode(code); !exists || item.ID != id {
 			t.Fatalf("built-in channel type is missing: %s %+v", code, item)
@@ -110,6 +110,44 @@ func TestOpenCodeGoBuiltinDeclaresUsageQuota(t *testing.T) {
 	}
 }
 
+func TestOpenCodeZenBuiltinSeparatesFromGoLane(t *testing.T) {
+	registry, err := LoadBuiltins(filepath.Join("..", "..", "manifest", "builtins.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, exists := registry.ChannelTypeByCode("opencode_zen")
+	if !exists {
+		t.Fatal("OpenCode Zen channel type is missing")
+	}
+	if item.ID != 9000000000000023 {
+		t.Fatalf("OpenCode Zen id = %d, want 9000000000000023", item.ID)
+	}
+	var config struct {
+		BaseURL  string          `json:"baseUrl"`
+		Quota    json.RawMessage `json:"quota"`
+		Protocol json.RawMessage `json:"protocol"`
+	}
+	if err = json.Unmarshal(item.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	// 免费层与 Go 车道地址彻底分开：…/zen/v1 对 …/zen/go/v1。
+	if config.BaseURL != "https://opencode.ai/zen/v1" {
+		t.Fatalf("OpenCode Zen base URL = %q", config.BaseURL)
+	}
+	// 额度查询按各自的 usage 地址配置（Go 车道 …/zen/go/v1/usage，
+	// 免费层 …/zen/v1/usage），复用同一解析适配器。
+	if !strings.Contains(string(config.Quota), `https://opencode.ai/zen/v1/usage`) {
+		t.Fatalf("OpenCode Zen quota path must target the free-lane usage URL, got %s", config.Quota)
+	}
+	if strings.Contains(string(config.Quota), `zen/go/v1/usage`) {
+		t.Fatalf("OpenCode Zen quota must not reuse the Go lane usage URL, got %s", config.Quota)
+	}
+	// Anthropic Messages 端点相对免费层根地址声明。
+	if !strings.Contains(string(config.Protocol), `"/messages"`) {
+		t.Fatalf("OpenCode Zen protocol messagesPath = %s, want /messages", config.Protocol)
+	}
+}
+
 func TestCommandCodeBuiltinPinsChatCompletions(t *testing.T) {
 	registry, err := LoadBuiltins(filepath.Join("..", "..", "manifest", "builtins.json"))
 	if err != nil {
@@ -154,9 +192,9 @@ func TestVolcengineArkPlanBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]struct {
-		id          uint64
-		name        string
-		baseURL     string
+		id           uint64
+		name         string
+		baseURL      string
 		quotaAdapter string
 	}{
 		"volcengine_ark": {
@@ -169,7 +207,7 @@ func TestVolcengineArkPlanBuiltins(t *testing.T) {
 		},
 		"volcengine_ark_agent": {
 			id: 9000000000000020, name: "火山方舟 Agent Plan",
-			baseURL: "https://ark.cn-beijing.volces.com/api/plan/v3",
+			baseURL:      "https://ark.cn-beijing.volces.com/api/plan/v3",
 			quotaAdapter: "volcengine_afp",
 		},
 	}

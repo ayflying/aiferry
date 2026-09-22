@@ -135,7 +135,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 // buildTestRequest 按 payload 类型构造测试请求：asrMultipartRequest 走 multipart 表单，其余走 JSON。
 // JSON 分支与转发链路共用 ApplyPromptCachePolicy，保证测试发出去的缓存字段与正式请求一致。
 // 免费层（…/zen/v1）再注入三件套并返回 forcedStream，调用方据此解析 SSE 回包的 usage。
-func buildTestRequest(ctx context.Context, url string, payload any, config AdvancedConfig, identity string) (*http.Request, bool, error) {
+func buildTestRequest(ctx context.Context, url string, channelType string, payload any, config AdvancedConfig, identity string) (*http.Request, bool, error) {
 	if asr, ok := payload.(asrMultipartRequest); ok {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
@@ -166,7 +166,7 @@ func buildTestRequest(ctx context.Context, url string, payload any, config Advan
 		return nil, false, err
 	}
 	forcedStream := false
-	if IsOpenCodeFreeLane(url) {
+	if IsOpenCodeFreeLane(channelType, url) {
 		body, forcedStream, err = ApplyOpenCodeFreeBody(body)
 		if err != nil {
 			return nil, false, err
@@ -188,7 +188,7 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	// 模型测试复用转发链路的缓存字段处置，避免「测试通过、正式被上游拒绝」：
 	// 渠道声明 off 时测试同样不下发缓存字段，缺省时同样注入稳定键。
 	identity := fmt.Sprintf("v1|test|m:%s|c:%d|k:%d", model.UpstreamName, channel.Id, credential.ID)
-	req, forcedStream, err := buildTestRequest(ctx, resolveTestURL(baseURL, path), payload, config, identity)
+	req, forcedStream, err := buildTestRequest(ctx, resolveTestURL(baseURL, path), channel.Type, payload, config, identity)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}

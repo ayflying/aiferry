@@ -129,7 +129,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	// （强制 stream、bash/read 工具桩、无工具时 tool_choice=none）。协议转换到
 	// responses/messages 的请求不注入，避免破坏非 chat 结构。
 	openCodeForcedStream := false
-	if channel.IsOpenCodeFreeLane(candidate.BaseURL) && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
+	if channel.IsOpenCodeFreeLane(candidate.ChannelType, candidate.BaseURL) && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		var forced bool
 		body, forced, err = channel.ApplyOpenCodeFreeBody(body)
 		if err != nil {

@@ -52,6 +52,19 @@
       }
     },
     {
+      "id": 9000000000000023,
+      "name": "OpenCode Zen",
+      "code": "opencode_zen",
+      "config": {
+        "baseUrl": "https://opencode.ai/zen/v1",
+        "models": { "method": "GET", "path": "/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" },
+        "quota": { "adapter": "opencode_go_usage", "method": "GET", "path": "https://opencode.ai/zen/v1/usage", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "protocol": { "messagesPath": "/messages" }
+      }
+    },
+    {
       "id": 9000000000000016,
       "name": "OpenRouter",
       "code": "openrouter",
