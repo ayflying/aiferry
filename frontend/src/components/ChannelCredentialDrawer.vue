@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { CircleAlert, Coins, Copy, Eye, EyeOff, Gauge, KeyRound, Plus, Settings2, Trash2 } from '@lucide/vue'
+import { CircleAlert, Coins, Copy, Eye, Gauge, KeyRound, Plus, Settings2, Trash2 } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelCredential, CostSummary, CredentialRevealStatus } from '../api/types'
@@ -31,10 +31,12 @@ const mgmtSaving = ref(false)
 const rows = ref<ChannelCredential[]>([])
 const queryDetails = ref<ChannelCostResult['credentials']>([])
 const summaries = ref<CostSummary[]>([])
-// 上游密钥明文：首次点「显示」需邮箱验证码验证，通过后 10 分钟窗口内
-// 可反复查看；明文只存在组件内存里，抽屉关闭即清空。
-const revealedSecrets = ref<Record<number, string>>({})
+// 查看完整上游密钥：先查 10 分钟邮箱验证窗口，通过后弹框展示明文；
+// 明文只存在组件内存里，抽屉关闭即清空，表格行内始终只显示前缀。
 const secretLoading = ref<Record<number, boolean>>({})
+const secretDialogVisible = ref(false)
+const secretDialogTitle = ref('')
+const secretDialogValue = ref('')
 const revealDialogVisible = ref(false)
 const revealStatus = ref<CredentialRevealStatus | null>(null)
 const revealCode = ref('')
@@ -54,21 +56,24 @@ const queryLabel = computed(() => {
 
 watch(() => props.modelValue, (open) => {
   if (open) void load(true)
-  else clearRevealedSecrets()
+  else clearRevealState()
 })
 watch(() => props.channel?.id, () => {
   if (visible.value) {
-    clearRevealedSecrets()
+    clearRevealState()
     void load(true)
   }
 })
 onBeforeUnmount(stopCodeCountdown)
 
-function clearRevealedSecrets() {
-  revealedSecrets.value = {}
+function clearRevealState() {
   pendingRevealId = null
   revealDialogVisible.value = false
   revealCode.value = ''
+  secretDialogVisible.value = false
+  secretDialogTitle.value = ''
+  secretDialogValue.value = ''
+  secretLoading.value = {}
   stopCodeCountdown()
 }
 
@@ -243,19 +248,18 @@ function costDetail(item: ChannelCredential) {
   return queryDetails.value.find((detail) => detail.credentialId === item.id)
 }
 
-// toggleSecret 显示/隐藏上游密钥明文。先查 10 分钟验证窗口：
-// 已验证直接揭示；未验证弹邮箱验证码对话框，验码通过后自动补揭示。
-async function toggleSecret(item: ChannelCredential) {
+function secretLabel(item: ChannelCredential) {
+  return `#${item.index} ${item.keyPrefix}`
+}
+
+// openSecret 查看完整上游密钥：走 10 分钟验证窗口，通过后弹框展示。
+async function openSecret(item: ChannelCredential) {
   if (!props.channel) return
-  if (revealedSecrets.value[item.id]) {
-    delete revealedSecrets.value[item.id]
-    return
-  }
   secretLoading.value = { ...secretLoading.value, [item.id]: true }
   try {
     const status = await apiGet<CredentialRevealStatus>('/credential-reveal/status')
     if (status.verified) {
-      await revealSecret(item)
+      await showSecretDialog(item)
       return
     }
     revealStatus.value = status
@@ -271,24 +275,25 @@ async function toggleSecret(item: ChannelCredential) {
   }
 }
 
-async function revealSecret(item: ChannelCredential) {
+async function showSecretDialog(item: ChannelCredential) {
   if (!props.channel) return
   secretLoading.value = { ...secretLoading.value, [item.id]: true }
   try {
     const result = await apiGet<{ key: string }>(`/channels/${props.channel.id}/credentials/${item.id}/secret`)
-    revealedSecrets.value = { ...revealedSecrets.value, [item.id]: result.key }
+    secretDialogTitle.value = secretLabel(item)
+    secretDialogValue.value = result.key
+    secretDialogVisible.value = true
   } catch (error) {
-    showError(error, '显示完整密钥失败')
+    showError(error, '查看完整密钥失败')
   } finally {
     secretLoading.value = { ...secretLoading.value, [item.id]: false }
   }
 }
 
-async function copyRevealed(item: ChannelCredential) {
-  const key = revealedSecrets.value[item.id]
-  if (!key) return
+async function copySecretDialog() {
+  if (!secretDialogValue.value) return
   try {
-    await copyText(key)
+    await copyText(secretDialogValue.value)
     showSuccess('完整密钥已复制')
   } catch (error) {
     showError(error, '复制完整密钥失败')
@@ -320,10 +325,9 @@ async function verifyRevealCode() {
     revealStatus.value = await apiPost<CredentialRevealStatus>('/credential-reveal/verify', { code })
     revealDialogVisible.value = false
     revealCode.value = ''
-    showSuccess('验证通过，10 分钟内可反复查看密钥')
     const item = rows.value.find((row) => row.id === pendingRevealId)
     pendingRevealId = null
-    if (item) await revealSecret(item)
+    if (item) await showSecretDialog(item)
   } catch (error) {
     showError(error, '验证码校验失败')
   } finally {
@@ -371,11 +375,11 @@ function stopCodeCountdown() {
 
     <div v-loading="loading" class="credential-table">
       <el-table :data="rows" row-key="id" size="small">
-        <el-table-column label="上游密钥" min-width="200"><template #default="{ row }"><span class="mono key-prefix" :class="{ 'key-secret': revealedSecrets[row.id] }"><el-tooltip content="固定序号：按创建顺序编号（含已删密钥占位），与用量明细的「渠道 #N」一致；删除后不重排" placement="top"><span class="cred-index">#{{ row.index }}</span></el-tooltip><KeyRound :size="14" /><template v-if="revealedSecrets[row.id]">{{ revealedSecrets[row.id] }}</template><template v-else>{{ row.keyPrefix }}</template><el-tooltip v-if="props.managementKeySupported && row.hasManagementKey" content="已配置该账号的管理密钥"><span class="mgmt-badge">管</span></el-tooltip></span></template></el-table-column>
+        <el-table-column label="上游密钥" min-width="200"><template #default="{ row }"><span class="mono key-prefix"><el-tooltip content="固定序号：按创建顺序编号（含已删密钥占位），与用量明细的「渠道 #N」一致；删除后不重排" placement="top"><span class="cred-index">#{{ row.index }}</span></el-tooltip><KeyRound :size="14" />{{ row.keyPrefix }}<el-tooltip v-if="props.managementKeySupported && row.hasManagementKey" content="已配置该账号的管理密钥"><span class="mgmt-badge">管</span></el-tooltip></span></template></el-table-column>
         <el-table-column label="状态" min-width="156"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="autoDisabledDetail(row)" placement="top-start"><div class="credential-status"><span class="status-dot warning">自动禁用</span><small v-if="row.autoDisabledAt">{{ formatTime(row.autoDisabledAt) }}</small></div></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
         <el-table-column :label="usageQuery ? '用量与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else><span v-if="!usageQuery && row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="!usageQuery && row.lastCostRemaining !== undefined">余额 {{ formatBalance(row.lastCostRemaining, row.lastCostCurrency) }}</span><span v-if="usageQuery && (row.lastCostUsage !== undefined || row.lastCostUsed !== undefined)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small><span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined && row.lastCostUsage === undefined" class="muted">尚未查询</span></template></div></template></el-table-column>
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
-        <el-table-column label="操作" width="150" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip :content="revealedSecrets[row.id] ? '隐藏完整密钥' : '显示完整密钥（需邮箱验证一次，10 分钟内免验证）'"><button class="icon-button" type="button" :aria-label="`${revealedSecrets[row.id] ? '隐藏' : '显示'} ${row.keyPrefix}`" :disabled="secretLoading[row.id]" @click="toggleSecret(row)"><EyeOff v-if="revealedSecrets[row.id]" :size="16" /><Eye v-else :size="16" /></button></el-tooltip><el-tooltip v-if="revealedSecrets[row.id]" content="复制完整密钥"><button class="icon-button" type="button" :aria-label="`复制 ${row.keyPrefix}`" @click="copyRevealed(row)"><Copy :size="16" /></button></el-tooltip><el-tooltip v-if="props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询该密钥的套餐额度"><button class="icon-button" type="button" :aria-label="`查询 ${row.keyPrefix} 额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
+        <el-table-column label="操作" width="150" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip content="查看完整密钥"><button class="icon-button" type="button" :aria-label="`查看 ${row.keyPrefix}`" :disabled="secretLoading[row.id]" @click="openSecret(row)"><Eye :size="16" /></button></el-tooltip><el-tooltip v-if="props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询该密钥的套餐额度"><button class="icon-button" type="button" :aria-label="`查询 ${row.keyPrefix} 额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
       </el-table>
       <div v-if="!loading && !rows.length" class="credential-empty"><CircleAlert :size="18" /><span>当前渠道没有可管理的上游密钥</span></div>
     </div>
@@ -397,8 +401,18 @@ function stopCodeCountdown() {
       </template>
     </el-dialog>
 
+    <el-dialog v-model="secretDialogVisible" :title="`完整密钥 · ${secretDialogTitle}`" width="560px" append-to-body @closed="secretDialogValue = ''">
+      <div class="secret-dialog-body">
+        <div class="secret-dialog-value mono">{{ secretDialogValue }}</div>
+        <el-button type="primary" :icon="Copy" @click="copySecretDialog">复制</el-button>
+      </div>
+      <template #footer>
+        <el-button @click="secretDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="revealDialogVisible" title="邮箱验证 · 查看密钥明文" width="460px" append-to-body @closed="revealCode = ''">
-      <el-alert type="info" :closable="false" show-icon class="reveal-alert" :title="revealStatus?.emailReady ? `验证码将发送至 ${revealStatus.emailMasked}；验证通过后 10 分钟内可反复查看，无需重复验证。` : '尚未填写邮箱，请先在「个人设置」中填写邮箱后再发送验证码。'" />
+      <el-alert type="info" :closable="false" show-icon class="reveal-alert" :title="revealStatus?.emailReady ? `验证码将发送至 ${revealStatus.emailMasked}` : '尚未填写邮箱，请先在「个人设置」中填写邮箱后再发送验证码。'" />
       <el-form label-position="top" @submit.prevent="verifyRevealCode">
         <el-form-item label="验证码">
           <div class="reveal-code-row">
@@ -409,12 +423,12 @@ function stopCodeCountdown() {
       </el-form>
       <template #footer>
         <el-button @click="revealDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="verifyingCode" @click="verifyRevealCode">验证并显示</el-button>
+        <el-button type="primary" :loading="verifyingCode" @click="verifyRevealCode">验证并查看</el-button>
       </template>
     </el-dialog>
   </el-drawer>
 </template>
 
 <style scoped>
-.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.mgmt-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; padding: 0 5px; border: 1px solid #b8d4ea; border-radius: 4px; color: #2a6f9e; background: #eef6fc; font-size: 10px; line-height: 16px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.key-prefix.key-secret { flex-wrap: wrap; word-break: break-all; color: #15202b; }.reveal-alert { margin-bottom: 12px; }.reveal-code-row { display: flex; width: 100%; gap: 8px; }.reveal-code-row .el-input { flex: 1; }.cred-index { display: inline-flex; align-items: center; padding: 0 4px; border: 1px solid #d5dde3; border-radius: 4px; color: #5b6a77; background: #f4f6f8; font-size: 10px; line-height: 16px; cursor: help; }.key-prefix .cred-index + svg { margin-left: -2px; }.mgmt-dialog-alert { margin-bottom: 12px; }.row-actions { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }.shared-balance strong { color: #15202b; }@media (max-width: 600px) { .credential-toolbar { align-items: stretch; flex-direction: column; }.credential-add { width: 100%; flex-wrap: wrap; }.credential-table { overflow-x: auto; }.credential-table :deep(.el-table) { min-width: 650px; } }
+.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.mgmt-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; padding: 0 5px; border: 1px solid #b8d4ea; border-radius: 4px; color: #2a6f9e; background: #eef6fc; font-size: 10px; line-height: 16px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.reveal-alert { margin-bottom: 12px; }.reveal-code-row { display: flex; width: 100%; gap: 8px; }.reveal-code-row .el-input { flex: 1; }.secret-dialog-body { display: flex; flex-direction: column; gap: 12px; }.secret-dialog-value { padding: 10px 12px; border: 1px solid #d5dde3; border-radius: 6px; background: #f4f6f8; color: #15202b; font-size: 13px; line-height: 1.5; word-break: break-all; white-space: pre-wrap; }.cred-index { display: inline-flex; align-items: center; padding: 0 4px; border: 1px solid #d5dde3; border-radius: 4px; color: #5b6a77; background: #f4f6f8; font-size: 10px; line-height: 16px; cursor: help; }.key-prefix .cred-index + svg { margin-left: -2px; }.mgmt-dialog-alert { margin-bottom: 12px; }.row-actions { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }
 </style>
