@@ -123,6 +123,69 @@ export function describePriceRuleRates(rule: PriceRule): string[] {
   })
 }
 
+export interface PriceRuleOverview {
+  columns: string[]
+  rows: Array<{ tier: string; cells: Array<{ ruleId: number; rates: string[] } | null> }>
+}
+
+export function priceRuleConditionSummary(rule: PriceRule, allRules: PriceRule[]): string {
+  const known = describePriceRuleTier(rule, allRules)
+  const extra = Object.entries(rule.conditions ?? {}).filter(([key]) => !['inputTokensAtLeast', 'inputTokensAtMost', 'time'].includes(key))
+  if (!extra.length) return known
+  return `${known} · ${extra.map(([key, value]) => key === 'endpoint' ? `端点 ${String(value)}` : `${key}=${JSON.stringify(value)}`).join(' · ')}`
+}
+
+// 只有条件构成无歧义的「长度 × 时段」组合时才生成矩阵；
+// 端点、其他条件或同格多条规则会影响实际命中，不能拼出看似完整但不真实的价格。
+export function buildPriceRuleOverview(rules: PriceRule[]): PriceRuleOverview | null {
+  const active = rules.filter((rule) => rule.status === 1)
+  if (!active.length) return null
+  const columns: string[] = []
+  const rows: PriceRuleOverview['rows'] = []
+  for (const rule of active) {
+    const conditions = rule.conditions ?? {}
+    if (Object.keys(conditions).some((key) => !['inputTokensAtLeast', 'inputTokensAtMost', 'time'].includes(key))) return null
+    const minimum = conditions['inputTokensAtLeast']
+    const maximum = conditions['inputTokensAtMost']
+    if ((minimum !== undefined && (!Number.isSafeInteger(minimum) || (minimum as number) < 0))
+      || (maximum !== undefined && (!Number.isSafeInteger(maximum) || (maximum as number) < 0))) return null
+    const description = describePriceRuleTier(rule, active)
+    const [tier, ...timeParts] = description.split(' · ')
+    const time = timeParts.join(' · ')
+    if (!tier || !time) return null
+    if (!columns.includes(time)) columns.push(time)
+    if (!rows.some((row) => row.tier === tier)) rows.push({ tier, cells: [] })
+  }
+  const ranges = rows.map((row) => {
+    const rule = active.find((item) => describePriceRuleTier(item, active).startsWith(`${row.tier} · `))!
+    return { min: Number(rule.conditions?.['inputTokensAtLeast'] ?? 0), max: Number(rule.conditions?.['inputTokensAtMost'] ?? Infinity) }
+  }).sort((left, right) => left.min - right.min)
+  if (ranges[0]?.min !== 0 || ranges.some((range, index) => index > 0 && range.min !== ranges[index - 1]!.max + 1)) return null
+  // 无时段条件只有在受限时段规则排在它前面时才是「其他时段」。
+  if (active.some((fallback) => !priceRuleTimeIsRestricted(fallback.conditions) && active.some((peak) =>
+    peak.id !== fallback.id && priceRuleTimeIsRestricted(peak.conditions)
+    && peak.conditions?.['inputTokensAtLeast'] === fallback.conditions?.['inputTokensAtLeast']
+    && peak.conditions?.['inputTokensAtMost'] === fallback.conditions?.['inputTokensAtMost']
+    && (peak.priority < fallback.priority || (peak.priority === fallback.priority && peak.id < fallback.id)),
+  ))) return null
+  if (columns.length > 3 || rows.length > 6) return null
+  if (columns.length > 1 && active.some((rule) => priceRuleTimeIsRestricted(rule.conditions)
+    && active.some((other) => other.id !== rule.id && priceRuleTimeIsRestricted(other.conditions)
+      && describePriceRuleTime(other.conditions) !== describePriceRuleTime(rule.conditions)))) return null
+  for (const row of rows) {
+    row.cells = columns.map((time) => {
+      const matches = active.filter((rule) => {
+        const description = describePriceRuleTier(rule, active)
+        return description === `${row.tier} · ${time}`
+      })
+      return matches.length === 1 ? { ruleId: matches[0]!.id, rates: describePriceRuleRates(matches[0]!) } : null
+    })
+  }
+  // 格子重叠或稀疏时退回忠实的逐行总览，而不是假设缺失档位的价格。
+  if (rows.some((row) => row.cells.some((cell) => cell === null))) return null
+  return { columns, rows }
+}
+
 export function describePriceRuleConditions(conditions?: Record<string, unknown> | null): string {
   const endpoint = typeof conditions?.['endpoint'] === 'string' ? conditions['endpoint'].trim() : ''
   const time = describePriceRuleTime(conditions)

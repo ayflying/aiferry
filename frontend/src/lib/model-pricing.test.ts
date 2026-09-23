@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { configuredTokenPriceItems, createPriceRuleDraft, describePriceRuleConditions, describePriceRuleRates, describePriceRuleTier, describePriceRuleTime, formatModelPrice, modelBillingModeLabel, priceRuleTimeIsRestricted, priceRuleToDraft } from './model-pricing'
+import { buildPriceRuleOverview, configuredTokenPriceItems, createPriceRuleDraft, describePriceRuleConditions, describePriceRuleRates, describePriceRuleTier, priceRuleConditionSummary, describePriceRuleTime, formatModelPrice, modelBillingModeLabel, priceRuleTimeIsRestricted, priceRuleToDraft } from './model-pricing'
 import type { PriceRule } from '../api/types'
 
 describe('model pricing display', () => {
@@ -90,6 +90,26 @@ describe('高级规则的可读档位与价格', () => {
     const long = { ...base, id: 3, conditions: { inputTokensAtLeast: 272001 } }
     expect(describePriceRuleTier(long, [base, peak, long])).toBe('输入 ≥ 272,001 Token · 不限时段')
     expect(describePriceRuleTier({ ...long, conditions: { inputTokensAtLeast: 100, inputTokensAtMost: 200 } }, [])).toBe('输入 100–200 Token · 不限时段')
+  })
+
+  it('把两种长度和两种时段合成一张价格总览，而非四张说明卡', () => {
+    const long = { ...base, id: 3, conditions: { inputTokensAtLeast: 272001 }, rates: { inputPerMillion: 3, outputPerMillion: 12 } }
+    const longPeak = { ...peak, id: 4, conditions: { inputTokensAtLeast: 272001, time: { ranges: [['09:00', '18:00']] } }, rates: { inputPerMillion: 6, outputPerMillion: 24 } }
+    const overview = buildPriceRuleOverview([base, peak, long, longPeak])
+    expect(overview?.columns).toEqual(['其他时段（高峰规则优先）', '每天 09:00–18:00'])
+    expect(overview?.rows.map((row) => row.tier)).toEqual(['输入 ≤ 272,000 Token', '输入 ≥ 272,001 Token'])
+    expect(overview?.rows[0]?.cells.map((cell) => cell?.rates[0])).toEqual(['输入 $2 / 1M Token', '输入 $4 / 1M Token'])
+    expect(overview?.rows[1]?.cells.map((cell) => cell?.rates[0])).toEqual(['输入 $3 / 1M Token', '输入 $6 / 1M Token'])
+  })
+
+  it('条件超出长度和时段、格子缺失或有重叠时，不拼造矩阵', () => {
+    expect(buildPriceRuleOverview([{ ...base, conditions: { endpoint: '/responses' } }])).toBeNull()
+    expect(priceRuleConditionSummary({ ...base, conditions: { endpoint: '/responses' } }, [base])).toContain('端点 /responses')
+    expect(buildPriceRuleOverview([base, peak, { ...base, id: 3, conditions: { inputTokensAtLeast: 272001 } }])).toBeNull()
+    expect(buildPriceRuleOverview([base, { ...base, id: 3 }])).toBeNull()
+    expect(buildPriceRuleOverview([base, { ...base, id: 3, conditions: { inputTokensAtLeast: 272000 } }])).toBeNull()
+    expect(buildPriceRuleOverview([{ ...base, conditions: { inputTokensAtMost: 100 } }, { ...base, id: 3, conditions: { inputTokensAtLeast: 102 } }])).toBeNull()
+    expect(buildPriceRuleOverview([{ ...base, priority: 0 }, { ...peak, priority: -1 }])).toBeNull()
   })
 
   it('按货币与计价单位展示已配置价格，保留零价、不展示未配置字段', () => {
