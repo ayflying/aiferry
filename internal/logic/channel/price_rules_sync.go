@@ -17,11 +17,10 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-// matchModelsForRule 把上游价格条目匹配到本地模型。先按完整名称精确匹配
-// （UpstreamName 或 PublicName）；未命中且名称带厂商前缀（如
-// z-ai/glm-5.3-flash）时，退回用最后一个 / 之后的后缀匹配。上游价格源
-// 普遍带 org/ 前缀而本地模型名通常没有，精确匹配失败时按后缀兜底即可
-// 命中 glm-5.3-flash 这类本地模型。
+// matchModelsForRule 在一个名称索引里找模型：先完整名称精确匹配，未命中且
+// 名称带厂商前缀（如 z-ai/glm-5.3-flash）时，退回用最后一个 / 之后的后缀匹配。
+// 上游价格源普遍带 org/ 前缀而本地模型名通常没有，精确匹配失败时按后缀兜底
+// 即可命中 glm-5.3-flash 这类本地模型。索引按公开名还是上游名构建由调用方决定。
 func matchModelsForRule(byName map[string][]entity.ChannelModels, ruleModel string) []entity.ChannelModels {
 	if models, exists := byName[ruleModel]; exists {
 		return models
@@ -32,6 +31,55 @@ func matchModelsForRule(byName map[string][]entity.ChannelModels, ruleModel stri
 		}
 	}
 	return nil
+}
+
+// buildPublicRulePlan 把上游价格条目两级匹配到各公开模型，返回
+// 公开名 → 规则列表 与 公开名 → 规范 channel_model id。
+//
+// 第一级按公开名直接匹配（含厂商前缀后缀回退），命中的公开名记为已覆盖；
+// 第二级按上游名（别名）匹配，仅补公开名没有直接来源的缺口。
+// 这样当上游 key 自身已是某个公开名时，别名渠道（UpstreamName 指向别的
+// 上游模型）的另一套价格不会混进该公开模型——典型事故是
+// channel_models 把 gpt-5.6-sol 别名到公开名 gpt-6-sol，同步时
+// gpt-5.6-sol 的 2 倍价规则与 gpt-6-sol 自身 2 条合并成 4 条。
+func buildPublicRulePlan(byPublic, byUpstream map[string][]entity.ChannelModels, rules []syncedRule) (map[string][]syncedRule, map[string]uint64) {
+	publicRules := make(map[string][]syncedRule)
+	canonicalModelIDs := make(map[string]uint64)
+	noteCanonical := func(publicName string, modelID uint64) {
+		if canonicalModelIDs[publicName] == 0 || modelID < canonicalModelIDs[publicName] {
+			canonicalModelIDs[publicName] = modelID
+		}
+	}
+
+	directCovered := make(map[string]struct{})
+	for _, rule := range rules {
+		seen := make(map[string]struct{})
+		for _, model := range matchModelsForRule(byPublic, rule.Model) {
+			if _, exists := seen[model.PublicName]; exists {
+				continue
+			}
+			seen[model.PublicName] = struct{}{}
+			publicRules[model.PublicName] = append(publicRules[model.PublicName], rule)
+			noteCanonical(model.PublicName, model.Id)
+			directCovered[model.PublicName] = struct{}{}
+		}
+	}
+
+	for _, rule := range rules {
+		seen := make(map[string]struct{})
+		for _, model := range matchModelsForRule(byUpstream, rule.Model) {
+			if _, exists := seen[model.PublicName]; exists {
+				continue
+			}
+			if _, covered := directCovered[model.PublicName]; covered {
+				continue
+			}
+			seen[model.PublicName] = struct{}{}
+			publicRules[model.PublicName] = append(publicRules[model.PublicName], rule)
+			noteCanonical(model.PublicName, model.Id)
+		}
+	}
+	return publicRules, canonicalModelIDs
 }
 
 func (s *sChannel) syncPricesFromPayload(ctx context.Context, endpoint string, config channeltype.PricingConfig, body []byte) (int, error) {
@@ -50,26 +98,13 @@ func (s *sChannel) saveSyncedPriceRules(ctx context.Context, endpoint string, ru
 	if err := dao.ChannelModels.Ctx(ctx).Scan(&models); err != nil {
 		return 0, gerror.Wrap(err, "load public models for prices")
 	}
-	byName := make(map[string][]entity.ChannelModels, len(models)*2)
+	byPublic := make(map[string][]entity.ChannelModels, len(models))
+	byUpstream := make(map[string][]entity.ChannelModels, len(models))
 	for _, model := range models {
-		byName[model.UpstreamName] = append(byName[model.UpstreamName], model)
-		byName[model.PublicName] = append(byName[model.PublicName], model)
+		byPublic[model.PublicName] = append(byPublic[model.PublicName], model)
+		byUpstream[model.UpstreamName] = append(byUpstream[model.UpstreamName], model)
 	}
-	publicRules := make(map[string][]syncedRule)
-	canonicalModelIDs := make(map[string]uint64)
-	for _, rule := range rules {
-		seen := make(map[string]struct{})
-		for _, model := range matchModelsForRule(byName, rule.Model) {
-			if _, exists := seen[model.PublicName]; exists {
-				continue
-			}
-			seen[model.PublicName] = struct{}{}
-			publicRules[model.PublicName] = append(publicRules[model.PublicName], rule)
-			if canonicalModelIDs[model.PublicName] == 0 || model.Id < canonicalModelIDs[model.PublicName] {
-				canonicalModelIDs[model.PublicName] = model.Id
-			}
-		}
-	}
+	publicRules, canonicalModelIDs := buildPublicRulePlan(byPublic, byUpstream, rules)
 	count := 0
 	err := dao.ModelPriceRules.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
 		for modelName, modelRules := range publicRules {
