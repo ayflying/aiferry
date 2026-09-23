@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Braces, Plus, Trash2 } from '@lucide/vue'
-import { ElMessage } from 'element-plus'
+import { showSuccess, showWarning } from '../lib/error'
 
 import {
   AUDIO_ADAPTER_OPTIONS, AUTH_TYPE_OPTIONS, COST_ADAPTER_OPTIONS, METHOD_OPTIONS,
@@ -71,7 +71,7 @@ function setMode(next: 'form' | 'json') {
 
 function formatJson() {
   const { config, error } = parseTypeConfigText(text.value)
-  if (error || !config) { ElMessage.warning('JSON 格式有误，无法格式化'); return }
+  if (error || !config) { showWarning('JSON 格式有误，无法格式化'); return }
   text.value = formatTypeConfig(config)
 }
 
@@ -84,7 +84,7 @@ function commitEndpointName(name: string) {
   delete editingNames.value[name]
   if (next === name) return
   if (!renameEndpoint(form.value, name, next)) {
-    ElMessage.warning(`端点名「${next}」不可用（为空或已存在）`)
+    showWarning(`端点名「${next}」不可用（为空或已存在）`)
   }
 }
 
@@ -102,7 +102,7 @@ function removeEndpoint(name: string) {
   const endpoints = form.value.endpoints
   if (!endpoints || typeof endpoints !== 'object') return
   if (endpointNames(form.value).length <= 1) {
-    ElMessage.warning('至少保留一个端点；若要全部使用内置端点，请点「改用内置端点」')
+    showWarning('至少保留一个端点；若要全部使用内置端点，请点「改用内置端点」')
     return
   }
   delete endpoints[name]
@@ -111,7 +111,7 @@ function removeEndpoint(name: string) {
 // 完全不声明 endpoints 时后端会回落到内置端点表，这是合法且常用的写法。
 function useBuiltinEndpoints() {
   delete form.value.endpoints
-  ElMessage.success('已移除自定义端点，保存后使用内置端点表')
+  showSuccess('已移除自定义端点，保存后使用内置端点表')
 }
 </script>
 

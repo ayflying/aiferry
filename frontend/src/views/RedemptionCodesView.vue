@@ -2,14 +2,14 @@
 import dayjs from 'dayjs'
 import { onMounted, reactive, ref } from 'vue'
 import { Copy, Plus, Search, Ticket, Trash2 } from '@lucide/vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost } from '../api/client'
 import type { CreatedRedemptionCode, RedemptionCode, RedemptionCodeStatus } from '../api/types'
 import TableActionButton from '../components/TableActionButton.vue'
 import MobileRecordList from '../components/MobileRecordList.vue'
 import ResponsiveList from '../components/ResponsiveList.vue'
 import { copyText } from '../lib/clipboard'
-import { showError } from '../lib/error'
+import { showError, showInfo, showSuccess } from '../lib/error'
 import { formatCost, formatTime } from '../lib/format'
 
 type StatusFilter = RedemptionCodeStatus | 'all'
@@ -63,13 +63,13 @@ async function create() {
       expiresAt: expiryTime(),
       quantity: form.quantity,
     })
-    ElMessage.success(`已创建 ${createdCodes.value.length} 个兑换码`)
+    showSuccess(`已创建 ${createdCodes.value.length} 个兑换码`)
     await load()
   } catch (error) { showError(error, '创建兑换码失败') } finally { saving.value = false }
 }
 
 async function copyCode(code: string) {
-  try { await copyText(code); ElMessage.success('兑换码已复制') } catch (error) { showError(error, '复制兑换码失败') }
+  try { await copyText(code); showSuccess('兑换码已复制') } catch (error) { showError(error, '复制兑换码失败') }
 }
 
 async function removeInvalid() {
@@ -77,7 +77,7 @@ async function removeInvalid() {
     await ElMessageBox.confirm('将永久删除所有已兑换和已过期的兑换码，无法恢复。', '删除无效兑换码', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
     deleting.value = true
     const result = await apiDelete<{ deleted: number }>('/redemption-codes/invalid')
-    result.deleted ? ElMessage.success(`已删除 ${result.deleted} 个无效兑换码`) : ElMessage.info('没有可删除的无效兑换码')
+    result.deleted ? showSuccess(`已删除 ${result.deleted} 个无效兑换码`) : showInfo('没有可删除的无效兑换码')
     await load()
   } catch (error) { if (error !== 'cancel') showError(error, '删除无效兑换码失败') } finally { deleting.value = false }
 }

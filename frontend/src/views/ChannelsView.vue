@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelCredential, ChannelInput, ChannelModel, ChannelQuotaResult, DiscoveredModel, TimeWindow } from '../api/types'
@@ -16,7 +16,7 @@ import ChannelTypeConfigEditor from '../components/ChannelTypeConfigEditor.vue'
 import ChannelTypeListPanel from '../components/ChannelTypeListPanel.vue'
 import { type ChannelTab, useChannelConfiguration } from '../composables/useChannelConfiguration'
 import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput, supportsOrganizationIdentity } from '../lib/channelForm'
-import { showError } from '../lib/error'
+import { showError, showSuccess } from '../lib/error'
 import { sortDiscoveredModels } from '../lib/models'
 import { closedWindowPayload, closedWindowsFromModels } from '../lib/time-window'
 import { useAppStore } from '../stores/app'
@@ -247,7 +247,7 @@ async function save() {
     if (editingId.value && payload.managementKey === undefined) delete payload.managementKey
     if (editingId.value) await apiPut(`/channels/${editingId.value}`, payload)
     else await apiPost('/channels', payload)
-    ElMessage.success(editingId.value ? '渠道已更新' : '渠道已添加')
+    showSuccess(editingId.value ? '渠道已更新' : '渠道已添加')
     drawerOpen.value = false
     tabLoaded.groups = false
     await loadChannels()
@@ -408,7 +408,7 @@ async function saveModelSelection() {
       })
     })
     await apiPut(`/channels/${discoveryChannel.value.id}/models/selection`, { models })
-    ElMessage.success(`已保存 ${models.length} 条模型映射关系`)
+    showSuccess(`已保存 ${models.length} 条模型映射关系`)
     discoveryOpen.value = false
     await loadChannels()
   } catch (error) {
@@ -434,7 +434,7 @@ async function queryCost(channel: Channel) {
   try {
     const result = await apiPost<ChannelCostResult>(`/channels/${channel.id}/costs/query`, {})
     const failures = result.credentials.filter((item) => item.error).length
-    ElMessage.success(failures ? `费用已更新，${failures} 个上游密钥查询失败` : '费用已更新')
+    showSuccess(failures ? `费用已更新，${failures} 个上游密钥查询失败` : '费用已更新')
     await loadChannels()
   } catch (error) {
     showError(error, '查询上游费用失败')
@@ -477,7 +477,7 @@ async function setChannelStatus(channel: Channel, enabled: boolean) {
   channelStatusSaving.value[channel.id] = true
   try {
     await apiPut(`/channels/${channel.id}/status`, { status: enabled ? 1 : 0 })
-    ElMessage.success(enabled ? '渠道已启用，全部上游密钥已恢复可用' : '渠道已手动停用')
+    showSuccess(enabled ? '渠道已启用，全部上游密钥已恢复可用' : '渠道已手动停用')
     await loadChannels()
   } catch (error) {
     showError(error, enabled ? '启用渠道失败' : '停用渠道失败')
@@ -490,7 +490,7 @@ async function remove(channel: Channel) {
   try {
     await ElMessageBox.confirm(`删除渠道“${channel.name}”？`, '删除渠道', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     await apiDelete(`/channels/${channel.id}`)
-    ElMessage.success('渠道已删除')
+    showSuccess('渠道已删除')
     tabLoaded.groups = false
     await loadChannels()
   } catch (error) {

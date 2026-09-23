@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Braces, Coins, Pencil, Plus, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { APIKey, ModelBillingMode, PriceRule, PriceSource, PublicModel } from '../api/types'
-import { showError } from '../lib/error'
+import { showError, showSuccess } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
 import { compareModelNames } from '../lib/models'
@@ -143,7 +143,7 @@ async function save() {
   saving.value = true
   try {
     await apiPut(`/models/${current.value.id}`, { ...form })
-    ElMessage.success('公共模型价格已保存')
+    showSuccess('公共模型价格已保存')
     editOpen.value = false
     await load()
   } catch (error) { showError(error, '保存公共价格失败') } finally { saving.value = false }
@@ -186,11 +186,11 @@ async function submitRule() {
         rates: draft.rates,
         status: editing.status,
       })
-      ElMessage.success('高级价格规则已更新')
+      showSuccess('高级价格规则已更新')
       editingRuleId.value = null
     } else {
       await apiPost(`/models/${current.value.id}/price-rules`, { name: draft.name || '人工规则', source: 'manual', sourceRef: '', priority: draft.priority, currency: draft.currency, conditions: draft.conditions, rates: draft.rates, status: 1 })
-      ElMessage.success('高级价格规则已添加')
+      showSuccess('高级价格规则已添加')
     }
     // 先关弹框再切换计费模式：规则已经落库，若后面的模式切换失败而弹框还开着，
     // 再点一次保存就会重复新增一条规则。
@@ -222,7 +222,7 @@ async function syncPrices() {
     const result = await apiPost<{ count: number; sources: number; succeeded: number; failures: Array<{ sourceName?: string; channelName?: string; message: string }> }>('/prices/sync', payload)
     if (!result.succeeded) showError(formatSyncFailures(result.failures), '价格同步失败')
     else if (result.failures.length) showError(`已同步 ${result.count} 条公共价格规则，但以下来源未完成：${formatSyncFailures(result.failures)}`, '价格同步未完全完成')
-    else ElMessage.success(result.count ? `已同步 ${result.count} 条公共价格规则` : '所选来源没有返回已匹配的公开模型价格')
+    else showSuccess(result.count ? `已同步 ${result.count} 条公共价格规则` : '所选来源没有返回已匹配的公开模型价格')
     if (current.value) await loadRules(current.value.id)
     await load()
   } catch (error) { showError(error, '价格同步失败') } finally { loading.value = false }

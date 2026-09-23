@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
 import { Pencil, Plus, RefreshCw, Trash2 } from '@lucide/vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiPost, apiPut } from '../api/client'
 import type { PriceSource } from '../api/types'
-import { showError } from '../lib/error'
+import { showError, showSuccess } from '../lib/error'
 import { priceSourceLocation } from '../lib/priceSource'
 
 const props = defineProps<{ modelValue: boolean; sources: PriceSource[]; loading: boolean }>()
@@ -45,7 +45,7 @@ async function save() {
     const payload = { name: form.name.trim(), code: form.code.trim(), status: form.status, config }
     if (editing.value) await apiPut(`/price-sources/${editing.value.id}`, payload)
     else await apiPost('/price-sources', payload)
-    ElMessage.success(editing.value ? '价格源已更新' : '价格源已添加')
+    showSuccess(editing.value ? '价格源已更新' : '价格源已添加')
     editing.value = undefined
     emit('changed')
   } catch (error) { showError(error, '保存价格源失败') } finally { saving.value = false }
@@ -55,7 +55,7 @@ async function remove(source: PriceSource) {
   try {
     await ElMessageBox.confirm(`删除价格源“${source.name}”？`, '删除价格源', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     await apiDelete(`/price-sources/${source.id}`)
-    ElMessage.success('价格源已删除')
+    showSuccess('价格源已删除')
     emit('changed')
   } catch (error) { if (error !== 'cancel') showError(error, '删除价格源失败') }
 }

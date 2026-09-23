@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Activity, CircleDollarSign, RefreshCw, Save, Ticket, UserRound } from '@lucide/vue'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '../lib/error'
 import { loadPersonalUsage, loadProfile, updateProfile } from '../api/auth'
 import { apiPost } from '../api/client'
 import type { AccountProfile, AccountUsageSummary, RedemptionResult } from '../api/types'
-import { showError } from '../lib/error'
 import { displayCurrency, formatBalance, formatCost, formatNumber } from '../lib/format'
 import { useAuthStore } from '../stores/auth'
 import { useSystemStore } from '../stores/system'
@@ -37,7 +36,7 @@ async function save() {
     profile.value = await updateProfile({ nickname: form.nickname.trim(), email: form.email.trim() })
     Object.assign(form, { nickname: profile.value.nickname, email: profile.value.email })
     await auth.ensureUser(true)
-    ElMessage.success('个人资料已保存')
+    showSuccess('个人资料已保存')
   } catch (error) { showError(error, '保存个人资料失败') } finally { saving.value = false }
 }
 
@@ -52,7 +51,7 @@ async function redeem() {
     Object.assign(form, { nickname: account.nickname, email: account.email })
     redemptionCode.value = ''
     await auth.ensureUser(true)
-    ElMessage.success(`兑换成功，已到账 ${formatCost(result.amount)}`)
+    showSuccess(`兑换成功，已到账 ${formatCost(result.amount)}`)
   } catch (error) { showError(error, '兑换失败') } finally { redeeming.value = false }
 }
 

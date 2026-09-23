@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { CircleAlert, CircleCheck, Gauge, Info, LoaderCircle, Trash2 } from '@lucide/vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { apiDelete, apiGet, apiPost } from '../api/client'
 import type { Channel, ChannelModel, CredentialHealth, ModelTestResult } from '../api/types'
-import { showError } from '../lib/error'
+import { showError, showSuccess } from '../lib/error'
 import { formatLatency } from '../lib/format'
 import { enabledChannelModels } from '../lib/models'
 
@@ -179,7 +179,7 @@ async function runTest(model: ChannelModel, quiet = false) {
       lastTestError: result.message,
     } : item)
     if (!quiet) {
-      if (result.success) ElMessage.success(`${model.publicName} 测试通过`)
+      if (result.success) showSuccess(`${model.publicName} 测试通过`)
       else showError(testFailureMessage(result), `${model.publicName} 测试失败`)
       emit('changed')
     }
@@ -230,7 +230,7 @@ async function testAll() {
     await Promise.all(Array.from({ length: Math.min(5, queue.length) }, runWorker))
     await loadModels(true)
     emit('changed')
-    ElMessage.success(`已完成 ${queue.length} 个模型的测试`)
+    showSuccess(`已完成 ${queue.length} 个模型的测试`)
   } finally {
     running.value = false
     batchTotal.value = 0
@@ -270,7 +270,7 @@ async function deleteFailedModels() {
     const result = await apiDelete<{ deleted: number }>(`/channels/${props.channel.id}/models/failed`)
     await loadModels()
     emit('changed')
-    ElMessage.success(result.deleted ? `已删除 ${result.deleted} 个失败模型` : '没有可删除的失败模型')
+    showSuccess(result.deleted ? `已删除 ${result.deleted} 个失败模型` : '没有可删除的失败模型')
   } catch (error) {
     if (error !== 'cancel') showError(error, '删除失败模型失败')
   }

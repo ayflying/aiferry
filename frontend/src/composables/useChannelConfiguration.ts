@@ -1,9 +1,9 @@
 import { computed, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { ChannelGroup, ChannelType, ChannelTypeConfig } from '../api/types'
-import { showError } from '../lib/error'
+import { showError, showSuccess } from '../lib/error'
 import { useAppStore } from '../stores/app'
 
 export type ChannelTab = 'channels' | 'groups' | 'types'
@@ -74,7 +74,7 @@ export function useChannelConfiguration(options: Options) {
       const payload = { name: typeForm.name, code: typeForm.code, ...(config ? { config } : {}) }
       if (editingType.value) await apiPut(`/channel-types/${editingType.value.id}`, payload)
       else await apiPost('/channel-types', payload)
-      ElMessage.success(editingType.value ? '渠道类型已更新' : '渠道类型已添加')
+      showSuccess(editingType.value ? '渠道类型已更新' : '渠道类型已添加')
       typeDrawerOpen.value = false
       await options.loadChannelTypes()
     } catch (error) {
@@ -89,7 +89,7 @@ export function useChannelConfiguration(options: Options) {
     try {
       await apiPut(`/channel-types/${item.id}/status`, { status: enabled ? 1 : 0 })
       item.status = enabled ? 1 : 0
-      ElMessage.success(enabled ? '渠道类型已启用' : '渠道类型已停用')
+      showSuccess(enabled ? '渠道类型已启用' : '渠道类型已停用')
     } catch (error) {
       showError(error, '更新渠道类型状态失败')
     } finally {
@@ -101,7 +101,7 @@ export function useChannelConfiguration(options: Options) {
     try {
       await ElMessageBox.confirm(`删除渠道类型“${item.name}”？`, '删除渠道类型', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
       await apiDelete(`/channel-types/${item.id}`)
-      ElMessage.success('渠道类型已删除')
+      showSuccess('渠道类型已删除')
       options.tabLoaded.channels = false
       await options.loadChannelTypes()
     } catch (error) {
@@ -133,7 +133,7 @@ export function useChannelConfiguration(options: Options) {
       const payload = { ...groupForm }
       if (editingGroup.value) await apiPut(`/channel-groups/${editingGroup.value.id}`, payload)
       else await apiPost('/channel-groups', payload)
-      ElMessage.success(editingGroup.value ? '渠道分组已更新' : '渠道分组已添加')
+      showSuccess(editingGroup.value ? '渠道分组已更新' : '渠道分组已添加')
       groupDrawerOpen.value = false
       options.tabLoaded.channels = false
       await options.loadChannelGroups()
@@ -148,7 +148,7 @@ export function useChannelConfiguration(options: Options) {
     try {
       await ElMessageBox.confirm(`删除渠道分组“${item.name}”？`, '删除渠道分组', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
       await apiDelete(`/channel-groups/${item.id}`)
-      ElMessage.success('渠道分组已删除')
+      showSuccess('渠道分组已删除')
       await options.loadChannelGroups()
     } catch (error) {
       if (error !== 'cancel') showError(error, '删除渠道分组失败')

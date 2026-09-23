@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { CircleDollarSign, Pencil, RefreshCw, ShieldCheck, Trash2, UserRound, UsersRound } from '@lucide/vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPut } from '../api/client'
 import type { AccountProfile, ManagedUser, ChannelGroup } from '../api/types'
-import { showError } from '../lib/error'
+import { showError, showSuccess } from '../lib/error'
 import { formatCost, formatNumber, formatTime } from '../lib/format'
 import { useAuthStore } from '../stores/auth'
 import TableActionButton from '../components/TableActionButton.vue'
@@ -41,7 +41,7 @@ async function saveBalance() {
   saving.value = true
   try {
     await apiPut<AccountProfile>(`/users/${selected.value.id}/balance`, { balance: form.balance })
-    ElMessage.success('用户余额已更新')
+    showSuccess('用户余额已更新')
     balanceDialog.value = false
     await load()
   } catch (error) { showError(error, '更新用户余额失败') } finally { saving.value = false }
@@ -51,7 +51,7 @@ async function remove(user: ManagedUser) {
   try {
     await ElMessageBox.confirm(`删除"${user.nickname}"后将永久清理其用量记录、API 密钥及授权策略，无法恢复。`, '删除用户', { type: 'warning', confirmButtonText: '删除用户', cancelButtonText: '取消' })
     await apiDelete<Record<string, never>>(`/users/${user.id}`)
-    ElMessage.success('用户及关联数据已删除')
+    showSuccess('用户及关联数据已删除')
     await load()
   } catch (error) { if (error !== 'cancel') showError(error, '删除用户失败') }
 }
@@ -71,7 +71,7 @@ async function saveGroups() {
   saving.value = true
   try {
     await apiPut<Record<string, never>>(`/users/${selected.value.id}/channel-groups`, { channelGroupIds: selectedGroupIDs.value })
-    ElMessage.success('用户渠道分组已更新')
+    showSuccess('用户渠道分组已更新')
     groupDialog.value = false
     await load()
   } catch (error) { showError(error, '保存用户渠道分组失败') } finally { saving.value = false }

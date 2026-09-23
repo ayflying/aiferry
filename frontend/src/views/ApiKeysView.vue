@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Copy, Eye, EyeOff, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from '@lucide/vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { APIKey, CreatedAPIKey, PublicModel } from '../api/types'
-import { showError } from '../lib/error'
+import { showError, showSuccess } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
 import { copyText } from '../lib/clipboard'
@@ -65,11 +65,11 @@ async function save() {
   try {
     if (editing.value) {
       await apiPut(`/api-keys/${editing.value.id}`, { ...form, expiresAt: form.expiresAt?.toISOString() })
-      ElMessage.success('访问密钥已更新')
+      showSuccess('访问密钥已更新')
       dialogOpen.value = false
     } else {
       created.value = await apiPost<CreatedAPIKey>('/api-keys', { ...form, expiresAt: form.expiresAt?.toISOString() })
-      ElMessage.success('访问密钥已创建')
+      showSuccess('访问密钥已创建')
     }
     await load()
   } catch (error) { showError(error, '保存访问密钥失败') } finally { saving.value = false }
@@ -79,7 +79,7 @@ async function copyCreatedKey() {
   if (!created.value) return
   try {
     await copyText(created.value.key)
-    ElMessage.success('密钥已复制')
+    showSuccess('密钥已复制')
   } catch (error) { showError(error, '复制密钥失败') }
 }
 
@@ -100,7 +100,7 @@ async function copyListKey(item: APIKey) {
   secretLoading[item.id] = true
   try {
     await copyText(await getSecret(item))
-    ElMessage.success('完整密钥已复制')
+    showSuccess('完整密钥已复制')
   } catch (error) { showError(error, '复制完整密钥失败') } finally { secretLoading[item.id] = false }
 }
 
@@ -120,7 +120,7 @@ async function remove(item: APIKey) {
   try {
     await ElMessageBox.confirm(`删除访问密钥“${item.name}”？`, '删除密钥', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
     await apiDelete(`/api-keys/${item.id}`)
-    ElMessage.success('访问密钥已删除')
+    showSuccess('访问密钥已删除')
     await load()
   } catch (error) { if (error !== 'cancel') showError(error, '删除访问密钥失败') }
 }

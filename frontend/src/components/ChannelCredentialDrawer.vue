@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { CircleAlert, Coins, Copy, Eye, EyeOff, Gauge, KeyRound, Plus, Settings2, Trash2 } from '@lucide/vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { Channel, ChannelCostResult, ChannelCredential, CostSummary, CredentialRevealStatus } from '../api/types'
 import { mergeCostSummaries } from '../lib/cost'
-import { showError } from '../lib/error'
+import { showError, showSuccess, showWarning } from '../lib/error'
 import { copyText } from '../lib/clipboard'
 import { formatBalance, formatCost, formatTime, formatNumber } from '../lib/format'
 import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
@@ -97,7 +97,7 @@ async function addCredential() {
     await apiPost(`/channels/${props.channel.id}/credentials`, payload)
     credentialValue.value = ''
     credentialManagementValue.value = ''
-    ElMessage.success('上游密钥已追加')
+    showSuccess('上游密钥已追加')
     await load(true)
     emit('changed')
   } catch (error) {
@@ -148,7 +148,7 @@ async function saveManagementKey(item: ChannelCredential, value: string) {
   try {
     await apiPut(`/channels/${props.channel.id}/credentials/${item.id}/management-key`, { managementKey: value })
     item.hasManagementKey = value !== ''
-    ElMessage.success(value ? '管理密钥已保存' : '管理密钥已清除，回退渠道级')
+    showSuccess(value ? '管理密钥已保存' : '管理密钥已清除，回退渠道级')
   } catch (error) {
     showError(error, '保存管理密钥失败')
   }
@@ -166,7 +166,7 @@ async function saveManagementKeyPair() {
     return
   }
   if (!accessKey || !secretKey) {
-    ElMessage.warning('Access Key 和 Secret Key 需要都填写')
+    showWarning('Access Key 和 Secret Key 需要都填写')
     return
   }
   mgmtSaving.value = true
@@ -187,7 +187,7 @@ async function setStatus(item: ChannelCredential, enabled: boolean) {
       item.autoDisabled = false
       item.autoDisabledReason = ''
     }
-    ElMessage.success(enabled ? '上游密钥已启用' : '上游密钥已停用')
+    showSuccess(enabled ? '上游密钥已启用' : '上游密钥已停用')
     emit('changed')
   } catch (error) {
     showError(error, '更新上游密钥状态失败')
@@ -201,7 +201,7 @@ async function remove(item: ChannelCredential) {
       type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
     })
     await apiDelete(`/channels/${props.channel.id}/credentials/${item.id}`)
-    ElMessage.success('上游密钥已删除')
+    showSuccess('上游密钥已删除')
     await load(true)
     emit('changed')
   } catch (error) {
@@ -218,7 +218,7 @@ async function queryCosts() {
     summaries.value = result.summaries || []
     const failures = queryDetails.value.filter((item) => item.error).length
     const valueLabel = channelQueryValueLabel(props.channel?.costQueryType, props.channel?.costQueryMode)
-    ElMessage.success(failures ? `${valueLabel}查询完成，${failures} 个密钥失败` : `${valueLabel}查询完成`)
+    showSuccess(failures ? `${valueLabel}查询完成，${failures} 个密钥失败` : `${valueLabel}查询完成`)
     await load(false)
     emit('changed')
   } catch (error) {
@@ -289,7 +289,7 @@ async function copyRevealed(item: ChannelCredential) {
   if (!key) return
   try {
     await copyText(key)
-    ElMessage.success('完整密钥已复制')
+    showSuccess('完整密钥已复制')
   } catch (error) {
     showError(error, '复制完整密钥失败')
   }
@@ -300,7 +300,7 @@ async function sendRevealCode() {
   sendingCode.value = true
   try {
     revealStatus.value = await apiPost<CredentialRevealStatus>('/credential-reveal/code')
-    ElMessage.success('验证码已发送，请查收邮箱')
+    showSuccess('验证码已发送，请查收邮箱')
     startCodeCountdown(60)
   } catch (error) {
     showError(error, '发送验证码失败')
@@ -312,7 +312,7 @@ async function sendRevealCode() {
 async function verifyRevealCode() {
   const code = revealCode.value.trim()
   if (!/^\d{6}$/.test(code)) {
-    ElMessage.warning('请输入 6 位验证码')
+    showWarning('请输入 6 位验证码')
     return
   }
   verifyingCode.value = true
@@ -320,7 +320,7 @@ async function verifyRevealCode() {
     revealStatus.value = await apiPost<CredentialRevealStatus>('/credential-reveal/verify', { code })
     revealDialogVisible.value = false
     revealCode.value = ''
-    ElMessage.success('验证通过，10 分钟内可反复查看密钥')
+    showSuccess('验证通过，10 分钟内可反复查看密钥')
     const item = rows.value.find((row) => row.id === pendingRevealId)
     pendingRevealId = null
     if (item) await revealSecret(item)
