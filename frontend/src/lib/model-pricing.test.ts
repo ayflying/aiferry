@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { configuredTokenPriceItems, createPriceRuleDraft, describePriceRuleConditions, describePriceRuleTime, formatModelPrice, modelBillingModeLabel, priceRuleTimeIsRestricted, priceRuleToDraft } from './model-pricing'
+import { configuredTokenPriceItems, createPriceRuleDraft, describePriceRuleConditions, describePriceRuleRates, describePriceRuleTier, describePriceRuleTime, formatModelPrice, modelBillingModeLabel, priceRuleTimeIsRestricted, priceRuleToDraft } from './model-pricing'
 import type { PriceRule } from '../api/types'
 
 describe('model pricing display', () => {
@@ -77,6 +77,24 @@ describe('price rule time description', () => {
 
   it('creates an unrestricted draft with no conditions or rates', () => {
     expect(createPriceRuleDraft()).toEqual({ name: '', priority: 100, currency: 'USD', conditions: {}, rates: {} })
+  })
+})
+
+describe('高级规则的可读档位与价格', () => {
+  const base: PriceRule = { id: 1, channelModelId: 1, name: '官方价格', source: 'sync', sourceRef: '', priority: 0, currency: 'USD', conditions: { inputTokensAtMost: 272000 }, rates: { inputPerMillion: 2, outputPerMillion: 8, cachedInputPerMillion: 0.2 }, status: 1, updatedAt: '' }
+  const peak: PriceRule = { ...base, id: 2, conditions: { inputTokensAtMost: 272000, time: { ranges: [['09:00', '18:00']] } }, rates: { inputPerMillion: 4, outputPerMillion: 16 } }
+
+  it('显示两个长度档与高峰、其他时段，不把兜底说成全天同价', () => {
+    expect(describePriceRuleTier(base, [base, peak])).toBe('输入 ≤ 272,000 Token · 其他时段（高峰规则优先）')
+    expect(describePriceRuleTier(peak, [base, peak])).toBe('输入 ≤ 272,000 Token · 每天 09:00–18:00')
+    const long = { ...base, id: 3, conditions: { inputTokensAtLeast: 272001 } }
+    expect(describePriceRuleTier(long, [base, peak, long])).toBe('输入 ≥ 272,001 Token · 不限时段')
+    expect(describePriceRuleTier({ ...long, conditions: { inputTokensAtLeast: 100, inputTokensAtMost: 200 } }, [])).toBe('输入 100–200 Token · 不限时段')
+  })
+
+  it('按货币与计价单位展示已配置价格，保留零价、不展示未配置字段', () => {
+    expect(describePriceRuleRates(base)).toEqual(['输入 $2 / 1M Token', '输出 $8 / 1M Token', '缓存读取 $0.2 / 1M Token'])
+    expect(describePriceRuleRates({ ...base, currency: 'CNY', rates: { request: 0 } })).toEqual(['每请求 ¥0 / 请求'])
   })
 })
 

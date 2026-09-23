@@ -87,6 +87,42 @@ export function describePriceRuleTime(conditions?: Record<string, unknown> | nul
   return describeTimeWindow(time)
 }
 
+// 上游同步的上下文阶梯与峰谷时段相乘，列表须分别说明两种条件，
+// 不可把无 time 条件的兜底分支误写成“全天同价”。
+export function describePriceRuleTier(rule: PriceRule, allRules: PriceRule[]): string {
+  const conditions = rule.conditions ?? {}
+  const minimum = conditions['inputTokensAtLeast']
+  const maximum = conditions['inputTokensAtMost']
+  const hasMin = typeof minimum === 'number' && Number.isFinite(minimum)
+  const hasMax = typeof maximum === 'number' && Number.isFinite(maximum)
+  const length = hasMin && hasMax
+    ? `输入 ${formatModelPrice(minimum)}–${formatModelPrice(maximum)} Token`
+    : hasMin ? `输入 ≥ ${formatModelPrice(minimum)} Token`
+      : hasMax ? `输入 ≤ ${formatModelPrice(maximum)} Token` : '不限输入长度'
+  const time = describePriceRuleTime(conditions)
+  const hasPeakSibling = !priceRuleTimeIsRestricted(conditions) && allRules.some((other) =>
+    other.id !== rule.id && other.status === 1 && priceRuleTimeIsRestricted(other.conditions)
+    && other.conditions?.['inputTokensAtLeast'] === minimum
+    && other.conditions?.['inputTokensAtMost'] === maximum,
+  )
+  return `${length} · ${hasPeakSibling ? '其他时段（高峰规则优先）' : time}`
+}
+
+const priceRuleRateFields = [
+  ['inputPerMillion', '输入'], ['outputPerMillion', '输出'],
+  ['cachedInputPerMillion', '缓存读取'], ['cacheWritePerMillion', '缓存写入'],
+  ['imageInputPerMillion', '图像输入'], ['audioInputPerMillion', '音频输入'],
+  ['audioOutputPerMillion', '音频输出'], ['request', '每请求'],
+] as const
+
+export function describePriceRuleRates(rule: PriceRule): string[] {
+  return priceRuleRateFields.flatMap(([key, label]) => {
+    const value = rule.rates?.[key]
+    if (typeof value !== 'number' || !Number.isFinite(value)) return []
+    return [`${label} ${rule.currency === 'CNY' ? '¥' : rule.currency === 'USD' ? '$' : rule.currency + ' '}${formatModelPrice(value)}${key === 'request' ? ' / 请求' : ' / 1M Token'}`]
+  })
+}
+
 export function describePriceRuleConditions(conditions?: Record<string, unknown> | null): string {
   const endpoint = typeof conditions?.['endpoint'] === 'string' ? conditions['endpoint'].trim() : ''
   const time = describePriceRuleTime(conditions)
