@@ -389,3 +389,10 @@ export interface ChannelInput {
   advancedConfig: ChannelAdvancedConfig
   groupIds: number[]
 }
+
+// 代理连通性测试结果：业务失败（代理不通）也走 ok=false 回传，不是接口错误。
+export interface ProxyTestResult {
+  ok: boolean
+  latencyMs: number
+  message: string
+}

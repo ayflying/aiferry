@@ -67,6 +67,10 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.PUT("/channels/{id}", c.updateChannel)
 	group.PUT("/channels/{id}/status", c.updateChannelStatus)
 	group.DELETE("/channels/{id}", c.deleteChannel)
+	// 编辑回显代理明文（列表只给 hasProxy，不明文）；测试地址来自表单当前值，
+	// 可测未保存的新地址，路由不挂 {id} 以免与 /channels/{id}/... 静态段歧义。
+	group.GET("/channels/{id}/proxy", c.revealChannelProxy)
+	group.POST("/proxy/test", c.testChannelProxy)
 	c.registerChannelCredentialRoutes(group)
 	group.GET("/channel-types", c.listChannelTypes)
 	group.GET("/channel-types/default-config", c.defaultChannelTypeConfig)
@@ -131,6 +135,23 @@ func (c *Controller) updateChannelStatus(r *ghttp.Request) {
 
 func (c *Controller) deleteChannel(r *ghttp.Request) {
 	respond(r, map[string]any{}, c.channels.Delete(r.Context(), routeID(r)))
+}
+
+// revealChannelProxy 返回渠道代理地址明文供编辑回显；无代理时为空串。
+// 响应不缓存，明文只走这一次下发。
+func (c *Controller) revealChannelProxy(r *ghttp.Request) {
+	r.Response.Header().Set("Cache-Control", "no-store")
+	proxyURL, err := c.channels.RevealProxyURL(r.Context(), routeID(r))
+	respond(r, map[string]string{"proxyUrl": proxyURL}, err)
+}
+
+// testChannelProxy 探测表单当前代理地址是否可用；业务失败经 ok=false 回传。
+func (c *Controller) testChannelProxy(r *ghttp.Request) {
+	var input adminapi.ProxyTestInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, c.channels.TestProxy(r.Context(), input.ProxyURL), nil)
 }
 
 func (c *Controller) discoverModels(r *ghttp.Request) {

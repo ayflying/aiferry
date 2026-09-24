@@ -3,8 +3,8 @@ import { computed } from 'vue'
 import { SlidersHorizontal } from '@lucide/vue'
 import type { ChannelAdvancedConfig } from '../api/types'
 
-defineProps<{ hasProxy: boolean; editing: boolean }>()
-const emit = defineEmits<{ clearProxy: [] }>()
+defineProps<{ testingProxy: boolean }>()
+const emit = defineEmits<{ testProxy: [] }>()
 const config = defineModel<ChannelAdvancedConfig>('config', { required: true })
 const proxyUrl = defineModel<string | undefined>('proxyUrl')
 
@@ -83,9 +83,12 @@ const promptCacheMode = computed({
     </div>
 
     <div class="proxy-field">
-      <div class="field-label"><strong>代理地址</strong><el-button v-if="editing && hasProxy" text size="small" @click="emit('clearProxy')">清除已保存代理</el-button></div>
-      <el-input v-model="proxyUrl" clearable :placeholder="editing && hasProxy ? '已配置（不回显）；留空保持原值，输入新值覆盖，清空保存即删除' : 'http://user:pass@host:port'" autocomplete="off" spellcheck="false" />
-	      <span>此渠道的网络代理，支持 HTTP/HTTPS 和 SOCKS5，例如 http:// 或 socks5://。</span>
+      <div class="field-label">
+        <strong>代理地址</strong>
+        <el-button size="small" :loading="testingProxy" :disabled="!(proxyUrl && proxyUrl.trim())" @click="emit('testProxy')">测试代理</el-button>
+      </div>
+      <el-input v-model="proxyUrl" clearable placeholder="http://user:pass@host:port" autocomplete="off" spellcheck="false" />
+      <span>此渠道的网络代理，支持 HTTP/HTTPS 和 SOCKS5；留空表示不使用代理，保存时清空即删除已保存的代理</span>
     </div>
 
     <div class="prompt-field">

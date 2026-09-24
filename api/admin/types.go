@@ -47,6 +47,12 @@ type ChannelStatusInput struct {
 	Status int `json:"status" v:"in:0,1"`
 }
 
+// ProxyTestInput 测试渠道代理连通性的请求体；地址来自编辑表单当前值，
+// 可以是尚未保存的新地址。
+type ProxyTestInput struct {
+	ProxyURL string `json:"proxyUrl" v:"required#请输入代理地址"`
+}
+
 type ChannelGroupInput struct {
 	Name        string   `json:"name" v:"required|length:1,96"`
 	Code        string   `json:"code" v:"required|length:2,64"`

@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { Channel, ChannelCostResult, ChannelCredential, ChannelInput, ChannelModel, ChannelQuotaResult, DiscoveredModel, TimeWindow } from '../api/types'
+import type { Channel, ChannelCostResult, ChannelCredential, ChannelInput, ChannelModel, ChannelQuotaResult, DiscoveredModel, ProxyTestResult, TimeWindow } from '../api/types'
 import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
 import ChannelGroupListPanel from '../components/ChannelGroupListPanel.vue'
@@ -76,7 +76,6 @@ const drawerSize = window.innerWidth <= 600 ? '94%' : '620px'
 const typeDrawerSize = window.innerWidth <= 600 ? '94%' : '680px'
 const form = reactive<ChannelInput>(createEmptyChannelInput())
 const title = computed(() => editingId.value ? '编辑渠道' : '添加渠道')
-const editingChannel = computed(() => store.channels.find((item) => item.id === editingId.value))
 const activeTypes = computed(() => store.channelTypes.filter((item) => item.status === 1 || item.code === form.type))
 const selectedChannelType = computed(() => store.channelTypes.find((item) => item.code === form.type))
 // 组织 ID / 项目 ID 只对 OpenAI 官方渠道有意义（注入 OpenAI-Organization /
@@ -200,6 +199,8 @@ async function openEdit(channel: Channel) {
     baseUrl: channel.baseUrl,
     apiKey: '',
     managementKey: undefined,
+    // 代理明文列表接口不回传，打开编辑后单独拉取；拉取失败保持 undefined，
+    // 保存时不会带上该字段（后端视为「保持原值」），避免误删已存代理。
     proxyUrl: undefined,
     organizationId: channel.organizationId,
     projectId: channel.projectId,
@@ -212,6 +213,7 @@ async function openEdit(channel: Channel) {
     groupIds: channel.groupIds || [],
   })
   drawerOpen.value = true
+  if (channel.hasProxy) void loadProxyUrl(channel.id)
   void loadHealthCheckModels(channel.id)
   await loadChannelFormOptions()
 }
@@ -225,8 +227,30 @@ async function loadHealthCheckModels(channelID: number) {
   }
 }
 
-function clearProxy() {
-  form.proxyUrl = ''
+async function loadProxyUrl(channelID: number) {
+  try {
+    const data = await apiGet<{ proxyUrl: string }>(`/channels/${channelID}/proxy`)
+    if (editingId.value === channelID) form.proxyUrl = data.proxyUrl
+  } catch (error) {
+    showError(error, '读取代理地址失败')
+  }
+}
+
+const testingProxy = ref(false)
+
+async function testProxy() {
+  const proxyURL = (form.proxyUrl || '').trim()
+  if (!proxyURL) return
+  testingProxy.value = true
+  try {
+    const result = await apiPost<ProxyTestResult>('/proxy/test', { proxyUrl: proxyURL })
+    if (result.ok) showSuccess(`${result.message}，耗时 ${result.latencyMs} ms`, '代理测试通过')
+    else showError(result.message, '代理测试失败')
+  } catch (error) {
+    showError(error, '代理测试失败')
+  } finally {
+    testingProxy.value = false
+  }
 }
 
 async function save() {
@@ -515,7 +539,7 @@ watch(activeTab, (tab) => {
     <ChannelQuotaDialog v-model="quotaOpen" :channel-name="quotaTitle" :loading="quotaLoading" :error="quotaError" :result="quotaResult" @refresh="quotaChannel && queryQuota(quotaChannel, true, quotaCredential)" />
     <ChannelCredentialDrawer v-model="credentialsOpen" :channel="credentialChannel" :quota-supported="credentialChannel?.quotaSupported" :management-key-supported="credentialUsesManagementKey" :management-key-pair="credentialManagementKeyPair" @changed="loadChannels" @query-quota="onCredentialQuota" />
 
-    <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form v-loading="channelFormLoading" label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型" @change="applyDefaultBaseURL"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" :placeholder="selectedChannelType?.config.baseUrl || 'https://api.openai.com/v1'" /></el-form-item><el-form-item v-if="!editingId" label="首个推理密钥（可选）"><el-input v-model="form.apiKey" type="password" show-password placeholder="sk-... 或上游密钥；本地服务（如 Ollama）可留空" autocomplete="new-password" /></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><ChannelRouteCoverageSettings v-model:priority="form.priority" v-model:weight="form.weight" v-model:backup-base-urls="form.advancedConfig.backupBaseUrls" v-model:health-check-model-id="form.healthCheckModelId" v-model:auto-disable-enabled="form.autoDisableEnabled" :editing="Boolean(editingId)" :models="healthCheckModelOptions" /><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :editing="Boolean(editingId)" :has-proxy="editingChannel?.hasProxy === true" @clear-proxy="clearProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
+    <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form v-loading="channelFormLoading" label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型" @change="applyDefaultBaseURL"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" :placeholder="selectedChannelType?.config.baseUrl || 'https://api.openai.com/v1'" /></el-form-item><el-form-item v-if="!editingId" label="首个推理密钥（可选）"><el-input v-model="form.apiKey" type="password" show-password placeholder="sk-... 或上游密钥；本地服务（如 Ollama）可留空" autocomplete="new-password" /></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><ChannelRouteCoverageSettings v-model:priority="form.priority" v-model:weight="form.weight" v-model:backup-base-urls="form.advancedConfig.backupBaseUrls" v-model:health-check-model-id="form.healthCheckModelId" v-model:auto-disable-enabled="form.autoDisableEnabled" :editing="Boolean(editingId)" :models="healthCheckModelOptions" /><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :testing-proxy="testingProxy" @test-proxy="testProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
 
     <el-drawer v-model="groupDrawerOpen" :title="editingGroup ? '编辑渠道分组' : '添加渠道分组'" :size="drawerSize"><el-form v-loading="groupFormLoading" label-position="top"><div class="form-grid"><el-form-item label="分组名称"><el-input v-model="groupForm.name" placeholder="例如 高优先级" /></el-form-item><el-form-item label="分组代码"><el-input v-model="groupForm.code" :disabled="Boolean(editingGroup)" placeholder="例如 premium" /></el-form-item><el-form-item label="状态"><el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="说明"><el-input v-model="groupForm.description" maxlength="255" show-word-limit /></el-form-item><el-form-item label="包含渠道"><el-select v-model="groupForm.channelIds" multiple filterable clearable placeholder="选择渠道"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="groupDrawerOpen = false">取消</el-button><el-button type="primary" :loading="groupSaving" @click="saveGroup">保存分组</el-button></template></el-drawer>
 
