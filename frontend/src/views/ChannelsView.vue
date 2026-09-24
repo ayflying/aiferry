@@ -239,13 +239,28 @@ async function loadProxyUrl(channelID: number) {
 const testingProxy = ref(false)
 
 async function testProxy() {
-  const proxyURL = (form.proxyUrl || '').trim()
-  if (!proxyURL) return
+  // 多行配置逐行探测：一条一行结果，全部通过走成功弹框，有失败列出
+  // 具体行号与原因，方便对照「哪个代理挂了」。
+  const lines = (form.proxyUrl || '').split('\n').map((line) => line.trim()).filter(Boolean)
+  if (!lines.length) return
   testingProxy.value = true
   try {
-    const result = await apiPost<ProxyTestResult>('/proxy/test', { proxyUrl: proxyURL })
-    if (result.ok) showSuccess(`${result.message}，耗时 ${result.latencyMs} ms`, '代理测试通过')
-    else showError(result.message, '代理测试失败')
+    const results: { line: number; proxyURL: string; result: ProxyTestResult }[] = []
+    for (const [index, proxyURL] of lines.entries()) {
+      const result = await apiPost<ProxyTestResult>('/proxy/test', { proxyUrl: proxyURL })
+      results.push({ line: index + 1, proxyURL, result })
+    }
+    const failed = results.filter((item) => !item.result.ok)
+    if (!failed.length) {
+      const detail = results.map((item) => `第 ${item.line} 行 ${item.result.latencyMs} ms`).join('，')
+      showSuccess(`${results.length} 个代理全部可用：${detail}`, '代理测试通过')
+      return
+    }
+    const detail = failed
+      .map((item) => `第 ${item.line} 行（${item.proxyURL}）：${item.result.message}`)
+      .join('\n')
+    const passed = results.length - failed.length
+    showError(`${failed.length} 个代理不可用${passed ? `，${passed} 个可用` : ''}：\n${detail}`, '代理测试失败')
   } catch (error) {
     showError(error, '代理测试失败')
   } finally {

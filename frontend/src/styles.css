@@ -172,6 +172,9 @@ button { color: inherit; }
 .el-input__wrapper, .el-select__wrapper, .el-textarea__inner, .el-date-editor { border-radius: 5px !important; }
 .el-drawer__header { margin-bottom: 0; padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .el-dialog { border-radius: 7px; }
+/* 居中阻塞弹框（lib/error.ts）消息区保留 \n 换行：多行失败明细要按行展示，
+   pre-line 仍会对超长单行正常折行，不影响既有单行文案。 */
+.el-message-box .el-message-box__message { white-space: pre-line; }
 .el-tag { border-radius: 4px; }
 .el-table th.el-table__cell { color: #46515d; font-size: 12px; font-weight: 650; }
 .el-table .cell { font-size: 12px; }

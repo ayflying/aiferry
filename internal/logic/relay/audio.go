@@ -361,14 +361,9 @@ func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseW
 		return attemptResult{errorMessage: err.Error()}, false
 	}
 	req.Header.Set("Content-Type", contentType)
-	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
-	if candidate.DirectHTTP {
-		client = s.app.HTTPDirect
-	}
-	if err != nil {
-		return attemptResult{errorMessage: err.Error()}, false
-	}
-	resp, err := client.Do(req)
+	resp, err := s.doViaProxy(ctx, req, candidate, func(client *http.Client) (*http.Response, error) {
+		return client.Do(req)
+	})
 	result := attemptResult{upstreamEndpoint: upstreamPath}
 	result.latency = time.Since(startedAt)
 	if err != nil {

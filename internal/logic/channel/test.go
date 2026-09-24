@@ -219,7 +219,9 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 		BaseURL:      baseURL,
 	})
 	startedAt := time.Now()
-	client, clientErr := s.HTTPClientForProxy(channel.ProxyUrlCipher)
+	// 模型测试走该密钥固定序号配对的代理（不顺延）：如实反映这把密钥的真实
+	// 出口，配对代理不通时测试失败，配合「测试代理」按钮定位是哪条挂了。
+	client, clientErr := s.HTTPClientForCredential(ctx, channel.ProxyUrlCipher, channel.Id, credential.ID)
 	if clientErr != nil {
 		return TestResult{}, path, usage.TokenUsage{}, clientErr
 	}

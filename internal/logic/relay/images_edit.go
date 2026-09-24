@@ -173,15 +173,10 @@ func (s *sRelay) attemptImagesEditUpstream(ctx context.Context, writer http.Resp
 		return attemptResult{errorMessage: err.Error()}, false
 	}
 	req.Header.Set("Content-Type", contentType)
-	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
-	if candidate.DirectHTTP {
-		client = s.app.HTTPDirect
-	}
-	if err != nil {
-		return attemptResult{errorMessage: err.Error()}, false
-	}
 	result := attemptResult{upstreamEndpoint: upstreamPath}
-	resp, err := client.Do(req)
+	resp, err := s.doViaProxy(ctx, req, candidate, func(client *http.Client) (*http.Response, error) {
+		return client.Do(req)
+	})
 	result.latency = time.Since(startedAt)
 	if err != nil {
 		result.errorMessage = gerror.Wrap(err, "call images/edits upstream").Error()

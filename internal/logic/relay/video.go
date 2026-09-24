@@ -428,14 +428,9 @@ func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, i
 	if method == http.MethodPost && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
-	if candidate.DirectHTTP {
-		client = s.app.HTTPDirect
-	}
-	if err != nil {
-		return videoUpstreamResult{err: err}
-	}
-	resp, err := client.Do(req)
+	resp, err := s.doViaProxy(ctx, req, candidate, func(client *http.Client) (*http.Response, error) {
+		return client.Do(req)
+	})
 	if err != nil {
 		return videoUpstreamResult{err: gerror.Wrap(err, "call video upstream")}
 	}

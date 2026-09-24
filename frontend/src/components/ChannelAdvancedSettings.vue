@@ -87,8 +87,8 @@ const promptCacheMode = computed({
         <strong>代理地址</strong>
         <el-button size="small" :loading="testingProxy" :disabled="!(proxyUrl && proxyUrl.trim())" @click="emit('testProxy')">测试代理</el-button>
       </div>
-      <el-input v-model="proxyUrl" clearable placeholder="http://user:pass@host:port" autocomplete="off" spellcheck="false" />
-      <span>此渠道的网络代理，支持 HTTP/HTTPS 和 SOCKS5；留空表示不使用代理，保存时清空即删除已保存的代理</span>
+      <el-input v-model="proxyUrl" type="textarea" :rows="3" clearable placeholder="每行一个代理地址，例如 http://user:pass@host:port" autocomplete="off" spellcheck="false" />
+      <span>支持多行，每行一个代理（HTTP/HTTPS / SOCKS5），按行序与渠道密钥取模固定配对（2 个代理、5 把密钥即 1-1、2-2、3-1、4-2、5-1）；某代理失败时仅对应密钥顺延到下一个，其它密钥不变。留空表示不使用代理，保存时清空即删除</span>
     </div>
 
     <div class="prompt-field">

@@ -162,17 +162,16 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	}
 	// OpenCode Go 等上游要求稳定的会话标识头，缺失时直接 400。
 	applyOpencodeGoHeaders(req.Header, incomingHeaders, candidate, userID)
-	client, err := s.channels.HTTPClientForProxy(candidate.ProxyURLCipher)
-	if err != nil {
-		return attemptResult{}, false, err
-	}
+	// 代理按密钥固定序号模运算配对；代理层失败仅本密钥顺延下一个（不随机、
+	// 不影响其它密钥的映射），详见 relay.doViaProxy / channel.DoViaProxies。
 	requestStartedAt := time.Now()
 	var resp *http.Response
-	if stream {
-		resp, err = doStreamRequest(ctx, client, req, time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second)
-	} else {
-		resp, err = client.Do(req)
-	}
+	resp, err = s.doViaProxy(ctx, req, candidate, func(client *http.Client) (*http.Response, error) {
+		if stream {
+			return doStreamRequest(ctx, client, req, time.Duration(settings.StreamFirstByteTimeoutSeconds)*time.Second)
+		}
+		return client.Do(req)
+	})
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "call upstream")
 	}
