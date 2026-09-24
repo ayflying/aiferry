@@ -9,7 +9,9 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/auth"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
+	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -131,6 +133,11 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 	if err != nil {
 		return 0, err
 	}
+	// 渠道归属：创建时记录当前登录用户，后续「未分组仅创建者可用 / 自有渠道只统计不实扣」都依赖它。
+	createdBy := usage.SystemUserID
+	if current, ok := auth.CurrentUser(ctx); ok {
+		createdBy = current.Id
+	}
 	data := do.Channels{
 		Name:               strings.TrimSpace(input.Name),
 		Type:               typeRow.Code,
@@ -145,6 +152,7 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 		CostQueryMode:      typeConfig.Costs.Adapter,
 		CostQueryConfig:    "{}",
 		AdvancedConfig:     advancedConfig,
+		CreatedByUserId:    createdBy,
 	}
 	if input.ManagementKey != nil && strings.TrimSpace(*input.ManagementKey) != "" {
 		data.ManagementKeyCipher, err = s.app.Secrets.Encrypt(strings.TrimSpace(*input.ManagementKey))
@@ -294,6 +302,7 @@ func (s *sChannel) toView(row entity.Channels) View {
 		LastTestLatencyMs:  row.LastTestLatencyMs,
 		LastTestError:      row.LastTestError,
 		CreatedAt:          row.CreatedAt,
+		CreatedByUserId:    row.CreatedByUserId,
 	}
 	if !row.AutoDisabledAt.IsZero() {
 		value := row.AutoDisabledAt

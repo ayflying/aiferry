@@ -74,7 +74,8 @@ func (s *sRelay) HandleImagesEdit(ctx context.Context, incomingHeaders http.Head
 		g.Log().Warningf(ctx, "relay %s: no available channel for model %s (images/edits; model auto-disabled, channel inactive, or group policy filtered)", clientIP, requestedModel)
 		return gerror.Wrapf(ErrNoAvailableChannel, "no available channel for model %s", requestedModel)
 	}
-	if s.requiresBalanceCheck(requestedModel) {
+	// 全部候选都是本人创建的渠道时跳过余额预检：自有渠道只统计、不实扣，余额为 0 也应可调用。
+	if s.requiresBalanceCheck(requestedModel) && !candidatesAllOwnedBy(candidates, key.UserId) {
 		if err = s.users.CheckBalance(ctx, key.UserId); err != nil {
 			return err
 		}

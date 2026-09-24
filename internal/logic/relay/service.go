@@ -75,8 +75,10 @@ type Candidate struct {
 	// HealthScore 是渠道模型健康分快照，参与加权随机排序：分数低于阈值时按比例
 	// 降权，让持续出错的渠道逐步让出流量。用指针区分「分数确实是 0」与「旧路由
 	// 缓存未携带该字段」，nil 表示未知并按不降权处理。
-	HealthScore     *int `json:"healthScore,omitempty"`
-	GroupIDs        []uint64
+	HealthScore *int `json:"healthScore,omitempty"`
+	GroupIDs    []uint64
+	// CreatedByUserID 是渠道创建者；旧缓存缺字段为 0，需强制回源。
+	CreatedByUserID uint64 `json:"createdByUserId,omitempty"`
 	ReasoningEffort string `orm:"-"`
 }
 
@@ -93,22 +95,22 @@ type ModelList struct {
 }
 
 type attemptResult struct {
-	status             int
-	body               []byte
-	tokens             usage.TokenUsage
-	firstTokenMs       *int64
-	errorMessage       string
-	latency            time.Duration
-	headers            http.Header
-	wroteBytes         bool
-	timedOut           bool
-	upstreamEndpoint   string
-	protocolConversion string
-	responseText       string
-	responseModel      string
-	streamCompleted    bool
+	status               int
+	body                 []byte
+	tokens               usage.TokenUsage
+	firstTokenMs         *int64
+	errorMessage         string
+	latency              time.Duration
+	headers              http.Header
+	wroteBytes           bool
+	timedOut             bool
+	upstreamEndpoint     string
+	protocolConversion   string
+	responseText         string
+	responseModel        string
+	streamCompleted      bool
 	responseHasToolCalls bool
-	attemptFlow        []usage.AttemptFlowStep
+	attemptFlow          []usage.AttemptFlowStep
 	// precedingFlow 保存本次尝试在协议回退前的那次上游请求（首跳）。协议回退是网关
 	// 对同一候选发起的第二次真实上游调用，两次都必须出现在调用流程里；只保留最终
 	// 结果会让用户在详情里看到「上游尝试 N 次」却不知道网关换过端点重试并自愈。
@@ -250,7 +252,8 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 		g.Log().Warningf(ctx, "relay %s: no available channel for model %s (model auto-disabled, channel inactive, or group policy filtered)", clientIP, requestedModel)
 		return gerror.Wrapf(ErrNoAvailableChannel, "no available channel for model %s", requestedModel)
 	}
-	if s.requiresBalanceCheck(requestedModel) {
+	// 全部候选都是本人创建的渠道时跳过余额预检：自有渠道只统计、不实扣，余额为 0 也应可调用。
+	if s.requiresBalanceCheck(requestedModel) && !candidatesAllOwnedBy(candidates, key.UserId) {
 		if err = s.users.CheckBalance(ctx, key.UserId); err != nil {
 			return err
 		}

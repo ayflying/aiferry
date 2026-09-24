@@ -46,7 +46,12 @@ func (s *sRelay) record(ctx context.Context, requestID string, key apikey.AuthKe
 					g.Log().Warningf(ctx, "apply channel %d usage cost: %v", candidate.ChannelID, err)
 				}
 			}
-			if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
+			// 自有渠道（创建者=当前密钥用户）：usage_logs 仍记 estimated_cost 供统计，
+			// 但不扣用户余额、不累计密钥消耗，billingDetails.Charged 保持 false。
+			ownChannel := candidate.CreatedByUserID != 0 && candidate.CreatedByUserID == key.UserId
+			if ownChannel {
+				g.Log().Debugf(ctx, "own channel %d usage %s: stats-only, cost=%s", candidate.ChannelID, requestID, cost)
+			} else if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
 				chargeErr = err
 			} else {
 				billingDetails.Charged = true
@@ -63,30 +68,30 @@ func (s *sRelay) record(ctx context.Context, requestID string, key apikey.AuthKe
 	}
 	recordError = detailedFailureLog(result, recordStatus, recordError, stream, attempts, time.Since(startedAt).Milliseconds())
 	if err := s.usage.Record(ctx, usage.RecordInput{
-		RequestID:           requestID,
-		UserID:              key.UserId,
-		APIKeyID:            key.Id,
-		ChannelID:           candidate.ChannelID,
-		ChannelCredentialID: candidate.ChannelCredentialID,
-		Endpoint:            endpoint,
-		UpstreamEndpoint:    upstreamEndpoint,
-		ProtocolConversion:  result.protocolConversion,
-		ClientIP:            clientIP,
-		IPLocation:          s.location(clientIP),
-		RequestedModel:      requestedModel,
-		UpstreamModel:       candidate.UpstreamName,
-		ReasoningEffort:     candidate.ReasoningEffort,
+		RequestID:            requestID,
+		UserID:               key.UserId,
+		APIKeyID:             key.Id,
+		ChannelID:            candidate.ChannelID,
+		ChannelCredentialID:  candidate.ChannelCredentialID,
+		Endpoint:             endpoint,
+		UpstreamEndpoint:     upstreamEndpoint,
+		ProtocolConversion:   result.protocolConversion,
+		ClientIP:             clientIP,
+		IPLocation:           s.location(clientIP),
+		RequestedModel:       requestedModel,
+		UpstreamModel:        candidate.UpstreamName,
+		ReasoningEffort:      candidate.ReasoningEffort,
 		HealthScoreAtRequest: s.modelHealthScoreAtRequest(ctx, candidate),
-		HTTPStatus:          recordStatus,
-		Stream:              stream,
-		Tokens:              result.tokens,
-		EstimatedCost:       cost,
-		BillingDetails:      billingDetails,
-		DurationMs:          time.Since(startedAt).Milliseconds(),
-		FirstTokenMs:        result.firstTokenMs,
-		Attempts:            attempts,
-		AttemptFlow:         result.attemptFlow,
-		ErrorMessage:        recordError,
+		HTTPStatus:           recordStatus,
+		Stream:               stream,
+		Tokens:               result.tokens,
+		EstimatedCost:        cost,
+		BillingDetails:       billingDetails,
+		DurationMs:           time.Since(startedAt).Milliseconds(),
+		FirstTokenMs:         result.firstTokenMs,
+		Attempts:             attempts,
+		AttemptFlow:          result.attemptFlow,
+		ErrorMessage:         recordError,
 	}); err != nil {
 		g.Log().Errorf(ctx, "record usage %s: %v", requestID, err)
 	}

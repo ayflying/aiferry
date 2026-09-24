@@ -22,6 +22,7 @@ type ChannelsDao struct {
 // ChannelsColumns defines and stores column names for the table channels.
 type ChannelsColumns struct {
 	Id                     string //
+	CreatedByUserId        string //
 	Name                   string //
 	Type                   string //
 	BaseUrl                string //
@@ -58,6 +59,7 @@ type ChannelsColumns struct {
 // channelsColumns holds the columns for the table channels.
 var channelsColumns = ChannelsColumns{
 	Id:                     "id",
+	CreatedByUserId:        "created_by_user_id",
 	Name:                   "name",
 	Type:                   "type",
 	BaseUrl:                "base_url",

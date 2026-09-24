@@ -68,6 +68,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 			UpstreamName:        row.UpstreamName,
 			ClosedWindow:        row.ClosedWindowsJson,
 			ConcurrencyLimit:    advancedConfig.ConcurrencyLimit,
+			CreatedByUserID:     channel.CreatedByUserId,
 		})
 	}
 	available := candidates[:0]
@@ -76,7 +77,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 		if groupErr != nil {
 			return nil, groupErr
 		}
-		if !keyAllowsGroupPolicy(key, groupIDs, s.app.Config.IsAdminRole(key.UserRole), key.UserChannelGroupIDs) {
+		if !keyAllowsGroupPolicy(key, candidate.CreatedByUserID, groupIDs, key.UserChannelGroupIDs) {
 			continue
 		}
 		hasCredential, credentialErr := s.channels.HasAvailableCredential(ctx, candidate.ChannelID)
@@ -187,7 +188,7 @@ func activeRouteChannels(ctx context.Context, channelIDs []uint64) (map[uint64]e
 	columns := dao.Channels.Columns()
 	channels := make([]entity.Channels, 0, len(channelIDs))
 	if err := dao.Channels.Ctx(ctx).
-		Fields(columns.Id, columns.Name, columns.Type, columns.BaseUrl, columns.ManagementKeyCipher, columns.OrganizationId, columns.ProjectId, columns.ProxyUrlCipher, columns.AdvancedConfig, columns.Priority, columns.Weight).
+		Fields(columns.Id, columns.Name, columns.Type, columns.BaseUrl, columns.ManagementKeyCipher, columns.OrganizationId, columns.ProjectId, columns.ProxyUrlCipher, columns.AdvancedConfig, columns.Priority, columns.Weight, columns.CreatedByUserId).
 		WhereIn(columns.Id, channelIDs).
 		Where(columns.Status, 1).
 		Scan(&channels); err != nil {
@@ -212,22 +213,22 @@ func keyAllowsModel(key apikey.AuthKey, model string) bool {
 	return len(key.AllowedModels) == 0 || containsString(key.AllowedModels, model)
 }
 func keyAllowsGroups(key apikey.AuthKey, groupIDs []uint64) bool {
-	// 该包装已废弃，改为下面带用户上下文的新版判定；
+	// 该包装已废弃，改为下面带创建者上下文的新版判定；
 	// 保留以兼容既有测试，并始终委托给完整判定。
-	return keyAllowsGroupPolicy(key, groupIDs, false, key.UserChannelGroupIDs)
+	return keyAllowsGroupPolicy(key, 0, groupIDs, key.UserChannelGroupIDs)
 }
 
-// keyAllowsGroupPolicy 按用户维度判定渠道分组访问权限：
-//   - 渠道未配置任何激活分组（groupIDs 为空）视为公共渠道，所有用户可用；
-//   - 管理员可访问全部渠道；
-//   - 渠道已分组时，仅当用户加入了其中至少一个分组才可访问；
+// keyAllowsGroupPolicy 按用户维度判定渠道访问权限：
+//   - 创建者本人始终可使用自己创建的渠道（含未分组渠道）；
+//   - 渠道未配置任何激活分组时，仅创建者可用（不再视为公共渠道）；
+//   - 渠道已分组时，创建者或分组成员可用；管理员不因角色豁免；
 //   - 用户可加入多个分组（userGroupIDs 为多值集合）。
-func keyAllowsGroupPolicy(key apikey.AuthKey, groupIDs []uint64, isAdmin bool, userGroupIDs []uint64) bool {
-	if isAdmin {
+func keyAllowsGroupPolicy(key apikey.AuthKey, createdBy uint64, groupIDs []uint64, userGroupIDs []uint64) bool {
+	if createdBy != 0 && createdBy == key.UserId {
 		return true
 	}
 	if len(groupIDs) == 0 {
-		return true
+		return false
 	}
 	for _, groupID := range groupIDs {
 		for _, allowed := range userGroupIDs {

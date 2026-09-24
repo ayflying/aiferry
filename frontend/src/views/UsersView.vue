@@ -115,7 +115,7 @@ onMounted(load)
     </el-dialog>
 
     <el-dialog v-model="groupDialog" title="用户渠道分组" width="min(480px, 92vw)">
-      <p v-if="selected" class="dialog-hint">为 <strong>{{ selected.nickname }}</strong> 分配渠道分组。用户加入分组后即可使用该分组下的渠道；管理员不受分组限制。</p>
+      <p v-if="selected" class="dialog-hint">为 <strong>{{ selected.nickname }}</strong> 分配渠道分组。用户加入分组后即可使用该分组下的渠道；渠道创建者始终可使用自己创建的渠道（含未分组渠道）。管理员同样受此限制。</p>
       <el-checkbox-group v-model="selectedGroupIDs" class="group-checkboxes">
         <el-checkbox v-for="g in allGroups.filter(g => g.status === 1)" :key="g.id" :value="g.id" :label="g.name" :title="g.description || g.name" />
       </el-checkbox-group>

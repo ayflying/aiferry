@@ -82,6 +82,7 @@ type View struct {
 	LastCostAt             *time.Time     `json:"lastCostAt"`
 	CostSummaries          []CostSummary  `json:"costSummaries"`
 	GroupIDs               []uint64       `json:"groupIds"`
+	CreatedByUserId        uint64         `json:"createdByUserId"`
 	CreatedAt              time.Time      `json:"createdAt"`
 }
 

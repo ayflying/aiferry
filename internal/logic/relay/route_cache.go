@@ -81,7 +81,7 @@ func (s *sRelay) writeRouteCache(ctx context.Context, model string, version int6
 //  3. 数据库路径解析完成后回写缓存，供后续请求（含其他密钥）复用。
 func (s *sRelay) routeCached(ctx context.Context, model string, key apikey.AuthKey) ([]Candidate, error) {
 	version := s.routeCacheVersion(ctx)
-	if candidates, ok := s.readRouteCache(ctx, model, version); ok {
+	if candidates, ok := s.readRouteCache(ctx, model, version); ok && routeCacheCarriesCreator(candidates) {
 		return s.filterCandidatesByKey(ctx, filterClosedCandidates(candidates, time.Now()), key)
 	}
 	candidates, err := s.routeStatic(ctx, model)
@@ -154,13 +154,40 @@ func (s *sRelay) routeStatic(ctx context.Context, model string) ([]Candidate, er
 			ClosedWindow:        row.ClosedWindowsJson,
 			ConcurrencyLimit:    advancedConfig.ConcurrencyLimit,
 			GroupIDs:            groupIDs,
+			CreatedByUserID:     channel.CreatedByUserId,
 		})
 	}
 	return candidates, nil
 }
 
+// routeCacheCarriesCreator 判断缓存候选是否已携带创建者字段。
+// 旧版本缓存反序列化后 CreatedByUserID 全为 0，若直接使用会把未分组渠道
+// 全部挡掉，因此必须强制回源重建一次。
+func routeCacheCarriesCreator(candidates []Candidate) bool {
+	for _, candidate := range candidates {
+		if candidate.CreatedByUserID == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// candidatesAllOwnedBy 判断候选是否全部由 userID 自己创建。
+// 全自有渠道时可跳过余额预检：统计扣费不真实扣金额，余额为 0 也应可调用。
+func candidatesAllOwnedBy(candidates []Candidate, userID uint64) bool {
+	if userID == 0 || len(candidates) == 0 {
+		return false
+	}
+	for _, candidate := range candidates {
+		if candidate.CreatedByUserID == 0 || candidate.CreatedByUserID != userID {
+			return false
+		}
+	}
+	return true
+}
+
 // filterCandidatesByKey 对缓存候选执行密钥相关过滤与动态排序：
-// 分组策略（管理员/用户分组）→ 加权随机排序。凭证冷却在 attemptChannel
+// 创建者/分组策略 → 加权随机排序。凭证冷却在 attemptChannel
 // 阶段由 SelectCredential 的排除逻辑兜底。
 func (s *sRelay) filterCandidatesByKey(ctx context.Context, candidates []Candidate, key apikey.AuthKey) ([]Candidate, error) {
 	var adminRoles []string
@@ -170,21 +197,16 @@ func (s *sRelay) filterCandidatesByKey(ctx context.Context, candidates []Candida
 	return filterCandidates(candidates, key, adminRoles), nil
 }
 
-// filterCandidates 是分组策略过滤 + 加权排序的纯函数实现，便于单测。
+// filterCandidates 是创建者/分组策略过滤 + 加权排序的纯函数实现，便于单测。
+// adminRoles 参数仅为兼容既有签名保留，管理员不再因角色豁免。
 func filterCandidates(candidates []Candidate, key apikey.AuthKey, adminRoles []string) []Candidate {
+	_ = adminRoles
 	// candidates 可能直接来自缓存反序列化的切片，复制一层避免污染缓存对象。
 	pool := make([]Candidate, len(candidates))
 	copy(pool, candidates)
-	isAdmin := false
-	for _, role := range adminRoles {
-		if role == key.UserRole {
-			isAdmin = true
-			break
-		}
-	}
 	available := pool[:0]
 	for _, candidate := range pool {
-		if !keyAllowsGroupPolicy(key, candidate.GroupIDs, isAdmin, key.UserChannelGroupIDs) {
+		if !keyAllowsGroupPolicy(key, candidate.CreatedByUserID, candidate.GroupIDs, key.UserChannelGroupIDs) {
 			continue
 		}
 		available = append(available, candidate)

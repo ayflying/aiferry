@@ -12,6 +12,7 @@ import (
 type Channels struct {
 	g.Meta                 `orm:"table:channels, do:true"`
 	Id                     any //
+	CreatedByUserId        any //
 	Name                   any //
 	Type                   any //
 	BaseUrl                any //
