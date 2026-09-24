@@ -221,7 +221,14 @@ async function openEdit(channel: Channel) {
 async function loadHealthCheckModels(channelID: number) {
   healthCheckModels.value = []
   try {
-    healthCheckModels.value = await apiGet<ChannelModel[]>(`/channels/${channelID}/models`)
+    const models = await apiGet<ChannelModel[]>(`/channels/${channelID}/models`)
+    // 加载期间可能已切换到别的渠道/新建页，丢弃过期结果。
+    if (editingId.value !== channelID) return
+    healthCheckModels.value = models
+    // 已配置的测试模型若已删除或停用，下拉框选不中、保存也会被后端拒绝；
+    // 这里清掉失效 ID，避免带着看不见的幽灵值提交。
+    const stillSelectable = models.some((item) => item.enabled === 1 && item.id === form.healthCheckModelId)
+    if (form.healthCheckModelId && !stillSelectable) form.healthCheckModelId = 0
   } catch (error) {
     showError(error, '加载测试模型失败')
   }

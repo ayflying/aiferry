@@ -102,14 +102,14 @@ func (s *sChannel) Get(ctx context.Context, id uint64) (entity.Channels, error) 
 		return row, gerror.Wrap(err, "find channel")
 	}
 	if row.Id == 0 {
-		return row, gerror.New("channel not found")
+		return row, gerror.New("渠道不存在")
 	}
 	return row, nil
 }
 
 func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uint64, error) {
 	if input.HealthCheckModelID != 0 {
-		return 0, gerror.New("test model can only be selected after the channel is created")
+		return 0, gerror.New("渠道创建成功后才能选择测试模型")
 	}
 	baseURL, err := normalizeBaseURL(input.BaseURL)
 	if err != nil {
