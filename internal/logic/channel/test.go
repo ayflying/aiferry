@@ -134,7 +134,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 
 // buildTestRequest 按 payload 类型构造测试请求：asrMultipartRequest 走 multipart 表单，其余走 JSON。
 // JSON 分支与转发链路共用 ApplyPromptCachePolicy，保证测试发出去的缓存字段与正式请求一致。
-// 免费层（…/zen/v1）再注入三件套并返回 forcedStream，调用方据此解析 SSE 回包的 usage。
+// 仅渠道类型 opencode_zen 再注入三件套并返回 forcedStream，调用方据此解析 SSE 回包的 usage。
 func buildTestRequest(ctx context.Context, url string, channelType string, payload any, config AdvancedConfig, identity string) (*http.Request, bool, error) {
 	if asr, ok := payload.(asrMultipartRequest); ok {
 		body := &bytes.Buffer{}

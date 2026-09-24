@@ -52,7 +52,6 @@ var genericUserAgentMarkers = []string{
 
 // UpstreamClientIdentity 描述一次上游请求的客户端身份，用于派生稳定会话标识。
 // UserID 为 0 时（如管理端测试与巡检）只按渠道、密钥、模型派生。
-// BaseURL 用于识别 OpenCode Zen 免费车道（…/zen/v1）与付费 Go 车道（…/zen/go/v1）。
 type UpstreamClientIdentity struct {
 	ChannelType  string
 	ChannelID    uint64
@@ -63,10 +62,9 @@ type UpstreamClientIdentity struct {
 }
 
 // ApplyUpstreamClientHeaders 按渠道类型补齐上游要求的客户端标识头。
-// OpenCode Zen 免费车道优先按渠道类型（opencode_zen）识别，地址命中
-// …/zen/v1 兜底（兼容既有改地址切免费层的渠道），注入强制 opencode/ UA
-// 与 ses_ 会话；付费 Go 车道维持原有 aiferry 会话与 UA 策略。其余渠道
-// 不受影响，转发与测试链路都必须调用。
+// 仅类型 opencode_zen 走免费层编辑器指纹模拟（opencode/ UA + ses_ 会话）；
+// opencode_go 维持 aiferry 会话与 UA 策略，即使地址指向 …/zen/v1 也不模拟。
+// 其余渠道不受影响，转发与测试链路都必须调用。
 func ApplyUpstreamClientHeaders(target, incoming http.Header, identity UpstreamClientIdentity) {
 	if IsOpenCodeFreeLane(identity.ChannelType, identity.BaseURL) {
 		applyOpenCodeFreeHeaders(target, incoming, identity)

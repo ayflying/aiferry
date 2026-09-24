@@ -21,13 +21,6 @@ const openCodeFreeUserAgent = "opencode/1.18.31"
 // 12 位小写 hex + 14 位 Base62（共 26 字符），否则 403。
 const openCodeSessionPrefix = "ses_"
 
-// openCodeFreeLanePath 与 openCodeGoLanePath 用于按路径区分
-// 免费车道（…/zen/v1）与付费 Go 车道（…/zen/go/v1）。
-const (
-	openCodeFreeLanePath = "/zen/v1"
-	openCodeGoLanePath   = "/zen/go/"
-)
-
 // base62Alphabet 是会话标识后 14 位使用的字符集（0-9A-Za-z）。
 const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
@@ -36,25 +29,12 @@ const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 // 两者的 baseUrl、套餐额度查询地址与客户端指纹策略都不同。
 const OpenCodeZenChannelType = "opencode_zen"
 
-// IsOpenCodeFreeLane 判定当前请求是否走 OpenCode Zen 免费车道。
-// 渠道类型命中 opencode_zen 时直接判定为免费层（类型是主判据——免费层
-// 与 Go 车道的地址、额度查询方式都不同，应由独立类型承载）；其余类型
-// 再按地址兜底：免费层形如 https://opencode.ai/zen/v1，付费 Go 车道形如
-// https://opencode.ai/zen/go/v1，先排除 /zen/go/ 再匹配 /zen/v1，避免
-// 两类地址混淆。地址兜底保证既有「opencode_go 类型改地址切免费层」的
-// 渠道用法不失效。
-func IsOpenCodeFreeLane(channelType, baseURL string) bool {
-	if strings.TrimSpace(channelType) == OpenCodeZenChannelType {
-		return true
-	}
-	normalized := strings.ToLower(strings.TrimSpace(baseURL))
-	if normalized == "" {
-		return false
-	}
-	if strings.Contains(normalized, openCodeGoLanePath) {
-		return false
-	}
-	return strings.Contains(normalized, openCodeFreeLanePath)
+// IsOpenCodeFreeLane 判定当前请求是否走 OpenCode Zen 免费车道指纹模拟。
+// 只认渠道类型 opencode_zen：编辑器指纹三件套（opencode/ UA、ses_ 会话、
+// 工具桩）仅免费层需要；opencode_go 及其它类型即使地址指向 …/zen/v1 也
+// 不模拟——付费 Go 车道维持 aiferry 会话与 UA 策略，由类型硬隔离。
+func IsOpenCodeFreeLane(channelType, _ string) bool {
+	return strings.TrimSpace(channelType) == OpenCodeZenChannelType
 }
 
 // applyOpenCodeFreeHeaders 为免费层请求补齐客户端指纹三件套中的

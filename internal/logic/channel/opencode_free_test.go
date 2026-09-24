@@ -7,53 +7,41 @@ import (
 	"testing"
 )
 
-func TestIsOpenCodeFreeLaneDistinguishesLanes(t *testing.T) {
-	free := []string{
-		"https://opencode.ai/zen/v1",
-		"https://opencode.ai/zen/v1/",
-		"HTTPS://OpenCode.AI/Zen/V1",
-		"  https://opencode.ai/zen/v1  ",
-		"https://opencode.ai/api/zen/v1/chat/completions",
-	}
-	for _, url := range free {
-		if !IsOpenCodeFreeLane("", url) {
-			t.Fatalf("expected free lane for %q", url)
-		}
-	}
-	notFree := []string{
-		"",
-		"https://opencode.ai/zen/go/v1",
-		"https://opencode.ai/zen/go/v1/chat/completions",
-		"https://api.openai.com/v1",
-		"https://opencode.ai/zen",
-	}
-	for _, url := range notFree {
-		if IsOpenCodeFreeLane("", url) {
-			t.Fatalf("expected non-free lane for %q", url)
-		}
-	}
-}
-
-func TestIsOpenCodeFreeLaneChannelTypeWins(t *testing.T) {
-	// 渠道类型 opencode_zen 是主判据：即便地址被改写（或为空），只要类型
-	// 命中就走免费层指纹；其他类型即使地址为空也绝不误判。
+// 指纹模拟只认渠道类型 opencode_zen：地址再像免费层也不行，
+// opencode_go 与其它类型一律不模拟编辑器。
+func TestIsOpenCodeFreeLaneOnlyZenType(t *testing.T) {
 	if !IsOpenCodeFreeLane(OpenCodeZenChannelType, "") {
-		t.Fatal("expected opencode_zen type with empty URL to hit free lane")
+		t.Fatal("opencode_zen type must hit free lane with empty URL")
 	}
 	if !IsOpenCodeFreeLane(OpenCodeZenChannelType, "https://example.com/whatever") {
-		t.Fatal("expected opencode_zen type to hit free lane regardless of URL")
+		t.Fatal("opencode_zen type must hit free lane regardless of URL")
 	}
-	if IsOpenCodeFreeLane(OpenCodeGoChannelType, "https://opencode.ai/zen/go/v1") {
-		t.Fatal("expected opencode_go go-lane URL to stay non-free")
+	// 地址兜底已移除：免费层地址也不足以触发模拟。
+	notFree := []struct {
+		channelType string
+		baseURL     string
+	}{
+		{"", "https://opencode.ai/zen/v1"},
+		{"", "https://opencode.ai/zen/v1/"},
+		{"", "HTTPS://OpenCode.AI/Zen/V1"},
+		{"", "  https://opencode.ai/zen/v1  "},
+		{OpenCodeGoChannelType, "https://opencode.ai/zen/go/v1"},
+		{OpenCodeGoChannelType, "https://opencode.ai/zen/v1"},
+		{"openai", "https://opencode.ai/zen/v1"},
+		{"", ""},
+		{"openai", ""},
 	}
-	if IsOpenCodeFreeLane("openai", "") {
-		t.Fatal("expected unrelated type with empty URL to stay non-free")
+	for _, item := range notFree {
+		if IsOpenCodeFreeLane(item.channelType, item.baseURL) {
+			t.Fatalf("type=%q url=%q must not hit free lane", item.channelType, item.baseURL)
+		}
 	}
 }
 
+// opencode_zen：注入编辑器指纹（opencode/ UA + ses_ 会话），且派生会话稳定。
 func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	identity := UpstreamClientIdentity{
-		ChannelType:  OpenCodeGoChannelType,
+		ChannelType:  OpenCodeZenChannelType,
 		ChannelID:    7,
 		CredentialID: 11,
 		ModelName:    "grok-code-fast-1",
@@ -71,7 +59,6 @@ func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 		t.Fatalf("expected ses_ session with 12hex+14base62, got %q", session)
 	}
 
-	// 派生会话必须稳定：同身份两次注入结果一致。
 	second := http.Header{}
 	ApplyUpstreamClientHeaders(second, nil, identity)
 	if second.Get(openCodeSessionHeader) != session {
@@ -79,8 +66,10 @@ func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	}
 }
 
+// 客户端自带合规 ses_ 会话与 opencode/ UA 时原样透传。
 func TestApplyUpstreamClientHeadersFreeLanePassesThroughClientSession(t *testing.T) {
 	identity := UpstreamClientIdentity{
+		ChannelType:  OpenCodeZenChannelType,
 		ChannelID:    7,
 		CredentialID: 11,
 		ModelName:    "grok-code-fast-1",
@@ -100,9 +89,8 @@ func TestApplyUpstreamClientHeadersFreeLanePassesThroughClientSession(t *testing
 	}
 }
 
-func TestApplyUpstreamClientHeadersFreeLaneOverridesGoLaneSession(t *testing.T) {
-	// 渠道类型仍是 opencode_go，但地址切到免费层：必须走免费层会话格式，
-	// 不能再发 aiferry- 前缀（免费层会 403）。
+// opencode_go 即使地址指向免费层也不模拟编辑器：走 aiferry 会话，不发 ses_。
+func TestApplyUpstreamClientHeadersGoLaneNeverSimulates(t *testing.T) {
 	identity := UpstreamClientIdentity{
 		ChannelType:  OpenCodeGoChannelType,
 		ChannelID:    7,
@@ -113,11 +101,17 @@ func TestApplyUpstreamClientHeadersFreeLaneOverridesGoLaneSession(t *testing.T) 
 	target := http.Header{}
 	ApplyUpstreamClientHeaders(target, http.Header{}, identity)
 	session := target.Get(openCodeSessionHeader)
-	if strings.HasPrefix(session, "aiferry-") {
-		t.Fatalf("free lane must not use aiferry- session, got %q", session)
+	if session == "" {
+		t.Fatal("opencode_go must still set x-opencode-session for upstream routing")
 	}
-	if !isOpenCodeFreeSessionID(session) {
-		t.Fatalf("expected free-lane session format, got %q", session)
+	if isOpenCodeFreeSessionID(session) {
+		t.Fatalf("opencode_go must not use free-lane ses_ session, got %q", session)
+	}
+	if !strings.HasPrefix(session, "aiferry-") {
+		t.Fatalf("expected aiferry- session for opencode_go, got %q", session)
+	}
+	if ua := target.Get("User-Agent"); strings.HasPrefix(ua, "opencode/") {
+		t.Fatalf("opencode_go must not force opencode/ UA, got %q", ua)
 	}
 }
 
