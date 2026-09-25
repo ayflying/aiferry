@@ -47,7 +47,7 @@ type CredentialCostResult struct {
 }
 
 func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input adminapi.CostQueryInput) (CostResult, error) {
-	channel, err := s.Get(ctx, channelID)
+	channel, err := s.GetOwned(ctx, channelID)
 	if err != nil {
 		return CostResult{}, err
 	}

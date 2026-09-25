@@ -54,6 +54,23 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.DELETE("/api-keys/{id}", c.deleteAPIKey)
 	group.GET("/usage", c.listUsage)
 	group.POST("/redemption-codes/redeem", c.redeemCode)
+	// 登录用户可管理自有渠道；按 ID 的所有权校验必须落在 service 层。
+	group.GET("/channels", c.listChannels)
+	group.POST("/channels", c.createChannel)
+	group.PUT("/channels/{id}", c.updateChannel)
+	group.PUT("/channels/{id}/status", c.updateChannelStatus)
+	group.DELETE("/channels/{id}", c.deleteChannel)
+	group.GET("/channels/{id}/proxy", c.revealChannelProxy)
+	group.POST("/proxy/test", c.testChannelProxy)
+	c.registerChannelCredentialRoutes(group)
+	group.GET("/channel-types", c.listChannelTypes)
+	group.GET("/channel-types/default-config", c.defaultChannelTypeConfig)
+	group.POST("/channels/{id}/models/discover", c.discoverModels)
+	group.GET("/channels/{id}/models", c.listChannelModels)
+	group.PUT("/channels/{id}/models/selection", c.selectChannelModels)
+	group.DELETE("/channels/{id}/models/failed", c.deleteFailedChannelModels)
+	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
+	group.GET("/channels/{id}/quota", c.queryChannelQuota)
 
 	group.Group("", func(admin *ghttp.RouterGroup) {
 		admin.Middleware(c.auth.RequireCurrentAdmin)
@@ -62,18 +79,6 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 }
 
 func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
-	group.GET("/channels", c.listChannels)
-	group.POST("/channels", c.createChannel)
-	group.PUT("/channels/{id}", c.updateChannel)
-	group.PUT("/channels/{id}/status", c.updateChannelStatus)
-	group.DELETE("/channels/{id}", c.deleteChannel)
-	// 编辑回显代理明文（列表只给 hasProxy，不明文）；测试地址来自表单当前值，
-	// 可测未保存的新地址，路由不挂 {id} 以免与 /channels/{id}/... 静态段歧义。
-	group.GET("/channels/{id}/proxy", c.revealChannelProxy)
-	group.POST("/proxy/test", c.testChannelProxy)
-	c.registerChannelCredentialRoutes(group)
-	group.GET("/channel-types", c.listChannelTypes)
-	group.GET("/channel-types/default-config", c.defaultChannelTypeConfig)
 	group.POST("/channel-types", c.createChannelType)
 	group.PUT("/channel-types/{id}", c.updateChannelType)
 	group.PUT("/channel-types/{id}/status", c.updateChannelTypeStatus)
@@ -82,12 +87,6 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.POST("/channel-groups", c.createChannelGroup)
 	group.PUT("/channel-groups/{id}", c.updateChannelGroup)
 	group.DELETE("/channel-groups/{id}", c.deleteChannelGroup)
-	group.POST("/channels/{id}/models/discover", c.discoverModels)
-	group.GET("/channels/{id}/models", c.listChannelModels)
-	group.PUT("/channels/{id}/models/selection", c.selectChannelModels)
-	group.DELETE("/channels/{id}/models/failed", c.deleteFailedChannelModels)
-	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
-	group.GET("/channels/{id}/quota", c.queryChannelQuota)
 	c.registerPriceRoutes(group)
 	group.GET("/usage/payload", c.getUsagePayload)
 	group.GET("/models", c.listModels)

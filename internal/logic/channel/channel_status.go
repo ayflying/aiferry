@@ -12,7 +12,7 @@ import (
 )
 
 func (s *sChannel) SetStatus(ctx context.Context, channelID uint64, status int) error {
-	if _, err := s.Get(ctx, channelID); err != nil {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
 		return err
 	}
 

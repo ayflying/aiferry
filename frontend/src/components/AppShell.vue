@@ -72,6 +72,7 @@ const items = computed<NavigationItem[]>(() => auth.user?.isAdmin
   ? adminItems
   : [
       { path: '/profile', label: '个人中心', icon: UserRound },
+      { path: '/channels', label: '渠道管理', icon: Cable },
       { path: '/api-keys', label: '访问密钥', icon: KeyRound },
       { path: '/usage', label: '用量日志', icon: Activity },
       { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },

@@ -20,12 +20,16 @@ import { showError, showSuccess } from '../lib/error'
 import { sortDiscoveredModels } from '../lib/models'
 import { closedWindowPayload, closedWindowsFromModels } from '../lib/time-window'
 import { useAppStore } from '../stores/app'
+import { useAuthStore } from '../stores/auth'
 
 const store = useAppStore()
+const auth = useAuthStore()
 const route = useRoute()
+const isAdmin = computed(() => auth.user?.isAdmin === true)
 
 const activeTab = computed<ChannelTab>(() => {
   const tab = route.meta.channelTab
+  if (!isAdmin.value) return 'channels'
   return tab === 'groups' || tab === 'types' ? tab : 'channels'
 })
 const tabLoading = reactive<Record<ChannelTab, boolean>>({ channels: false, groups: false, types: false })
@@ -147,7 +151,8 @@ async function ensureTabs(...tabs: ChannelTab[]) {
 async function loadChannelFormOptions() {
   channelFormLoading.value = true
   try {
-    await ensureTabs('types', 'groups')
+    if (isAdmin.value) await ensureTabs('types', 'groups')
+    else await ensureTabs('types')
   } finally {
     channelFormLoading.value = false
   }
@@ -545,15 +550,16 @@ async function remove(channel: Channel) {
 }
 
 watch(activeTab, (tab) => {
-  void ensureTabs(tab === 'groups' ? 'channels' : tab, tab)
+  if (isAdmin.value) void ensureTabs(tab === 'groups' ? 'channels' : tab, tab)
+  else void ensureTabs('channels', 'types')
 }, { immediate: true })
 </script>
 
 <template>
   <div class="page-stack">
     <section v-if="activeTab === 'channels'"><ChannelListPanel :channels="store.channels" :loading="tabLoading.channels" :querying-cost-i-d="queryingCostID" :querying-quota-i-d="queryingQuotaID" :status-saving="channelStatusSaving" @create="openCreate" @discover="discover" @edit="openEdit" @open-credentials="openCredentials" @query-cost="queryCost" @query-quota="queryQuota" @refresh="loadChannels" @remove="remove" @set-status="setChannelStatus" @test="openTest" /></section>
-    <section v-else-if="activeTab === 'groups'"><ChannelGroupListPanel :channels="store.channels" :groups="store.channelGroups" :loading="tabLoading.groups" @create="openCreateGroup" @edit="openEditGroup" @refresh="loadChannelGroups" @remove="removeGroup" /></section>
-    <section v-else><ChannelTypeListPanel :loading="tabLoading.types" :status-saving="typeStatusSaving" :types="store.channelTypes" @create="openCreateType" @edit="openEditType" @refresh="loadChannelTypes" @remove="removeType" @set-status="setTypeStatus" /></section>
+    <section v-else-if="activeTab === 'groups' && isAdmin"><ChannelGroupListPanel :channels="store.channels" :groups="store.channelGroups" :loading="tabLoading.groups" @create="openCreateGroup" @edit="openEditGroup" @refresh="loadChannelGroups" @remove="removeGroup" /></section>
+    <section v-else-if="isAdmin"><ChannelTypeListPanel :loading="tabLoading.types" :status-saving="typeStatusSaving" :types="store.channelTypes" @create="openCreateType" @edit="openEditType" @refresh="loadChannelTypes" @remove="removeType" @set-status="setTypeStatus" /></section>
 
     <ChannelModelMappingDialog v-model="discoveryOpen" :channel-name="discoveryChannel?.name || ''" :discovering="discovering" :discovery-error="discoveryError" :discovery-unsupported="discoveryUnsupported" :applying="applyingSelection" :discovered-models="dialogModels" :selected-model-names="selectedModelNames" @update:selected-model-names="onSelectionChanged" v-model:discovery-keyword="discoveryKeyword" v-model:model-mappings="modelMappings" :window-models="windowModels" v-model:closed-windows="closedWindows" @add-custom-model="addCustomModel" @retry="discoveryChannel && discover(discoveryChannel)" @add-mapping="addModelMapping" @remove-mapping="removeModelMapping" @save="saveModelSelection" />
 

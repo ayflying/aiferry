@@ -73,7 +73,7 @@ type credentialRow struct {
 }
 
 func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input adminapi.ChannelCredentialInput) (uint64, error) {
-	if _, err := s.Get(ctx, channelID); err != nil {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
 		return 0, err
 	}
 	plainText := strings.TrimSpace(input.APIKey)
@@ -117,7 +117,7 @@ func (s *sChannel) createCredentialTx(ctx context.Context, channelID uint64, val
 }
 
 func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]CredentialView, error) {
-	channel, err := s.Get(ctx, channelID)
+	channel, err := s.GetOwned(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +149,9 @@ func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]Cre
 // 调用方（控制器）必须先通过邮箱验证窗口检查；明文只经 HTTPS 响应下发，
 // 不落日志、不缓存。
 func (s *sChannel) RevealCredential(ctx context.Context, channelID, credentialID uint64) (string, error) {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
+		return "", err
+	}
 	credential, err := s.credentialByID(ctx, channelID, credentialID)
 	if err != nil {
 		return "", err
@@ -199,6 +202,9 @@ func credentialDisplayIndexes(orderedIDs []uint64) map[uint64]uint {
 // 表示清除（回到渠道级回退）。管理密钥与推理密钥是两个独立凭据：推理密钥
 // 用于请求转发，管理密钥用于该上游账号的用量/余额/额度查询。
 func (s *sChannel) SetCredentialManagementKey(ctx context.Context, channelID, credentialID uint64, input adminapi.ChannelCredentialManagementKeyInput) error {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
+		return err
+	}
 	credential, err := s.credentialByID(ctx, channelID, credentialID)
 	if err != nil {
 		return err
@@ -222,6 +228,9 @@ func (s *sChannel) SetCredentialManagementKey(ctx context.Context, channelID, cr
 }
 
 func (s *sChannel) SetCredentialStatus(ctx context.Context, channelID, credentialID uint64, input adminapi.ChannelCredentialStatusInput) error {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
+		return err
+	}
 	credential, err := s.credentialByID(ctx, channelID, credentialID)
 	if err != nil {
 		return err
@@ -243,6 +252,9 @@ func (s *sChannel) SetCredentialStatus(ctx context.Context, channelID, credentia
 }
 
 func (s *sChannel) DeleteCredential(ctx context.Context, channelID, credentialID uint64) error {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
+		return err
+	}
 	credential, err := s.credentialByID(ctx, channelID, credentialID)
 	if err != nil {
 		return err

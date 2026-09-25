@@ -11,26 +11,25 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/auth"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
-	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 func (s *sChannel) List(ctx context.Context) ([]View, error) {
-	if cached, ok := s.readListCache(ctx); ok {
-		return cached, nil
+	current, ok := auth.CurrentUser(ctx)
+	if !ok {
+		return nil, gerror.New("未登录")
 	}
-	views, err := s.listFromDatabase(ctx)
+	views, err := s.listFromDatabase(ctx, current.Id)
 	if err != nil {
 		return nil, err
 	}
-	s.writeListCache(ctx, views)
 	return views, nil
 }
 
-func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
+func (s *sChannel) listFromDatabase(ctx context.Context, userID uint64) ([]View, error) {
 	var rows []entity.Channels
-	if err := dao.Channels.Ctx(ctx).OrderDesc(dao.Channels.Columns().Priority).OrderDesc(dao.Channels.Columns().Id).Scan(&rows); err != nil {
+	if err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().CreatedByUserId, userID).OrderDesc(dao.Channels.Columns().Priority).OrderDesc(dao.Channels.Columns().Id).Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list channels")
 	}
 	views := make([]View, 0, len(rows))
@@ -98,7 +97,11 @@ func (s *sChannel) listFromDatabase(ctx context.Context) ([]View, error) {
 	return views, nil
 }
 
+// Get 供后台定时任务和 relay 使用，不受请求用户的渠道所有权约束。
 func (s *sChannel) Get(ctx context.Context, id uint64) (entity.Channels, error) {
+	if current, ok := auth.CurrentUser(ctx); ok {
+		return s.getOwnedByUser(ctx, id, current.Id)
+	}
 	var row entity.Channels
 	if err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().Id, id).Scan(&row); err != nil {
 		return row, gerror.Wrap(err, "find channel")
@@ -109,7 +112,39 @@ func (s *sChannel) Get(ctx context.Context, id uint64) (entity.Channels, error) 
 	return row, nil
 }
 
+// GetOwned 仅允许当前登录用户读取自己创建的渠道，供用户态管理接口使用。
+func (s *sChannel) GetOwned(ctx context.Context, id uint64) (entity.Channels, error) {
+	current, ok := auth.CurrentUser(ctx)
+	if !ok {
+		return entity.Channels{}, gerror.New("未登录")
+	}
+	return s.getOwnedByUser(ctx, id, current.Id)
+}
+
+func (s *sChannel) ensureOwned(ctx context.Context, id uint64) error {
+	_, err := s.GetOwned(ctx, id)
+	return err
+}
+
+func (s *sChannel) getOwnedByUser(ctx context.Context, id, userID uint64) (entity.Channels, error) {
+	var row entity.Channels
+	if err := dao.Channels.Ctx(ctx).
+		Where(dao.Channels.Columns().Id, id).
+		Where(dao.Channels.Columns().CreatedByUserId, userID).
+		Scan(&row); err != nil {
+		return row, gerror.Wrap(err, "find owned channel")
+	}
+	if row.Id == 0 {
+		return row, gerror.New("渠道不存在或无权访问")
+	}
+	return row, nil
+}
+
 func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uint64, error) {
+	current, ok := auth.CurrentUser(ctx)
+	if !ok {
+		return 0, gerror.New("未登录")
+	}
 	if input.HealthCheckModelID != 0 {
 		return 0, gerror.New("渠道创建成功后才能选择测试模型")
 	}
@@ -134,10 +169,7 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 		return 0, err
 	}
 	// 渠道归属：创建时记录当前登录用户，后续「未分组仅创建者可用 / 自有渠道只统计不实扣」都依赖它。
-	createdBy := usage.SystemUserID
-	if current, ok := auth.CurrentUser(ctx); ok {
-		createdBy = current.Id
-	}
+	createdBy := current.Id
 	data := do.Channels{
 		Name:               strings.TrimSpace(input.Name),
 		Type:               typeRow.Code,
@@ -186,7 +218,7 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 }
 
 func (s *sChannel) Update(ctx context.Context, id uint64, input adminapi.ChannelInput) error {
-	current, err := s.Get(ctx, id)
+	current, err := s.GetOwned(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -263,7 +295,7 @@ func (s *sChannel) Update(ctx context.Context, id uint64, input adminapi.Channel
 }
 
 func (s *sChannel) Delete(ctx context.Context, id uint64) error {
-	if _, err := s.Get(ctx, id); err != nil {
+	if _, err := s.GetOwned(ctx, id); err != nil {
 		return err
 	}
 	if _, err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().Id, id).Data(do.Channels{Status: 0}).Update(); err != nil {

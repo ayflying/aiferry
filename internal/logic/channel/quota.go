@@ -56,7 +56,7 @@ type QuotaView struct {
 // 重复点击不会重复请求上游，refresh 为 true 时绕过缓存强制查询；
 // credentialID 非零时只查询该密钥，不合并、不缓存（管理端即时诊断操作）。
 func (s *sChannel) QueryQuota(ctx context.Context, channelID, credentialID uint64, refresh bool) (QuotaView, error) {
-	channel, err := s.Get(ctx, channelID)
+	channel, err := s.GetOwned(ctx, channelID)
 	if err != nil {
 		return QuotaView{}, err
 	}

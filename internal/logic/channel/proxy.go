@@ -242,7 +242,7 @@ func (s *sChannel) HTTPClientForProxy(proxyURLCipher string) (*http.Client, erro
 // RevealProxyURL 解密并返回渠道代理地址明文（多行，每行一个），仅供管理端
 // 编辑回显。未配置代理时返回空串；明文只经 HTTPS 响应下发，不落日志、不缓存。
 func (s *sChannel) RevealProxyURL(ctx context.Context, id uint64) (string, error) {
-	row, err := s.Get(ctx, id)
+	row, err := s.GetOwned(ctx, id)
 	if err != nil {
 		return "", err
 	}

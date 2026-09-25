@@ -19,7 +19,7 @@ import (
 )
 
 func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]DiscoveredModel, error) {
-	channel, err := s.Get(ctx, channelID)
+	channel, err := s.GetOwned(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]Disc
 }
 
 func (s *sChannel) SelectModels(ctx context.Context, channelID uint64, input adminapi.ModelSelectionInput) ([]ModelView, error) {
-	if _, err := s.Get(ctx, channelID); err != nil {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
 		return nil, err
 	}
 	mappings, err := normalizeModelMappings(input)
@@ -267,11 +267,14 @@ func stringOrDefault(value, fallback string) string {
 }
 
 func (s *sChannel) ListModels(ctx context.Context, channelID uint64) ([]ModelView, error) {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
+		return nil, err
+	}
 	return s.listModelViews(ctx, channelID)
 }
 
 func (s *sChannel) DeleteFailedModels(ctx context.Context, channelID uint64) (int, error) {
-	if _, err := s.Get(ctx, channelID); err != nil {
+	if err := s.ensureOwned(ctx, channelID); err != nil {
 		return 0, err
 	}
 	result, err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{
