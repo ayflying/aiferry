@@ -12,13 +12,9 @@ import (
 )
 
 const (
-	// defaultSessionTTLHours 是未配置 SESSION_TTL_HOURS 时的会话有效期（30 天滑动续期）。
-	// 会话每次请求都会重新写入 Redis TTL 和 Cookie，隔夜/隔周使用不会掉登录；
-	// 只有部署方显式设置 SESSION_TTL_HOURS 才会覆盖这个默认值。
-	defaultSessionTTLHours = 24 * 30
 	// usage_logs uses MySQL DATETIME values that have always represented Beijing wall time.
 	// This storage interpretation is fixed; it is independent from the configurable display timezone.
-	storageTimezone        = "Asia/Shanghai"
+	storageTimezone = "Asia/Shanghai"
 )
 
 type App struct {
@@ -37,7 +33,6 @@ type App struct {
 	CasdoorEndpoint        string
 	CasdoorClientID        string
 	CasdoorClientSecret    string
-	SessionTTL             int
 	AdminRoles             []string
 	// UsageRetentionDays 是使用明细的保留窗口（天）。0 表示不清理（默认）：
 	// 仪表盘、用户用量等消费统计都实时聚合自 usage_logs，删除明细会一并缩短
@@ -86,7 +81,6 @@ func Load() (App, error) {
 		CasdoorEndpoint:        strings.TrimRight(env("CASDOOR_ENDPOINT", ""), "/"),
 		CasdoorClientID:        strings.TrimSpace(os.Getenv("CASDOOR_CLIENT_ID")),
 		CasdoorClientSecret:    os.Getenv("CASDOOR_CLIENT_SECRET"),
-		SessionTTL:             envInt("SESSION_TTL_HOURS", defaultSessionTTLHours),
 		AdminRoles:             envList("AIFERRY_ADMIN_ROLES", []string{"admin"}),
 		UsageRetentionDays:     envInt("USAGE_RETENTION_DAYS", 0),
 		PayloadLogEnabled:      envBool("PAYLOAD_LOG_ENABLED", true),

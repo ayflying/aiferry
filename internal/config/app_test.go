@@ -7,28 +7,8 @@ import (
 	"time"
 )
 
-// 产品约定：未显式配置 SESSION_TTL_HOURS 时会话默认 30 天，且每次请求滑动延长。
-// 之前默认 7 天、生产又把它压到 12 小时，导致隔夜就掉登录。
-func TestLoadUsesThirtyDaySessionByDefault(t *testing.T) {
-	t.Setenv("MYSQL_PASSWORD", "test-password")
-	t.Setenv("AIFERRY_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
-	t.Setenv("CASDOOR_ENDPOINT", "https://casdoor.example.test")
-	t.Setenv("CASDOOR_CLIENT_ID", "test-client")
-	t.Setenv("CASDOOR_CLIENT_SECRET", "test-secret")
-	t.Setenv("SESSION_TTL_HOURS", "")
-
-	app, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	const thirtyDaysInHours = 24 * 30
-	if defaultSessionTTLHours != thirtyDaysInHours {
-		t.Fatalf("defaultSessionTTLHours = %d, want %d", defaultSessionTTLHours, thirtyDaysInHours)
-	}
-	if app.SessionTTL != thirtyDaysInHours {
-		t.Fatalf("SessionTTL = %d, want %d", app.SessionTTL, thirtyDaysInHours)
-	}
-}
+// 产品约定：登录会话有效期写死 30 天（见 internal/logic/auth/session.go 的 sessionTTLDuration），
+// 配置层不再读取 SESSION_TTL_HOURS，也不再暴露 SessionTTL 字段；断言在 auth 包内。
 
 func TestLoadUsesBeijingStorageTimezone(t *testing.T) {
 	t.Setenv("MYSQL_PASSWORD", "test-password")

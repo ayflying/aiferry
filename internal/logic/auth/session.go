@@ -16,6 +16,11 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
+// sessionTTLDuration 是登录会话有效期：写死 30 天，不提供环境变量覆盖。
+// 每次认证成功都会用它刷新 Redis 键的 TTL 并重写 Cookie，实现滑动续期；
+// 之前允许 SESSION_TTL_HOURS 覆盖，被部署方压到十几小时后隔天就掉登录。
+const sessionTTLDuration = 30 * 24 * time.Hour
+
 // Authenticate 从 Redis 读取会话，并重新查询本地用户状态。
 // 会话只缓存身份快照，权限和停用状态以数据库当前值为准，避免用户被停用后仍可使用旧会话。
 func (s *sAuth) Authenticate(ctx context.Context, token string) (SessionUser, error) {
@@ -158,7 +163,7 @@ func SecureRequest(r *ghttp.Request) bool {
 }
 
 func (s *sAuth) sessionTTL() time.Duration {
-	return time.Duration(s.app.Config.SessionTTL) * time.Hour
+	return sessionTTLDuration
 }
 
 func writeUnauthorized(r *ghttp.Request) {

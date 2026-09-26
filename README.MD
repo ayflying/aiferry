@@ -43,12 +43,12 @@ MYSQL_HOST / MYSQL_PORT / MYSQL_DATABASE / MYSQL_USER / MYSQL_PASSWORD
 REDIS_ADDR / REDIS_PASSWORD
 AIFERRY_MASTER_KEY
 CASDOOR_ENDPOINT / CASDOOR_CLIENT_ID / CASDOOR_CLIENT_SECRET
-SESSION_TTL_HOURS
+AIFERRY_ADMIN_ROLES
 ```
 
 `AIFERRY_MASTER_KEY` 必须是 Base64 编码的 32 字节随机密钥。渠道推理密钥和管理密钥由它使用 AES-GCM 加密。
 
-`SESSION_TTL_HOURS` 是登录会话有效期（小时），每次请求都会滑动续期。未配置时默认 720 小时（30 天）；显式配置会覆盖默认值，配置过小会导致隔天就掉登录。
+登录会话有效期固定 30 天，每次请求都会滑动续期（刷新 Redis TTL 和 Cookie），不提供环境变量配置。历史上可用 `SESSION_TTL_HOURS` 覆盖，曾被压到十几小时导致隔天掉登录，现已移除。
 
 ## 远程开发
 
