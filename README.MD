@@ -48,6 +48,8 @@ SESSION_TTL_HOURS
 
 `AIFERRY_MASTER_KEY` 必须是 Base64 编码的 32 字节随机密钥。渠道推理密钥和管理密钥由它使用 AES-GCM 加密。
 
+`SESSION_TTL_HOURS` 是登录会话有效期（小时），每次请求都会滑动续期。未配置时默认 720 小时（30 天）；显式配置会覆盖默认值，配置过小会导致隔天就掉登录。
+
 ## 远程开发
 
 项目不要求在本机安装 Go、Node、MySQL 或 Redis。源码同步到构建服务器后，统一通过开发 toolbox 执行：

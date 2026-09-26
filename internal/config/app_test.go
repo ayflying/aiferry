@@ -7,7 +7,9 @@ import (
 	"time"
 )
 
-func TestLoadUsesSevenDaySessionByDefault(t *testing.T) {
+// 产品约定：未显式配置 SESSION_TTL_HOURS 时会话默认 30 天，且每次请求滑动延长。
+// 之前默认 7 天、生产又把它压到 12 小时，导致隔夜就掉登录。
+func TestLoadUsesThirtyDaySessionByDefault(t *testing.T) {
 	t.Setenv("MYSQL_PASSWORD", "test-password")
 	t.Setenv("AIFERRY_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	t.Setenv("CASDOOR_ENDPOINT", "https://casdoor.example.test")
@@ -19,12 +21,12 @@ func TestLoadUsesSevenDaySessionByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	const sevenDaysInHours = 24 * 7
-	if defaultSessionTTLHours != sevenDaysInHours {
-		t.Fatalf("defaultSessionTTLHours = %d, want %d", defaultSessionTTLHours, sevenDaysInHours)
+	const thirtyDaysInHours = 24 * 30
+	if defaultSessionTTLHours != thirtyDaysInHours {
+		t.Fatalf("defaultSessionTTLHours = %d, want %d", defaultSessionTTLHours, thirtyDaysInHours)
 	}
-	if app.SessionTTL != sevenDaysInHours {
-		t.Fatalf("SessionTTL = %d, want %d", app.SessionTTL, sevenDaysInHours)
+	if app.SessionTTL != thirtyDaysInHours {
+		t.Fatalf("SessionTTL = %d, want %d", app.SessionTTL, thirtyDaysInHours)
 	}
 }
 

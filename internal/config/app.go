@@ -12,7 +12,10 @@ import (
 )
 
 const (
-	defaultSessionTTLHours = 24 * 7
+	// defaultSessionTTLHours 是未配置 SESSION_TTL_HOURS 时的会话有效期（30 天滑动续期）。
+	// 会话每次请求都会重新写入 Redis TTL 和 Cookie，隔夜/隔周使用不会掉登录；
+	// 只有部署方显式设置 SESSION_TTL_HOURS 才会覆盖这个默认值。
+	defaultSessionTTLHours = 24 * 30
 	// usage_logs uses MySQL DATETIME values that have always represented Beijing wall time.
 	// This storage interpretation is fixed; it is independent from the configurable display timezone.
 	storageTimezone        = "Asia/Shanghai"
