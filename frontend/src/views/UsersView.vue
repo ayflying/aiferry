@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { CircleDollarSign, Pencil, RefreshCw, ShieldCheck, Trash2, UserRound, UsersRound } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
-import { apiDelete, apiGet, apiPut } from '../api/client'
+import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import type { AccountProfile, ManagedUser, ChannelGroup } from '../api/types'
 import { showError, showSuccess } from '../lib/error'
 import { formatCost, formatNumber, formatTime } from '../lib/format'
@@ -12,6 +13,7 @@ import MobileRecordList from '../components/MobileRecordList.vue'
 import ResponsiveList from '../components/ResponsiveList.vue'
 
 const auth = useAuthStore()
+const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const users = ref<ManagedUser[]>([])
@@ -70,7 +72,8 @@ async function saveGroups() {
   if (!selected.value) return
   saving.value = true
   try {
-    await apiPut<Record<string, never>>(`/users/${selected.value.id}/channel-groups`, { channelGroupIds: selectedGroupIDs.value })
+    const savedGroupIDs = await apiPost<number[]>(`/users/${selected.value.id}/channel-groups`, { channelGroupIds: selectedGroupIDs.value })
+    if (savedGroupIDs.length !== selectedGroupIDs.value.length) throw new Error('保存结果与所选分组不一致，请刷新后重试')
     showSuccess('用户渠道分组已更新')
     groupDialog.value = false
     await load()
@@ -90,7 +93,7 @@ onMounted(load)
     <div class="table-panel">
       <ResponsiveList>
         <template #desktop><el-table v-loading="loading" :data="users" row-key="id">
-        <el-table-column label="用户" min-width="190"><template #default="{ row }"><div class="user-cell"><el-avatar :size="30" :src="row.avatarUrl || undefined"><UserRound :size="15" /></el-avatar><div><strong>{{ row.nickname }}</strong><small>{{ row.role === 'admin' ? '管理员' : '用户' }}</small></div></div></template></el-table-column>
+        <el-table-column label="用户" min-width="190"><template #default="{ row }"><button class="user-detail-link" type="button" @click="router.push(`/users/${row.id}`)"><el-avatar :size="30" :src="row.avatarUrl || undefined"><UserRound :size="15" /></el-avatar><span><strong>{{ row.nickname }}</strong><small>{{ row.role === 'admin' ? '管理员' : '用户' }}</small></span></button></template></el-table-column>
         <el-table-column label="邮箱" min-width="190"><template #default="{ row }">{{ row.email || '未绑定' }}</template></el-table-column>
         <el-table-column label="余额" min-width="132"><template #default="{ row }"><span class="mono">{{ formatCost(row.balance) }}</span></template></el-table-column>
         <el-table-column label="访问密钥" width="110" align="right"><template #default="{ row }">{{ formatNumber(row.apiKeyCount) }}</template></el-table-column>
@@ -100,7 +103,7 @@ onMounted(load)
         </el-table></template>
         <template #mobile><MobileRecordList :loading="loading">
           <article v-for="row in users" :key="row.id" class="mobile-record">
-            <div class="mobile-record__header"><div class="user-cell"><el-avatar :size="34" :src="row.avatarUrl || undefined"><UserRound :size="16" /></el-avatar><div class="mobile-record__title"><strong>{{ row.nickname }}</strong><small>{{ row.role === 'admin' ? '管理员' : '用户' }} · {{ row.email || '未绑定邮箱' }}</small></div></div><span class="mono">{{ formatCost(row.balance) }}</span></div>
+            <div class="mobile-record__header"><button class="user-detail-link" type="button" @click="router.push(`/users/${row.id}`)"><el-avatar :size="34" :src="row.avatarUrl || undefined"><UserRound :size="16" /></el-avatar><span class="mobile-record__title"><strong>{{ row.nickname }}</strong><small>{{ row.role === 'admin' ? '管理员' : '用户' }} · {{ row.email || '未绑定邮箱' }}</small></span></button><span class="mono">{{ formatCost(row.balance) }}</span></div>
             <dl class="mobile-record__facts"><div><dt>访问密钥</dt><dd>{{ formatNumber(row.apiKeyCount) }}</dd></div><div><dt>近 30 天调用</dt><dd>{{ formatNumber(row.usage.requests) }} · {{ formatCost(row.usage.estimatedCost) }}</dd></div><div class="mobile-record__wide"><dt>最近登录</dt><dd>{{ formatTime(row.lastLoginAt) }}</dd></div></dl>
             <div class="mobile-record__footer"><span class="muted">账户余额</span><div class="mobile-record__actions"><el-button size="small" :icon="CircleDollarSign" @click="openBalance(row)">修改余额</el-button><el-button size="small" :icon="ShieldCheck" @click="openGroups(row)">渠道分组</el-button><el-button v-if="row.id !== auth.user?.id" size="small" :icon="Trash2" type="danger" plain @click="remove(row)">删除</el-button></div></div>
           </article>
@@ -126,6 +129,7 @@ onMounted(load)
 </template>
 
 <style scoped>
+.user-detail-link { display: inline-flex; align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }.user-detail-link span { display: flex; flex-direction: column; gap: 2px; }.user-detail-link strong { color: #15202b; font-size: 12px; }.user-detail-link small { color: #7b8792; font-size: 10px; }.user-detail-link:hover strong { color: #409eff; }
 .user-cell { display: flex; align-items: center; gap: 9px; }.user-cell div, .usage-cell { display: flex; flex-direction: column; gap: 2px; }.user-cell strong { color: #15202b; font-size: 12px; }.user-cell small, .usage-cell small { color: #7b8792; font-size: 10px; }.usage-cell { align-items: flex-end; font-family: 'JetBrains Mono', monospace; font-size: 11px; }.empty-state svg { display: block; margin: 0 auto 10px; color: #7b8792; }.empty-state span { display: block; }
 .dialog-hint { margin: 0 0 14px; font-size: 12px; color: #5e6c7a; line-height: 1.5; }
 .group-checkboxes { display: flex; flex-direction: column; gap: 8px; }

@@ -12,7 +12,7 @@ func (c *Controller) registerUserRoutes(group *ghttp.RouterGroup) {
 	group.PUT("/users/{id}/balance", c.updateUserBalance)
 	group.DELETE("/users/{id}", c.deleteUser)
 	group.GET("/users/{id}/channel-groups", c.listUserChannelGroups)
-	group.PUT("/users/{id}/channel-groups", c.updateUserChannelGroups)
+	group.POST("/users/{id}/channel-groups", c.updateUserChannelGroups)
 }
 
 func (c *Controller) listUsers(r *ghttp.Request) {
@@ -53,5 +53,6 @@ func (c *Controller) updateUserChannelGroups(r *ghttp.Request) {
 	if !parse(r, &input) {
 		return
 	}
-	respond(r, map[string]any{}, c.users.ReplaceChannelGroupIDs(r.Context(), routeID(r), input.ChannelGroupIDs))
+	data, err := c.users.ReplaceChannelGroupIDs(r.Context(), routeID(r), input.ChannelGroupIDs)
+	respond(r, data, err)
 }

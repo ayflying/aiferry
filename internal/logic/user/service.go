@@ -349,24 +349,52 @@ func (s *sUser) ListChannelGroupIDs(ctx context.Context, id uint64) ([]uint64, e
 	return ids, nil
 }
 
-func (s *sUser) ReplaceChannelGroupIDs(ctx context.Context, id uint64, groupIDs []uint64) error {
+func (s *sUser) ReplaceChannelGroupIDs(ctx context.Context, id uint64, groupIDs []uint64) ([]uint64, error) {
 	if _, err := s.find(ctx, id); err != nil {
-		return err
+		return nil, err
 	}
-	return dao.ChannelGroups.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
-		if _, err := g.DB().Model("user_channel_groups").Ctx(txCtx).Where("user_id", id).Delete(); err != nil {
+	uniqueGroupIDs := make([]uint64, 0, len(groupIDs))
+	seen := make(map[uint64]struct{}, len(groupIDs))
+	for _, groupID := range groupIDs {
+		if groupID == 0 {
+			continue
+		}
+		if _, exists := seen[groupID]; exists {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		uniqueGroupIDs = append(uniqueGroupIDs, groupID)
+	}
+	if err := dao.ChannelGroups.Transaction(ctx, func(txCtx context.Context, tx gdb.TX) error {
+		if _, err := tx.Model("user_channel_groups").Ctx(txCtx).Where("user_id", id).Delete(); err != nil {
 			return gerror.Wrap(err, "clear user channel groups")
 		}
-		for _, groupID := range groupIDs {
-			if groupID == 0 {
-				continue
-			}
-			if _, err := g.DB().Model("user_channel_groups").Ctx(txCtx).Data(g.Map{"user_id": id, "channel_group_id": groupID}).Insert(); err != nil {
+		for _, groupID := range uniqueGroupIDs {
+			if _, err := tx.Model("user_channel_groups").Ctx(txCtx).Data(g.Map{"user_id": id, "channel_group_id": groupID}).Insert(); err != nil {
 				return gerror.Wrap(err, "insert user channel group")
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil, err
+	}
+	persistedGroupIDs, err := s.ListChannelGroupIDs(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(persistedGroupIDs) != len(uniqueGroupIDs) {
+		return persistedGroupIDs, gerror.Newf("用户渠道分组保存校验失败：请求 %d 个，实际保存 %d 个", len(uniqueGroupIDs), len(persistedGroupIDs))
+	}
+	persisted := make(map[uint64]struct{}, len(persistedGroupIDs))
+	for _, groupID := range persistedGroupIDs {
+		persisted[groupID] = struct{}{}
+	}
+	for _, groupID := range uniqueGroupIDs {
+		if _, exists := persisted[groupID]; !exists {
+			return persistedGroupIDs, gerror.New("用户渠道分组保存校验失败：实际关联与请求不一致")
+		}
+	}
+	return persistedGroupIDs, nil
 }
 
 func (s *sUser) find(ctx context.Context, id uint64) (entity.Users, error) {

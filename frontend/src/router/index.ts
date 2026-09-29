@@ -26,6 +26,7 @@ const router = createRouter({
     { path: '/settings/security', name: 'settings-security', component: () => import('../views/SettingsView.vue'), meta: { title: '安全与限制', admin: true, settingsTab: 'security' } },
     { path: '/settings/mail', name: 'settings-mail', component: () => import('../views/SettingsView.vue'), meta: { title: '邮件提醒', admin: true, settingsTab: 'mail' } },
     { path: '/users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: '用户管理', admin: true } },
+    { path: '/users/:id', name: 'user-detail', component: () => import('../views/UserDetailView.vue'), meta: { title: '用户详情', admin: true } },
     { path: '/redemption-codes', name: 'redemption-codes', component: () => import('../views/RedemptionCodesView.vue'), meta: { title: '兑换码', admin: true } },
     { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: '个人中心' } },
   ],
