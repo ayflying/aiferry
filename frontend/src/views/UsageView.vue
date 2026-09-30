@@ -14,25 +14,28 @@ import { currentTimeInDisplayZone, formatCost, formatNumber, formatPreciseCost, 
 import { formatIPLocation } from '../lib/ip-location'
 import { streamLabel } from '../lib/usage'
 
+const props = defineProps<{ userId?: number }>()
 const store = useAppStore()
 const auth = useAuthStore()
 const loading = ref(false)
-const timeRange = ref(todayRange())
+const timeRange = ref(props.userId !== undefined ? recentRange(30) : todayRange())
 const page = ref<UsagePage>({ items: [], summary: { requests: 0, estimatedCost: 0 }, startAt: timeRange.value[0].toISOString(), endAt: endOfSecond(timeRange.value[1]).toISOString(), total: 0, page: 1, pageSize: 20 })
 const filters = reactive({ model: '', userId: undefined as number | undefined, channelId: undefined as number | undefined, apiKeyId: undefined as number | undefined, startAt: timeRange.value[0].toISOString(), endAt: endOfSecond(timeRange.value[1]).toISOString(), page: 1, pageSize: 20 })
 const users = ref<UserOption[]>([])
 const usersLoaded = ref(false)
 const isAdmin = computed(() => auth.user?.isAdmin === true)
-const selectedUserId = computed(() => filters.userId ?? auth.user?.id)
+const selectedUserId = computed(() => props.userId ?? filters.userId ?? auth.user?.id)
+const embeddedForUser = computed(() => props.userId !== undefined)
 const usageItems = computed(() => page.value.items ?? [])
 const selectedUsage = ref<UsageLog>()
 const detailOpen = ref(false)
 
 async function load() {
   loading.value = true
-  void loadSupport().catch((error) => showError(error, '加载用量筛选项失败'))
   try {
-    page.value = await apiGet<UsagePage>('/usage', filters)
+    await loadSupport()
+    const query = { ...filters, userId: props.userId ?? filters.userId }
+    page.value = await apiGet<UsagePage>('/usage', query)
   } catch (error) { showError(error, '加载用量记录失败') } finally { loading.value = false }
 }
 
@@ -43,14 +46,14 @@ async function loadSupport() {
   }
   if (isAdmin.value) {
     support.push(store.channels.length ? Promise.resolve() : store.loadChannels())
-    if (!usersLoaded.value) {
+    if (!embeddedForUser.value && !usersLoaded.value) {
       support.push(apiGet<UserOption[]>('/users', { compact: 1 }).then((items) => {
         users.value = items
         usersLoaded.value = true
       }))
     }
   }
-  if (selectedUserId.value && (filters.userId !== undefined || isAdmin.value)) {
+  if (selectedUserId.value && (embeddedForUser.value || filters.userId !== undefined || isAdmin.value)) {
     support.push(apiGet<APIKey[]>(`/api-keys`, { userId: selectedUserId.value }).then((items) => {
       store.apiKeys = items ?? []
     }))
@@ -61,11 +64,22 @@ async function loadSupport() {
 function search() { filters.page = 1; load() }
 
 watch(() => filters.userId, () => {
+  if (embeddedForUser.value) return
   filters.apiKeyId = undefined
+  search()
+})
+watch(() => props.userId, (id) => {
+  if (id === undefined) return
+  filters.apiKeyId = undefined
+  filters.userId = id
   search()
 })
 function changePage(value: number) { filters.page = value; load() }
 function changePageSize(value: number) { filters.pageSize = value; filters.page = 1; load() }
+function recentRange(days: number): [Date, Date] {
+  const now = currentTimeInDisplayZone()
+  return [now.startOf('day').subtract(days - 1, 'day').toDate(), now.endOf('day').millisecond(0).toDate()]
+}
 function todayRange(): [Date, Date] {
   const now = currentTimeInDisplayZone()
   return [now.startOf('day').toDate(), now.endOf('day').millisecond(0).toDate()]
@@ -124,18 +138,19 @@ function openUsageDetail(row: UsageLog) {
   detailOpen.value = true
 }
 onMounted(() => {
-  if (isAdmin.value && auth.user?.id) filters.userId = auth.user.id
+  if (props.userId !== undefined) filters.userId = props.userId
+  else if (isAdmin.value && auth.user?.id) filters.userId = auth.user.id
   load()
 })
 </script>
 
 <template>
-  <div class="page-stack">
+  <div v-loading="loading" class="page-stack">
     <div class="page-toolbar">
       <div class="toolbar-group">
         <el-date-picker v-model="timeRange" type="datetimerange" range-separator="至" start-placeholder="开始时间" end-placeholder="结束时间" :clearable="false" :editable="false" style="width: min(100%, 352px)" @change="changeTimeRange" />
         <el-input v-model="filters.model" clearable placeholder="模型名称" style="width: 200px" @keyup.enter="search" />
-        <el-select v-if="isAdmin" v-model="filters.userId" filterable placeholder="选择用户" style="width: 160px"><el-option v-for="item in users" :key="item.id" :label="item.nickname" :value="item.id" /></el-select>
+        <el-select v-if="isAdmin && !embeddedForUser" v-model="filters.userId" filterable placeholder="选择用户" style="width: 160px"><el-option v-for="item in users" :key="item.id" :label="item.nickname" :value="item.id" /></el-select>
         <el-select v-if="isAdmin" v-model="filters.channelId" clearable placeholder="全部渠道" style="width: 160px"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select>
         <el-select v-model="filters.apiKeyId" clearable placeholder="全部密钥" style="width: 160px"><el-option v-for="item in store.apiKeys" :key="item.id" :label="item.name" :value="item.id" /></el-select>
         <el-button type="primary" :icon="Search" @click="search">查询</el-button>

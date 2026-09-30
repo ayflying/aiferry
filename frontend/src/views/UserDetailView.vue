@@ -1,27 +1,35 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { init, use } from 'echarts/core'
+import { BarChart, LineChart } from 'echarts/charts'
+import { CanvasRenderer } from 'echarts/renderers'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import type { EChartsType } from 'echarts/core'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Eye, EyeOff, RefreshCw, UserRound } from '@lucide/vue'
 import { apiGet } from '../api/client'
-import type { APIKey, Dashboard, ManagedUser, UsageLog, UsagePage } from '../api/types'
-import UsageDetailDialog from '../components/UsageDetailDialog.vue'
+import type { APIKey, Dashboard, ManagedUser } from '../api/types'
+import UsageView from './UsageView.vue'
 import { showError } from '../lib/error'
 import { formatBalance, formatCost, formatNumber, formatTime } from '../lib/format'
+
+use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent])
 
 const route = useRoute()
 const router = useRouter()
 const activeTab = ref('dashboard')
 const user = ref<ManagedUser>()
 const keys = ref<APIKey[]>([])
-const usage = ref<UsagePage>({ items: [], summary: { requests: 0, estimatedCost: 0 }, startAt: '', endAt: '', total: 0, page: 1, pageSize: 20 })
 const dashboard = ref<Dashboard>()
 const loading = ref(false)
 const revealedSecrets = reactive<Record<number, string>>({})
 const secretLoading = reactive<Record<number, boolean>>({})
-const selectedUsage = ref<UsageLog>()
-const detailOpen = ref(false)
 const userId = computed(() => String(route.params.id))
 const summary = computed(() => dashboard.value?.summary)
+const chartElement = ref<HTMLDivElement>()
+const costChartElement = ref<HTMLDivElement>()
+let chart: EChartsType | undefined
+let costChart: EChartsType | undefined
 
 async function load() {
   loading.value = true
@@ -35,20 +43,53 @@ async function load() {
     if (!user.value) throw new Error('用户不存在')
     keys.value = userKeys
     dashboard.value = dashboardData
+    await nextTick()
+    renderChart()
+    renderCostChart()
   } catch (error) { showError(error, '加载用户详情失败') } finally { loading.value = false }
 }
 
-async function loadUsage(page = 1) {
-  loading.value = true
-  try {
-    usage.value = await apiGet<UsagePage>('/usage', { userId: userId.value, page, pageSize: usage.value.pageSize, days: 30 })
-  } catch (error) { showError(error, '加载模型使用日志失败') } finally { loading.value = false }
+function renderChart() {
+  if (!chartElement.value || !dashboard.value) return
+  chart ||= init(chartElement.value)
+  const hourly = dashboard.value.trendBucketUnit === 'hour'
+  chart.setOption({
+    animationDuration: 450,
+    color: ['#1677ff', '#16866f'],
+    grid: { top: 36, right: 54, bottom: 32, left: 48, containLabel: true },
+    tooltip: { trigger: 'axis' },
+    legend: { top: 2, left: 'center' },
+    xAxis: { type: 'category', data: dashboard.value.trend.map(point => hourly ? point.bucket.slice(5, 16) : point.bucket.slice(5)), axisLabel: { hideOverlap: true, interval: hourly ? 2 : 'auto' } },
+    yAxis: [{ type: 'value', name: '请求' }, { type: 'value', name: 'Token' }],
+    series: [
+      { name: '请求', type: 'bar', barMaxWidth: hourly ? 16 : 22, data: dashboard.value.trend.map(point => point.requests) },
+      { name: 'Token', type: 'line', yAxisIndex: 1, smooth: !hourly, showSymbol: !hourly, data: dashboard.value.trend.map(point => point.inputTokens + point.outputTokens) },
+    ],
+  })
 }
 
-async function selectTab(tab: string) {
-  activeTab.value = tab
-  if (tab === 'usage' && !usage.value.items.length && !usage.value.total) await loadUsage()
+function renderCostChart() {
+  if (!costChartElement.value || !dashboard.value) return
+  const points = dashboard.value.trend
+  if (!points.length) {
+    costChart?.dispose()
+    costChart = undefined
+    return
+  }
+  costChart ||= init(costChartElement.value)
+  const hourly = dashboard.value.trendBucketUnit === 'hour'
+  costChart.setOption({
+    animationDuration: 450,
+    color: ['#16866f'],
+    grid: { top: 22, right: 24, bottom: 32, left: 58, containLabel: true },
+    tooltip: { trigger: 'axis', valueFormatter: (value: number | string) => formatCost(Number(value)) },
+    xAxis: { type: 'category', data: points.map(point => hourly ? point.bucket.slice(5, 16) : point.bucket.slice(5)), axisLabel: { hideOverlap: true, interval: hourly ? 2 : 'auto' } },
+    yAxis: { type: 'value', name: '成本', axisLabel: { formatter: (value: number) => formatCost(value) } },
+    series: [{ name: '估算成本', type: 'line', smooth: !hourly, showSymbol: !hourly, areaStyle: { opacity: 0.2 }, data: points.map(point => point.estimatedCost ?? 0) }],
+  })
 }
+
+function resizeChart() { chart?.resize(); costChart?.resize() }
 
 async function toggleSecret(item: APIKey) {
   if (!item.secretAvailable || secretLoading[item.id]) return
@@ -59,8 +100,21 @@ async function toggleSecret(item: APIKey) {
   finally { secretLoading[item.id] = false }
 }
 
-function showUsage(item: UsageLog) { selectedUsage.value = item; detailOpen.value = true }
-onMounted(load)
+function selectTab(tab: string) {
+  activeTab.value = tab
+  if (tab === 'dashboard') {
+    void nextTick(() => {
+      if (chart) chart.resize()
+      else renderChart()
+      if (costChart) costChart.resize()
+      else renderCostChart()
+    })
+  }
+}
+
+watch(dashboard, async () => { await nextTick(); renderChart(); renderCostChart() })
+onMounted(() => { load(); window.addEventListener('resize', resizeChart) })
+onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chart?.dispose(); costChart?.dispose() })
 </script>
 
 <template>
@@ -79,19 +133,16 @@ onMounted(load)
           <article class="metric-card"><div class="label">总 Token</div><div class="value">{{ formatNumber(summary.totalTokens) }}</div><div class="detail">近 30 天用量</div></article>
           <article class="metric-card"><div class="label">估算成本</div><div class="value">{{ formatCost(summary.estimatedCost) }}</div><div class="detail">近 30 天</div></article>
         </section>
+        <section v-if="dashboard" class="table-panel chart-panel"><div class="section-heading"><div><h2>请求与 Token 趋势</h2><p>最近 30 天 · {{ dashboard.trendBucketUnit === 'hour' ? '按小时聚合' : '按天聚合' }}</p></div></div><div ref="chartElement" class="trend-chart" /></section>
+        <section v-if="dashboard" class="table-panel chart-panel"><div class="section-heading"><div><h2>消费趋势</h2><p>最近 30 天 · 每 {{ dashboard.trendBucketUnit === 'hour' ? '小时' : '日' }}估算成本</p></div></div><div ref="costChartElement" class="trend-chart cost-trend-chart" /></section>
         <section v-if="dashboard" class="dashboard-grid">
           <div class="table-panel"><div class="section-heading"><h2>模型用量</h2></div><el-table :data="dashboard.byModel" row-key="name"><el-table-column prop="name" label="模型" min-width="150"/><el-table-column prop="requests" label="请求数" align="right"/><el-table-column label="Token" align="right"><template #default="{ row }">{{ formatNumber(row.totalTokens) }}</template></el-table-column><el-table-column label="成本" align="right"><template #default="{ row }">{{ formatCost(row.estimatedCost) }}</template></el-table-column></el-table></div>
-          <div class="table-panel"><div class="section-heading"><h2>用量趋势</h2></div><el-table :data="dashboard.trend" row-key="bucket"><el-table-column prop="bucket" label="时间" min-width="135"/><el-table-column prop="requests" label="请求数" align="right"/><el-table-column label="Token" align="right"><template #default="{ row }">{{ formatNumber(row.inputTokens + row.outputTokens) }}</template></el-table-column></el-table></div>
+          <div class="table-panel"><div class="section-heading"><h2>渠道请求</h2></div><el-table :data="dashboard.byChannel" row-key="name"><el-table-column prop="name" label="渠道" min-width="140"/><el-table-column prop="requests" label="请求数" align="right"/><el-table-column label="Token" align="right"><template #default="{ row }">{{ formatNumber(row.totalTokens) }}</template></el-table-column><el-table-column label="成本" align="right"><template #default="{ row }">{{ formatCost(row.estimatedCost) }}</template></el-table-column></el-table></div>
         </section>
         <div v-if="dashboard && !dashboard.summary.requests" class="empty-state">最近 30 天暂无用量</div>
       </el-tab-pane>
       <el-tab-pane label="模型使用日志" name="usage">
-        <div class="table-panel"><el-table :data="usage.items" row-key="id" @row-click="showUsage">
-          <el-table-column label="时间" min-width="170"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
-          <el-table-column prop="requestedModel" label="模型" min-width="150"/><el-table-column prop="apiKeyName" label="访问密钥" min-width="120"/><el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.httpStatus >= 200 && row.httpStatus < 300 ? 'success' : 'danger'">{{ row.httpStatus }}</el-tag></template></el-table-column>
-          <el-table-column label="Token" align="right" min-width="120"><template #default="{ row }">{{ formatNumber(row.totalTokens ?? 0) }}</template></el-table-column><el-table-column label="成本" align="right" min-width="110"><template #default="{ row }">{{ formatCost(row.estimatedCost ?? 0) }}</template></el-table-column>
-        </el-table><el-pagination v-if="usage.total" background layout="total, prev, pager, next" :total="usage.total" :page-size="usage.pageSize" :current-page="usage.page" @current-change="loadUsage" /></div>
-        <div v-if="!loading && !usage.items.length" class="empty-state">最近 30 天暂无模型使用日志</div>
+        <UsageView v-if="user" :user-id="user.id" class="embedded-usage" />
       </el-tab-pane>
       <el-tab-pane :label="`访问密钥（${keys.length}）`" name="keys">
         <div class="table-panel"><el-table :data="keys" row-key="id">
@@ -100,7 +151,6 @@ onMounted(load)
         </el-table><div v-if="!loading && !keys.length" class="empty-state">该用户尚未申请访问密钥</div></div>
       </el-tab-pane>
     </el-tabs>
-    <UsageDetailDialog v-model="detailOpen" :usage="selectedUsage"/>
   </div>
 </template>
 
@@ -111,9 +161,14 @@ onMounted(load)
 .summary-balance small, .section-heading { color: #7b8792; font-size: 12px; }
 .section-heading { padding: 16px 18px; }
 .detail-tabs { min-width: 0; }
+.chart-panel { overflow: hidden; }
+.trend-chart { width: 100%; height: 300px; }
+.cost-trend-chart { height: 280px; }
+.section-heading p { margin: 4px 0 0; color: #7b8792; font-size: 12px; }
 .dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .key-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .key-value { min-width: 0; overflow-wrap: anywhere; }
 .empty-state { padding: 28px; text-align: center; color: #7b8792; }
-@media (max-width: 760px) { .dashboard-grid { grid-template-columns: 1fr; } }
+.embedded-usage { width: 100%; }
+@media (max-width: 760px) { .trend-chart, .cost-trend-chart { height: 250px; }.dashboard-grid { grid-template-columns: 1fr; } }
 </style>

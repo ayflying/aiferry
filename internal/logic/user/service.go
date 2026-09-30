@@ -46,8 +46,9 @@ type Profile struct {
 
 type ManagedUser struct {
 	Profile
-	APIKeyCount int64             `json:"apiKeyCount"`
-	Usage       usage.UserSummary `json:"usage"`
+	APIKeyCount   int64             `json:"apiKeyCount"`
+	ChannelGroups []string          `json:"channelGroups"`
+	Usage         usage.UserSummary `json:"usage"`
 }
 
 type Option struct {
@@ -109,6 +110,29 @@ func (s *sUser) List(ctx context.Context) ([]ManagedUser, error) {
 		Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list Casdoor users")
 	}
+	userIDs := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		userIDs = append(userIDs, row.Id)
+	}
+	groupRows := make([]struct {
+		UserID uint64 `orm:"user_id"`
+		Name   string `orm:"name"`
+	}, 0)
+	if len(rows) > 0 {
+		if err := g.DB().Model("user_channel_groups ucg").
+			Ctx(ctx).
+			LeftJoin("channel_groups cg", "cg.id = ucg.channel_group_id").
+			Fields("ucg.user_id", "cg.name").
+			WhereIn("ucg.user_id", userIDs).
+			Order("cg.name").
+			Scan(&groupRows); err != nil {
+			return nil, gerror.Wrap(err, "list user channel groups")
+		}
+	}
+	groupsByUser := make(map[uint64][]string, len(rows))
+	for _, group := range groupRows {
+		groupsByUser[group.UserID] = append(groupsByUser[group.UserID], group.Name)
+	}
 	result := make([]ManagedUser, 0, len(rows))
 	for _, row := range rows {
 		summary, err := s.usage.UserSummary(ctx, row.Id, 30)
@@ -119,7 +143,7 @@ func (s *sUser) List(ctx context.Context) ([]ManagedUser, error) {
 		if err != nil {
 			return nil, gerror.Wrap(err, "count user API keys")
 		}
-		result = append(result, ManagedUser{Profile: profileFromEntity(row), APIKeyCount: int64(keyCount), Usage: summary})
+		result = append(result, ManagedUser{Profile: profileFromEntity(row), APIKeyCount: int64(keyCount), ChannelGroups: groupsByUser[row.Id], Usage: summary})
 	}
 	return result, nil
 }

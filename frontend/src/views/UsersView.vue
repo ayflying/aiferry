@@ -95,6 +95,7 @@ onMounted(load)
         <template #desktop><el-table v-loading="loading" :data="users" row-key="id">
         <el-table-column label="用户" min-width="190"><template #default="{ row }"><button class="user-detail-link" type="button" @click="router.push(`/users/${row.id}`)"><el-avatar :size="30" :src="row.avatarUrl || undefined"><UserRound :size="15" /></el-avatar><span><strong>{{ row.nickname }}</strong><small>{{ row.role === 'admin' ? '管理员' : '用户' }}</small></span></button></template></el-table-column>
         <el-table-column label="邮箱" min-width="190"><template #default="{ row }">{{ row.email || '未绑定' }}</template></el-table-column>
+        <el-table-column label="渠道分组" min-width="160"><template #default="{ row }"><div v-if="row.channelGroups.length" class="group-tags"><el-tag v-for="group in row.channelGroups" :key="group" size="small" effect="plain">{{ group }}</el-tag></div><span v-else class="muted">未分组</span></template></el-table-column>
         <el-table-column label="余额" min-width="132"><template #default="{ row }"><span class="mono">{{ formatCost(row.balance) }}</span></template></el-table-column>
         <el-table-column label="访问密钥" width="110" align="right"><template #default="{ row }">{{ formatNumber(row.apiKeyCount) }}</template></el-table-column>
         <el-table-column label="近 30 天调用" min-width="130" align="right"><template #default="{ row }"><div class="usage-cell"><strong>{{ formatNumber(row.usage.requests) }}</strong><small>{{ formatCost(row.usage.estimatedCost) }}</small></div></template></el-table-column>
@@ -131,6 +132,7 @@ onMounted(load)
 <style scoped>
 .user-detail-link { display: inline-flex; align-items: center; gap: 9px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }.user-detail-link span { display: flex; flex-direction: column; gap: 2px; }.user-detail-link strong { color: #15202b; font-size: 12px; }.user-detail-link small { color: #7b8792; font-size: 10px; }.user-detail-link:hover strong { color: #409eff; }
 .user-cell { display: flex; align-items: center; gap: 9px; }.user-cell div, .usage-cell { display: flex; flex-direction: column; gap: 2px; }.user-cell strong { color: #15202b; font-size: 12px; }.user-cell small, .usage-cell small { color: #7b8792; font-size: 10px; }.usage-cell { align-items: flex-end; font-family: 'JetBrains Mono', monospace; font-size: 11px; }.empty-state svg { display: block; margin: 0 auto 10px; color: #7b8792; }.empty-state span { display: block; }
+.group-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .dialog-hint { margin: 0 0 14px; font-size: 12px; color: #5e6c7a; line-height: 1.5; }
 .group-checkboxes { display: flex; flex-direction: column; gap: 8px; }
 </style>
