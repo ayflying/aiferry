@@ -36,7 +36,7 @@ const ruleDraft = ref<PriceRuleDraft>(createPriceRuleDraft())
 const editingRuleId = ref<number | null>(null)
 // 新增与编辑共用同一个弹框：null 表示新增，否则是正在编辑的规则 id。
 const ruleDialogOpen = ref(false)
-const priceDrawerSize = window.innerWidth <= 600 ? '94%' : '520px'
+const priceDrawerSize = window.innerWidth <= 600 ? '94%' : 'min(720px, 94vw)'
 const form = reactive({
   billingMode: 'token' as ModelBillingMode,
   inputPrice: undefined as number | undefined,
