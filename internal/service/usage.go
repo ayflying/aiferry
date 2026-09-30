@@ -16,6 +16,7 @@ type (
 		ParseDashboardRange(ctx context.Context, startValue string, endValue string, days int, hours int) (DashboardRange, error)
 		ParseLogRange(ctx context.Context, startValue string, endValue string) (time.Time, time.Time, error)
 		Dashboard(ctx context.Context, dateRange DashboardRange) (Dashboard, error)
+		DashboardForUser(ctx context.Context, userID uint64, dateRange DashboardRange) (Dashboard, error)
 		UserSummary(ctx context.Context, userID uint64, days int) (UserSummary, error)
 		List(ctx context.Context, input LogFilter) (LogPage, error)
 		Record(ctx context.Context, input RecordInput) error

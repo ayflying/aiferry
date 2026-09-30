@@ -9,6 +9,7 @@ import (
 
 func (c *Controller) registerUserRoutes(group *ghttp.RouterGroup) {
 	group.GET("/users", c.listUsers)
+	group.GET("/users/{id}/dashboard", c.userDashboard)
 	group.PUT("/users/{id}/balance", c.updateUserBalance)
 	group.DELETE("/users/{id}", c.deleteUser)
 	group.GET("/users/{id}/channel-groups", c.listUserChannelGroups)
@@ -22,6 +23,16 @@ func (c *Controller) listUsers(r *ghttp.Request) {
 		return
 	}
 	data, err := c.users.List(r.Context())
+	respond(r, data, err)
+}
+
+func (c *Controller) userDashboard(r *ghttp.Request) {
+	dateRange, err := c.usage.ParseDashboardRange(r.Context(), r.GetQuery("startAt").String(), r.GetQuery("endAt").String(), r.GetQuery("days", 30).Int(), r.GetQuery("hours").Int())
+	if err != nil {
+		respond(r, nil, err)
+		return
+	}
+	data, err := c.usage.DashboardForUser(r.Context(), routeID(r), dateRange)
 	respond(r, data, err)
 }
 

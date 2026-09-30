@@ -74,11 +74,13 @@ func modelGroupNameExpression(column string) string {
 }
 
 // usageRangeQuery 构造仪表盘区间查询，左闭右开，与明细扫描时的边界保持一致。
-func usageRangeQuery(ctx context.Context, dateRange DashboardRange) *gdb.Model {
+func usageRangeQuery(ctx context.Context, dateRange DashboardRange, userID ...uint64) *gdb.Model {
 	columns := dao.UsageLogs.Columns()
-	return dao.UsageLogs.Ctx(ctx).
-		WhereGTE(columns.CreatedAt, dateRange.StartAt).
-		WhereLT(columns.CreatedAt, dateRange.EndAt)
+	query := dao.UsageLogs.Ctx(ctx).WhereGTE(columns.CreatedAt, dateRange.StartAt).WhereLT(columns.CreatedAt, dateRange.EndAt)
+	if len(userID) > 0 && userID[0] > 0 {
+		query = query.Where(columns.UserId, userID[0])
+	}
+	return query
 }
 
 // dashboardBucketShiftSeconds 计算库内 created_at 墙钟时间与展示时区之间的偏移量（秒）。
@@ -140,10 +142,10 @@ func costBucketExpression(column string, unit costBucketUnit, startLocal time.Ti
 	)
 }
 
-func (s *sUsage) dashboardSummaryAggregate(ctx context.Context, dateRange DashboardRange) (dashboardSummaryAggregate, error) {
+func (s *sUsage) dashboardSummaryAggregate(ctx context.Context, dateRange DashboardRange, userID ...uint64) (dashboardSummaryAggregate, error) {
 	columns := dao.UsageLogs.Columns()
 	result := dashboardSummaryAggregate{}
-	if err := usageRangeQuery(ctx, dateRange).
+	if err := usageRangeQuery(ctx, dateRange, userID...).
 		Fields(
 			"COUNT(*) AS requests",
 			"SUM(CASE WHEN "+columns.HttpStatus+" BETWEEN 200 AND 299 THEN 1 ELSE 0 END) AS successes",
@@ -159,13 +161,13 @@ func (s *sUsage) dashboardSummaryAggregate(ctx context.Context, dateRange Dashbo
 	return result, nil
 }
 
-func (s *sUsage) dashboardModelAggregates(ctx context.Context, dateRange DashboardRange) ([]dashboardBreakdownAggregate, error) {
+func (s *sUsage) dashboardModelAggregates(ctx context.Context, dateRange DashboardRange, userID ...uint64) ([]dashboardBreakdownAggregate, error) {
 	columns := dao.UsageLogs.Columns()
 	// 模型名是字符串，库默认 collation 大小写不敏感：直接 GROUP BY 会把
 	// Qwen3.8-Flash 与 qwen3.8-flash 合成一组，而原先的 Go map 是区分大小写的。
 	// 用 CAST 分组还原逐行聚合的分组粒度，再取组内原值作为展示名。
 	result := make([]dashboardBreakdownAggregate, 0)
-	if err := usageRangeQuery(ctx, dateRange).
+	if err := usageRangeQuery(ctx, dateRange, userID...).
 		Fields(
 			modelGroupNameExpression(columns.RequestedModel),
 			"COUNT(*) AS requests",
@@ -179,13 +181,13 @@ func (s *sUsage) dashboardModelAggregates(ctx context.Context, dateRange Dashboa
 	return result, nil
 }
 
-func (s *sUsage) dashboardChannelAggregates(ctx context.Context, dateRange DashboardRange) ([]dashboardBreakdownAggregate, error) {
+func (s *sUsage) dashboardChannelAggregates(ctx context.Context, dateRange DashboardRange, userID ...uint64) ([]dashboardBreakdownAggregate, error) {
 	columns := dao.UsageLogs.Columns()
 	// 渠道为空的行在明细聚合里归到 0，分组表达式必须重复写出，否则 MySQL 会把
 	// GROUP BY channel_id 解析成基列而把 NULL 和 0 分成两组。
 	channelKey := "COALESCE(" + columns.ChannelId + ", 0)"
 	result := make([]dashboardBreakdownAggregate, 0)
-	if err := usageRangeQuery(ctx, dateRange).
+	if err := usageRangeQuery(ctx, dateRange, userID...).
 		Fields(
 			channelKey+" AS channel_id",
 			"COUNT(*) AS requests",
@@ -199,11 +201,11 @@ func (s *sUsage) dashboardChannelAggregates(ctx context.Context, dateRange Dashb
 	return result, nil
 }
 
-func (s *sUsage) dashboardTrendAggregates(ctx context.Context, dateRange DashboardRange, bucketUnit string, shiftSeconds int) ([]dashboardTrendAggregate, error) {
+func (s *sUsage) dashboardTrendAggregates(ctx context.Context, dateRange DashboardRange, bucketUnit string, shiftSeconds int, userID ...uint64) ([]dashboardTrendAggregate, error) {
 	columns := dao.UsageLogs.Columns()
 	bucket := trendBucketExpression(columns.CreatedAt, bucketUnit, shiftSeconds)
 	result := make([]dashboardTrendAggregate, 0)
-	if err := usageRangeQuery(ctx, dateRange).
+	if err := usageRangeQuery(ctx, dateRange, userID...).
 		Fields(
 			bucket+" AS bucket",
 			"COUNT(*) AS requests",
@@ -218,21 +220,21 @@ func (s *sUsage) dashboardTrendAggregates(ctx context.Context, dateRange Dashboa
 	return result, nil
 }
 
-func (s *sUsage) costTotalAggregate(ctx context.Context, dateRange DashboardRange) (float64, error) {
-	total, err := usageRangeQuery(ctx, dateRange).Sum(dao.UsageLogs.Columns().EstimatedCost)
+func (s *sUsage) costTotalAggregate(ctx context.Context, dateRange DashboardRange, userID ...uint64) (float64, error) {
+	total, err := usageRangeQuery(ctx, dateRange, userID...).Sum(dao.UsageLogs.Columns().EstimatedCost)
 	if err != nil {
 		return 0, gerror.Wrap(err, "aggregate cost distribution total")
 	}
 	return total, nil
 }
 
-func (s *sUsage) costBucketAggregates(ctx context.Context, dateRange DashboardRange, unit costBucketUnit, startLocal time.Time, shiftSeconds int) ([]costBucketAggregate, error) {
+func (s *sUsage) costBucketAggregates(ctx context.Context, dateRange DashboardRange, unit costBucketUnit, startLocal time.Time, shiftSeconds int, userID ...uint64) ([]costBucketAggregate, error) {
 	columns := dao.UsageLogs.Columns()
 	bucket := costBucketExpression(columns.CreatedAt, unit, startLocal, shiftSeconds)
 	result := make([]costBucketAggregate, 0)
 	// GoFrame 的 Group 是覆盖语义，多列分组必须一次传入（内部用逗号连接）。
 	// 这里直接传分组表达式而不是 SELECT 别名，省掉一层 MySQL 别名解析依赖。
-	if err := usageRangeQuery(ctx, dateRange).
+	if err := usageRangeQuery(ctx, dateRange, userID...).
 		Fields(
 			modelGroupNameExpression(columns.RequestedModel),
 			bucket+" AS bucket",

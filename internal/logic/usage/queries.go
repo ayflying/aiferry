@@ -71,20 +71,31 @@ func parseLogTime(value string, location *time.Location) (time.Time, error) {
 }
 
 func (s *sUsage) Dashboard(ctx context.Context, dateRange DashboardRange) (Dashboard, error) {
+	return s.dashboard(ctx, dateRange, 0)
+}
+
+func (s *sUsage) DashboardForUser(ctx context.Context, userID uint64, dateRange DashboardRange) (Dashboard, error) {
+	if userID == 0 {
+		return Dashboard{}, gerror.New("用户 ID 无效")
+	}
+	return s.dashboard(ctx, dateRange, userID)
+}
+
+func (s *sUsage) dashboard(ctx context.Context, dateRange DashboardRange, userID uint64) (Dashboard, error) {
 	location := s.timeLocation(ctx)
 	now := time.Now().In(location)
 	// 库内 created_at 是进程本地时区的墙钟时间，分桶要按展示时区，两者不一致时才平移。
 	shiftSeconds := dashboardBucketShiftSeconds(location)
 
-	summary, err := s.dashboardSummaryAggregate(ctx, dateRange)
+	summary, err := s.dashboardSummaryAggregate(ctx, dateRange, userID)
 	if err != nil {
 		return Dashboard{}, err
 	}
-	models, err := s.dashboardModelAggregates(ctx, dateRange)
+	models, err := s.dashboardModelAggregates(ctx, dateRange, userID)
 	if err != nil {
 		return Dashboard{}, err
 	}
-	channels, err := s.dashboardChannelAggregates(ctx, dateRange)
+	channels, err := s.dashboardChannelAggregates(ctx, dateRange, userID)
 	if err != nil {
 		return Dashboard{}, err
 	}
@@ -97,14 +108,14 @@ func (s *sUsage) Dashboard(ctx context.Context, dateRange DashboardRange) (Dashb
 		trendRange.EndAt = current
 	}
 	trendBucketUnit := dashboardTrendBucketUnit(trendRange, location)
-	trendRows, err := s.dashboardTrendAggregates(ctx, dateRange, trendBucketUnit, shiftSeconds)
+	trendRows, err := s.dashboardTrendAggregates(ctx, dateRange, trendBucketUnit, shiftSeconds, userID)
 	if err != nil {
 		return Dashboard{}, err
 	}
 	result := dashboardFromAggregates(
 		summary, models, channels, trendRows, channelNames, location, trendRange, trendBucketUnit,
 	)
-	recentCost, err := s.costDistribution(ctx, dateRange, now, location)
+	recentCost, err := s.costDistribution(ctx, dateRange, now, location, userID)
 	if err != nil {
 		return result, err
 	}

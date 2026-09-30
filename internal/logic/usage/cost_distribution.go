@@ -18,7 +18,7 @@ const (
 	dayBucketLayout              = "2006-01-02"
 )
 
-func (s *sUsage) costDistribution(ctx context.Context, dateRange DashboardRange, now time.Time, location *time.Location) (RecentCostDistribution, error) {
+func (s *sUsage) costDistribution(ctx context.Context, dateRange DashboardRange, now time.Time, location *time.Location, userID ...uint64) (RecentCostDistribution, error) {
 	endAt := dateRange.EndAt
 	if current := now.UTC(); endAt.After(current) {
 		endAt = current
@@ -37,12 +37,12 @@ func (s *sUsage) costDistribution(ctx context.Context, dateRange DashboardRange,
 
 	// 区间边界沿用 clamp 后的 endAt；总量与「模型 × 桶」都在数据库侧聚合，只回传小结果集。
 	scopedRange := DashboardRange{StartAt: startAt, EndAt: endAt}
-	total, err := s.costTotalAggregate(ctx, scopedRange)
+	total, err := s.costTotalAggregate(ctx, scopedRange, userID...)
 	if err != nil {
 		return result, err
 	}
 	result.TotalEstimatedCost = total
-	rows, err := s.costBucketAggregates(ctx, scopedRange, bucketUnit, startLocal, dashboardBucketShiftSeconds(location))
+	rows, err := s.costBucketAggregates(ctx, scopedRange, bucketUnit, startLocal, dashboardBucketShiftSeconds(location), userID...)
 	if err != nil {
 		return result, err
 	}

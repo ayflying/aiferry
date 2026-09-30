@@ -337,14 +337,20 @@ func (s *sUser) ListChannelGroupIDs(ctx context.Context, id uint64) ([]uint64, e
 	if _, err := s.find(ctx, id); err != nil {
 		return nil, err
 	}
-	ids := make([]uint64, 0)
+	rows := make([]struct {
+		ChannelGroupID uint64 `orm:"channel_group_id"`
+	}, 0)
 	if err := g.DB().Model("user_channel_groups").
 		Ctx(ctx).
 		Fields("channel_group_id").
 		Where("user_id", id).
 		Order("channel_group_id").
-		Scan(&ids); err != nil {
+		Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list user channel groups")
+	}
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ChannelGroupID)
 	}
 	return ids, nil
 }
