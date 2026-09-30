@@ -15,6 +15,7 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/channelgroup"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	mailservice "github.com/yunloli/aiferry/internal/logic/mail"
+	"github.com/yunloli/aiferry/internal/logic/modelmetadata"
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/timewindow"
@@ -132,23 +133,25 @@ type CredentialHealthView struct {
 }
 
 type PublicModelView struct {
-	Id               uint64   `json:"id" orm:"id"`
-	PublicName       string   `json:"publicName" orm:"public_name"`
-	InputPrice       *float64 `json:"inputPrice" orm:"input_price"`
-	CachedInputPrice *float64 `json:"cachedInputPrice" orm:"cached_input_price"`
-	CacheWritePrice  *float64 `json:"cacheWritePrice" orm:"cache_write_price"`
-	OutputPrice      *float64 `json:"outputPrice" orm:"output_price"`
-	ImageInputPrice  *float64 `json:"imageInputPrice" orm:"image_input_price"`
-	AudioInputPrice  *float64 `json:"audioInputPrice" orm:"audio_input_price"`
-	AudioOutputPrice *float64 `json:"audioOutputPrice" orm:"audio_output_price"`
-	RequestPrice     *float64 `json:"requestPrice" orm:"request_price"`
-	BillingMode      string   `json:"billingMode" orm:"billing_mode"`
+	Metadata         modelmetadata.Metadata `json:"metadata" orm:"-"`
+	Id               uint64                 `json:"id" orm:"id"`
+	PublicName       string                 `json:"publicName" orm:"public_name"`
+	InputPrice       *float64               `json:"inputPrice" orm:"input_price"`
+	CachedInputPrice *float64               `json:"cachedInputPrice" orm:"cached_input_price"`
+	CacheWritePrice  *float64               `json:"cacheWritePrice" orm:"cache_write_price"`
+	OutputPrice      *float64               `json:"outputPrice" orm:"output_price"`
+	ImageInputPrice  *float64               `json:"imageInputPrice" orm:"image_input_price"`
+	AudioInputPrice  *float64               `json:"audioInputPrice" orm:"audio_input_price"`
+	AudioOutputPrice *float64               `json:"audioOutputPrice" orm:"audio_output_price"`
+	RequestPrice     *float64               `json:"requestPrice" orm:"request_price"`
+	BillingMode      string                 `json:"billingMode" orm:"billing_mode"`
 }
 
 type DiscoveredModel struct {
-	Name       string `json:"name"`
-	PublicName string `json:"publicName"`
-	Selected   bool   `json:"selected"`
+	Metadata   modelmetadata.Metadata `json:"metadata"`
+	Name       string                 `json:"name"`
+	PublicName string                 `json:"publicName"`
+	Selected   bool                   `json:"selected"`
 }
 
 func New(appSvc *app.Service, typeSvc *channeltype.Service, groupSvc *channelgroup.Service, resilienceSvc *system.Service, usageSvc *usage.Service, priceCache *pricingcache.Service, userSvc *user.Service, mailSvc *mailservice.Service) *sChannel {

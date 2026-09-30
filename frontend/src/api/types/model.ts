@@ -1,5 +1,28 @@
 export type ModelBillingMode = 'token' | 'request' | 'rules'
 
+export type ModelModality = 'text' | 'image' | 'audio' | 'video' | 'file'
+
+/** null 表示未知；用于 manual 时回退 automatic。空模态列表表示明确无。 */
+export interface ModelMetadata {
+  display_name: string | null
+  description: string | null
+  input_modalities: ModelModality[] | null
+  output_modalities: ModelModality[] | null
+  context_length: number | null
+  max_output_tokens: number | null
+  capabilities: {
+    tools: boolean | null
+    reasoning: boolean | null
+    structured_output: boolean | null
+  }
+}
+
+export interface ModelMetadataResponse {
+  automatic: ModelMetadata
+  manual: ModelMetadata | null
+  effective: ModelMetadata
+}
+
 /**
  * 时间窗：时区 + 星期（ISO 1=周一 … 7=周日，空表示每天）+ 一天内的多个时段。
  * 时段元素为 [开始, 结束]，起止相同表示全天，开始晚于结束表示跨零点。

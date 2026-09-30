@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -15,13 +13,13 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
-	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/apikey"
 	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/logic/channel"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/logic/iplocation"
 	mailservice "github.com/yunloli/aiferry/internal/logic/mail"
+	"github.com/yunloli/aiferry/internal/logic/modelmetadata"
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
@@ -83,10 +81,11 @@ type Candidate struct {
 }
 
 type Model struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
+	Metadata modelmetadata.Metadata `json:"metadata"`
+	ID       string                 `json:"id"`
+	Object   string                 `json:"object"`
+	Created  int64                  `json:"created"`
+	OwnedBy  string                 `json:"owned_by"`
 }
 
 type ModelList struct {
@@ -130,81 +129,6 @@ type attemptResult struct {
 
 func New(appSvc *app.Service, usageSvc *usage.Service, resilienceSvc *system.Service, userSvc *user.Service, priceCache *pricingcache.Service, mailSvc *mailservice.Service, channelSvc *channel.Service, channelTypeSvc *channeltype.Service, locationSvc *iplocation.Service) *sRelay {
 	return &sRelay{app: appSvc, usage: usageSvc, resilience: resilienceSvc, users: userSvc, prices: priceCache, mail: mailSvc, channels: channelSvc, types: channelTypeSvc, locations: locationSvc, slots: newKeySlots()}
-}
-
-// modelsListCacheKey 复用历史键名 aiferry:models:list 并嵌入路由版本号：
-// 所有渠道/模型/分组写路径都会递增 aiferry:routes:version，版本号变化后
-// 旧列表键自然失效。短 TTL 兜底防止版本号丢失。
-const modelsListCacheTTL = 60 * time.Second
-
-func (s *sRelay) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
-	version := s.routeCacheVersion(ctx)
-	cacheKey := fmt.Sprintf("aiferry:models:list:%d:%d", key.Id, version)
-	if cached, err := s.app.Redis.Get(ctx, cacheKey).Bytes(); err == nil {
-		var list ModelList
-		if json.Unmarshal(cached, &list) == nil {
-			return list, nil
-		}
-	}
-	list, err := s.computeModels(ctx, key)
-	if err != nil {
-		return ModelList{}, err
-	}
-	if encoded, err := json.Marshal(list); err == nil {
-		_ = s.app.Redis.Set(ctx, cacheKey, encoded, modelsListCacheTTL).Err()
-	}
-	return list, nil
-}
-
-// computeModels 逐模型解析可用渠道候选，得出该密钥可见的模型列表。
-// routeCached 命中缓存时每个模型只消耗 1 次 Redis 读，无数据库查询。
-func (s *sRelay) computeModels(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
-	modelColumns := dao.ChannelModels.Columns()
-	rows := make([]struct {
-		ChannelId  uint64 `orm:"channel_id"`
-		PublicName string `orm:"public_name"`
-	}, 0)
-	err := dao.ChannelModels.Ctx(ctx).
-		Fields(modelColumns.ChannelId, modelColumns.PublicName).
-		Where(modelColumns.Enabled, 1).
-		WhereNull(modelColumns.AutoDisabledAt).
-		Scan(&rows)
-	if err != nil {
-		return ModelList{}, gerror.Wrap(err, "list public models")
-	}
-	channelIDs := make(map[uint64]struct{}, len(rows))
-	for _, row := range rows {
-		channelIDs[row.ChannelId] = struct{}{}
-	}
-	activeChannels, err := activeRouteChannels(ctx, sortedRouteIDs(channelIDs))
-	if err != nil {
-		return ModelList{}, err
-	}
-	publicNames := make(map[string]struct{})
-	for _, row := range rows {
-		if _, active := activeChannels[row.ChannelId]; active {
-			publicNames[row.PublicName] = struct{}{}
-		}
-	}
-	names := make([]string, 0, len(publicNames))
-	for name := range publicNames {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	models := make([]Model, 0, len(names))
-	for _, name := range names {
-		if len(key.AllowedModels) > 0 && !containsString(key.AllowedModels, name) {
-			continue
-		}
-		candidates, routeErr := s.routeCached(ctx, name, key)
-		if routeErr != nil {
-			return ModelList{}, routeErr
-		}
-		if len(candidates) > 0 {
-			models = append(models, Model{ID: name, Object: "model", Created: 0, OwnedBy: "aiferry"})
-		}
-	}
-	return ModelList{Object: "list", Data: models}, nil
 }
 
 func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, clientIP, gatewayHost, endpoint string, body []byte, key apikey.AuthKey) error {

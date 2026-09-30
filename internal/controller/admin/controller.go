@@ -79,6 +79,8 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 }
 
 func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
+	group.GET("/model-metadata", c.getModelMetadata)
+	group.PUT("/model-metadata", c.putModelMetadata)
 	group.POST("/channel-types", c.createChannelType)
 	group.PUT("/channel-types/{id}", c.updateChannelType)
 	group.PUT("/channel-types/{id}/status", c.updateChannelTypeStatus)

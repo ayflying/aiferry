@@ -6,6 +6,7 @@ AiFerry（AI 摆渡）是基于 GoFrame v2 和 Vue 3 的 OpenAI 兼容中转管�
 
 - OpenAI 兼容接口：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/images/generations`
 - 普通响应与 SSE 流式响应
+- 模型列表能力元数据：上游同步、公开模型手动覆盖、输入输出模态与三态能力、上下文长度（见 [模型能力元数据](docs/model-metadata.md)）
 - Responses 与 Chat Completions 之间的协议自动转换（工具调用历史、多模态内容与思考内容的双向还原，见 `docs/protocol-conversion.md`）
 - 渠道优先级、权重路由、最多三渠道故障转移和 Redis 冷却
 - 渠道模型定时关闭：按「渠道 × 模型」配置星期与时段，关闭期间自动从路由摘除（见 `docs/model-closed-windows.md`）
@@ -50,18 +51,18 @@ AIFERRY_ADMIN_ROLES
 
 登录会话有效期固定 30 天，每次请求都会滑动续期（刷新 Redis TTL 和 Cookie），不提供环境变量配置。历史上可用 `SESSION_TTL_HOURS` 覆盖，曾被压到十几小时导致隔天掉登录，现已移除。
 
-## 远程开发
+## 本机基础检查
 
-项目不要求在本机安装 Go、Node、MySQL 或 Redis。源码同步到构建服务器后，统一通过开发 toolbox 执行：
+使用本机已有 Go、Node.js 和前端依赖运行基础检查；不再要求把源码同步到远程构建机：
 
-```bash
-docker compose -f docker-compose.dev.yml run --rm toolbox sh ./hack/remote-tools.sh migrate
-docker compose -f docker-compose.dev.yml run --rm toolbox sh ./hack/remote-tools.sh dao
-docker compose -f docker-compose.dev.yml run --rm toolbox sh ./hack/remote-tools.sh backend-test
-docker compose -f docker-compose.dev.yml run --rm toolbox sh ./hack/remote-tools.sh frontend-check
+```powershell
+go test ./...
+pnpm --dir frontend run typecheck
+pnpm --dir frontend run test:run
+pnpm --dir frontend run build
 ```
 
-DAO、DO 和 entity 必须由远程 `gf gen dao` 生成，禁止手工修改生成文件。
+DAO、DO、entity 与服务接口必须使用 GoFrame 生成工具生成，禁止手工修改。需要数据库的迁移或集成验证应使用隔离测试数据库，不使用生产凭据。本机单元测试不等于生产验收。
 
 ## 运行
 
@@ -84,18 +85,14 @@ docker compose --profile local up -d
 
 根目录 `VERSION` 是唯一版本来源，初始版本为 `0.1.2`。**版本号在每次提交发布前手动递增（补丁位 +1），与代码改动一并提交**；CI 只校验格式并用它打同名版本标签和 `latest` 标签，不再自动递增或回推 bump 提交。提交并推送 Git 源码后，由 CI 构建并推送镜像，再由部署流程拉取更新。
 
-镜像仓库认证、构建主机和部署路径属于维护者的 CI/CD 或私有运维环境配置，不是开源项目的初始化步骤。发布凭据必须由部署环境的凭据存储或密钥管理服务保管，不得写入仓库或 `.env`。随后从 Windows PowerShell 在仓库根目录执行：
+基础测试通过后，仅暂存本次改动（含手动递增的 `VERSION`），创建中文提交并推送 `main`。正式版本由 GitHub Actions CI 自动构建，发布版本标签和 `latest`；镜像凭据由 CI Secrets 管理，不得写入仓库或 `.env`。
 
-```powershell
-.\hack\release.ps1
-```
-
-脚本要求 Git 工作区干净，并自动完成版本递增、详细中文发布提交、`main` 推送、临时源码同步、远程 `docker build`、`ghcr.io/ayflying/aiferry:<版本>` 与 `latest` 推送、Compose 拉取和健康检查。远程临时源码会在结束时清理。
+`hack/release.ps1` 是历史远程发布脚本，当前常规流程不使用。CI 成功不代表生产容器已经更新；生产部署与健康检查是独立验收步骤，需明确授权。
 
 ## 测试
 
-- Go 单元和集成检查：`hack/remote-tools.sh backend-test`
-- Vue 类型检查、Vitest 和生产构建：`hack/remote-tools.sh frontend-check`
+- Go 单元检查：`go test ./...`
+- Vue 类型检查、Vitest 和生产构建：`pnpm --dir frontend run typecheck`、`pnpm --dir frontend run test:run`、`pnpm --dir frontend run build`
 - Casdoor 脱敏冒烟：`sh hack/smoke-auth.sh`
 - Playwright 桌面与移动验收：在 Playwright 容器中执行 `npm run test:e2e`
 

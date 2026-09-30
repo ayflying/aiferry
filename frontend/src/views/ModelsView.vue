@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Braces, Coins, Pencil, Plus, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { APIKey, ModelBillingMode, PriceRule, PriceSource, PublicModel } from '../api/types'
+import type { APIKey, ModelBillingMode, ModelMetadata, ModelMetadataResponse, PriceRule, PriceSource, PublicModel } from '../api/types'
 import { showError, showSuccess } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
@@ -16,7 +16,33 @@ import TableActionButton from '../components/TableActionButton.vue'
 import PriceSourceManager from '../components/PriceSourceManager.vue'
 import MobileRecordList from '../components/MobileRecordList.vue'
 import ResponsiveList from '../components/ResponsiveList.vue'
-
+import ModelMetadataEditor from '../components/ModelMetadataEditor.vue'
+const metadataTarget = ref('')
+const metadataOpen = ref(false), metadataLoading = ref(false), metadataSaving = ref(false)
+const metadataData = ref<ModelMetadataResponse | null>(null)
+let metadataRequest = 0
+async function openMetadata(publicName: string) {
+  const request = ++metadataRequest
+  metadataTarget.value = publicName
+  metadataData.value = null
+  metadataOpen.value = true
+  metadataLoading.value = true
+  try {
+    const data = await apiGet<ModelMetadataResponse>('/model-metadata', { publicName })
+    if (request === metadataRequest) metadataData.value = data
+  } catch (error) { if (request === metadataRequest) showError(error, '加载模型能力失败') }
+  finally { if (request === metadataRequest) metadataLoading.value = false }
+}
+async function saveMetadata(metadata: ModelMetadata | null) {
+  if (!metadataData.value || metadataLoading.value || metadataSaving.value) return
+  metadataSaving.value = true
+  try {
+    await apiPut('/model-metadata', { publicName: metadataTarget.value, metadata })
+    showSuccess(metadata === null ? '已清除手动覆盖，恢复自动能力' : '模型能力已保存')
+    metadataOpen.value = false
+  } catch (error) { showError(error, '保存模型能力失败') }
+  finally { metadataSaving.value = false }
+}
 const store = useAppStore()
 const auth = useAuthStore()
 const models = ref<PublicModel[]>([])
@@ -54,7 +80,6 @@ const missingFallbackRule = computed(() => rules.value.length > 0 && rules.value
 const editingRule = computed(() => rules.value.find((rule) => rule.id === editingRuleId.value) ?? null)
 // 上游同步规则每次同步都会按模型整批删除重建，对它的编辑只能临时生效，必须提前说明。
 const editingHint = computed(() => (editingRule.value?.source === 'sync' ? '该规则由价格同步生成：保存后立即生效，但下次同步上游价格时会覆盖这次修改。' : ''))
-
 const filtered = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return models.value.filter((item) => !query || item.publicName.toLowerCase().includes(query)).sort((left, right) => compareModelNames(left.publicName, right.publicName))
@@ -68,7 +93,6 @@ const channelPriceSources = computed(() => {
   const typesWithPricing = new Set(store.channelTypes.filter((type) => type.config.pricing.adapter !== 'none').map((type) => type.code))
   return store.channels.filter((channel) => channel.status === 1 && typesWithPricing.has(channel.type))
 })
-
 async function load() {
   loading.value = true
   try {
@@ -96,17 +120,14 @@ async function load() {
     if (!syncTargetExists(priceSyncTarget.value)) priceSyncTarget.value = defaultSyncTarget()
   } catch (error) { showError(error, '加载模型失败') } finally { loading.value = false }
 }
-
 function defaultSyncTarget() {
   return enabledSources.value[0] ? `source:${enabledSources.value[0].id}` : channelPriceSources.value[0] ? `channel:${channelPriceSources.value[0].id}` : ''
 }
-
 function syncTargetExists(target: string) {
   const [kind, rawID] = target.split(':')
   const id = Number(rawID)
   return kind === 'source' ? enabledSources.value.some((item) => item.id === id) : kind === 'channel' && channelPriceSources.value.some((item) => item.id === id)
 }
-
 function openEdit(model: PublicModel) {
   current.value = model
   Object.assign(form, {
@@ -127,7 +148,6 @@ function openEdit(model: PublicModel) {
   editOpen.value = true
   loadRules(model.id)
 }
-
 async function loadRules(modelId: number) {
   try {
     rules.value = await apiGet<PriceRule[]>(`/models/${modelId}/price-rules`)
@@ -138,7 +158,6 @@ async function loadRules(modelId: number) {
     }
   } catch (error) { showError(error, '加载价格规则失败') }
 }
-
 async function save() {
   if (!current.value) return
   saving.value = true
@@ -149,25 +168,21 @@ async function save() {
     await load()
   } catch (error) { showError(error, '保存公共价格失败') } finally { saving.value = false }
 }
-
 function startAddRule() {
   editingRuleId.value = null
   ruleDraft.value = createPriceRuleDraft()
   ruleDialogOpen.value = true
 }
-
 function startEditRule(rule: PriceRule) {
   editingRuleId.value = rule.id
   ruleDraft.value = priceRuleToDraft(rule)
   ruleDialogOpen.value = true
 }
-
 function cancelEditRule() {
   editingRuleId.value = null
   ruleDraft.value = createPriceRuleDraft()
   ruleDialogOpen.value = false
 }
-
 async function submitRule() {
   if (!current.value) return
   const draft = ruleDraft.value
@@ -205,7 +220,6 @@ async function submitRule() {
     await loadRules(current.value.id)
   } catch (error) { showError(error, editing ? '更新价格规则失败' : '添加价格规则失败') } finally { ruleSaving.value = false }
 }
-
 async function removeRule(rule: PriceRule) {
   try {
     await ElMessageBox.confirm(`删除价格规则“${rule.name}”？`, '删除价格规则', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
@@ -213,7 +227,6 @@ async function removeRule(rule: PriceRule) {
     if (current.value) await loadRules(current.value.id)
   } catch (error) { if (error !== 'cancel') showError(error, '删除价格规则失败') }
 }
-
 async function syncPrices() {
   if (!priceSyncTarget.value) { showError('请选择价格同步来源', '无法同步价格'); return }
   const [kind, rawID] = priceSyncTarget.value.split(':')
@@ -228,20 +241,16 @@ async function syncPrices() {
     await load()
   } catch (error) { showError(error, '价格同步失败') } finally { loading.value = false }
 }
-
 function formatSyncFailures(failures: Array<{ sourceName?: string; channelName?: string; message: string }>) {
   const visible = failures.slice(0, 2).map((item) => `${item.sourceName || item.channelName || '价格源'}：${item.message}`)
   const remaining = failures.length - visible.length
   return `${visible.join('；')}${remaining > 0 ? `；另有 ${remaining} 个价格源失败` : ''}`
 }
-
 watch([keyword, models], () => { page.value = 1 })
 // 弹框被 teleport 到 body，抽屉关掉不会连带隐藏它，必须显式收起，否则会浮在列表上方。
 watch(editOpen, (open) => { if (!open) ruleDialogOpen.value = false })
-
 onMounted(load)
 </script>
-
 <template>
   <div class="page-stack models-page">
     <div class="page-toolbar">
@@ -258,20 +267,19 @@ onMounted(load)
       </template>
       <el-button v-else :icon="RefreshCw" :loading="loading" @click="load">刷新</el-button>
     </div>
-
     <div class="table-panel">
       <ResponsiveList>
         <template #desktop><el-table v-loading="loading" :data="pagedModels" row-key="publicName" class="models-table">
         <el-table-column prop="publicName" label="公开模型" min-width="250"><template #default="{ row }"><span class="mono model-name">{{ row.publicName }}</span></template></el-table-column>
         <el-table-column label="计费方式" width="105"><template #default="{ row }"><span class="muted">{{ modelBillingModeLabel(row.billingMode) }}</span></template></el-table-column>
         <el-table-column label="价格" min-width="420"><template #default="{ row }"><ModelPriceSummary v-bind="row" /></template></el-table-column>
-        <el-table-column v-if="isAdmin" label="操作" width="86" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="Coins" :label="`设置 ${row.publicName} 的公共价格`" @click="openEdit(row)" /></div></template></el-table-column>
+        <el-table-column v-if="isAdmin" label="操作" width="118" fixed="right" align="right"><template #default="{ row }"><div class="table-actions"><TableActionButton :icon="Pencil" :label="`编辑 ${row.publicName} 的模型能力`" :disabled="metadataSaving" @click="openMetadata(row.publicName)" /><TableActionButton :icon="Coins" :label="`设置 ${row.publicName} 的公共价格`" @click="openEdit(row)" /></div></template></el-table-column>
         </el-table></template>
         <template #mobile><MobileRecordList :loading="loading">
           <article v-for="row in pagedModels" :key="row.publicName" class="mobile-record">
             <div class="mobile-record__header"><div class="mobile-record__title"><code>{{ row.publicName }}</code><small>{{ modelBillingModeLabel(row.billingMode) }}</small></div></div>
             <dl class="mobile-record__facts"><div><dt>计费方式</dt><dd>{{ modelBillingModeLabel(row.billingMode) }}</dd></div><div class="mobile-record__wide"><dt>价格</dt><dd><ModelPriceSummary v-bind="row" /></dd></div></dl>
-            <div v-if="isAdmin" class="mobile-record__footer"><span class="muted">公共模型价格</span><el-button size="small" :icon="Coins" @click="openEdit(row)">设置价格</el-button></div>
+            <div v-if="isAdmin" class="mobile-record__footer"><el-button size="small" :icon="Pencil" :disabled="metadataSaving" @click="openMetadata(row.publicName)">编辑能力</el-button><el-button size="small" :icon="Coins" @click="openEdit(row)">设置价格</el-button></div>
           </article>
         </MobileRecordList></template>
       </ResponsiveList>
@@ -281,7 +289,6 @@ onMounted(load)
       </div>
       <div v-if="!loading && !filtered.length" class="empty-state"><div><strong>没有匹配模型</strong><span>先在渠道页发现并选择模型</span></div></div>
     </div>
-
     <el-drawer v-if="isAdmin" v-model="editOpen" title="公共价格设置" :size="priceDrawerSize">
       <el-form label-position="top">
         <div class="price-target"><div><span>公开模型</span><code>{{ current?.publicName }}</code></div><div><span>适用范围</span><strong>所有同名模型</strong></div></div>
@@ -313,10 +320,12 @@ onMounted(load)
       </el-form>
       <template #footer><el-button @click="editOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存价格</el-button></template>
     </el-drawer>
+    <el-dialog v-if="isAdmin" v-model="metadataOpen" :title="`模型能力 · ${metadataTarget}`" width="min(760px, 94vw)" :close-on-click-modal="!metadataSaving" :close-on-press-escape="!metadataSaving" :show-close="!metadataSaving" append-to-body>
+      <ModelMetadataEditor :data="metadataData" :loading="metadataLoading" :saving="metadataSaving" @save="saveMetadata" @cancel="metadataOpen = false" @retry="openMetadata(metadataTarget)" />
+    </el-dialog>
     <PriceSourceManager v-if="isAdmin" v-model="sourceOpen" :sources="sources" :loading="loading" @changed="load" />
   </div>
 </template>
-
 <style scoped>
 .models-page :deep(.el-input__inner), .models-page :deep(.el-select__placeholder), .models-page :deep(.el-table th.el-table__cell .cell), .models-page :deep(.el-table td.el-table__cell .cell) { font-size: 14px; }.models-page :deep(.el-table th.el-table__cell .cell) { color: #33404c; font-weight: 600; }.models-page :deep(.el-table td.el-table__cell .cell) { line-height: 1.5; }.model-name { color: #15202b; font-size: 14px; font-weight: 600; }.models-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 56px; color: #66717d; font-size: 13px; }.mobile-record__title code { font-size: 14px; font-weight: 600; }.price-target { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 13px; border: 1px solid #dce2e7; border-radius: 6px; background: #f7f9fa; }.price-target div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }.price-target span { color: #66717d; font-size: 11px; }.price-target code, .price-target strong { overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.pricing-tabs { margin-top: 18px; }.pricing-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }.pricing-tabs :deep(.el-input-number) { width: 100%; }.price-heading { margin-top: 4px; padding-top: 0; border-top: 0; }.rule-add { display: flex; justify-content: flex-end; margin-top: 10px; }.rules-list { display: grid; gap: 7px; margin: 10px 0; }.rule-row { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 11px 12px; border: 1px solid #dce2e7; border-radius: 6px; }.rule-row .rule-detail { display: flex; min-width: 0; flex-direction: column; gap: 5px; } .rule-explanation { color: #4b5763; font-size: 12px; line-height: 1.6; } .rule-row .rule-tier { color: #2457a7; font-size: 12px; font-weight: 600; } .rule-row .rule-rates { display: flex; flex-wrap: wrap; gap: 4px 10px; color: #253343; font-size: 12px; font-weight: 500; } .rule-row .rule-rates span { color: inherit; font-size: inherit; } .rule-row .rule-detail small { color: #7b8792; font-size: 10px; }.rule-row span { color: #66717d; font-size: 10px; }.rule-row code { overflow: hidden; color: #4b5763; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.rule-row .rule-actions { display: flex; flex-direction: row; align-items: center; gap: 2px; }.rule-row--editing { border-color: #a8c6ee; background: #f2f8ff; }.rule-warning { margin: 10px 0 0; padding: 9px 11px; border: 1px solid #f0c9a0; border-radius: 6px; background: #fdf6ec; color: #8a5a12; font-size: 11px; line-height: 1.6; }@media (max-width: 720px) { .models-pagination { justify-content: space-between; flex-wrap: wrap; gap: 8px; } }
 .pricing-overview { margin: 16px 0 10px; padding: 14px; border: 1px solid #b8cce6; border-radius: 8px; background: #f3f7fc; }

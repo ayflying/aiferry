@@ -3,7 +3,7 @@
 ## 开发与安全
 
 - 默认使用中文沟通；Git 提交标题和正文必须使用中文，并具体说明改动、原因与验证结果。
-- 后端使用 GoFrame v2：接口在 `api`，控制器只处理输入输出，业务逻辑在 `internal/logic`；`internal/service` 仅保留通过远程 `gf gen service` 生成的服务接口。DAO、DO、entity 只能通过远程 `gf gen dao` 生成，禁止手工修改。
+- 后端使用 GoFrame v2：接口在 `api`，控制器只处理输入输出，业务逻辑在 `internal/logic`；`internal/service` 仅保留通过 `gf gen service` 生成的服务接口。DAO、DO、entity 只能通过 `gf gen dao` 生成，禁止手工修改。
 - 前端使用 Vue 3、Element Plus、Pinia 和 Vue Router，管理端保持高密度、全宽布局；模型价格按公开模型维护，渠道只作为同步来源。
 - `.env` 包含数据库、Redis、Casdoor、主密钥和渠道密钥，严禁读取输出、提交或复制到源码归档。`.env.example` 只保留脱敏示例。
 - 管理端由 Casdoor 保护，只允许管理员和 `AI用户组` 用户登录；登录页不展示准入用户组说明。
@@ -13,12 +13,13 @@
 - 手写的生产源码以约 350 行为审查阈值。超过阈值时按业务职责拆分同包文件或 Vue 子组件；生成的 DAO、DO、entity 与测试夹具除外。
 - 同一上游请求、鉴权、错误处理、计费计算或缓存逻辑出现两次时，优先提取领域内帮助方法；不要复制后只改字符串或字段名。
 - 前端出现两处以上相同的工具按钮、状态展示、表单区块或异步交互时，创建 `frontend/src/components` 下的无业务副作用组件复用。页面组件负责数据加载与业务编排，组件负责可视化和事件发出。
-- 拆分必须保持已有 API、错误语义和 Redis/数据库行为不变；先在远程运行 Go 与 Vue 检查，再提交重构。
+- 拆分必须保持已有 API、错误语义和 Redis/数据库行为不变；先在本机运行 Go 与 Vue 基础检查，再提交重构。
 
-## 远程构建与发布
+## 基础检查与发布
 
-- 禁止在本机安装 Go、Node、MySQL 或 Redis。所有检查、镜像构建和部署均在 `root@<原构建机>` 完成。
-- 源码必须以独立临时目录同步到远程；构建结束后清理该临时源码和临时归档，不执行全局 Docker prune。
+- 基础测试在本机执行（Go 单元测试、Vue 类型检查和前端测试）；使用已有工具链，不为验证安装 MySQL 或 Redis。正式版本由 GitHub Actions CI 构建并推送镜像，不再要求同步源码到远程构建机。
+- DAO、DO、entity 与服务接口仍须使用 GoFrame 生成工具生成，禁止手工修改；生成所需数据库连接不得使用生产凭据。
+- 本机基础测试不等于生产验收；提交推送后检查 CI 结果。生产部署是独立操作，未经本次明确授权不更新容器。
 - 宿主机服务端口固定为 `38517`，容器内仍监听 `8080`。部署后验证 `http://127.0.0.1:38517/healthz`。
 - 生产 Compose 只能引用 `ghcr.io/ayflying/aiferry:<版本>`，不得包含 `build`。运行前执行 `docker compose pull aiferry`，再执行 `docker compose up -d --no-deps aiferry`。
 
@@ -26,6 +27,6 @@
 
 - 根目录 `VERSION` 是唯一发布版本来源，当前值以该文件内容为准，格式固定为 `主版本.次版本.补丁版本`。
 - **版本号由开发者在每次提交发布前手动递增根目录 `VERSION` 文件**（补丁位 +1），并把 VERSION 与代码改动放进同一个提交。CI 不再自动递增，也不再回推 bump 提交——避免每次推送后远端多出一个提交、下次推送还需 rebase 的冗余流程。
-- 使用 `hack/release.ps1` 发起发布：它只在本地 Git 工作区干净时运行，递增版本、创建详细中文发布提交、推送 `main`，再将 Git 归档同步到远程构建服务器。
-- 远程服务器必须预先执行 `docker login ghcr.io -u ayflying`，并使用具有 `write:packages`、`read:packages` 权限的 GitHub PAT。令牌只存在 Docker 凭据存储，不得写入仓库或 `.env`。
-- 发布后确认版本镜像与 `latest` 均已推送，Compose 已从 GHCR 拉取镜像，容器状态为 `healthy`。仓库没有远端时不得自行推送；已有 `origin` 后推送 `main`。
+- 本机基础测试通过后，选择性暂存本次文件，创建详细中文提交并推送 `main`，由 CI 构建版本镜像与 `latest`。`hack/release.ps1` 是历史远程发布脚本，本流程不使用。
+- 镜像仓库凭据由 CI Secrets 管理，不得写入源码或 `.env`。
+- 提交后核验 CI 结果；镜像构建成功不代表生产已部署。仓库没有远端时不得自行推送；已有 `origin` 后推送 `main`。

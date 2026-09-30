@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/modelmetadata"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
@@ -73,7 +74,7 @@ func (s *sChannel) listPublicModelViews(ctx context.Context) ([]PublicModelView,
 	columns := dao.ChannelModels.Columns()
 	models := make([]entity.ChannelModels, 0)
 	if err := dao.ChannelModels.Ctx(ctx).
-		Fields(columns.Id, columns.PublicName).
+		Fields(columns.Id, columns.PublicName, columns.ChannelId, columns.UpstreamName).
 		Where(columns.Enabled, 1).
 		OrderAsc(columns.Id).
 		Scan(&models); err != nil {
@@ -93,10 +94,19 @@ func (s *sChannel) listPublicModelViews(ctx context.Context) ([]PublicModelView,
 	if err != nil {
 		return nil, err
 	}
+	catalog, err := modelmetadata.Load(ctx, modelChannelIDs(models), names)
+	if err != nil {
+		return nil, err
+	}
+	refsByName := make(map[string][]modelmetadata.Ref)
+	for _, model := range models {
+		refsByName[model.PublicName] = append(refsByName[model.PublicName], modelmetadata.Ref{ChannelID: model.ChannelId, ModelName: model.UpstreamName})
+	}
 	result := make([]PublicModelView, 0, len(names))
 	for _, name := range names {
 		price := prices[name]
 		result = append(result, PublicModelView{
+			Metadata:         catalog.Resolve(name, refsByName[name]).Effective,
 			Id:               firstByName[name],
 			PublicName:       name,
 			InputPrice:       price.InputPrice,
