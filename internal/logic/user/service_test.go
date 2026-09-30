@@ -2,6 +2,22 @@ package user
 
 import "testing"
 
+func TestSetAdminRejectsSelfDemotionBeforeDatabase(t *testing.T) {
+	service := &sUser{}
+	err := service.SetAdmin(t.Context(), 7, 7, false)
+	if err == nil || err.Error() != "不能移除自己的管理员权限" {
+		t.Fatalf("SetAdmin() error = %v, want self-demotion rejection", err)
+	}
+}
+
+func TestSetAdminRejectsZeroUser(t *testing.T) {
+	service := &sUser{}
+	err := service.SetAdmin(t.Context(), 0, 7, true)
+	if err == nil || err.Error() != "用户不存在" {
+		t.Fatalf("SetAdmin() error = %v, want missing user rejection", err)
+	}
+}
+
 func TestNormalizeEmail(t *testing.T) {
 	value, err := normalizeEmail("User@Example.COM")
 	if err != nil || value != "user@example.com" {

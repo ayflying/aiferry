@@ -11,6 +11,7 @@ func (c *Controller) registerUserRoutes(group *ghttp.RouterGroup) {
 	group.GET("/users", c.listUsers)
 	group.GET("/users/{id}/dashboard", c.userDashboard)
 	group.PUT("/users/{id}/balance", c.updateUserBalance)
+	group.PUT("/users/{id}/role", c.updateUserRole)
 	group.DELETE("/users/{id}", c.deleteUser)
 	group.GET("/users/{id}/channel-groups", c.listUserChannelGroups)
 	group.POST("/users/{id}/channel-groups", c.updateUserChannelGroups)
@@ -43,6 +44,19 @@ func (c *Controller) updateUserBalance(r *ghttp.Request) {
 	}
 	data, err := c.users.UpdateBalance(r.Context(), routeID(r), input.Balance)
 	respond(r, data, err)
+}
+
+func (c *Controller) updateUserRole(r *ghttp.Request) {
+	var input adminapi.UserRoleInput
+	if !parse(r, &input) {
+		return
+	}
+	operator, ok := auth.CurrentUser(r.Context())
+	if !ok {
+		respond(r, nil, auth.ErrUnauthorized)
+		return
+	}
+	respond(r, map[string]any{}, c.users.SetAdmin(r.Context(), routeID(r), operator.Id, input.IsAdmin))
 }
 
 func (c *Controller) deleteUser(r *ghttp.Request) {

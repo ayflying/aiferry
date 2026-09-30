@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/do"
@@ -58,8 +59,25 @@ func (s *sAuth) syncUser(ctx context.Context, account casdoorAccount) (SessionUs
 		}
 	}
 
-	// 普通 Casdoor 用户和 Casdoor 管理员都允许登录；角色只影响本地业务权限。
-	// Casdoor 账号状态已在 CompleteLogin 中检查，这里只检查本地账户是否存在且启用。
+	role = accountRole(account)
+	// AiFerry 的本地管理员授权优先于 Casdoor 角色，登录同步不能覆盖手动授权。
+	override := 0
+	if current.Id != 0 {
+		count, err := g.DB().Model("user_admin_overrides").Ctx(ctx).Where("user_id", current.Id).Count()
+		if err != nil {
+			return SessionUser{}, gerror.Wrap(err, "check local administrator override")
+		}
+		override = count
+	}
+	if override > 0 {
+		if len(s.app.Config.AdminRoles) > 0 {
+			role = s.app.Config.AdminRoles[0]
+		} else {
+			role = "admin"
+		}
+	}
+
+	// 普通 Casdoor 用户和管理员都允许登录；账户状态在 CompleteLogin 中检查。
 	if current.Id == 0 || current.Status != 1 {
 		return SessionUser{}, ErrAccessDenied
 	}

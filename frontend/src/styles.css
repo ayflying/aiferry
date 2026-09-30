@@ -157,7 +157,7 @@ button { color: inherit; }
 .icon-button.danger:hover { border-color: #e9abb2; color: var(--danger); background: var(--danger-soft); }
 .icon-button:disabled { cursor: not-allowed; opacity: .45; }
 .icon-button:disabled:hover { border-color: var(--line); color: #3a4652; background: var(--surface); }
-.table-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.table-actions { display: flex; width: 100%; align-items: center; justify-content: center; gap: 6px; }
 
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
 .form-grid .full { grid-column: 1 / -1; }

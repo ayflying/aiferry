@@ -57,6 +57,8 @@ export interface AccountProfile {
 }
 
 export interface ManagedUser extends AccountProfile {
+  isAdmin: boolean
+  isAdminOverride: boolean
   apiKeyCount: number
   channelGroups: string[]
   usage: AccountUsageSummary

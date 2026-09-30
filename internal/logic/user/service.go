@@ -46,9 +46,11 @@ type Profile struct {
 
 type ManagedUser struct {
 	Profile
-	APIKeyCount   int64             `json:"apiKeyCount"`
-	ChannelGroups []string          `json:"channelGroups"`
-	Usage         usage.UserSummary `json:"usage"`
+	IsAdmin         bool              `json:"isAdmin"`
+	IsAdminOverride bool              `json:"isAdminOverride"`
+	APIKeyCount     int64             `json:"apiKeyCount"`
+	ChannelGroups   []string          `json:"channelGroups"`
+	Usage           usage.UserSummary `json:"usage"`
 }
 
 type Option struct {
@@ -59,6 +61,17 @@ type Option struct {
 type apiKeyCache struct {
 	Id      uint64 `orm:"id"`
 	KeyHash string `orm:"key_hash"`
+}
+
+type userAdminOverrideDO struct {
+	g.Meta       `orm:"table:user_admin_overrides, do:true"`
+	UserID       any `orm:"user_id"`
+	OriginalRole any `orm:"original_role"`
+}
+
+type userAdminOverride struct {
+	UserID       uint64 `orm:"user_id"`
+	OriginalRole string `orm:"original_role"`
 }
 
 func New(appSvc *app.Service, usageSvc *usage.Service) *sUser {
@@ -133,6 +146,16 @@ func (s *sUser) List(ctx context.Context) ([]ManagedUser, error) {
 	for _, group := range groupRows {
 		groupsByUser[group.UserID] = append(groupsByUser[group.UserID], group.Name)
 	}
+	overrideRows := make([]userAdminOverride, 0)
+	if len(userIDs) > 0 {
+		if err := g.DB().Model("user_admin_overrides").Ctx(ctx).Fields("user_id").WhereIn("user_id", userIDs).Scan(&overrideRows); err != nil {
+			return nil, gerror.Wrap(err, "list local administrator overrides")
+		}
+	}
+	adminOverrides := make(map[uint64]struct{}, len(overrideRows))
+	for _, row := range overrideRows {
+		adminOverrides[row.UserID] = struct{}{}
+	}
 	result := make([]ManagedUser, 0, len(rows))
 	for _, row := range rows {
 		summary, err := s.usage.UserSummary(ctx, row.Id, 30)
@@ -143,7 +166,18 @@ func (s *sUser) List(ctx context.Context) ([]ManagedUser, error) {
 		if err != nil {
 			return nil, gerror.Wrap(err, "count user API keys")
 		}
-		result = append(result, ManagedUser{Profile: profileFromEntity(row), APIKeyCount: int64(keyCount), ChannelGroups: groupsByUser[row.Id], Usage: summary})
+		profile := profileFromEntity(row)
+		isAdmin := s.app.Config.IsAdminRole(row.Role)
+		if _, overridden := adminOverrides[row.Id]; overridden {
+			isAdmin = true
+			if len(s.app.Config.AdminRoles) > 0 {
+				profile.Role = s.app.Config.AdminRoles[0]
+			} else {
+				profile.Role = "admin"
+			}
+		}
+		_, isAdminOverride := adminOverrides[row.Id]
+		result = append(result, ManagedUser{Profile: profile, IsAdmin: isAdmin, IsAdminOverride: isAdminOverride, APIKeyCount: int64(keyCount), ChannelGroups: groupsByUser[row.Id], Usage: summary})
 	}
 	return result, nil
 }
@@ -298,6 +332,88 @@ func (s *sUser) Credit(ctx context.Context, id uint64, amount decimal.Decimal) e
 			return gerror.Wrap(err, "credit user balance")
 		}
 		s.invalidateBalanceCache(txCtx, account.Id)
+		return nil
+	})
+}
+
+func (s *sUser) SetAdmin(ctx context.Context, id, operatorID uint64, enabled bool) error {
+	if id == 0 {
+		return gerror.New("用户不存在")
+	}
+	if id == operatorID && !enabled {
+		return gerror.New("不能移除自己的管理员权限")
+	}
+	return dao.Users.Transaction(ctx, func(txCtx context.Context, tx gdb.TX) error {
+		if _, err := tx.Model("user_admin_role_lock").Ctx(txCtx).Where("id", 1).Lock(gdb.LockForUpdate).One(); err != nil {
+			return gerror.Wrap(err, "lock administrator role changes")
+		}
+		columns := dao.Users.Columns()
+		var lockedUsers []entity.Users
+		if err := tx.Model("users").Ctx(txCtx).
+			Fields(columns.Id, columns.Role, columns.Status, columns.IdentityProvider).
+			Where(columns.IdentityProvider, "casdoor").
+			Where(columns.Status, 1).
+			Lock(gdb.LockForUpdate).
+			Scan(&lockedUsers); err != nil {
+			return gerror.Wrap(err, "lock user accounts for role update")
+		}
+		adminIDs := make(map[uint64]struct{}, len(lockedUsers))
+		for _, account := range lockedUsers {
+			if s.app.Config.IsAdminRole(account.Role) {
+				adminIDs[account.Id] = struct{}{}
+			}
+		}
+		var target entity.Users
+		if err := dao.Users.Ctx(txCtx).Where(columns.Id, id).Lock(gdb.LockForUpdate).Scan(&target); err != nil {
+			return gerror.Wrap(err, "find user for role update")
+		}
+		if target.Id == 0 || target.IdentityProvider != "casdoor" {
+			return gerror.New("只能修改 Casdoor 用户的管理员角色")
+		}
+		var override userAdminOverride
+		if err := tx.Model("user_admin_overrides").Ctx(txCtx).Where("user_id", id).Scan(&override); err != nil {
+			return gerror.Wrap(err, "load original user role")
+		}
+		if enabled {
+			if override.OriginalRole != "" {
+				return nil
+			}
+			if s.app.Config.IsAdminRole(target.Role) {
+				if _, err := tx.Model("user_admin_overrides").Ctx(txCtx).Data(userAdminOverrideDO{UserID: id, OriginalRole: target.Role}).Insert(); err != nil {
+					return gerror.Wrap(err, "save original user role")
+				}
+				return nil
+			}
+			if _, err := tx.Model("user_admin_overrides").Ctx(txCtx).Data(userAdminOverrideDO{UserID: id, OriginalRole: target.Role}).Insert(); err != nil {
+				return gerror.Wrap(err, "save original user role")
+			}
+			role := "admin"
+			if len(s.app.Config.AdminRoles) > 0 {
+				role = s.app.Config.AdminRoles[0]
+			}
+			if _, err := dao.Users.Ctx(txCtx).Where(columns.Id, id).Data(do.Users{Role: role}).Update(); err != nil {
+				return gerror.Wrap(err, "grant administrator role")
+			}
+			return nil
+		}
+		if override.OriginalRole == "" {
+			return gerror.New("该管理员由 Casdoor 授权，请在 Casdoor 管理")
+		}
+		if _, stillAdmin := adminIDs[id]; !stillAdmin {
+			return gerror.New("该用户当前不是管理员")
+		}
+		if _, stillAdmin := adminIDs[id]; !stillAdmin {
+			return gerror.New("该用户当前不是管理员")
+		}
+		if len(adminIDs) <= 1 {
+			return gerror.New("不能移除最后一位管理员")
+		}
+		if _, err := tx.Model("user_admin_overrides").Ctx(txCtx).Where("user_id", id).Delete(); err != nil {
+			return gerror.Wrap(err, "remove local administrator override")
+		}
+		if _, err := dao.Users.Ctx(txCtx).Where(columns.Id, id).Data(do.Users{Role: override.OriginalRole}).Update(); err != nil {
+			return gerror.Wrap(err, "restore original user role")
+		}
 		return nil
 	})
 }
