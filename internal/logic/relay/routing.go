@@ -152,13 +152,19 @@ func weightedOrder(candidates []Candidate) []Candidate {
 
 func (s *sRelay) channelGroupIDs(ctx context.Context, channelID uint64) ([]uint64, error) {
 	membershipColumns := dao.ChannelGroupMembers.Columns()
-	var memberships []uint64
+	membershipRows := make([]struct {
+		ChannelGroupID uint64 `orm:"channel_group_id"`
+	}, 0)
 	if err := dao.ChannelGroupMembers.Ctx(ctx).
 		Fields(membershipColumns.ChannelGroupId).
 		Where(membershipColumns.ChannelId, channelID).
 		OrderAsc(membershipColumns.ChannelGroupId).
-		Scan(&memberships); err != nil {
+		Scan(&membershipRows); err != nil {
 		return nil, gerror.Wrap(err, "load channel group memberships")
+	}
+	memberships := make([]uint64, 0, len(membershipRows))
+	for _, row := range membershipRows {
+		memberships = append(memberships, row.ChannelGroupID)
 	}
 	if len(memberships) == 0 {
 		return nil, nil

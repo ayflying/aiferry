@@ -79,16 +79,21 @@ func (s *sAPIKey) populateUserPolicy(ctx context.Context, key *AuthKey) error {
 		return gerror.Wrap(err, "load user role")
 	}
 	key.UserRole = user.Role
-	ids := make([]uint64, 0)
+	groupRows := make([]struct {
+		ChannelGroupID uint64 `orm:"channel_group_id"`
+	}, 0)
 	if err := g.DB().Model("user_channel_groups").
 		Ctx(ctx).
 		Fields("channel_group_id").
 		Where("user_id", key.UserId).
 		Order("channel_group_id").
-		Scan(&ids); err != nil {
+		Scan(&groupRows); err != nil {
 		return gerror.Wrap(err, "load user channel groups")
 	}
-	key.UserChannelGroupIDs = ids
+	key.UserChannelGroupIDs = make([]uint64, 0, len(groupRows))
+	for _, row := range groupRows {
+		key.UserChannelGroupIDs = append(key.UserChannelGroupIDs, row.ChannelGroupID)
+	}
 	return nil
 }
 
