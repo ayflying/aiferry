@@ -185,6 +185,16 @@
       }
     },
     {
+      "id": 9000000000000024,
+      "name": "WorkBuddy",
+      "code": "workbuddy",
+      "config": {
+        "baseUrl": "https://www.workbuddy.cn/v2",
+        "models": { "method": "GET", "path": "/enterprises/personal/models", "listPath": "data", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "quota": { "adapter": "workbuddy_credits", "method": "POST", "path": "/billing/meter/get-user-resource-summary", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " }
+      }
+    },
+    {
       "id": 9000000000000022,
       "name": "Command Code",
       "code": "commandcode",

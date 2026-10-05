@@ -283,7 +283,7 @@ export interface ChannelCostResult {
 }
 
 export interface ChannelQuotaWindow {
-  kind: 'five_hour' | 'weekly' | 'monthly' | 'mcp'
+  kind: 'five_hour' | 'weekly' | 'monthly' | 'mcp' | 'checkin'
   label: string
   usedPercent: number
   used?: number

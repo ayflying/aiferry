@@ -142,6 +142,9 @@ func (s *sChannel) fetchQuota(ctx context.Context, channel entity.Channels, conf
 	if config.Adapter == channeltype.AdapterVolcAFP {
 		return s.fetchQuotaVolcAFP(ctx, channel)
 	}
+	if config.Adapter == channeltype.AdapterWorkBuddy {
+		return s.fetchWorkBuddyCredits(ctx, channel, config)
+	}
 	endpoint, err := resolveQuotaURL(channel.BaseUrl, config.Path)
 	if err != nil {
 		return QuotaView{}, err
@@ -402,6 +405,9 @@ func (s *sChannel) credentialCiphers(ctx context.Context, channelID uint64) ([]q
 func parseQuotaResponse(adapter string, body []byte) (QuotaView, error) {
 	if adapter == channeltype.AdapterOpenCodeGo {
 		return parseOpenCodeGoUsage(body)
+	}
+	if adapter == channeltype.AdapterWorkBuddy {
+		return parseWorkBuddyCredits(body)
 	}
 	var payload struct {
 		Code    int    `json:"code"`
