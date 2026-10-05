@@ -17,7 +17,7 @@ import ChannelTypeListPanel from '../components/ChannelTypeListPanel.vue'
 import { type ChannelTab, useChannelConfiguration } from '../composables/useChannelConfiguration'
 import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput, supportsOrganizationIdentity } from '../lib/channelForm'
 import { showError, showSuccess } from '../lib/error'
-import { sortDiscoveredModels } from '../lib/models'
+import { sortDiscoveredModels, splitPublicModelNames } from '../lib/models'
 import { closedWindowPayload, closedWindowsFromModels } from '../lib/time-window'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
@@ -367,16 +367,18 @@ const dialogModels = computed(() => {
 })
 
 // windowModels 是该渠道当前会生效的「公开模型」清单，供「关闭时间」页签逐项配置。
-// 一个上游模型可以有多个公开别名，这里按公开名去重：同一个公开名共享一套关闭时段。
+// 一个上游模型可以有多个公开别名（同一行逗号分隔也算多个），这里按公开名去重：
+// 同一个公开名共享一套关闭时段。
 const windowModels = computed(() => {
   const rows = new Map<string, { publicName: string; upstreamName: string }>()
   for (const upstreamName of selectedModelNames.value) {
     const aliases = modelMappings.value.filter((item) => item.upstreamName === upstreamName)
     const entries = aliases.length ? aliases : [{ publicName: upstreamName }]
     for (const entry of entries) {
-      const publicName = entry.publicName.trim()
-      if (!publicName || rows.has(publicName)) continue
-      rows.set(publicName, { publicName, upstreamName })
+      for (const publicName of splitPublicModelNames(entry.publicName)) {
+        if (rows.has(publicName)) continue
+        rows.set(publicName, { publicName, upstreamName })
+      }
     }
   }
   return [...rows.values()].sort((left, right) => left.publicName.localeCompare(right.publicName))
@@ -430,17 +432,19 @@ function discoveryErrorUnsupported(error: unknown) {
 
 async function saveModelSelection() {
   if (!discoveryChannel.value) return
-  const mappings = modelMappings.value.map((item) => ({
+  const rows = modelMappings.value.map((item) => ({
     upstreamName: item.upstreamName.trim(),
-    publicName: item.publicName.trim(),
+    publicName: item.publicName,
   }))
-  if (mappings.some((item) => !item.upstreamName || !item.publicName)) {
+  // 公开名允许逗号批量，一行可挂多个名字；只有分隔符等于没填，仍按缺全拦下。
+  if (rows.some((item) => !item.upstreamName || splitPublicModelNames(item.publicName).length === 0)) {
     showError('请补全每一行映射关系的上游模型和自定义名称', '映射配置不完整')
     return
   }
+  const mappings = expandModelMappingRows(rows)
   const seen = new Set<string>()
   for (const mapping of mappings) {
-    const key = `${mapping.upstreamName}\u0000${mapping.publicName}`
+    const key = `${mapping.upstreamName} -> ${mapping.publicName}`
     if (seen.has(key)) {
       showError(`映射关系重复：${mapping.upstreamName} → ${mapping.publicName}`, '映射配置重复')
       return

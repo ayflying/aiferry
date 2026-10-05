@@ -2,6 +2,7 @@ package channel
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
@@ -97,6 +98,67 @@ func TestNormalizeModelClosedWindowsNormalizesList(t *testing.T) {
 	cleared := modelMapping{UpstreamName: "glm-5", PublicName: "glm-5"}
 	if windows[cleared] != "" {
 		t.Fatalf("全不限制的窗口应归一成空串表示清除，got %q", windows[cleared])
+	}
+}
+
+func TestNormalizeModelMappingsExpandsCommaSeparatedPublicNames(t *testing.T) {
+	mappings, err := normalizeModelMappings(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{UpstreamName: "space-bunny-free", PublicName: " space-bunny, free ，space-bunny "},
+		{UpstreamName: "mimo-v2.6-flash-free", PublicName: "mimo-v2.6-flash"},
+		{UpstreamName: "comma-only", PublicName: " , ， "},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []modelMapping{
+		{UpstreamName: "space-bunny-free", PublicName: "space-bunny"},
+		{UpstreamName: "space-bunny-free", PublicName: "free"},
+		{UpstreamName: "mimo-v2.6-flash-free", PublicName: "mimo-v2.6-flash"},
+		{UpstreamName: "comma-only", PublicName: "comma-only"},
+	}
+	if !reflect.DeepEqual(mappings, want) {
+		t.Fatalf("unexpected mappings: got %#v, want %#v", mappings, want)
+	}
+}
+
+func TestNormalizeModelMappingsRejectsDuplicateMappingAcrossCommaNames(t *testing.T) {
+	_, err := normalizeModelMappings(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{UpstreamName: "space-bunny-free", PublicName: "space-bunny"},
+		{UpstreamName: "space-bunny-free", PublicName: "free,space-bunny"},
+	}})
+	if err == nil || err.Error() != "duplicate model mapping: space-bunny-free -> space-bunny" {
+		t.Fatalf("unexpected duplicate error: %v", err)
+	}
+}
+
+func TestNormalizeModelMappingsRejectsLongNameInsideCommaList(t *testing.T) {
+	long := strings.Repeat("x", 192)
+	if _, err := normalizeModelMappings(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{UpstreamName: "gpt-5", PublicName: "gpt-5-main," + long},
+	}}); err == nil {
+		t.Fatal("逗号列表里过长的公开名应报错")
+	}
+}
+
+func TestNormalizeModelClosedWindowsAppliesToEveryCommaSeparatedName(t *testing.T) {
+	windows, err := normalizeModelClosedWindows(adminapi.ModelSelectionInput{Models: []adminapi.ModelMappingInput{
+		{
+			UpstreamName: "space-bunny-free",
+			PublicName:   "space-bunny,free",
+			ClosedWindows: []adminapi.ModelClosedWindowInput{
+				{TZ: "Asia/Shanghai", Weekdays: []int{1, 2, 3}, Ranges: [][]string{{"09:00", "12:00"}}},
+			},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"tz":"Asia/Shanghai","weekdays":[1,2,3],"ranges":[["09:00","12:00"]]}]`
+	for _, publicName := range []string{"space-bunny", "free"} {
+		key := modelMapping{UpstreamName: "space-bunny-free", PublicName: publicName}
+		if windows[key] != want {
+			t.Fatalf("公开名 %s 未拿到关闭时段：got %s, want %s", publicName, windows[key], want)
+		}
 	}
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChannelModel, DiscoveredModel } from '../api/types'
-import { enabledChannelModels, sortDiscoveredModels } from './models'
+import { enabledChannelModels, expandModelMappingRows, sortDiscoveredModels, splitPublicModelNames } from './models'
 
 describe('model lists', () => {
   it('sorts discovered models by name without mutating the response', () => {
@@ -23,5 +23,30 @@ describe('model lists', () => {
     ])
 
     expect(result.map((item) => item.publicName)).toEqual(['alpha', 'zeta'])
+  })
+})
+
+describe('model mapping public names', () => {
+  it('splits comma separated public names and drops blank or repeated parts', () => {
+    expect(splitPublicModelNames(' space-bunny, free ，space-bunny ,, ')).toEqual(['space-bunny', 'free'])
+    expect(splitPublicModelNames(' , ， ')).toEqual([])
+    expect(splitPublicModelNames('mimo-v2.6-flash')).toEqual(['mimo-v2.6-flash'])
+  })
+
+  it('expands one row into several mappings of the same upstream model', () => {
+    const rows = [
+      { upstreamName: ' space-bunny-free ', publicName: 'space-bunny,free' },
+      { upstreamName: 'mimo-v2.6-flash-free', publicName: 'mimo-v2.6-flash' },
+    ]
+
+    expect(expandModelMappingRows(rows)).toEqual([
+      { upstreamName: 'space-bunny-free', publicName: 'space-bunny' },
+      { upstreamName: 'space-bunny-free', publicName: 'free' },
+      { upstreamName: 'mimo-v2.6-flash-free', publicName: 'mimo-v2.6-flash' },
+    ])
+  })
+
+  it('keeps an incomplete row out of the expanded result so the caller can report it', () => {
+    expect(expandModelMappingRows([{ upstreamName: 'gpt-5', publicName: ' , ' }])).toEqual([])
   })
 })

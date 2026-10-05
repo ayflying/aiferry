@@ -114,6 +114,37 @@ type modelMapping struct {
 	PublicName   string
 }
 
+// splitPublicModelNames 解析自定义公开名称：一个上游模型允许用逗号一次写出多个公开名
+// （半角逗号与全角逗号都算分隔符），空片段与重复片段丢弃，返回顺序即填写顺序。
+// 公开名是路由与价格的主键，绝不能把整串逗号文本当成一个名字落库。
+func splitPublicModelNames(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '，' })
+	seen := make(map[string]struct{}, len(parts))
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result
+}
+
+// resolvePublicModelNames 取一条映射实际生效的公开名列表：逗号批量写法展开成多条，
+// 没写或只剩分隔符时回退为上游模型名本身。
+func resolvePublicModelNames(upstreamName, publicName string) []string {
+	names := splitPublicModelNames(publicName)
+	if len(names) == 0 {
+		return []string{upstreamName}
+	}
+	return names
+}
+
 func normalizeModelMappings(input adminapi.ModelSelectionInput) ([]modelMapping, error) {
 	items := input.Models
 	if len(items) == 0 {
@@ -134,19 +165,21 @@ func normalizeModelMappings(input adminapi.ModelSelectionInput) ([]modelMapping,
 		if len(upstreamName) > 191 {
 			return nil, gerror.Newf("upstream model name is too long: %s", upstreamName)
 		}
-		publicName := strings.TrimSpace(item.PublicName)
-		if publicName == "" {
-			publicName = upstreamName
+		// 公开名支持逗号批量：一个上游模型一次映射到多个公开名，展开成多条独立关系。
+		for _, publicName := range resolvePublicModelNames(upstreamName, item.PublicName) {
+			if len(publicName) > 191 {
+				return nil, gerror.Newf("public model name is too long: %s", publicName)
+			}
+			mapping := modelMapping{UpstreamName: upstreamName, PublicName: publicName}
+			if _, exists := seen[mapping]; exists {
+				return nil, gerror.Newf("duplicate model mapping: %s -> %s", upstreamName, publicName)
+			}
+			seen[mapping] = struct{}{}
+			result = append(result, mapping)
+			if len(result) > 2000 {
+				return nil, gerror.New("too many models selected")
+			}
 		}
-		if len(publicName) > 191 {
-			return nil, gerror.Newf("public model name is too long: %s", publicName)
-		}
-		mapping := modelMapping{UpstreamName: upstreamName, PublicName: publicName}
-		if _, exists := seen[mapping]; exists {
-			return nil, gerror.Newf("duplicate model mapping: %s -> %s", upstreamName, publicName)
-		}
-		seen[mapping] = struct{}{}
-		result = append(result, mapping)
 	}
 	return result, nil
 }
@@ -164,12 +197,18 @@ func normalizeModelClosedWindows(input adminapi.ModelSelectionInput) (map[modelM
 		if upstreamName == "" {
 			continue
 		}
-		publicName := strings.TrimSpace(item.PublicName)
-		if publicName == "" {
-			publicName = upstreamName
+		publicNames := resolvePublicModelNames(upstreamName, item.PublicName)
+		keys := make([]modelMapping, 0, len(publicNames))
+		pending := false
+		for _, publicName := range publicNames {
+			key := modelMapping{UpstreamName: upstreamName, PublicName: publicName}
+			if _, exists := windows[key]; exists {
+				continue
+			}
+			keys = append(keys, key)
+			pending = true
 		}
-		key := modelMapping{UpstreamName: upstreamName, PublicName: publicName}
-		if _, exists := windows[key]; exists {
+		if !pending {
 			continue
 		}
 		converted := make([]timewindow.Window, 0, len(item.ClosedWindows))
@@ -178,9 +217,12 @@ func normalizeModelClosedWindows(input adminapi.ModelSelectionInput) (map[modelM
 		}
 		normalized, err := timewindow.NormalizeWindows(converted)
 		if err != nil {
-			return nil, gerror.Wrapf(err, "模型 %s 的关闭时段无效", publicName)
+			return nil, gerror.Wrapf(err, "模型 %s 的关闭时段无效", publicNames[0])
 		}
-		windows[key] = normalized
+		// 逗号批量写出的每个公开名都算独立映射，各自拿同一份时段配置。
+		for _, key := range keys {
+			windows[key] = normalized
+		}
 	}
 	return windows, nil
 }

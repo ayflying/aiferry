@@ -110,11 +110,12 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
           <div v-else-if="!discovering" class="selection-empty">{{ discoveredModels.length ? '没有匹配模型' : '上游没有返回模型' }}</div>
         </el-tab-pane>
         <el-tab-pane label="配置映射" name="mapping">
+          <div class="mapping-hint">一个上游模型可以映射到多个公开名称：右侧用逗号分隔批量填写，如 <code>space-bunny,free</code>，保存后展开为两条独立映射。</div>
           <div class="mapping-toolbar"><span class="mapping-count">{{ modelMappings.length }} 条映射关系</span><el-button type="primary" :icon="Plus" @click="emit('addMapping')">添加映射</el-button></div>
           <div v-if="modelMappings.length" class="mapping-list">
             <div v-for="mapping in modelMappings" :key="mapping.id" class="mapping-entry-row">
               <el-select :model-value="mapping.upstreamName" filterable allow-create default-first-option clearable placeholder="选择或输入上游模型 ID" class="mapping-upstream" @update:model-value="updateMapping(mapping.id, 'upstreamName', $event)"><el-option v-for="item in selectedDiscoveredModels" :key="item.name" :label="item.name" :value="item.name" /></el-select>
-              <el-input :model-value="mapping.publicName" maxlength="191" placeholder="填写自定义公开名称" class="mapping-public" @update:model-value="updateMapping(mapping.id, 'publicName', $event)" />
+              <el-input :model-value="mapping.publicName" maxlength="191" placeholder="公开名称，多个用逗号分隔" class="mapping-public" @update:model-value="updateMapping(mapping.id, 'publicName', $event)" />
               <el-tooltip content="删除映射"><el-button text :icon="Trash2" :aria-label="`删除 ${mapping.upstreamName || '此条'} 映射`" @click="emit('removeMapping', mapping.id)" /></el-tooltip>
             </div>
           </div>
