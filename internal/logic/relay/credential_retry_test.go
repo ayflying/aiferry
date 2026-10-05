@@ -9,8 +9,8 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
-	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/logic/channel"
+	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
@@ -53,78 +53,86 @@ func TestSummarizeCandidateSkips(t *testing.T) {
 	}
 }
 
-// 上游按有状态会话校验拒绝本会话的工具调用历史时，必须放行到下一个候选渠道：
-// 这类失败的根源在渠道侧（它只认自己生成过的 tool_call 记录），实测换到无状态上游
-// 全部成功；若在这里当成对客户端请求的最终判决，就会把渠道问题暴露成用户的请求错误。
-func TestNonRetryableClientFailureAllowsStatefulSessionRejection(t *testing.T) {
-	// 故意不把 400 放进 RetryStatusCodes：放行依据是「上游归因」，不是管理端配置。
-	settings := adminapi.SystemResilienceSettingsInput{RetryStatusCodes: "401,403,404,408,429,500-599"}
-	cases := map[string][]byte{
-		"deepseek": []byte(`{"error":{"type":"invalid_request_error","message":"Error from provider (Console Go): Upstream request failed: [invalid_request_error] The reasoning_content in the thinking mode must be passed back to the API."}}`),
-		"kimi":     []byte(`{"error":{"message":"thinking is enabled but reasoning_content is missing in assistant tool call message at index 2"}}`),
+// 渠道失效判定只认两条规则：状态码命中自动禁用状态码（DisableStatusCodes），或错误
+// 文案命中失败关键词（FailureKeywords）。其余失败（普通 400、403、404、402、5xx）一律
+// 留在重试链里换候选自愈：上游会把渠道侧故障包装成普通 400（如聚合层的 "Upstream
+// request failed"），4xx 不能再当成对客户端请求的最终判决。
+func TestChannelDeadFailureClassification(t *testing.T) {
+	settings := system.DefaultResilienceSettings()
+	// DisableStatusCodes 默认 401,429：命中即整渠道跳过，不再消耗本渠道的备用地址与密钥。
+	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests} {
+		if !channelDeadFailure(attemptResult{status: status}, settings) {
+			t.Fatalf("status %d listed in DisableStatusCodes must mark the channel dead", status)
+		}
 	}
-	for name, body := range cases {
-		for _, status := range []int{http.StatusBadRequest, http.StatusUnprocessableEntity} {
-			result := attemptResult{status: status, body: body}
-			if nonRetryableClientFailure(result, nil, settings) {
-				t.Fatalf("%s status %d: stateful session rejection must keep routing to the next candidate", name, status)
-			}
+	for _, status := range []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusPaymentRequired, http.StatusInternalServerError} {
+		if channelDeadFailure(attemptResult{status: status}, settings) {
+			t.Fatalf("status %d must stay retryable under default settings", status)
+		}
+	}
+	// 上游文件服务 404 被包成 HTTP 400 的情形（Responses 文件下载）：同样留在重试链里。
+	fileDownload404 := attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"code":"invalid_value","message":"Error while downloading file. Upstream status code: 404.","param":"url"}}`)}
+	if channelDeadFailure(fileDownload404, settings) {
+		t.Fatal("a file-download 404 wrapped in HTTP 400 must stay retryable")
+	}
+	// 失败关键词命中：即使状态码不在禁用清单里也整渠道跳过（大小写不敏感）。
+	if !channelDeadFailure(attemptResult{
+		status:       http.StatusBadRequest,
+		errorMessage: "ERROR: YOUR CREDIT BALANCE IS TOO LOW",
+	}, settings) {
+		t.Fatal("a FailureKeywords hit must mark the channel dead regardless of status")
+	}
+	// 管理端把 403 加进 DisableStatusCodes 后同样生效。
+	custom := settings
+	custom.DisableStatusCodes = "403"
+	if !channelDeadFailure(attemptResult{status: http.StatusForbidden}, custom) {
+		t.Fatal("403 must mark the channel dead when listed in DisableStatusCodes")
+	}
+	// 已写出内容的结果由 attemptCompleted 就地收尾，不参与分类；空错误文案不参与关键词匹配。
+	if channelDeadFailure(attemptResult{status: http.StatusUnauthorized, wroteBytes: true}, settings) {
+		t.Fatal("written results must not be classified")
+	}
+	if channelDeadFailure(attemptResult{status: http.StatusBadRequest}, settings) {
+		t.Fatal("a 400 without keywords must stay retryable")
+	}
+}
+
+// reasoning_content 会话校验拒绝不再有专门豁免：按「其余情况一律重试」并入普通重试流
+// （备用地址→换密钥→换候选渠道）。管理员若希望这类失败直接跳渠道，可把字段名加入
+// FailureKeywords——关键词通道对 errorMessage 生效。
+func TestStatefulSessionRejectionStaysRetryable(t *testing.T) {
+	settings := system.DefaultResilienceSettings()
+	cases := map[string]string{
+		"deepseek": "Error from provider (Console Go): Upstream request failed: [invalid_request_error] The reasoning_content in the thinking mode must be passed back to the API.",
+		"kimi":     "thinking is enabled but reasoning_content is missing in assistant tool call message at index 2",
+	}
+	for name, message := range cases {
+		if channelDeadFailure(attemptResult{status: http.StatusBadRequest, errorMessage: message}, settings) {
+			t.Fatalf("%s: stateful session rejection must stay retryable by default", name)
+		}
+	}
+	keywords := settings
+	keywords.FailureKeywords = append(keywords.FailureKeywords, "reasoning_content")
+	for name, message := range cases {
+		if !channelDeadFailure(attemptResult{status: http.StatusBadRequest, errorMessage: message}, keywords) {
+			t.Fatalf("%s: adding the marker to FailureKeywords must mark the channel dead", name)
 		}
 	}
 }
 
-// 上游只把错误留在 errorMessage 里（响应体缺失或不可解析）时同样要认得出来。
-func TestUpstreamStatefulSessionRejectionReadsErrorMessage(t *testing.T) {
-	message := "The `reasoning_content` in the thinking mode must be passed back to the API."
-	if !upstreamStatefulSessionRejection(http.StatusBadRequest, nil, message) {
-		t.Fatal("must detect the marker in errorMessage when the body is empty")
-	}
-	if !upstreamStatefulSessionRejection(http.StatusBadRequest, []byte("reasoning_content is required"), "") {
-		t.Fatal("must fall back to the raw body when error.message is absent")
-	}
-}
-
-// 普通 400（请求体本身被上游拒绝）仍然是最终判决：这次修复只放行「上游归因于会话状态」
-// 的那一类，否则会把真正的客户端请求错误放大到每一个候选渠道。
-func TestNonRetryableClientFailureKeepsPlainBadRequestTerminal(t *testing.T) {
-	settings := adminapi.SystemResilienceSettingsInput{RetryStatusCodes: "400-407,500-599"}
-	plain := attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"message":"messages: at least one message is required"}}`)}
-	if !nonRetryableClientFailure(plain, nil, settings) {
-		t.Fatal("a plain 400 must stay terminal even when 400 is listed as retryable")
-	}
-	// 已向客户端写出内容的失败无法重放：由 attemptCompleted 直接判定为「本次尝试到此结束」，
-	// 根本不会进入换候选决策，因此这类失败也不会被会话状态判定放行。
-	written := attemptResult{status: http.StatusBadRequest, wroteBytes: true, body: []byte(`reasoning_content must be passed back`)}
-	if !attemptCompleted(written, nil, true) {
-		t.Fatal("a failure after bytes were written must end the attempt")
-	}
-}
-
-// 只有 400/422 才可能命中会话状态判定，其它状态码保持原有重试语义。
-func TestUpstreamStatefulSessionRejectionIgnoresOtherStatuses(t *testing.T) {
-	body := []byte(`{"error":{"message":"reasoning_content must be passed back"}}`)
-	for _, status := range []int{http.StatusOK, http.StatusNotFound, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
-		if upstreamStatefulSessionRejection(status, body, "") {
-			t.Fatalf("status %d must not match the stateful session rejection", status)
-		}
-	}
-}
-
-// 402（余额不足）是账号级失败：成因在渠道密钥，与客户端请求无关。必须放行到下一个
-// 候选渠道换路自愈，并让 maybeAutoDisable 走密钥级禁用分支；若在这里判成对客户端
-// 请求的最终判决，渠道余额空了之后每次请求都会原样撞墙一次。
-func TestNonRetryableClientFailureAllowsPaymentRequired(t *testing.T) {
-	// 故意不把 402 放进 RetryStatusCodes：放行依据是「上游归因」，不是管理端配置。
-	settings := adminapi.SystemResilienceSettingsInput{RetryStatusCodes: "401,403,404,408,429,500-599"}
+// 402（余额不足）不在默认禁用规则里：按普通重试流换同渠道其余密钥、再换候选渠道自愈；
+// 密钥级禁用仍由 maybeAutoDisable 的 definitiveCredentialFailure 负责。
+func TestPaymentRequiredStaysRetryableByDefault(t *testing.T) {
+	settings := system.DefaultResilienceSettings()
 	result := attemptResult{
 		status:       http.StatusPaymentRequired,
 		body:         []byte(`{"error":{"code":"INSUFFICIENT_BALANCE","message":"余额不足"}}`),
 		errorMessage: "error: code=\"INSUFFICIENT_BALANCE\" message=\"余额不足\"",
 	}
-	if nonRetryableClientFailure(result, nil, settings) {
-		t.Fatal("402 insufficient balance must keep routing to the next candidate")
+	if channelDeadFailure(result, settings) {
+		t.Fatal("402 must stay retryable under default settings")
 	}
-	// 已写出内容后收到的 402 无法重放：attemptCompleted 先行短路，同样不会换候选。
+	// 已写出内容后收到的失败无法重放：attemptCompleted 先行短路，不进入换候选决策。
 	written := attemptResult{status: http.StatusPaymentRequired, wroteBytes: true}
 	if !attemptCompleted(written, nil, true) {
 		t.Fatal("a 402 after bytes were written must end the attempt")

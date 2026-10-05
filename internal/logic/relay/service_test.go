@@ -13,7 +13,6 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/yunloli/aiferry/internal/logic/channel"
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
-	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
@@ -123,47 +122,6 @@ func TestCandidateBaseURLsUsesPrimaryThenDistinctBackups(t *testing.T) {
 		if urls[index] != want[index] {
 			t.Fatalf("URLs = %#v, want %#v", urls, want)
 		}
-	}
-}
-
-func TestRetryableStatus(t *testing.T) {
-	for _, status := range []int{401, 402, 403, 404, 408, 429, 500, 503} {
-		if !retryableStatus(status) {
-			t.Fatalf("status %d should retry", status)
-		}
-	}
-	for _, status := range []int{200, 400, 422} {
-		if retryableStatus(status) {
-			t.Fatalf("status %d should not retry", status)
-		}
-	}
-}
-
-func TestNonRetryableClientFailureStopsCredentialTraversal(t *testing.T) {
-	settings := system.DefaultResilienceSettings()
-	if !nonRetryableClientFailure(attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"code":"invalid_type","message":"image_url must be a string"}}`)}, nil, settings) {
-		t.Fatal("image URL validation failure must stop retries")
-	}
-	// 文件下载失败在 Responses 中表现为 HTTP 400，而错误详情内带有上游文件服务的
-	// 404。它不是“模型不存在”的路由错误，切换密钥、备用地址或渠道也无法让该 URL
-	// 重新可访问；必须立即返回，避免同一个失效文件被重复请求多次。
-	fileDownload404 := attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"code":"invalid_value","message":"Error while downloading file. Upstream status code: 404.","param":"url"}}`)}
-	if !nonRetryableClientFailure(fileDownload404, nil, settings) {
-		t.Fatal("file download 404 wrapped in HTTP 400 must stop retries")
-	}
-	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusUnprocessableEntity} {
-		if !nonRetryableClientFailure(attemptResult{status: status}, nil, settings) {
-			t.Fatalf("upstream client error status %d must stop retries", status)
-		}
-	}
-	if nonRetryableClientFailure(attemptResult{status: http.StatusNotFound}, nil, settings) {
-		t.Fatal("404 model-not-found must allow failover to another configured channel")
-	}
-	if nonRetryableClientFailure(attemptResult{status: http.StatusBadRequest, body: []byte(`{"error":{"message":"Responses API is not supported"}}`)}, nil, settings) {
-		t.Fatal("unsupported endpoint must retain protocol fallback")
-	}
-	if nonRetryableClientFailure(attemptResult{status: http.StatusTooManyRequests}, nil, settings) {
-		t.Fatal("configured retryable status must continue retries")
 	}
 }
 

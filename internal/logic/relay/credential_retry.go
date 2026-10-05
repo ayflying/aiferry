@@ -7,11 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tidwall/gjson"
-
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/logic/channel"
-	"github.com/yunloli/aiferry/internal/logic/protocol"
+	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
@@ -76,6 +74,10 @@ type channelAttempt struct {
 	// 「3 把密钥在该模型下全部处于组合冷却」）。仅在从未发出上游请求时非空，
 	// 供 Handle 组装「零尝试」诊断文案，避免事后按渠道重查得出相矛盾的结论。
 	skipReason string
+	// channelDead 表示本次尝试命中了「自动禁用状态码」或「失败关键词」：失败被判定
+	// 为渠道/密钥侧不可用（maybeAutoDisable 会按同一套规则处理禁用），本渠道剩余的
+	// 备用地址与密钥不再尝试，直接交还外层切换下一候选渠道。
+	channelDead bool
 }
 
 // attemptChannel keeps retries inside one channel until no usable upstream key
@@ -141,14 +143,34 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 				steps := attemptFlowSteps(current.ChannelName, result)
 				flow := append(attempted.flow, steps...)
 				attempted = channelAttempt{candidate: current, result: result, attempts: attempted.attempts + len(steps), flow: flow}
-				if attemptCompleted(attempted.result, attemptErr, stream) || nonRetryableClientFailure(attempted.result, attemptErr, settings) {
+				if attemptCompleted(attempted.result, attemptErr, stream) {
 					attempted.handled = true
+					break
+				}
+				if channelDeadFailure(attempted.result, settings) {
+					// 禁用类失败（自动禁用状态码/失败关键词）：渠道内重试只会重演，
+					// 不再消耗本渠道剩余的备用地址与密钥，交还外层切换下一候选渠道；
+					// handled 保持 false，最终结果由候选耗尽路径透传给客户端。
+					attempted.channelDead = true
 					break
 				}
 			}
 			return attempted
 		}()
 		if last.handled {
+			last.result.attemptFlow = last.flow
+			return last
+		}
+		if last.channelDead {
+			// 禁用类失败默认直接跳渠道；仅最后一个候选的首次 429 例外——上游限流
+			// 文案通常建议「稍后重试」，保留一次退避重试的机会，重试仍命中再跳。
+			if shouldRetryThrottledCandidate(options, throttleRetried, last, ctx.Err()) {
+				throttleRetried = true
+				last.channelDead = false
+				if waitForThrottleRetry(ctx) {
+					continue
+				}
+			}
 			last.result.attemptFlow = last.flow
 			return last
 		}
@@ -213,72 +235,31 @@ func attemptCompleted(result attemptResult, attemptErr error, stream bool) bool 
 	return true
 }
 
-// nonRetryableClientFailure 对切换凭据或备用地址也无法修复的请求错误停止重试。
-// 上游鉴权失败表示当前密钥不可用，不能继续用同一请求轮换密钥或地址；
-// 只有明确表示接口不支持的响应才允许协议回退；另有两类 4xx 虽然也是 4xx，
-// 但成因在渠道侧，同样放行给下一个候选：状态会话校验拒绝（见
-// upstreamStatefulSessionRejection）与余额不足 402（账号级失败，换渠道自愈
-// 并触发密钥级禁用）。
-func nonRetryableClientFailure(result attemptResult, attemptErr error, settings adminapi.SystemResilienceSettingsInput) bool {
-	if attemptErr != nil || result.wroteBytes || result.status < http.StatusBadRequest || result.status >= http.StatusInternalServerError {
+// channelDeadFailure 判定一次失败是否意味着「当前渠道已不可用，应整渠道跳过」：
+// 状态码命中自动禁用状态码（DisableStatusCodes，与 maybeAutoDisable 的禁用门禁同一套
+// MatchesStatusCodeRules 匹配），或错误文案命中失败关键词（FailureKeywords，欠费/配额/
+// 鉴权类账号级故障）。这两类失败即使换本渠道的其余密钥或备用地址也大概率重演，因此
+// 渠道内不再重试；禁用动作仍由 maybeAutoDisable 负责。
+//
+// 未命中上述规则的失败一律留在重试链里（备用地址→换密钥→换候选渠道）：上游会把渠道侧
+// 故障包装成普通 400（如聚合层的 "Upstream request failed"），4xx 不再被当成对客户端
+// 请求的最终判决；全部候选耗尽后由 Handle 把最后一次上游 4xx 原样透传。reasoning_content
+// 会话校验拒绝、协议不支持回退等情形也随之并入普通重试——需要跳渠道时，管理员可把相应
+// 关键词加入 FailureKeywords。
+func channelDeadFailure(result attemptResult, settings adminapi.SystemResilienceSettingsInput) bool {
+	if result.wroteBytes {
+		// 已经向客户端写出内容的结果由 attemptCompleted 就地收尾，不参与重试分类。
 		return false
 	}
-	// A received 4xx response is a definitive response for this request after
-	// the one in-attempt protocol fallback (if applicable). Do not send the
-	// same user payload again with another credential or backup URL. Only the
-	// explicitly transient client statuses remain eligible for retry.
-	if result.status >= http.StatusBadRequest && result.status < http.StatusInternalServerError {
-		if (result.status == http.StatusBadRequest || result.status == http.StatusUnprocessableEntity) && protocol.ShouldFallback(result.status, result.body) {
-			return false
-		}
-		// 有状态会话校验类拒绝的根源在渠道侧，不在请求体：换候选渠道重放即可自愈，
-		// 不能当成对客户端请求的最终判决（详见 upstreamStatefulSessionRejection）。
-		if upstreamStatefulSessionRejection(result.status, result.body, result.errorMessage) {
-			return false
-		}
-		// 402（余额不足）是账号级失败：成因在渠道密钥，与客户端请求无关。放行给候选
-		// 循环换渠道自愈；同时让 maybeAutoDisable 走密钥级禁用分支（isCredentialScopedFailure
-		// 已把 402 归为凭证级，见 model_health.go），避免后续请求继续撞同一面余额墙。
-		if result.status == http.StatusPaymentRequired {
-			return false
-		}
-		switch result.status {
-		case http.StatusNotFound, http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
-			// 404 can mean that this channel/group does not expose the requested
-			// model. Allow routing to the next candidate, but never treat it as a
-			// successful response. The configured rule still controls whether the
-			// current credential may be retried.
-			return !retryableStatusForRules(result.status, settings.RetryStatusCodes)
-		default:
-			return true
-		}
+	if result.status >= http.StatusBadRequest && system.MatchesStatusCodeRules(settings.DisableStatusCodes, result.status) {
+		return true
 	}
-	return false
-}
-
-// statefulSessionRejectionField 是上游在有状态会话校验失败时点名的字段。各家措辞不同
-// （DeepSeek：「The `reasoning_content` in the thinking mode must be passed back to the
-// API.」；Kimi：「thinking is enabled but reasoning_content is missing in assistant tool
-// call message at index N」），但都会点名这个字段，因此只认字段名、不绑定整句——宁可在
-// 上游改措辞后多换一次渠道，也不要漏判成「客户端请求错」。
-const statefulSessionRejectionField = "reasoning_content"
-
-// upstreamStatefulSessionRejection 判定一次 4xx 响应是否为「上游按有状态会话校验，拒绝了
-// 本会话的工具调用历史」。
-//
-// Console Go 系的聚合上游（生产中为 sub2api 渠道）只承认自己生成过的 tool_call 记录：
-// 认不出就返回 400，并提示思考内容必须回传。这类失败与请求体本身无关——实测同一份请求
-// 换到无状态上游（ch30/31/32 共 63 次）全部 200，而空串兜底在该渠道无效（回传「缺字段 /
-// 空串 / 真实内容」的 400 率为 5/10、5/10、4/10，与内容无关）。因此这里必须放行到下一个
-// 候选，否则会把一个本可自愈的渠道问题直接暴露给用户，且与多渠道无状态轮转天然冲突。
-//
-// 上游把错误写进 error.message，个别链路只留下纯文本错误信息，三者都查。
-func upstreamStatefulSessionRejection(status int, body []byte, errorMessage string) bool {
-	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+	message := strings.ToLower(result.errorMessage)
+	if message == "" {
 		return false
 	}
-	for _, candidate := range []string{gjson.GetBytes(body, "error.message").String(), string(body), errorMessage} {
-		if strings.Contains(strings.ToLower(candidate), statefulSessionRejectionField) {
+	for _, keyword := range settings.FailureKeywords {
+		if strings.Contains(message, strings.ToLower(keyword)) {
 			return true
 		}
 	}

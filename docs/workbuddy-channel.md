@@ -7,7 +7,7 @@
 - 桌面端：`D:\Program Files\WorkBuddy\WorkBuddy.exe`
 - 进程运行中，无 `--remote-debugging-port`，无法 attach 提取运行时 token
 - 数据目录：`C:\Users\ay\.workbuddy`（90 项：`workbuddy.db`、`models.json`、`keyblob`（336B DPAPI wrapped-key）、`secrets` 为空、`user-state.json`、`qimei-cache.json`、账号目录 `c409dd35-abd0-469a-aaca-a69f7aa67d6d`）
-- `keyblob` 结构：`{"version":1,"keyId":"bb9f264ee53ec068","slots":[{"type":"static-v1","protectorKeyId":"9127dea1b44020a7","wrapped":"..."}]}` —— 真实凭证由本机 DPAPI 保护的静态密钥加密，无法在服务端复现
+- `keyblob` 结构：`{"version":1,"keyId":"bb9f264ee53ec068","slots":[{"type":"static-v1","protectorKeyId":"9127dea1b44020a7","wrapped":"..."}]}` —— wrapped 字段解码为 AES-256-GCM（suite=1，32 字节 master key、12 字节 nonce、16 字节 authTag）；`protectorKeyId` "9127dea1b44020a7" 不在磁盘任何文件，仅由运行时加载的 `TuringShieldSDK.dll` / `turing_sdk.node`（在 PID 34320 模块中）派生；无法在服务端复现解密
 - `models.json`（官方模型清单，7 条）：`glm-5.3-flash`、`qwen3.8-flash-next`、`deepseek-flash`、`mimo-v2.6-flash`、`gpt-6-sol`、`gpt-6-luna`、`grok-4.7`
 - API 清单（`app.asar` 317MB 正则提取）：`/v2/chat/completions`（默认计算网关 `copilot.tencent.com`）、`/v3/chat/completions`、`/v4/chat/completions`、`/v1/chat/completions`、`/v2/enterprises/personal/models`（模型清单）、`/v2/user/cloudagent/quota`、`/v2/billing/meter/*`（计费与额度）
 - 鉴权模型（`buildHeaders`）：`Authorization: Bearer ${accessToken}` + `X-User-Id: <uid>` + `X-Domain: www.workbuddy.cn`；计费接口额外经 `buildHeadersWithTuringToken` 加 `X-Device-Token`（由本机 `qimei.dll` 风控 SDK 生成）
@@ -53,3 +53,7 @@
 - 单测：`internal/logic/channel/quota_workbuddy_test.go`（6 例，覆盖积分解析、已用补齐、空窗口拒绝、错误响应、签到解析、未签到状态）
 - 配置断言：`internal/config/builtins_test.go`（更新为 23 条内置类型，新增 `workbuddy` 映射）
 - 文档：本文件
+
+## 逆向结论（subagent ef4a118b 完成，无文件修改）
+
+无活跃 Bearer `.c-kg` 令牌存在于任何本机文件（`secrets` 空、`workbuddy.db` 无 auth 表、Chromium 缓存仅有 9/2026 旧值全部 401）。`keyblob` 已完整逆向：AES-256-GCM（`at-rest-crypto` 模块在 `app.asar` `/main/server.js`）；`protectorKeyId` `9127dea1b44020a7` 由运行时 `TuringShieldSDK.dll` 派生，不在磁盘。`accessToken` 由 `/v2/auth/token` 获得并仅存于进程内存（`PID 34320`）。要提取需截获 `/v2/auth/token` 网络流量或用管理员权限读取 PID 34320 内存。

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	mathrand "math/rand/v2"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -272,17 +271,6 @@ func (s *sRelay) maybeAutoDisable(ctx context.Context, settings adminapi.SystemR
 	if err != nil {
 		g.Log().Warningf(ctx, "组合评分写入失败 channel=%d model=%d credential=%d: %v", candidate.ChannelID, candidate.ChannelModelID, candidate.ChannelCredentialID, err)
 	}
-}
-
-func retryableStatus(status int) bool {
-	return retryableStatusForRules(status, system.DefaultResilienceSettings().RetryStatusCodes)
-}
-
-func retryableStatusForRules(status int, rules string) bool {
-	if status == http.StatusPaymentRequired {
-		return true
-	}
-	return system.MatchesStatusCodeRules(rules, status)
 }
 
 // summarizeCandidateSkips 汇总候选渠道在选凭证阶段被整段跳过的原因，用于 attempts==0 的

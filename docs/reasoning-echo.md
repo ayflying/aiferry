@@ -213,6 +213,18 @@ assistant 消息；`reasoning_content` 缺失/`null` 在已翻篇的历史消息
   所以走到切换的那几次总耗时会被拉长（37s、93s）。这是 ch9 自身的慢响应，与本次改动无关；
   若这类超长等待变得频繁，可考虑在渠道级给 ch9 设更短的上游超时。
 
+### 更新（0.5.167）：4xx「整单终态」已废除，专用豁免一并移除
+
+0.5.124 引入的 `upstreamStatefulSessionRejection` 豁免与 `nonRetryableClientFailure` 分类器已在
+0.5.167 随重试政策整体重构移除（见 `internal/logic/relay/credential_retry.go` 的
+`channelDeadFailure`）：上游会把渠道侧故障包装成普通 400（如聚合层的
+`Upstream request failed`），因此**除「自动禁用状态码（`DisableStatusCodes`）」与「失败关键词
+（`FailureKeywords`）」命中者整渠道跳过外，其余失败一律沿重试链自愈**（备用地址→换密钥→换
+候选渠道），4xx 不再是对客户端请求的最终判决。reasoning_content 会话校验拒绝由此并入普通
+重试（效果与 0.5.124 的豁免一致）；若希望这类失败直接跳渠道，可把 `reasoning_content` 加入
+管理端失败关键词。单测见 `credential_retry_test.go` 的
+`TestStatefulSessionRejectionStaysRetryable`。
+
 ## 排障
 
 - 失败日志里出现「协议转换：」行时，说明请求经过了 Responses/Chat 协议转换：方向是

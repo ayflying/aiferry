@@ -310,9 +310,9 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			g.Log().Errorf(ctx, "record failed request %s: %v", requestID, recordErr)
 		}
 		// 所有候选都失败后，只要最后一次是「尚未向客户端写出任何内容的 4xx」，就把上游响应
-		// 原样透传。4xx 表示请求本身被上游拒绝，改写成网关级 5xx（503 server_error，客户端
-		// 会据此重试）属于误导；某状态码是否列在 RetryStatusCodes 里，只决定「要不要继续换
-		// 候选」，不应改变最终对客户端的表达。
+		// 原样透传。4xx 不再是对整次请求的终态判决——上游会把渠道侧故障包装成普通 400（如
+		// 聚合层的 "Upstream request failed"），因此 4xx 随候选链一路重试到最后；改写成网关级
+		// 5xx（503 server_error，客户端会据此重试）反而丢失上游的原始错误信息，属于误导。
 		if !last.wroteBytes && last.status >= http.StatusBadRequest && last.status < http.StatusInternalServerError {
 			s.writeBufferedResponse(writer, last.status, sensitiveDataRestorer.restoreBufferedResponse(last.body), last.headers)
 			return nil
