@@ -69,6 +69,9 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.GET("/channels/{id}/models", c.listChannelModels)
 	group.PUT("/channels/{id}/models/selection", c.selectChannelModels)
 	group.DELETE("/channels/{id}/models/failed", c.deleteFailedChannelModels)
+	// 模型测试面向登录用户开放：用户给自己创建的渠道配好模型后必须能立刻验证可用性，
+	// 归属校验落在 service 层（TestModel → Get 按当前登录用户过滤渠道）。
+	group.POST("/models/test", c.testModel)
 	group.POST("/channels/{id}/costs/query", c.queryChannelCost)
 	group.GET("/channels/{id}/quota", c.queryChannelQuota)
 
@@ -96,7 +99,6 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.POST("/models/{id}/price-rules", c.createPriceRule)
 	group.PUT("/price-rules/{id}", c.updatePriceRule)
 	group.DELETE("/price-rules/{id}", c.deletePriceRule)
-	group.POST("/models/test", c.testModel)
 	group.GET("/dashboard", c.dashboard)
 	c.registerUserRoutes(group)
 	c.registerRedemptionCodeRoutes(group)

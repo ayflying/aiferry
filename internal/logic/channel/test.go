@@ -46,14 +46,17 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	if model.Id == 0 {
 		return TestResult{}, gerror.New("model not found")
 	}
+	// 渠道归属校验必须早于余额校验：Get 在登录上下文中按创建者过滤渠道，
+	// 非管理员只能测试自己创建的渠道下的模型。先查余额会让越权请求拿到
+	// 「余额不足」这种与权限无关的误导性提示。
+	channel, err := s.Get(ctx, model.ChannelId)
+	if err != nil {
+		return TestResult{}, err
+	}
 	if userID != usage.SystemUserID && s.prices.IsPriced(model.PublicName) {
 		if err := s.users.CheckBalance(ctx, userID); err != nil {
 			return TestResult{}, err
 		}
-	}
-	channel, err := s.Get(ctx, model.ChannelId)
-	if err != nil {
-		return TestResult{}, err
 	}
 	credential, err := s.CredentialForTest(ctx, channel.Id, input.ChannelCredentialID)
 	if err != nil {
