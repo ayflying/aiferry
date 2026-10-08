@@ -9,7 +9,10 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
-const httpMethodGet = "GET"
+const (
+	httpMethodGet  = "GET"
+	httpMethodPost = "POST"
+)
 
 func ParseConfig(raw []byte) (Config, error) {
 	config := DefaultConfig()
@@ -148,8 +151,35 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 			config.Path = "/"
 		}
 		return nil
+	case AdapterWorkBuddy:
+		// WorkBuddy 积分/签到查询是 POST + channel_key 鉴权，接口路径由适配器与
+		// builtins.json 共同决定（运行时实际路径见 channel/quota_workbuddy.go 的
+		// workBuddyCreditsPath），不套用 GET 系列额度适配器的默认 method/path，
+		// 只做请求形状与鉴权校验。
+		config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
+		if config.Method == "" {
+			config.Method = httpMethodPost
+		}
+		if config.Method != httpMethodPost {
+			return gerror.Newf("quota adapter %s only supports the POST method", config.Adapter)
+		}
+		config.Path = strings.TrimSpace(config.Path)
+		if config.Path != "" {
+			if err := validatePathField("quota.path", config.Path); err != nil {
+				return err
+			}
+		}
+		config.AuthType = normalizeAuth(config.AuthType)
+		if config.AuthType == AuthNone {
+			config.AuthType = AuthChannelKey
+		}
+		config.HeaderName = normalizeHeader(config.HeaderName, config.AuthType)
+		if !validAuth(config.AuthType) {
+			return gerror.Newf("unsupported quota authType for %s", config.Adapter)
+		}
+		return nil
 	default:
-		return gerror.Newf("unsupported quota adapter %q (expected none, %s, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterOpenCodeGo, AdapterVolcAFP)
+		return gerror.Newf("unsupported quota adapter %q (expected none, %s, %s, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterOpenCodeGo, AdapterVolcAFP, AdapterWorkBuddy)
 	}
 	config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
 	if config.Method == "" {
