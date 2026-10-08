@@ -12,6 +12,9 @@ import (
 const (
 	httpMethodGet  = "GET"
 	httpMethodPost = "POST"
+
+	// defaultLoginPrefixPath 是外链登录接口在 /v2 之后的默认路径前缀。
+	defaultLoginPrefixPath = "/plugin"
 )
 
 func ParseConfig(raw []byte) (Config, error) {
@@ -50,6 +53,9 @@ func ParseConfig(raw []byte) (Config, error) {
 		return Config{}, err
 	}
 	if err := normalizeQuotaConfig(&config.Quota); err != nil {
+		return Config{}, err
+	}
+	if err := normalizeLoginConfig(&config.Login); err != nil {
 		return Config{}, err
 	}
 	if err := normalizeEndpointConfigs(config.Endpoints); err != nil {
@@ -106,6 +112,33 @@ func validatePathField(field, value string) error {
 		return nil
 	}
 	return gerror.Newf("%s must start with / or be a full HTTP(S) URL", field)
+}
+
+// normalizeLoginConfig 校验渠道类型的登录配置。adapter 留空或 "none" 表示不支持登录；
+// external_link（浏览器外链 SSO）必须声明 platform，prefixPath 默认 /plugin 且必须以 / 开头。
+func normalizeLoginConfig(config *LoginConfig) error {
+	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
+	switch config.Adapter {
+	case "", AdapterLoginNone:
+		*config = LoginConfig{}
+		return nil
+	case AdapterLoginExternalLink:
+		config.Platform = strings.ToLower(strings.TrimSpace(config.Platform))
+		if config.Platform == "" {
+			return gerror.New("login.platform is required for the external_link login adapter")
+		}
+		config.PrefixPath = strings.TrimSpace(config.PrefixPath)
+		if config.PrefixPath == "" {
+			config.PrefixPath = defaultLoginPrefixPath
+			return nil
+		}
+		if !strings.HasPrefix(config.PrefixPath, "/") {
+			return gerror.New("login.prefixPath must start with /")
+		}
+		return nil
+	default:
+		return gerror.Newf("unsupported login adapter %q (expected none or %s)", config.Adapter, AdapterLoginExternalLink)
+	}
 }
 
 func normalizeBaseURL(value *string) error {

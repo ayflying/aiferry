@@ -6,11 +6,13 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// aggregateOpenCodeFreeSSE 把 OpenCode Zen 免费层强制流式后返回的 chat SSE
-// 聚合成非流式 chat.completion JSON。免费层指纹校验要求 stream=true，客户端
-// 非流式请求被网关改写后必须在这里把分片拼回完整响应，才能走既有非流式回包、
-// 计费与报文落盘路径。聚合失败时原样返回，交由上层按上游原始响应处理。
-func aggregateOpenCodeFreeSSE(raw []byte) []byte {
+// aggregateChatCompletionSSE 把「强制流式车道」上游返回的 chat SSE 聚合成非流式
+// chat.completion JSON。两类渠道会走到这里：OpenCode Zen 免费层（指纹校验要求
+// stream=true），以及声明了 forceUpstreamStream 的渠道类型（如 WorkBuddy 系，
+// 非流式请求被网关直接 400）。客户端非流式请求被改写后必须把分片拼回完整响应，
+// 才能走既有非流式回包、计费与报文落盘路径。聚合失败时原样返回，交由上层按上游
+// 原始响应处理。
+func aggregateChatCompletionSSE(raw []byte) []byte {
 	content := ""
 	reasoning := ""
 	role := "assistant"

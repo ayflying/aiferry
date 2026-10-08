@@ -116,6 +116,15 @@ export interface ChannelTypeVideoConfig {
 
 export interface ChannelTypeProtocolConfig {
   chatCompletionsOnly: boolean
+  /** 上游只接受流式请求时置 true：转发层把非流式请求改成流式再聚合回 JSON。 */
+  forceUpstreamStream?: boolean
+}
+
+/** 渠道类型的登录方式声明；adapter 决定登录形态（external_link = 浏览器外链 SSO）。 */
+export interface ChannelTypeLoginConfig {
+  adapter: 'none' | 'external_link'
+  platform?: string
+  prefixPath?: string
 }
 
 export interface ChannelTypeConfig {
@@ -124,6 +133,7 @@ export interface ChannelTypeConfig {
   costs: ChannelTypeCostConfig
   pricing: ChannelTypePricingConfig
   quota?: ChannelTypeQuotaConfig
+  login?: ChannelTypeLoginConfig
   audio?: ChannelTypeAudioConfig
   video?: ChannelTypeVideoConfig
   protocol?: ChannelTypeProtocolConfig
@@ -217,6 +227,19 @@ export interface CostSummary {
   usageUnit?: string
   usageType?: string
   usageDimension?: string
+}
+
+/** 外链登录：一次性登录地址 + 轮询换票用的 state。 */
+export interface ChannelLoginSession {
+  state: string
+  authUrl: string
+}
+
+/** 登录轮询结果：pending 表示等待用户完成登录，completed 表示令牌已写入凭据。 */
+export interface ChannelLoginResult {
+  status: 'pending' | 'completed'
+  credentialId: number
+  uid: string
 }
 
 export interface ChannelCredential {

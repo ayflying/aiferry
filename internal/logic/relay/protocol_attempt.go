@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
@@ -93,6 +94,13 @@ func (s *sRelay) protocolTypeConfig(ctx context.Context, candidate Candidate) (c
 	return typeConfig, true
 }
 
+// declaresUpstreamStreamOnly 判定渠道类型是否声明「上游只接受流式请求」。
+// 读取失败按未声明处理，退回按客户端原样转发，不阻断请求。
+func (s *sRelay) declaresUpstreamStreamOnly(ctx context.Context, candidate Candidate) bool {
+	typeConfig, ok := s.protocolTypeConfig(ctx, candidate)
+	return ok && typeConfig.Protocol.ForceUpstreamStream
+}
+
 func isZhipuResponsesBaseURL(baseURL string) bool {
 	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "https://open.bigmodel.cn/api/v1")
 }
@@ -128,14 +136,22 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	// OpenCode Zen 免费层指纹校验只认 chat completions 形态：注入请求体三件套
 	// （强制 stream、bash/read 工具桩、无工具时 tool_choice=none）。协议转换到
 	// responses/messages 的请求不注入，避免破坏非 chat 结构。
-	openCodeForcedStream := false
+	forcedStream := false
 	if channel.IsOpenCodeFreeLane(candidate.ChannelType, candidate.BaseURL) && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		var forced bool
 		body, forced, err = channel.ApplyOpenCodeFreeBody(body)
 		if err != nil {
 			return attemptResult{}, false, err
 		}
-		openCodeForcedStream = forced
+		forcedStream = forced
+	} else if plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint && s.declaresUpstreamStreamOnly(ctx, candidate) {
+		// 该上游只接受流式请求（非流式直接被网关 400 且无响应体）：客户端要非流式
+		// JSON 时把请求体改成 stream=true，回包处再把 SSE 聚合回 chat.completion。
+		if !gjson.GetBytes(body, "stream").Bool() {
+			body, _ = sjson.SetBytes(body, "stream", true)
+			body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
+			forcedStream = true
+		}
 	}
 	if stream && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
@@ -178,11 +194,12 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if !stream || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
-		// 免费层强制流式：客户端要非流式 JSON，但请求体已被改成 stream=true，
-		// 上游回的是 SSE。把分片聚合成 chat.completion 后再走非流式回包/计费。
-		forcedStreamAggregate := openCodeForcedStream && !stream && resp.StatusCode >= 200 && resp.StatusCode < 300 && readErr == nil
+		// 强制流式车道（OpenCode 免费层指纹校验，或渠道类型声明只接受流式）：
+		// 客户端要非流式 JSON，但请求体已被改成 stream=true，上游回的是 SSE。
+		// 把分片聚合成 chat.completion 后再走非流式回包/计费。
+		forcedStreamAggregate := forcedStream && !stream && resp.StatusCode >= 200 && resp.StatusCode < 300 && readErr == nil
 		if forcedStreamAggregate {
-			responseBody = aggregateOpenCodeFreeSSE(responseBody)
+			responseBody = aggregateChatCompletionSSE(responseBody)
 		}
 		// 思考内容必须在响应改写前捕获：ReasoningToContent 会把 reasoning_content
 		// 合并进 content 并删除原字段，改写后再读就拿不到了。

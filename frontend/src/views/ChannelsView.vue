@@ -100,6 +100,13 @@ const credentialManagementKeyPair = computed(() => {
   const config = store.channelTypes.find((item) => item.code === credentialChannel.value?.type)?.config
   return config?.quota?.adapter === 'volcengine_afp'
 })
+// credentialLoginSupported：上游密钥抽屉是否展示「登录获取密钥」入口。
+// 登录形态由渠道类型声明的 login.adapter 决定（external_link = 浏览器外链 SSO），
+// 未声明的类型不展示，避免点了才报错。
+const credentialLoginSupported = computed(() => {
+  const config = store.channelTypes.find((item) => item.code === credentialChannel.value?.type)?.config
+  return config?.login?.adapter === 'external_link'
+})
 const healthCheckModelOptions = computed(() => [...healthCheckModels.value]
   .filter((item) => item.enabled === 1)
   .sort((left, right) => left.publicName.localeCompare(right.publicName) || left.upstreamName.localeCompare(right.upstreamName)))
@@ -569,7 +576,7 @@ watch(activeTab, (tab) => {
 
     <ChannelModelTestDialog v-model="testOpen" :channel="testChannel" @changed="loadChannels" />
     <ChannelQuotaDialog v-model="quotaOpen" :channel-name="quotaTitle" :loading="quotaLoading" :error="quotaError" :result="quotaResult" @refresh="quotaChannel && queryQuota(quotaChannel, true, quotaCredential)" />
-    <ChannelCredentialDrawer v-model="credentialsOpen" :channel="credentialChannel" :quota-supported="credentialChannel?.quotaSupported" :management-key-supported="credentialUsesManagementKey" :management-key-pair="credentialManagementKeyPair" @changed="loadChannels" @query-quota="onCredentialQuota" />
+    <ChannelCredentialDrawer v-model="credentialsOpen" :channel="credentialChannel" :quota-supported="credentialChannel?.quotaSupported" :management-key-supported="credentialUsesManagementKey" :management-key-pair="credentialManagementKeyPair" :login-supported="credentialLoginSupported" @changed="loadChannels" @query-quota="onCredentialQuota" />
 
     <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form v-loading="channelFormLoading" label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placeholder="选择渠道类型" @change="applyDefaultBaseURL"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" :placeholder="selectedChannelType?.config.baseUrl || 'https://api.openai.com/v1'" /></el-form-item><el-form-item v-if="!editingId" label="首个推理密钥（可选）"><el-input v-model="form.apiKey" type="password" show-password placeholder="sk-... 或上游密钥；本地服务（如 Ollama）可留空" autocomplete="new-password" /></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><ChannelRouteCoverageSettings v-model:priority="form.priority" v-model:weight="form.weight" v-model:backup-base-urls="form.advancedConfig.backupBaseUrls" v-model:health-check-model-id="form.healthCheckModelId" v-model:auto-disable-enabled="form.autoDisableEnabled" :editing="Boolean(editingId)" :models="healthCheckModelOptions" /><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :testing-proxy="testingProxy" @test-proxy="testProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
 

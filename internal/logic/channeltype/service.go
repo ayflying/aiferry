@@ -34,6 +34,10 @@ const (
 	AdapterQiniuUsage  = "qiniu_usage"
 	AdapterNewAPIRatio = "newapi_ratio"
 
+	// 登录适配器：声明渠道支持"登录换取凭据"而不是手工填写密钥。
+	AdapterLoginNone         = "none"
+	AdapterLoginExternalLink = "external_link"
+
 	ValueTypeCost  = "cost"
 	ValueTypeUsage = "usage"
 
@@ -126,6 +130,11 @@ type ProtocolConfig struct {
 	// 通配（如 union-*）或精确名（如 qwen3.7-max）。只在命中名单时把该
 	// 模型的请求与测试切往 Messages 端点，其余模型不受影响。
 	MessagesModels []string `json:"messagesModels"`
+	// ForceUpstreamStream 声明该上游只接受流式 chat completions 请求：客户端以
+	// 非流式方式请求时，转发层把请求体改成 stream=true，再把上游 SSE 聚合回
+	// 非流式 JSON。WorkBuddy 系（copilot.tencent.com）的非流式请求会被网关直接
+	// 400 且不返回响应体，属于硬性要求，不是可选优化。
+	ForceUpstreamStream bool `json:"forceUpstreamStream"`
 }
 
 type Config struct {
@@ -136,8 +145,26 @@ type Config struct {
 	Audio     AudioConfig               `json:"audio"`
 	Video     VideoConfig               `json:"video"`
 	Quota     QuotaConfig               `json:"quota"`
+	Login     LoginConfig               `json:"login"`
 	Protocol  ProtocolConfig            `json:"protocol"`
 	Endpoints map[string]EndpointConfig `json:"endpoints"`
+}
+
+// LoginConfig 声明渠道类型的登录方式。adapter 决定登录形态，而登录形态由各平台
+// 官方方式决定：
+//
+//	external_link —— 浏览器外链 SSO。服务端先向平台申请一次性登录地址，把地址交给
+//	管理员在浏览器打开（微信扫码、账号密码、企业 SSO 均由平台登录页自行决定），
+//	服务端只轮询换票，因此不依赖登录时所在设备的任何本地组件。
+//
+// adapter 留空或 "none" 表示该渠道类型不支持登录，凭据只能手工填写密钥。
+type LoginConfig struct {
+	// Adapter 登录适配器，目前仅支持 external_link。
+	Adapter string `json:"adapter"`
+	// Platform 传给平台登录接口的 platform 参数（如 workbuddy）。
+	Platform string `json:"platform"`
+	// PrefixPath 登录接口在 /v2 之后的路径前缀（如 /plugin）。
+	PrefixPath string `json:"prefixPath"`
 }
 
 // QuotaConfig 声明渠道类型的套餐额度查询能力（如 GLM Coding Plan 的
@@ -177,8 +204,8 @@ type VideoConfig struct {
 
 // 视频适配器取值。
 const (
-	VideoAdapterOpenAI       = "openai"
-	VideoAdapterMiniMax      = "minimax"
+	VideoAdapterOpenAI        = "openai"
+	VideoAdapterMiniMax       = "minimax"
 	VideoAdapterVolcengineArk = "volcengine_ark"
 )
 

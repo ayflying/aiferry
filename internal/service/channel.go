@@ -49,6 +49,11 @@ type (
 		//     （组合冷却由 SelectCredential 直接给出原因，不会落到这里）。
 		CredentialSkipReason(ctx context.Context, channelID uint64) (string, error)
 		CreateCredential(ctx context.Context, channelID uint64, input adminapi.ChannelCredentialInput) (uint64, error)
+		// StartChannelLogin 向渠道类型声明的登录接口申请一次性登录地址，供管理员在
+		// 浏览器完成平台官方登录流程（微信扫码/账号密码/SSO 由平台登录页决定）。
+		StartChannelLogin(ctx context.Context, channelID uint64) (ChannelLoginSession, error)
+		// PollChannelLogin 轮询一次登录结果；成功后把令牌写入渠道凭据。
+		PollChannelLogin(ctx context.Context, channelID uint64, state string) (ChannelLoginResult, error)
 		ListCredentials(ctx context.Context, channelID uint64) ([]CredentialView, error)
 		// RevealCredential 解密并返回单把上游密钥明文，仅供管理端「显示密钥」用。
 		// 调用方（控制器）必须先通过邮箱验证窗口检查；明文只经 HTTPS 响应下发，

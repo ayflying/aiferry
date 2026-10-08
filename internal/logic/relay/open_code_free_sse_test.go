@@ -7,14 +7,14 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestAggregateOpenCodeFreeSSEBuildsChatCompletion(t *testing.T) {
+func TestAggregateChatCompletionSSEBuildsChatCompletion(t *testing.T) {
 	sse := []byte(
 		`data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1700000000,"model":"grok-code-fast-1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"},"finish_reason":null}]}` + "\n" +
 			`data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":null}]}` + "\n" +
 			`data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}` + "\n" +
 			"data: [DONE]\n",
 	)
-	result := aggregateOpenCodeFreeSSE(sse)
+	result := aggregateChatCompletionSSE(sse)
 	if !json.Valid(result) {
 		t.Fatalf("expected valid JSON, got %s", result)
 	}
@@ -35,7 +35,7 @@ func TestAggregateOpenCodeFreeSSEBuildsChatCompletion(t *testing.T) {
 	}
 }
 
-func TestAggregateOpenCodeFreeSSECarriesReasoningAndToolCalls(t *testing.T) {
+func TestAggregateChatCompletionSSECarriesReasoningAndToolCalls(t *testing.T) {
 	sse := []byte(
 		`data: {"id":"c2","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"think "}}]}` + "\n" +
 			`data: {"id":"c2","choices":[{"index":0,"delta":{"reasoning_content":"more"}}]}` + "\n" +
@@ -43,7 +43,7 @@ func TestAggregateOpenCodeFreeSSECarriesReasoningAndToolCalls(t *testing.T) {
 			`data: {"id":"c2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"mmand\":\"ls\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n" +
 			"data: [DONE]\n",
 	)
-	result := aggregateOpenCodeFreeSSE(sse)
+	result := aggregateChatCompletionSSE(sse)
 	if reasoning := gjson.GetBytes(result, "choices.0.message.reasoning_content").String(); reasoning != "think more" {
 		t.Fatalf("expected concatenated reasoning, got %q", reasoning)
 	}
@@ -59,13 +59,13 @@ func TestAggregateOpenCodeFreeSSECarriesReasoningAndToolCalls(t *testing.T) {
 	}
 }
 
-func TestAggregateOpenCodeFreeSSEPassesThroughNonSSE(t *testing.T) {
+func TestAggregateChatCompletionSSEPassesThroughNonSSE(t *testing.T) {
 	raw := []byte(`{"error":{"message":"FreeTierError","type":"invalid_request_error"}}`)
-	result := aggregateOpenCodeFreeSSE(raw)
+	result := aggregateChatCompletionSSE(raw)
 	if string(result) != string(raw) {
 		t.Fatalf("expected non-SSE passthrough, got %s", result)
 	}
-	empty := aggregateOpenCodeFreeSSE([]byte("data: [DONE]\n"))
+	empty := aggregateChatCompletionSSE([]byte("data: [DONE]\n"))
 	if string(empty) != "data: [DONE]\n" {
 		t.Fatalf("expected empty stream passthrough, got %s", empty)
 	}

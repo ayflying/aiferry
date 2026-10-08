@@ -38,6 +38,26 @@ type ChannelCredentialStatusInput struct {
 	Status int `json:"status" v:"in:0,1"`
 }
 
+// ChannelLoginSessionView 是一次外链登录的发起结果：authUrl 交给管理员在浏览器里打开
+// 完成登录，state 用于随后轮询换票。
+type ChannelLoginSessionView struct {
+	State   string `json:"state"`
+	AuthURL string `json:"authUrl"`
+}
+
+// ChannelLoginPollInput 轮询一次登录结果。
+type ChannelLoginPollInput struct {
+	State string `json:"state" v:"required#登录状态不能为空"`
+}
+
+// ChannelLoginResultView 登录轮询结果：pending 表示仍在等待用户完成登录，
+// completed 表示令牌已写入渠道凭据。
+type ChannelLoginResultView struct {
+	Status       string `json:"status"`
+	CredentialID uint64 `json:"credentialId"`
+	UID          string `json:"uid"`
+}
+
 // CredentialRevealVerifyInput 校验查看上游密钥明文的邮箱验证码。
 type CredentialRevealVerifyInput struct {
 	Code string `json:"code" v:"required|length:6,6#请输入验证码|验证码必须为 6 位"`
