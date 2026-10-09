@@ -19,6 +19,18 @@ const visible = computed({
 })
 const loading = ref(false)
 const adding = ref(false)
+const addDialogVisible = ref(false)
+const addMode = ref<'manual' | 'login'>('manual')
+function openAddCredential() {
+  credentialValue.value = ''
+  credentialManagementValue.value = ''
+  addMode.value = props.loginSupported ? 'login' : 'manual'
+  addDialogVisible.value = true
+}
+function beginCredentialLogin() {
+  addDialogVisible.value = false
+  void startLogin()
+}
 const querying = ref(false)
 const credentialValue = ref('')
 const credentialManagementValue = ref('')
@@ -69,17 +81,34 @@ let loginElapsedTimer: ReturnType<typeof setInterval> | undefined
 const loginWaitSeconds = 300
 const loginPollIntervalMs = 2000
 
+let loginGeneration = 0
+let loginPollBusy = false
+
 async function startLogin() {
-  if (!props.channel) return
+  if (!props.channel || loginStarting.value) return
+  stopLoginPolling()
+  const generation = loginGeneration
+  const channelID = props.channel.id
+  // 在用户点击的同步阶段创建窗口，避免等待接口后被浏览器拦截。
+  const loginWindow = window.open('about:blank', '_blank')
+  if (loginWindow) loginWindow.opener = null
   loginStarting.value = true
   loginError.value = ''
   try {
-    loginSession.value = await apiPost<ChannelLoginSession>(`/channels/${props.channel.id}/credentials/login`)
+    const session = await apiPost<ChannelLoginSession>(`/channels/${channelID}/credentials/login`)
+    if (generation !== loginGeneration || props.channel?.id !== channelID) {
+      loginWindow?.close()
+      return
+    }
+    loginSession.value = session
     loginElapsed.value = 0
     loginDialogVisible.value = true
     startLoginPolling()
+    if (loginWindow && !loginWindow.closed) loginWindow.location.replace(session.authUrl)
+    // 若新窗口被拦截，等待弹窗仍保留手动打开入口。
   } catch (error) {
-    showError(error, '发起登录失败')
+    loginWindow?.close()
+    if (generation === loginGeneration) showError(error, '发起登录失败')
   } finally {
     loginStarting.value = false
   }
@@ -105,9 +134,13 @@ function startLoginPolling() {
 
 async function pollLogin() {
   const session = loginSession.value
-  if (!props.channel || !session) return
+  const channelID = props.channel?.id
+  const generation = loginGeneration
+  if (!channelID || !session || loginPollBusy) return
+  loginPollBusy = true
   try {
-    const result = await apiPost<ChannelLoginResult>(`/channels/${props.channel.id}/credentials/login/poll`, { state: session.state })
+    const result = await apiPost<ChannelLoginResult>(`/channels/${channelID}/credentials/login/poll`, { state: session.state })
+    if (generation !== loginGeneration || props.channel?.id !== channelID) return
     if (result.status !== 'completed') return
     stopLoginPolling()
     loginDialogVisible.value = false
@@ -115,13 +148,17 @@ async function pollLogin() {
     await load(true)
     emit('changed')
   } catch (error) {
+    if (generation !== loginGeneration) return
     stopLoginPolling()
     showError(error, '登录轮询失败')
     loginError.value = '轮询失败，可点「重新发起登录」重试'
+  } finally {
+    loginPollBusy = false
   }
 }
 
 function stopLoginPolling() {
+  loginGeneration += 1
   if (loginPollTimer) {
     clearInterval(loginPollTimer)
     loginPollTimer = undefined
@@ -134,9 +171,20 @@ function stopLoginPolling() {
 
 watch(() => props.modelValue, (open) => {
   if (open) void load(true)
-  else clearRevealState()
+  else {
+    clearRevealState()
+    addDialogVisible.value = false
+    loginDialogVisible.value = false
+    stopLoginPolling()
+  }
+})
+watch(loginDialogVisible, (open) => {
+  if (!open) stopLoginPolling()
 })
 watch(() => props.channel?.id, () => {
+  addDialogVisible.value = false
+  loginDialogVisible.value = false
+  stopLoginPolling()
   if (visible.value) {
     clearRevealState()
     void load(true)
@@ -183,6 +231,7 @@ async function addCredential() {
     await apiPost(`/channels/${props.channel.id}/credentials`, payload)
     credentialValue.value = ''
     credentialManagementValue.value = ''
+    addDialogVisible.value = false
     showSuccess('上游密钥已追加')
     await load(true)
     emit('changed')
@@ -437,12 +486,7 @@ function stopCodeCountdown() {
 <template>
   <el-drawer v-model="visible" :title="`上游密钥 · ${channel?.name || ''}`" :size="drawerSize" destroy-on-close>
     <div class="credential-toolbar">
-      <div class="credential-add">
-        <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" placeholder="追加上游推理密钥" @keyup.enter="addCredential" />
-        <el-input v-if="props.managementKeySupported" v-model="credentialManagementValue" type="password" show-password autocomplete="new-password" :placeholder="props.managementKeyPair ? '管理密钥 Secret Key（可选，格式 AK:SK）' : '管理密钥（可选，按账号查用量）'" @keyup.enter="addCredential" />
-        <el-button type="primary" :icon="Plus" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">追加</el-button>
-      </div>
-      <el-button v-if="loginSupported" :icon="LogIn" :loading="loginStarting" @click="startLogin">登录获取密钥</el-button>
+      <el-button type="primary" :icon="Plus" @click="openAddCredential">添加密钥</el-button>
       <el-button :icon="Coins" :loading="querying" :disabled="channel?.costQueryMode === 'none'" @click="queryCosts">{{ queryLabel }}</el-button>
     </div>
 
@@ -463,7 +507,7 @@ function stopCodeCountdown() {
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
         <el-table-column label="操作" width="150" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip content="查看完整密钥"><button class="icon-button" type="button" :aria-label="`查看 ${row.keyPrefix}`" :disabled="secretLoading[row.id]" @click="openSecret(row)"><Eye :size="16" /></button></el-tooltip><el-tooltip v-if="props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询该密钥的套餐额度"><button class="icon-button" type="button" :aria-label="`查询 ${row.keyPrefix} 额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
       </el-table>
-      <div v-if="!loading && !rows.length" class="credential-empty"><CircleAlert :size="18" /><span>当前渠道没有可管理的上游密钥</span></div>
+      <div v-if="!loading && !rows.length" class="credential-empty"><CircleAlert :size="18" /><span>{{ loginSupported ? '当前渠道还没有上游密钥，请点「添加密钥」选择平台登录或手动填写 API Key' : '当前渠道没有可管理的上游密钥' }}</span></div>
     </div>
 
     <div v-if="props.managementKeySupported && queryDetails.some(item => item.shared)" class="shared-balance">
@@ -508,7 +552,23 @@ function stopCodeCountdown() {
         <el-button type="primary" :loading="verifyingCode" @click="verifyRevealCode">验证并查看</el-button>
       </template>
     </el-dialog>
-  <el-dialog v-model="loginDialogVisible" title="登录上游账号" width="560px" append-to-body @closed="stopLoginPolling">
+    <el-dialog v-model="addDialogVisible" title="添加上游密钥" width="min(560px, 94vw)" append-to-body>
+      <el-radio-group v-if="loginSupported" v-model="addMode" style="margin-bottom: 16px">
+        <el-radio-button value="login">平台登录</el-radio-button>
+        <el-radio-button value="manual">手动填写 API Key</el-radio-button>
+      </el-radio-group>
+      <template v-if="addMode === 'manual'">
+        <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" placeholder="填写上游 API Key" @keyup.enter="addCredential" />
+        <el-input v-if="props.managementKeySupported" v-model="credentialManagementValue" type="password" show-password autocomplete="new-password" :placeholder="props.managementKeyPair ? '管理密钥（可选，格式 AK:SK）' : '管理密钥（可选）'" style="margin-top: 12px" />
+      </template>
+      <el-alert v-else type="info" :closable="false" title="通过平台官方登录添加密钥。完成登录后，凭据会自动保存到当前渠道。" />
+      <template #footer>
+        <el-button :disabled="adding" @click="addDialogVisible = false">取消</el-button>
+        <el-button v-if="addMode === 'manual'" type="primary" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">添加密钥</el-button>
+        <el-button v-else type="primary" :icon="LogIn" :loading="loginStarting" @click="beginCredentialLogin">打开平台登录页</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="loginDialogVisible" title="登录上游账号" width="560px" append-to-body>
       <el-alert type="info" :closable="false" show-icon class="login-alert" title="在浏览器里完成平台官方登录（如微信扫码），本页会自动等待并接收凭据；登录地址是一次性的，请尽快完成。" />
       <div class="login-url-row">
         <el-input :model-value="loginSession?.authUrl || ''" readonly />
@@ -529,6 +589,6 @@ function stopCodeCountdown() {
 </template>
 
 <style scoped>
-.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; gap: 8px; }.mgmt-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; padding: 0 5px; border: 1px solid #b8d4ea; border-radius: 4px; color: #2a6f9e; background: #eef6fc; font-size: 10px; line-height: 16px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.reveal-alert { margin-bottom: 12px; }.reveal-code-row { display: flex; width: 100%; gap: 8px; }.reveal-code-row .el-input { flex: 1; }.secret-dialog-body { display: flex; flex-direction: column; gap: 12px; }.secret-dialog-value { padding: 10px 12px; border: 1px solid #d5dde3; border-radius: 6px; background: #f4f6f8; color: #15202b; font-size: 13px; line-height: 1.5; word-break: break-all; white-space: pre-wrap; }.cred-index { display: inline-flex; align-items: center; padding: 0 4px; border: 1px solid #d5dde3; border-radius: 4px; color: #5b6a77; background: #f4f6f8; font-size: 10px; line-height: 16px; cursor: help; }.key-prefix .cred-index + svg { margin-left: -2px; }.mgmt-dialog-alert { margin-bottom: 12px; }.row-actions { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }
+.credential-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }.credential-add { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; gap: 8px; }.mgmt-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; padding: 0 5px; border: 1px solid #b8d4ea; border-radius: 4px; color: #2a6f9e; background: #eef6fc; font-size: 10px; line-height: 16px; }.cost-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }.summary-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid #dce2e7; border-radius: 6px; background: #fff; font-size: 11px; }.summary-item strong { color: #15202b; font-family: 'JetBrains Mono', monospace; }.cost-state { display: flex; min-width: 0; flex-direction: column; gap: 2px; font-size: 11px; }.cost-state small, .credential-status small { color: #7b8792; }.credential-status { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.key-prefix { display: inline-flex; align-items: center; gap: 6px; }.reveal-alert { margin-bottom: 12px; }.reveal-code-row { display: flex; width: 100%; gap: 8px; }.reveal-code-row .el-input { flex: 1; }.secret-dialog-body { display: flex; flex-direction: column; gap: 12px; }.secret-dialog-value { padding: 10px 12px; border: 1px solid #d5dde3; border-radius: 6px; background: #f4f6f8; color: #15202b; font-size: 13px; line-height: 1.5; word-break: break-all; white-space: pre-wrap; }.cred-index { display: inline-flex; align-items: center; padding: 0 4px; border: 1px solid #d5dde3; border-radius: 4px; color: #5b6a77; background: #f4f6f8; font-size: 10px; line-height: 16px; cursor: help; }.key-prefix .cred-index + svg { margin-left: -2px; }.mgmt-dialog-alert { margin-bottom: 12px; }.row-actions { display: inline-flex; align-items: center; gap: 6px; }.credential-empty { display: flex; min-height: 170px; align-items: center; justify-content: center; gap: 8px; color: #7b8792; font-size: 12px; }.shared-balance { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px; border: 1px solid #c6dae9; border-radius: 6px; color: #40505f; background: #f4f9fd; font-size: 12px; }
 .login-alert { margin-bottom: 12px; }.login-url-row { display: flex; gap: 8px; }.login-status { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #5b6a77; font-size: 12px; }.login-status .spinner { animation: login-spin 1s linear infinite; }@keyframes login-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>

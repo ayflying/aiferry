@@ -38,9 +38,20 @@
 - 签到请求需要 `X-Device-Token`（Turing 风控头），服务端无法复现；失败时不阻塞积分结果，只把失败明细写入 `PartialErrors`
 - 已用百分比计算：`used / total * 100`（缺失 `CycleUsedCapacity` 时用 `total - remain` 补齐）
 
+## 添加密钥与平台登录
+
+1. 在渠道的上游密钥抽屉点击「添加密钥」。WorkBuddy 默认选择「平台登录」，仍可切换到「手动填写 API Key」。不支持登录的渠道只显示手动输入。
+2. 点击「打开平台登录页」，系统现场申请一次性地址并打开官方登录页面；按平台页面提示完成微信扫码等登录。若浏览器拦截新窗口，使用等待弹窗中的「打开登录页」。
+3. 每 2 秒轮询一次，成功后将 accessToken 作为新的上游密钥保存，刷新列表。等待超过 300 秒需重新发起；关闭弹窗、关闭抽屉或切换渠道会停止本地轮询。
+
+- 登录由渠道类型的 `login.adapter=external_link`、`platform=workbuddy`、`prefixPath=/plugin` 声明，不在通用组件中硬编码微信登录。
+- 官方链路：`POST /v2/plugin/auth/state?platform=workbuddy` 获取 state/authUrl；`GET /v2/plugin/auth/token?state=...` 的业务码 11217 表示等待，0 表示完成。完成票据只能消费一次。
+- 目前不自动刷新令牌；令牌失效后重新登录添加密钥，再删除失效密钥。手动输入仍只填 accessToken，不带 Bearer 前缀。
+- 已验证聊天请求只需 Authorization；无需新增 UID/Domain 凭据字段。WorkBuddy 的非流式上游请求返回空体 400，因此声明 `protocol.forceUpstreamStream=true`，由网关将流式结果聚合回非流式响应。
+
 ## 接口约束与限制
 
-- **无第三方授权接口**：桌面端没有 `API 密钥`、`创建密钥` 或 `device_code` / `tokenUrl` 登录授权接口；`keyblob` 的 `wrapped` 字段由本机 DPAPI 静态密钥加密，无法在服务端解密
+- **不提供独立 API Key 创建入口**：使用官方外链登录取得 accessToken，无需读取桌面端文件或进程内存。下方本机侦察结果属于历史记录，不代表当前获取凭据的方式。
 - **积分余额可查询**：只要渠道密钥（`channel_key`）包含有效的 `accessToken`（Bearer 令牌，格式见 `C:\Users\ay\.workbuddy` 下多个日志中的 `Authorization: Bearer ...c-kg`），即可读取积分
 - **签到状态不可保证查询成功**：由于缺失 `X-Device-Token`，签到接口在多数服务器环境下会返回 HTTP 401/403，结果以 `PartialErrors` 提示，不阻塞积分窗口
 - **渠道密钥格式**：仅填入 `accessToken`（`Bearer` 前缀由适配器自动拼接）；不支持同时传入 `X-User-Id`（渠道配置只支持单个鉴权头 `headerName+headerPrefix`，见 `service.go:52-153`）
