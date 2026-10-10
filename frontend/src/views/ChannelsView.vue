@@ -57,6 +57,7 @@ const discoveryUnsupported = ref(false)
 const testOpen = ref(false)
 const testChannel = ref<Channel>()
 const credentialsOpen = ref(false)
+const credentialOpening = ref(false)
 const credentialChannel = ref<Channel>()
 const healthCheckModels = ref<ChannelModel[]>([])
 const queryingCostID = ref<number>()
@@ -485,9 +486,28 @@ function openTest(channel: Channel) {
   testOpen.value = true
 }
 
-function openCredentials(channel: Channel) {
-  credentialChannel.value = channel
-  credentialsOpen.value = true
+async function openCredentials(channel: Channel) {
+  if (credentialOpening.value) return
+  credentialOpening.value = true
+  try {
+    // 管理员首次进入列表只加载渠道；密钥入口必须先取得类型能力，
+    // 不能把「尚未加载」误判成「不支持登录/管理密钥」。
+    if (!tabLoaded.types) {
+      // 直接等待 store 请求，让失败进入此入口的 catch；列表加载函数会吞掉异常。
+      await store.loadChannelTypes()
+    }
+    if (!store.channelTypes.some((item) => item.code === channel.type)) {
+      tabLoaded.types = false
+      throw new Error('未找到该渠道的类型配置，请刷新渠道类型后重试')
+    }
+    tabLoaded.types = true
+    credentialChannel.value = channel
+    credentialsOpen.value = true
+  } catch (error) {
+    showError(error, '加载渠道密钥配置失败')
+  } finally {
+    credentialOpening.value = false
+  }
 }
 
 async function queryCost(channel: Channel) {
