@@ -118,6 +118,18 @@ func (s *sRelay) requiresBalanceCheck(modelName string) bool {
 	return s.prices.IsPriced(modelName)
 }
 
+// candidatesRequireBalanceCheck 只要有一个候选的公开名已定价就需要余额预检：
+// 请求可以写映射后的公开名，也可以写上游原始名，实际计费与预检都按
+// candidate.PublicName 判定，避免用上游原始名绕过余额预检。
+func (s *sRelay) candidatesRequireBalanceCheck(candidates []Candidate) bool {
+	for _, candidate := range candidates {
+		if s.requiresBalanceCheck(candidate.PublicName) {
+			return true
+		}
+	}
+	return false
+}
+
 func pricedUsageCost(priced bool, billingDetails *usage.BillingBreakdown) (*decimal.Decimal, bool) {
 	if billingDetails != nil {
 		cost := billingDetails.Cost()

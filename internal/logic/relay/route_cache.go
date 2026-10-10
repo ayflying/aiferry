@@ -99,7 +99,7 @@ func (s *sRelay) routeStatic(ctx context.Context, model string) ([]Candidate, er
 	models := make([]entity.ChannelModels, 0)
 	if err := dao.ChannelModels.Ctx(ctx).
 		Where(modelColumns.Enabled, 1).
-		Where(modelColumns.PublicName, model).
+		Where("("+modelColumns.PublicName+" = ? OR "+modelColumns.UpstreamName+" = ?)", model, model).
 		WhereNull(modelColumns.AutoDisabledAt).
 		Scan(&models); err != nil {
 		return nil, gerror.Wrap(err, "load model routes")

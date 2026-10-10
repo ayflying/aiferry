@@ -58,14 +58,11 @@ func (s *sRelay) HandleImagesEdit(ctx context.Context, incomingHeaders http.Head
 	if !imagesEditHasImage(parts) {
 		return gerror.New("images/edits request requires an image file")
 	}
-	if !keyAllowsModel(key, requestedModel) {
-		return gerror.New("API key is not allowed to use model " + requestedModel)
-	}
 	// 与图片生成同一口径：把 multipart 中的 prompt 还原成 JSON 交给统一敏感词检查。
 	if err = s.resilience.CheckSensitivePrompt(ctx, endpoint, imagesEditPromptProbe(requestedModel, parts)); err != nil {
 		return err
 	}
-	candidates, err := s.routeCached(ctx, requestedModel, key)
+	candidates, err := s.routeWithPolicy(ctx, key, requestedModel)
 	if err != nil {
 		return err
 	}
@@ -75,7 +72,7 @@ func (s *sRelay) HandleImagesEdit(ctx context.Context, incomingHeaders http.Head
 		return gerror.Wrapf(ErrNoAvailableChannel, "no available channel for model %s", requestedModel)
 	}
 	// 全部候选都是本人创建的渠道时跳过余额预检：自有渠道只统计、不实扣，余额为 0 也应可调用。
-	if s.requiresBalanceCheck(requestedModel) && !candidatesAllOwnedBy(candidates, key.UserId) {
+	if s.candidatesRequireBalanceCheck(candidates) && !candidatesAllOwnedBy(candidates, key.UserId) {
 		if err = s.users.CheckBalance(ctx, key.UserId); err != nil {
 			return err
 		}

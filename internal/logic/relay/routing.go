@@ -24,7 +24,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 	models := make([]entity.ChannelModels, 0)
 	if err := dao.ChannelModels.Ctx(ctx).
 		Where(modelColumns.Enabled, 1).
-		Where(modelColumns.PublicName, model).
+		Where("("+modelColumns.PublicName+" = ? OR "+modelColumns.UpstreamName+" = ?)", model, model).
 		WhereNull(modelColumns.AutoDisabledAt).
 		Scan(&models); err != nil {
 		return nil, gerror.Wrap(err, "load model routes")
@@ -214,9 +214,41 @@ func sortedRouteIDs(values map[uint64]struct{}) []uint64 {
 	return result
 }
 
-func keyAllowsModel(key apikey.AuthKey, model string) bool {
-	return len(key.AllowedModels) == 0 || containsString(key.AllowedModels, model)
+// routeWithPolicy 在路由之后执行「API Key 模型白名单」过滤。
+//
+// 白名单按公开名配置，而客户端现在既可以请求映射后的公开名、也可以直接请求上游
+// 原始名（见 routeStatic），因此判定不再只看请求里的字符串：请求名命中白名单时全部
+// 放行，否则只保留公开名在白名单内的候选。白名单把候选全过滤掉时返回与原
+// keyAllowsModel 拦截一致的错误文案，让调用方无需区分拦截来源。
+func (s *sRelay) routeWithPolicy(ctx context.Context, key apikey.AuthKey, model string) ([]Candidate, error) {
+	candidates, err := s.routeCached(ctx, model, key)
+	if err != nil {
+		return nil, err
+	}
+	filtered := filterCandidatesByAllowedModels(key, model, candidates)
+	if len(filtered) == 0 && len(candidates) > 0 {
+		return nil, gerror.New("API key is not allowed to use model " + model)
+	}
+	return filtered, nil
 }
+
+// filterCandidatesByAllowedModels 按 API Key 白名单裁剪候选：
+// 白名单为空或请求名本身在白名单内时原样返回（保持既有快速路径），
+// 否则只保留公开名在白名单内的候选 —— 这正是「请求上游原始名、命中映射后的公开名」
+// 场景下应当放行的判定口径。
+func filterCandidatesByAllowedModels(key apikey.AuthKey, requestedModel string, candidates []Candidate) []Candidate {
+	if len(key.AllowedModels) == 0 || containsString(key.AllowedModels, requestedModel) {
+		return candidates
+	}
+	filtered := make([]Candidate, 0, len(candidates))
+	for _, c := range candidates {
+		if containsString(key.AllowedModels, c.PublicName) {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
 func keyAllowsGroups(key apikey.AuthKey, groupIDs []uint64) bool {
 	// 该包装已废弃，改为下面带创建者上下文的新版判定；
 	// 保留以兼容既有测试，并始终委托给完整判定。

@@ -250,10 +250,7 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 	if err != nil {
 		return err
 	}
-	if !keyAllowsModel(key, requestedModel) {
-		return gerror.New("API key is not allowed to use model " + requestedModel)
-	}
-	candidates, err := s.routeCached(ctx, requestedModel, key)
+	candidates, err := s.routeWithPolicy(ctx, key, requestedModel)
 	if err != nil {
 		return err
 	}
@@ -261,7 +258,7 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 		return gerror.Wrapf(ErrNoAvailableChannel, "no available channel for model %s", requestedModel)
 	}
 	// 全部候选都是本人创建的渠道时跳过余额预检：自有渠道只统计、不实扣，余额为 0 也应可调用。
-	if s.requiresBalanceCheck(requestedModel) && !candidatesAllOwnedBy(candidates, key.UserId) {
+	if s.candidatesRequireBalanceCheck(candidates) && !candidatesAllOwnedBy(candidates, key.UserId) {
 		if err = s.users.CheckBalance(ctx, key.UserId); err != nil {
 			return err
 		}
