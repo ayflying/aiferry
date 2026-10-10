@@ -27,8 +27,8 @@ import (
 
 type CredentialView struct {
 	Id uint64 `json:"id"`
-	// Index 是该密钥在渠道内的固定序号（按创建顺序，含已软删密钥占位），
-	// 与用量明细/模型质量里的「渠道 #N」同口径：删除不重排，历史日志不会错位。
+	// Index 是当前渠道存留密钥按创建顺序排列的序号，物理删除后重新编号。
+	// 历史调用日志仍保留，但被删密钥的外键引用会置空。
 	Index                  uint       `json:"index"`
 	KeyPrefix              string     `json:"keyPrefix"`
 	HasManagementKey       bool       `json:"hasManagementKey"`
@@ -97,7 +97,7 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 	data.ChannelId = channelID
 	id, err := dao.ChannelCredentials.Ctx(ctx).Data(data).InsertAndGetId()
 	if err != nil {
-		return 0, gerror.Wrap(err, "create channel credential")
+		return 0, credentialInsertError(err)
 	}
 	s.InvalidateListCache(ctx)
 	return uint64(id), s.invalidateRoutes(ctx)
@@ -166,11 +166,8 @@ func (s *sChannel) RevealCredential(ctx context.Context, channelID, credentialID
 	return plainText, nil
 }
 
-// credentialDisplayIndexes 计算渠道内每把密钥的固定展示序号。
-// 口径与用量明细 loadUsageCredentialIndexes、模型质量
-// loadModelQualityCredentialIndexes 一致：Unscoped 含已软删密钥、按 id
-// 升序从 1 编号——已删密钥继续占位，删除后其余密钥编号不重排，
-// 保证密钥列表上标注的 #N 与历史 usage_logs 里的「渠道 #N」始终对得上。
+// credentialDisplayIndexes 按当前存留密钥的创建顺序计算展示序号。
+// 与用量明细、模型质量查询使用相同排序；物理删除后不保留编号占位。
 func (s *sChannel) credentialDisplayIndexes(ctx context.Context, channelID uint64) (map[uint64]uint, error) {
 	columns := dao.ChannelCredentials.Columns()
 	credentials := make([]entity.ChannelCredentials, 0)
@@ -188,8 +185,7 @@ func (s *sChannel) credentialDisplayIndexes(ctx context.Context, channelID uint6
 	return credentialDisplayIndexes(orderedIDs), nil
 }
 
-// credentialDisplayIndexes 把按 id 升序的密钥 ID 列表编成 1..N 的固定序号。
-// 入参必须包含已软删密钥，否则删除后编号会漂移。
+// credentialDisplayIndexes 把按 id 升序的存留密钥 ID 列表编成 1..N 的序号。
 func credentialDisplayIndexes(orderedIDs []uint64) map[uint64]uint {
 	indexes := make(map[uint64]uint, len(orderedIDs))
 	for position, id := range orderedIDs {
@@ -263,7 +259,13 @@ func (s *sChannel) DeleteCredential(ctx context.Context, channelID, credentialID
 		if _, deleteErr := dao.ApiKeyChannelCredentials.Ctx(txCtx).Where(do.ApiKeyChannelCredentials{ChannelCredentialId: credential.Id}).Delete(); deleteErr != nil {
 			return gerror.Wrap(deleteErr, "remove channel credential bindings")
 		}
-		if _, deleteErr := dao.ChannelCredentials.Ctx(txCtx).Where(do.ChannelCredentials{Id: credential.Id}).Delete(); deleteErr != nil {
+		if _, deleteErr := dao.ChannelCredentialCostSnapshots.Ctx(txCtx).Where(do.ChannelCredentialCostSnapshots{ChannelCredentialId: credential.Id}).Delete(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "remove channel credential cost snapshots")
+		}
+		if _, deleteErr := dao.ChannelModelCredentials.Ctx(txCtx).Where(do.ChannelModelCredentials{ChannelCredentialId: credential.Id}).Delete(); deleteErr != nil {
+			return gerror.Wrap(deleteErr, "remove channel model credential states")
+		}
+		if _, deleteErr := dao.ChannelCredentials.Ctx(txCtx).Unscoped().Where(do.ChannelCredentials{Id: credential.Id}).Delete(); deleteErr != nil {
 			return gerror.Wrap(deleteErr, "delete channel credential")
 		}
 		return nil
