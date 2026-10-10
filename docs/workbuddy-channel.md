@@ -21,7 +21,7 @@
   "code": "workbuddy",
   "config": {
     "baseUrl": "https://www.workbuddy.cn/v2",
-    "models": {"method":"GET","path":"/enterprises/personal/models","listPath":"data","idPath":"id","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer "},
+    "models": {"method":"GET","path":"/enterprises/personal/models","listPath":"data.models","idPath":"id","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer "},
     "quota": {"adapter":"workbuddy_credits","method":"POST","path":"/billing/meter/get-user-resource-summary","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer "}
   }
 }
@@ -29,7 +29,7 @@
 
 - 额度查询路径：`POST /billing/meter/get-user-resource-summary`（桌面端 `resourcePrefix` 为空，不带 `/v2` 前缀；由 `resolveHostURL` 自动拼接 `https://www.workbuddy.cn` + `/billing/meter/get-user-resource-summary`）
 - 签到状态路径：`POST /v2/billing/meter/checkin-activity-status`（桌面端 `billingPrefix` 固定为 `/v2`）
-- 模型发现路径：`GET /enterprises/personal/models`（相对于 `baseUrl`，自动包含 `/v2` 前缀）
+- 模型发现路径：`GET /enterprises/personal/models`（相对于 `baseUrl`，自动包含 `/v2` 前缀）；响应中的 `data` 是对象，模型数组位于 `data.models`，模型名称字段为 `id`。官方客户端先解包 `data`，再读取 `models`；不能按 OpenAI 的 `data` 数组解析。
 
 ## 额度解析适配器（`workbuddy_credits`）
 
