@@ -51,6 +51,8 @@
 - 目前不自动刷新令牌；令牌失效后重新登录添加密钥，再删除失效密钥。手动输入仍只填 accessToken，不带 Bearer 前缀。
 - 已验证聊天请求只需 Authorization；无需新增 UID/Domain 凭据字段。WorkBuddy 的非流式上游请求返回空体 400，因此声明 `protocol.forceUpstreamStream=true`，由网关将流式结果聚合回非流式响应。
 
+- 渠道类型同时声明 `protocol.chatCompletionsOnly=true`，正式转发及自动测试优先使用 Chat Completions，不将聊天模型回退到 Responses/Embeddings。渠道测试即使关闭界面流式选项，也遵守 `forceUpstreamStream` 发送流式聊天请求并解析 SSE 用量。旧版本测试忽略此约束，非流式失败后可能显示最后一次 Embeddings 的“embedding model not found”，不能据此认定聊天模型不存在。
+
 ## 接口约束与限制
 
 - **不提供独立 API Key 创建入口**：使用官方外链登录取得 accessToken，无需读取桌面端文件或进程内存。下方本机侦察结果属于历史记录，不代表当前获取凭据的方式。

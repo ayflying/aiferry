@@ -320,6 +320,9 @@ func testEndpoints(endpoint, model string, typeConfig channeltype.Config, settin
 	if endpoint != "auto" {
 		return []string{endpoint}
 	}
+	if typeConfig.Protocol.ChatCompletionsOnly {
+		return []string{"chat"}
+	}
 	modelName := strings.ToLower(strings.TrimSpace(model))
 	// Messages 模型名单命中（渠道类型声明优先、全局名单兜底）：该模型只认
 	// Anthropic Messages 端点，放在序列首位；后续端点仅在 404/405 等可回退
@@ -425,6 +428,8 @@ func testPayload(endpoint, model string, stream bool, typeConfig channeltype.Con
 			"n":      1,
 		}, false
 	default:
+		// 测试与正式转发一致：上游只接受流式时，即使界面关闭流式也发送 SSE 请求。
+		stream = stream || typeConfig.Protocol.ForceUpstreamStream
 		payload := map[string]any{
 			"model":                 model,
 			"messages":              []map[string]string{{"role": "user", "content": "Reply with exactly OK."}},

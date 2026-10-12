@@ -2,10 +2,12 @@ package channel
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/config"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
@@ -22,6 +24,41 @@ func TestWorkBuddyModelDiscoveryFromBuiltinConfig(t *testing.T) {
 	}
 	if cfg.Models.ListPath != "data.models" || cfg.Models.IDPath != "id" {
 		t.Fatalf("unexpected WorkBuddy model paths: %+v", cfg.Models)
+	}
+	if !cfg.Protocol.ChatCompletionsOnly || !cfg.Protocol.ForceUpstreamStream {
+		t.Fatal("WorkBuddy must declare streaming chat completions")
+	}
+	settings := adminapi.SystemResilienceSettingsInput{}
+	for _, model := range []string{"hy3", "deepseek-v4-flash", "space-bunny", "step-5-preview", "gpt-5-test"} {
+		endpoints := testEndpoints("auto", model, cfg, settings)
+		if !reflect.DeepEqual(endpoints, []string{"chat"}) {
+			t.Fatalf("%s endpoints = %v, want chat only", model, endpoints)
+		}
+		for _, stream := range []bool{false, true} {
+			path, payload, streamed := testPayload("chat", model, stream, cfg, settings)
+			body, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var request struct {
+				Model         string `json:"model"`
+				Stream        bool   `json:"stream"`
+				StreamOptions struct {
+					IncludeUsage bool `json:"include_usage"`
+				} `json:"stream_options"`
+			}
+			if err := json.Unmarshal(body, &request); err != nil {
+				t.Fatal(err)
+			}
+			if path != "/chat/completions" || !streamed || !request.Stream || !request.StreamOptions.IncludeUsage || request.Model != model {
+				t.Fatalf("invalid WorkBuddy chat request: path=%s streamed=%t body=%s", path, streamed, body)
+			}
+		}
+	}
+	// 未声明限制的渠道仍遵守界面选择，不误开启流式。
+	_, _, streamed := testPayload("chat", "hy3", false, channeltype.Config{}, settings)
+	if streamed {
+		t.Fatal("undeclared channel unexpectedly forced stream")
 	}
 	cases := []struct {
 		name string

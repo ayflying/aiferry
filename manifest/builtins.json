@@ -193,7 +193,7 @@
         "models": { "method": "GET", "path": "/enterprises/personal/models", "listPath": "data.models", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
         "quota": { "adapter": "workbuddy_credits", "method": "POST", "path": "/billing/meter/get-user-resource-summary", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
         "login": { "adapter": "external_link", "platform": "workbuddy", "prefixPath": "/plugin" },
-        "protocol": { "forceUpstreamStream": true }
+        "protocol": { "forceUpstreamStream": true, "chatCompletionsOnly": true }
       }
     },
     {
