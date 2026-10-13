@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
@@ -53,7 +52,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	if err != nil {
 		return TestResult{}, err
 	}
-	if userID != usage.SystemUserID && s.prices.IsPriced(model.PublicName) {
+	if testChargesUser(userID, channel.CreatedByUserId) && s.prices.IsPriced(model.PublicName) {
 		if err := s.users.CheckBalance(ctx, userID); err != nil {
 			return TestResult{}, err
 		}
@@ -249,56 +248,6 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 		result.Message = upstreamerror.Message(responseBody, resp.Status)
 	}
 	return result, path, tokens, nil
-}
-
-func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel entity.Channels, credentialID uint64, model entity.ChannelModels, path string, result *TestResult, tokens usage.TokenUsage, attemptFlow []usage.AttemptFlowStep) error {
-	if s.usage == nil {
-		return nil
-	}
-	cost := s.prices.Estimate(model.PublicName, path, tokens, time.Now())
-	recordStatus := result.HTTPStatus
-	recordMessage := result.Message
-	var chargeErr error
-	if result.Success {
-		if cost != nil {
-			if applyErr := s.ApplyCredentialUsageCost(ctx, channel.Id, credentialID, *cost); applyErr != nil {
-				g.Log().Warningf(ctx, "apply channel %d test usage cost: %v", channel.Id, applyErr)
-			}
-			if userID != usage.SystemUserID {
-				if debitErr := s.users.Debit(ctx, userID, *cost); debitErr != nil {
-					chargeErr = debitErr
-				} else if s.mail != nil {
-					s.mail.NotifyLowBalance(ctx, userID)
-				}
-			}
-		}
-		if chargeErr != nil {
-			recordStatus = http.StatusPaymentRequired
-			recordMessage = chargeErr.Error()
-		}
-	}
-	recordErr := s.usage.Record(ctx, usage.RecordInput{
-		RequestID:            usage.NewRequestID("aftest"),
-		UserID:               userID,
-		ChannelID:            channel.Id,
-		ChannelCredentialID:  credentialID,
-		Endpoint:             "test:" + path,
-		RequestedModel:       model.PublicName,
-		UpstreamModel:        model.UpstreamName,
-		HealthScoreAtRequest: &model.HealthScore,
-		HTTPStatus:           recordStatus,
-		Stream:               result.Stream,
-		Tokens:               tokens,
-		EstimatedCost:        cost,
-		DurationMs:           result.LatencyMs,
-		Attempts:             len(attemptFlow),
-		AttemptFlow:          attemptFlow,
-		ErrorMessage:         recordMessage,
-	})
-	if recordErr != nil {
-		result.Message = truncate(result.Message+"；用量记录失败："+recordErr.Error(), 1024)
-	}
-	return chargeErr
 }
 
 // testAttemptFlowStep 把一次渠道测试的端点尝试快照成调用流程步骤。测试链路会按
