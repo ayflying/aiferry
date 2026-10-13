@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -23,18 +24,40 @@ func (s *sSystem) ApplyModelHealthScore(ctx context.Context, settings adminapi.S
 	}
 	success := input.Status >= 200 && input.Status < 300 && input.Message == "" && !input.TimedOut && !input.Committed
 	delta := -modelHealthFailurePenalty(input)
+	dailyQuota := false
 	if input.Status == http.StatusTooManyRequests && !input.Committed {
 		delta = -ModelHealthRateLimitPenalty
+		// 免费档「每日请求数耗尽」与瞬时限流性质不同：它是确定性的账号状态，
+		// 冷却到配额重置（UTC 零点）而不是等健康分自然扣光。
+		dailyQuota = isDailyQuotaExhaustion(input.Message)
 	}
 	if success {
 		delta = ModelHealthRelaySuccessByLatency(input.Latency)
 	}
-	err := s.changeComboHealth(ctx, input.ChannelID, input.ModelID, input.ChannelCredentialID, delta, success)
+	err := s.changeComboHealth(ctx, input.ChannelID, input.ModelID, input.ChannelCredentialID, delta, success, dailyQuota)
 	return false, err
 }
 
+// dailyQuotaExhaustionMarker 是 OpenRouter 免费档「每日请求数耗尽」错误文案的特征串：
+// "Rate limit exceeded: free-models-per-day"。按日重置的免费配额错误都带该标签。
+const dailyQuotaExhaustionMarker = "free-models-per-day"
+
+// isDailyQuotaExhaustion 判断上游报错是否为按天免费配额耗尽。这类失败是确定性的
+// 密钥/账号级状态（当日配额用完，UTC 零点重置），与瞬时可恢复的普通 429 限流性质不同。
+func isDailyQuotaExhaustion(message string) bool {
+	return strings.Contains(strings.ToLower(message), dailyQuotaExhaustionMarker)
+}
+
+// nextUTCMidnight 返回下一个 UTC 零点（北京时间早上 8 点）。OpenRouter 等按 UTC 日
+// 重置免费配额的上游以此为准。
+func nextUTCMidnight() time.Time {
+	now := time.Now().UTC()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+}
+
 // changeComboHealth 统一先锁模型行，使初始化、组合增减与投影在同一事务串行完成。
-func (s *sSystem) changeComboHealth(ctx context.Context, channelID, modelID, credentialID uint64, delta int, success bool) error {
+// dailyQuota 表示本次失败是免费档日配额耗尽：密钥冷却到 UTC 零点而非 5 分钟。
+func (s *sSystem) changeComboHealth(ctx context.Context, channelID, modelID, credentialID uint64, delta int, success bool, dailyQuota bool) error {
 	if credentialID == 0 {
 		return nil
 	}
@@ -70,7 +93,11 @@ func (s *sSystem) changeComboHealth(ctx context.Context, channelID, modelID, cre
 		}
 		score := max(0, min(100, combo.HealthScore+delta))
 		data := do.ChannelModelCredentials{HealthScore: score}
-		if score == 0 {
+		if !success && dailyQuota {
+			// 日配额耗尽不依赖健康分扣到 0：Remaining=0 是确定状态，直接冷却到
+			// 配额重置时刻，期间选密钥阶段会实时跳过该组合。
+			data.CooldownUntil = gtime.New(nextUTCMidnight())
+		} else if score == 0 {
 			data.CooldownUntil = gtime.Now().Add(5 * time.Minute)
 		}
 		// 不保存上游原始报错，避免密钥或请求内容经错误摘要泄露。
@@ -81,6 +108,17 @@ func (s *sSystem) changeComboHealth(ctx context.Context, channelID, modelID, cre
 		}
 		if _, err := dao.ChannelModelCredentials.Ctx(ctx).Where(do.ChannelModelCredentials{Id: combo.Id}).Data(data).Update(); err != nil {
 			return err
+		}
+		if !success && dailyQuota {
+			// 日配额按密钥（账号）计算而不是按模型组合：同一把耗尽的密钥挂在渠道内
+			// 其他模型上的组合一并冷却，避免换个模型映射再次撞上同一把 key。其他组合
+			// 的模型投影暂不刷新（仅影响权重展示），选密钥阶段的实时冷却过滤不受影响。
+			if _, err := dao.ChannelModelCredentials.Ctx(ctx).
+				Where(do.ChannelModelCredentials{ChannelId: model.ChannelId, ChannelCredentialId: credentialID}).
+				Data(do.ChannelModelCredentials{CooldownUntil: gtime.New(nextUTCMidnight())}).
+				Update(); err != nil {
+				return err
+			}
 		}
 		if success && score > 0 {
 			if _, err := dao.ChannelModelCredentials.Ctx(ctx).Where(do.ChannelModelCredentials{Id: combo.Id}).Data(dao.ChannelModelCredentials.Columns().CooldownUntil, gdb.Raw("NULL")).Update(); err != nil {
@@ -129,7 +167,7 @@ func (s *sSystem) updateModelHealthProjection(ctx context.Context, model entity.
 
 // BumpComboHealthScore 测试成功只恢复实际测试的组合，不触碰其他凭证。
 func (s *sSystem) BumpComboHealthScore(ctx context.Context, modelID, credentialID uint64, delta int) error {
-	return s.changeComboHealth(ctx, 0, modelID, credentialID, max(0, delta), true)
+	return s.changeComboHealth(ctx, 0, modelID, credentialID, max(0, delta), true, false)
 }
 
 // ResetModelHealthScore 是人工整模型重置，明确覆盖该模型的全部组合。
