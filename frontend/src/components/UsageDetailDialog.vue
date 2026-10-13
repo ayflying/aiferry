@@ -197,7 +197,7 @@ function billingSummary() {
 
       <section class="detail-section payload-section">
         <h3>原始报文</h3>
-        <p class="payload-hint">收发正文按请求落盘（保留最近 9999 份，每小时滚动清理），仅管理员可查看，用于排查正文污染与参数改写。</p>
+        <p class="payload-hint">收发正文按请求落盘（保留最近 9999 份，每小时滚动清理）。普通用户仅可查看本人的调用，管理员可查看所有调用；鉴权信息已脱敏，用于排查正文污染与参数改写。</p>
         <div v-if="payloadError" class="payload-error">{{ payloadError }}</div>
         <el-button v-else-if="!payloadText" size="small" :loading="payloadLoading" @click="loadPayload">加载原始报文</el-button>
         <pre v-if="payloadText" class="payload-view">{{ payloadText }}</pre>

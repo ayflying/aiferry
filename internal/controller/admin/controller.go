@@ -53,6 +53,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.PUT("/api-keys/{id}", c.updateAPIKey)
 	group.DELETE("/api-keys/{id}", c.deleteAPIKey)
 	group.GET("/usage", c.listUsage)
+	group.GET("/usage/payload", c.getUsagePayload)
 	group.POST("/redemption-codes/redeem", c.redeemCode)
 	// 登录用户可管理自有渠道；按 ID 的所有权校验必须落在 service 层。
 	group.GET("/channels", c.listChannels)
@@ -93,7 +94,6 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.PUT("/channel-groups/{id}", c.updateChannelGroup)
 	group.DELETE("/channel-groups/{id}", c.deleteChannelGroup)
 	c.registerPriceRoutes(group)
-	group.GET("/usage/payload", c.getUsagePayload)
 	group.GET("/models", c.listModels)
 	group.PUT("/models/{id}", c.updateModel)
 	group.POST("/models/{id}/price-rules", c.createPriceRule)
@@ -352,10 +352,23 @@ func parse(r *ghttp.Request, target any) bool {
 	return true
 }
 
-// getUsagePayload 按 requestId 返回落盘的收发原始报文（仅管理员）。
-// 报文可能因开关关闭、已滚动清理或写入失败而不存在，统一以错误语义返回。
+// getUsagePayload 允许用户查看本人调用，管理员可查看所有调用。
+// 归属检查早于文件读取，不能仅靠前端隐藏按钮或报文文件名隔离用户。
 func (c *Controller) getUsagePayload(r *ghttp.Request) {
-	data, err := relay.ReadPayload(r.GetQuery("requestId").String())
+	current, ok := auth.CurrentUser(r.Context())
+	if !ok {
+		respond(r, nil, auth.ErrUnauthorized)
+		return
+	}
+	requestID := r.GetQuery("requestId").String()
+	if err := c.usage.CheckPayloadAccess(r.Context(), requestID, current.Id, c.auth.IsAdmin(current)); err != nil {
+		respond(r, nil, err)
+		return
+	}
+	data, err := relay.ReadPayload(requestID)
+	if err == nil {
+		data, err = relay.SanitizePayload(data, c.auth.IsAdmin(current))
+	}
 	if err != nil {
 		respond(r, nil, errors.New("报文不存在：可能未开启落盘或已按保留上限滚动清理"))
 		return
