@@ -142,35 +142,68 @@ func TestPaymentRequiredStaysRetryableByDefault(t *testing.T) {
 // 协议回退会对同一候选发起两次真实上游调用（首跳失败 + 回退结果）：两次都必须进入
 // 调用流程，「上游尝试次数」也要按两步计——否则用户看到「上游尝试 1 次」，不知道
 // 网关换过端点重试并自愈。
-// 429 限流退避重试只在「最后一个候选、且本候选已无别的密钥可换」时生效：
-// 仍有候选可切换时必须保持原有的「换个候选立刻重试」语义，否则会给上游额外放大
-// 限流压力，也会让本来可以立刻自愈的请求白等一个退避窗口。
-func TestShouldRetryThrottledCandidateOnlyForLastCandidate(t *testing.T) {
+// 同候选退避重试（429 限流 / 内容风控拦截）只在「最后一个候选、且本候选已无别的密钥可
+// 换」时生效：仍有候选可切换时必须保持原有的「换个候选立刻重试」语义，否则会给上游
+// 额外放大限流压力，也会让本来可以立刻自愈的请求白等一个退避窗口。
+func TestShouldRetrySameCandidateOnlyForLastCandidate(t *testing.T) {
 	ctxErr := error(nil)
+	riskControl := attemptResult{status: http.StatusBadRequest, errorMessage: `error: code=11128 msg="request illegal" requestId="d0013ff2" displayMsg={"zh":"请求被拦截，请重新发送"}`}
 	cases := []struct {
 		name      string
 		options   attemptOptions
 		retried   bool
-		status    int
+		result    attemptResult
 		credID    uint64
 		ctxErr    error
 		wantRetry bool
 	}{
-		{"最后一个候选遇上 429", attemptOptions{throttleRetry: true}, false, http.StatusTooManyRequests, 22, ctxErr, true},
-		{"还有候选可切换时不退避", attemptOptions{throttleRetry: false}, false, http.StatusTooManyRequests, 22, ctxErr, false},
-		{"同一候选只退避一次", attemptOptions{throttleRetry: true}, true, http.StatusTooManyRequests, 22, ctxErr, false},
-		{"非 429 失败不退避", attemptOptions{throttleRetry: true}, false, http.StatusInternalServerError, 22, ctxErr, false},
-		{"没发出过真实尝试不退避", attemptOptions{throttleRetry: true}, false, http.StatusTooManyRequests, 0, ctxErr, false},
-		{"客户端已断开不退避", attemptOptions{throttleRetry: true}, false, http.StatusTooManyRequests, 22, context.Canceled, false},
+		{"最后一个候选遇上 429", attemptOptions{throttleRetry: true}, false, attemptResult{status: http.StatusTooManyRequests}, 22, ctxErr, true},
+		{"还有候选可切换时不退避", attemptOptions{throttleRetry: false}, false, attemptResult{status: http.StatusTooManyRequests}, 22, ctxErr, false},
+		{"同一候选只退避一次", attemptOptions{throttleRetry: true}, true, attemptResult{status: http.StatusTooManyRequests}, 22, ctxErr, false},
+		{"非 429 失败不退避", attemptOptions{throttleRetry: true}, false, attemptResult{status: http.StatusInternalServerError}, 22, ctxErr, false},
+		{"没发出过真实尝试不退避", attemptOptions{throttleRetry: true}, false, attemptResult{status: http.StatusTooManyRequests}, 0, ctxErr, false},
+		{"客户端已断开不退避", attemptOptions{throttleRetry: true}, false, attemptResult{status: http.StatusTooManyRequests}, 22, context.Canceled, false},
+		{"最后一个候选遇上内容风控拦截", attemptOptions{riskControlRetry: true}, false, riskControl, 35, ctxErr, true},
+		{"还有候选可切换时风控拦截不退避", attemptOptions{riskControlRetry: false}, false, riskControl, 35, ctxErr, false},
+		{"风控拦截同一候选只退避一次", attemptOptions{riskControlRetry: true}, true, riskControl, 35, ctxErr, false},
+		{"429 开关不带风控签名时命中", attemptOptions{throttleRetry: true}, false, riskControl, 35, ctxErr, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			last := channelAttempt{
 				candidate: Candidate{ChannelCredentialID: tc.credID},
-				result:    attemptResult{status: tc.status},
+				result:    tc.result,
 			}
-			if got := shouldRetryThrottledCandidate(tc.options, tc.retried, last, tc.ctxErr); got != tc.wantRetry {
-				t.Fatalf("shouldRetryThrottledCandidate = %v, want %v", got, tc.wantRetry)
+			if got := shouldRetrySameCandidate(tc.options, tc.retried, last, tc.ctxErr); got != tc.wantRetry {
+				t.Fatalf("shouldRetrySameCandidate = %v, want %v", got, tc.wantRetry)
+			}
+		})
+	}
+}
+
+// 内容风控的「概率性拦截」签名只认 400/422 + 风控特征文案（格式化文案或原始响应体）：
+// 推理内容校验等确定性 400 不带签名，必须保持原有「换渠道/透传」语义，绝不能被误判为
+// 可重试——同候选重试一个确定性拒绝只会白等一个退避窗口。
+func TestRiskControlBlockedSignature(t *testing.T) {
+	cases := []struct {
+		name   string
+		result attemptResult
+		want   bool
+	}{
+		{"格式化文案 11128", attemptResult{status: http.StatusBadRequest, errorMessage: `error: code=11128 msg="request illegal" requestId="d0013ff2-1d80-4be1-a8a0-f5d4c58f7e5a" displayMsg={"en":"Request blocked. Please send it again","zh":"请求被拦截，请重新发送"}`}, true},
+		{"原始响应体 11128", attemptResult{status: http.StatusBadRequest, body: []byte(`{"code": 11128, "msg": "request illegal", "requestId": "d0013ff2"}`)}, true},
+		{"422 仅文案拦截", attemptResult{status: http.StatusUnprocessableEntity, errorMessage: "上游返回 请求被拦截"}, true},
+		{"确定性 reasoning_content 400 不算", attemptResult{status: http.StatusBadRequest, errorMessage: "The reasoning_content in the thinking mode must be passed back to the API."}, false},
+		{"普通 400 不算", attemptResult{status: http.StatusBadRequest, errorMessage: "error: invalid model parameter"}, false},
+		{"403 不算", attemptResult{status: http.StatusForbidden, errorMessage: "error: code=11128 msg=\"request illegal\""}, false},
+		{"500 不算", attemptResult{status: http.StatusInternalServerError, errorMessage: "error: code=11128 msg=\"request illegal\""}, false},
+		{"200 不算", attemptResult{status: http.StatusOK, errorMessage: ""}, false},
+		{"403 仅原始响应体带风控码也不算", attemptResult{status: http.StatusForbidden, body: []byte(`{"code": 11128, "msg": "request illegal"}`)}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isRiskControlBlockedResult(tc.result); got != tc.want {
+				t.Fatalf("isRiskControlBlockedResult = %v, want %v", got, tc.want)
 			}
 		})
 	}

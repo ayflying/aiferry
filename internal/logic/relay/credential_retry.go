@@ -59,6 +59,12 @@ type attemptOptions struct {
 	// throttleRetry 为真时允许对 429 在同一候选同一密钥上退避重试一次。仅由最后一个候选
 	// 携带：上游明确建议稍后重试时给最后一条路一次自愈机会；仍有候选可切换时不额外放大限流。
 	throttleRetry bool
+	// riskControlRetry 为真时允许对上游内容风控的概率性拦截（如 workbuddy 渠道的 11128
+	// 「request illegal」）在同一候选同一密钥上退避重试一次。同样仅由最后一个候选携带：
+	// 拦截按请求抽样，同型请求稍后重发大概率通过（上游 displayTips 即建议「请重新发送」）；
+	// 仍有候选可切换时保持原有的换候选语义。推理内容校验等确定性 400 不带风控签名，
+	// 不会被误判为可重试。
+	riskControlRetry bool
 }
 
 type channelAttempt struct {
@@ -85,17 +91,19 @@ type channelAttempt struct {
 func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, body []byte, candidate Candidate, stream bool, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, excluded map[uint64]struct{}, sensitiveDataRestorer *sensitiveDataRestorer, options attemptOptions) channelAttempt {
 	candidate.ReasoningEffort = requestReasoningEffort(body)
 	last := channelAttempt{candidate: candidate}
-	throttleRetried := false
+	sameCandidateRetried := false
 	for {
 		// 占额度必须与选密钥一起做：同渠道其它密钥还有空位时直接换密钥，
 		// 全部占满才排队等待，避免把同一个密钥的等待强加给整个渠道。
 		credential, release, err := s.acquireKeySlot(ctx, apiKeyID, candidate, excluded, options.ignoreComboCooldown)
 		if err != nil {
-			// 上游以 429 限流（例如 OpenRouter 共享池的「请稍后重试」）而本候选已没有别的
-			// 密钥或备用地址可换：退避一次再试，把上游的建议落地。只由最后一个候选启用、
-			// 每个候选最多退避一次；客户端已断开时不再发起上游请求，按原错误路径收尾。
-			if shouldRetryThrottledCandidate(options, throttleRetried, last, ctx.Err()) {
-				throttleRetried = true
+			// 上游以 429 限流（例如 OpenRouter 共享池的「请稍后重试」），或以内容风控的
+			// 概率性拦截拒绝（如 workbuddy 渠道的 11128「request illegal」，上游 displayTips
+			// 明确建议「请重新发送」），而本候选已没有别的密钥或备用地址可换：退避一次再试，
+			// 把上游的建议落地。只由最后一个候选启用、每个候选最多退避一次；客户端已断开时
+			// 不再发起上游请求，按原错误路径收尾。
+			if shouldRetrySameCandidate(options, sameCandidateRetried, last, ctx.Err()) {
+				sameCandidateRetried = true
 				delete(excluded, last.candidate.ChannelCredentialID)
 				if waitForThrottleRetry(ctx) {
 					continue
@@ -162,10 +170,11 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			return last
 		}
 		if last.channelDead {
-			// 禁用类失败默认直接跳渠道；仅最后一个候选的首次 429 例外——上游限流
-			// 文案通常建议「稍后重试」，保留一次退避重试的机会，重试仍命中再跳。
-			if shouldRetryThrottledCandidate(options, throttleRetried, last, ctx.Err()) {
-				throttleRetried = true
+			// 禁用类失败默认直接跳渠道；仅最后一个候选的首次 429 / 内容风控拦截例外——
+			// 上游限流建议「稍后重试」、风控提示「请重新发送」，保留一次退避重试的机会，
+			// 重试仍命中再跳。
+			if shouldRetrySameCandidate(options, sameCandidateRetried, last, ctx.Err()) {
+				sameCandidateRetried = true
 				last.channelDead = false
 				if waitForThrottleRetry(ctx) {
 					continue
@@ -178,17 +187,51 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 	}
 }
 
-// shouldRetryThrottledCandidate 判断一次「挑选密钥失败」是否应改判为 429 退避重试：
-// 只有最后一个候选（options.throttleRetry）、本候选尚未退避过、上一次真实尝试确实是 429，
+// shouldRetrySameCandidate 判断一次「挑选密钥失败」或「禁用类失败」是否应改判为同候选
+// 退避重试：只有最后一个候选（throttleRetry / riskControlRetry 对应的开关）、本候选尚未
+// 退避过、上一次真实尝试命中可重试签名（429 限流，或上游内容风控的概率性拦截），
 // 且客户端仍在等待时才成立。抽成纯函数便于单测覆盖边界。
-func shouldRetryThrottledCandidate(options attemptOptions, throttleRetried bool, last channelAttempt, ctxErr error) bool {
-	return !throttleRetried && options.throttleRetry &&
-		last.result.status == http.StatusTooManyRequests &&
-		last.candidate.ChannelCredentialID > 0 && ctxErr == nil
+func shouldRetrySameCandidate(options attemptOptions, retried bool, last channelAttempt, ctxErr error) bool {
+	if retried || last.candidate.ChannelCredentialID <= 0 || ctxErr != nil {
+		return false
+	}
+	if options.throttleRetry && last.result.status == http.StatusTooManyRequests {
+		return true
+	}
+	return options.riskControlRetry && isRiskControlBlockedResult(last.result)
 }
 
-// waitForThrottleRetry 等待一次 429 退避窗口。客户端在退避期间断开时返回 false，
-// 调用方按原错误路径收尾，不再发起上游请求。
+// riskControlBlockedMarkers 是上游内容风控「概率性拦截」的错误签名（如 workbuddy 渠道的
+// code=11128「request illegal」）。拦截按请求抽样：同型请求稍后重发大概率通过，上游
+// displayTips 亦建议「请重新发送」，因此同候选退避重试一次即可自愈，而不是换渠道。
+// 签名同时覆盖 upstreamerror.Message 的格式化文案与上游原始响应体两种形态。
+var riskControlBlockedMarkers = []string{
+	`code=11128`,      // 格式化文案里的风控码（code=11128）
+	`request illegal`, // 风控 msg 原文（文案与原始响应体均含）
+	`请求被拦截`,           // displayMsg 中文文案（部分上游只给文案）
+}
+
+// isRiskControlBlockedResult 判断一次失败是否为上游内容风控的概率性拦截：仅 400/422 且
+// 错误文案（errorMessage，缺省回退原始响应体）命中风控签名。推理内容校验等确定性 400
+// 不带这些签名，保持原有「换渠道/透传」语义，绝不会被误判为可重试。
+func isRiskControlBlockedResult(result attemptResult) bool {
+	if result.status != http.StatusBadRequest && result.status != http.StatusUnprocessableEntity {
+		return false
+	}
+	message := result.errorMessage
+	if strings.TrimSpace(message) == "" {
+		message = string(result.body)
+	}
+	for _, marker := range riskControlBlockedMarkers {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// waitForThrottleRetry 等待一次同候选退避窗口（429 限流或内容风控拦截共用同一退避时长）。
+// 客户端在退避期间断开时返回 false，调用方按原错误路径收尾，不再发起上游请求。
 func waitForThrottleRetry(ctx context.Context) bool {
 	timer := time.NewTimer(candidateThrottleRetryDelay)
 	defer timer.Stop()

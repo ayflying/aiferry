@@ -84,26 +84,99 @@ func TestFinishFailedRequestKeepsRedactedLogAndRestoredClientResponse(t *testing
 	}
 }
 
-func TestFinishFailedRequestDoesNotRewriteOtherFailures(t *testing.T) {
+// 最终 5xx 与已写出内容的失败同样保持既有语义：已写出的结果无法重放，就地收尾不重写；
+// 最终 5xx（所有候选耗尽）此前只写状态不写体、客户端拿到空 200，现在同样透传上游原始
+// 错误体——502 的上游 body 原样到达客户端，仍不做任何改写。
+func TestFinishFailedRequestSkipsWrittenResults(t *testing.T) {
 	previous := payloadLogState
 	defer func() { payloadLogState = previous }()
-	for _, result := range []attemptResult{
-		{status: 502, body: []byte(`{"error":"gateway failure"}`)},
-		{status: 400, wroteBytes: true, body: []byte(`{"error":"already written"}`)},
-	} {
-		dir := t.TempDir()
-		InitPayloadLog(true, dir, 3)
-		writer := httptest.NewRecorder()
-		writer.WriteHeader(202)
-		_, _ = writer.Write([]byte("existing response"))
-		(&sRelay{}).finishFailedRequest(writer, "afreq_other", Candidate{}, "public", "/responses", true, 1, nil, result, nil)
-		if writer.Code != 202 || writer.Body.String() != "existing response" {
-			t.Fatalf("non-passthrough response changed: %d %s", writer.Code, writer.Body.String())
-		}
-		entry := waitFailedPayload(t, dir, "afreq_other")
-		if entry.HTTPStatus != result.status || !jsonEqual(entry.Response, result.body) {
-			t.Fatalf("other failure payload changed: %+v", entry)
-		}
+	dir := t.TempDir()
+	InitPayloadLog(true, dir, 3)
+	writer := httptest.NewRecorder()
+	writer.WriteHeader(202)
+	_, _ = writer.Write([]byte("existing response"))
+	result := attemptResult{status: 400, wroteBytes: true, body: []byte(`{"error":"already written"}`)}
+	(&sRelay{}).finishFailedRequest(writer, "afreq_other", Candidate{}, "public", "/responses", true, 1, nil, result, nil)
+	if writer.Code != 202 || writer.Body.String() != "existing response" {
+		t.Fatalf("written response changed: %d %s", writer.Code, writer.Body.String())
+	}
+	entry := waitFailedPayload(t, dir, "afreq_other")
+	if entry.HTTPStatus != result.status || !jsonEqual(entry.Response, result.body) {
+		t.Fatalf("written failure payload changed: %+v", entry)
+	}
+}
+
+// 最终 5xx（所有候选耗尽、未写出任何内容）必须透传上游原始错误体：此前只写状态不写体，
+// 客户端拿到空 200，SDK 解析不出任何错误内容。502 的上游 body 原样到达客户端。
+func TestFinishFailedRequestPassesThrough5xxBody(t *testing.T) {
+	previous := payloadLogState
+	defer func() { payloadLogState = previous }()
+	dir := t.TempDir()
+	InitPayloadLog(true, dir, 3)
+	writer := httptest.NewRecorder()
+	response := []byte(`{"error":"gateway failure"}`)
+	(&sRelay{}).finishFailedRequest(writer, "afreq_5xx", Candidate{}, "public", "/responses", true, 1, nil, attemptResult{status: 502, body: response}, nil)
+	if writer.Code != 502 || !bytes.Equal(writer.Body.Bytes(), response) {
+		t.Fatalf("5xx passthrough changed: status=%d body=%q", writer.Code, writer.Body.Bytes())
+	}
+	entry := waitFailedPayload(t, dir, "afreq_5xx")
+	if entry.HTTPStatus != 502 || !jsonEqual(entry.Response, response) {
+		t.Fatalf("5xx payload changed: %+v", entry)
+	}
+}
+
+// 上游错误体不是错误信封形状时（如 workbuddy 内容风控的 {"code":11128,...}，没有 error
+// 字段）必须包装成标准 OpenAI 错误信封再透传：标准 SDK 与客户端错误分类层都依赖
+// error.message 渲染错误，没有 error 字段的 body 表现为「有状态码但看不到任何错误内容」。
+// 已是错误形状的原样透传；空 body 回退到带状态码的合成文案。
+func TestClientVisibleErrorBodyWrapsNonEnvelopeBodies(t *testing.T) {
+	cases := []struct {
+		name    string
+		result  attemptResult
+		want    string
+		contain string
+	}{
+		{
+			name:   "workbuddy 风控体包装为标准信封",
+			result: attemptResult{status: 400, body: []byte(`{"code": 11128, "msg": "request illegal", "requestId": "d0013ff2"}`)},
+			want:   `{"error":{"message":"error: code=11128 msg=\"request illegal\" requestId=\"d0013ff2\"","type":"upstream_error"}}`,
+		},
+		{
+			name:   "非 JSON 错误体回退到状态码文案（与 upstreamerror.Message 脱敏语义一致）",
+			result: attemptResult{status: 502, body: []byte(`<html>upstream crashed</html>`)},
+			want:   `{"error":{"message":"upstream returned HTTP 502","type":"upstream_error"}}`,
+		},
+		{
+			name:   "已是标准信封原样透传",
+			result: attemptResult{status: 400, body: []byte(`{"error":{"message":"original upstream failure","code":11128}}`)},
+			want:   `{"error":{"message":"original upstream failure","code":11128}}`,
+		},
+		{
+			name:   "字符串 error 字段同样透传",
+			result: attemptResult{status: 502, body: []byte(`{"error":"gateway failure"}`)},
+			want:   `{"error":"gateway failure"}`,
+		},
+		{
+			name:   "空 body 回退到 errorMessage",
+			result: attemptResult{status: 400, errorMessage: "error: code=11128 msg=\"request illegal\""},
+			want:   `{"error":{"message":"error: code=11128 msg=\"request illegal\"","type":"upstream_error"}}`,
+		},
+		{
+			name:   "空 body 无错误文案回退到状态码",
+			result: attemptResult{status: 400},
+			want:   `{"error":{"message":"upstream returned HTTP 400","type":"upstream_error"}}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := clientVisibleErrorBody(tc.result)
+			if tc.want != "" && !jsonEqual(got, []byte(tc.want)) {
+				t.Fatalf("clientVisibleErrorBody = %s, want %s", got, tc.want)
+			}
+			if tc.contain != "" && !bytes.Contains(got, []byte(tc.contain)) {
+				t.Fatalf("clientVisibleErrorBody = %s, want it to contain %q", got, tc.contain)
+			}
+		})
 	}
 }
 

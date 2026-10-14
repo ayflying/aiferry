@@ -206,9 +206,10 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			for {
 				outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, key.UserId, key.Id, settings, excludedCredentials, sensitiveDataRestorer, attemptOptions{
 					ignoreComboCooldown: pass > 0,
-					// 只有最后一个候选才允许对 429 退避重试：仍有候选可切换时保持原有的
-					// 「换个候选立刻重试」语义，不给上游额外放大限流压力。
-					throttleRetry: index == len(candidates)-1,
+					// 只有最后一个候选才允许对 429 / 内容风控拦截退避重试：仍有候选可切换时
+					// 保持原有的「换个候选立刻重试」语义，不给上游额外放大限流压力。
+					throttleRetry:    index == len(candidates)-1,
+					riskControlRetry: index == len(candidates)-1,
 				})
 				if outcome.concurrencyExhausted {
 					// 该渠道每把密钥的并发额度都占满，且等待窗口内没有腾出空位。
