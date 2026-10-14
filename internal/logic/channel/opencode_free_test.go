@@ -3,8 +3,10 @@ package channel
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 指纹模拟只认渠道类型 opencode_zen：地址再像免费层也不行，
@@ -38,7 +40,8 @@ func TestIsOpenCodeFreeLaneOnlyZenType(t *testing.T) {
 	}
 }
 
-// opencode_zen：注入编辑器指纹（opencode/ UA + ses_ 会话），且派生会话稳定。
+// opencode_zen：注入官方 CLI 同款指纹（opencode/ UA、会话三处同值、
+// client/request/project 标识），且派生会话跨请求稳定。
 func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	identity := UpstreamClientIdentity{
 		ChannelType:  OpenCodeZenChannelType,
@@ -56,7 +59,21 @@ func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	}
 	session := target.Get(openCodeSessionHeader)
 	if !isOpenCodeFreeSessionID(session) {
-		t.Fatalf("expected ses_ session with 12hex+14base62, got %q", session)
+		t.Fatalf("expected canonical ses_ session, got %q", session)
+	}
+	if got := target.Get("X-Opencode-Client"); got != "cli" {
+		t.Fatalf("expected x-opencode-client=cli, got %q", got)
+	}
+	for _, name := range []string{"X-Session-Id", "X-Session-Affinity"} {
+		if got := target.Get(name); got != session {
+			t.Fatalf("expected %s to mirror the session, got %q", name, got)
+		}
+	}
+	if got := target.Get("X-Opencode-Request"); !strings.HasPrefix(got, "req_") {
+		t.Fatalf("expected req_ request id, got %q", got)
+	}
+	if got := target.Get("X-Opencode-Project"); !strings.HasPrefix(got, "prj_") {
+		t.Fatalf("expected prj_ project id, got %q", got)
 	}
 
 	second := http.Header{}
@@ -66,7 +83,8 @@ func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	}
 }
 
-// 客户端自带合规 ses_ 会话与 opencode/ UA 时原样透传。
+// 客户端自带合规 ses_ 会话（形状与计数器窗口均合法）与 opencode/ UA
+// 时原样透传。
 func TestApplyUpstreamClientHeadersFreeLanePassesThroughClientSession(t *testing.T) {
 	identity := UpstreamClientIdentity{
 		ChannelType:  OpenCodeZenChannelType,
@@ -75,13 +93,14 @@ func TestApplyUpstreamClientHeadersFreeLanePassesThroughClientSession(t *testing
 		ModelName:    "grok-code-fast-1",
 		BaseURL:      "https://opencode.ai/zen/v1",
 	}
+	// ses_ + 官方客户端同款反码时间戳 hex（counter=1）+ 14 位 Base62。
+	canonical := openCodeSessionPrefix + invertedTimestampHex(time.Now().UnixMilli(), 1) + "CDEFGHIJKLMN12"
 	incoming := http.Header{}
-	// ses_ + 12 位 hex + 14 位 Base62，共 26 字符 body。
-	incoming.Set("x-opencode-session", "ses_0123456789abCDEFGHIJKLMN12")
+	incoming.Set("x-opencode-session", canonical)
 	incoming.Set("User-Agent", "opencode/1.18.31")
 	target := http.Header{}
 	ApplyUpstreamClientHeaders(target, incoming, identity)
-	if got := target.Get(openCodeSessionHeader); got != "ses_0123456789abCDEFGHIJKLMN12" {
+	if got := target.Get(openCodeSessionHeader); got != canonical {
 		t.Fatalf("expected compliant client session passthrough, got %q", got)
 	}
 	if got := target.Get("User-Agent"); got != "opencode/1.18.31" {
@@ -199,6 +218,24 @@ func TestOpenCodeFreeSessionFormat(t *testing.T) {
 	if len(session) != len("ses_")+26 {
 		t.Fatalf("expected ses_ + 26 chars, got %q (%d)", session, len(session))
 	}
+	// hex 段必须能反向解码出合法计数器，且 counter=1 时低 12 位按位取反
+	// 后结构性落在 ffe（上游解码窗口 [0,63] 的来源）。
+	clockHex := session[len(openCodeSessionPrefix):][:12]
+	inverted, err := strconv.ParseUint(clockHex, 16, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counter := ^inverted & openCodeCounterMask; counter > openCodeCounterMax {
+		t.Fatalf("derived session counter %d outside accepted window [0,%d]", counter, openCodeCounterMax)
+	}
+	if !strings.HasSuffix(clockHex, "ffe") {
+		t.Fatalf("expected counter-1 encoding to end in ffe, got %q", clockHex)
+	}
+	// 与官方编码器的行为逐位对齐：纪元毫秒 + counter=1 必须得到
+	// fffffffffffe（~1 截断 48 位）。
+	if got := invertedTimestampHex(0, 1); got != "fffffffffffe" {
+		t.Fatalf("epoch mint mismatch: %q", got)
+	}
 	if deriveOpenCodeFreeSessionID(identity) != session {
 		t.Fatal("expected deterministic derivation")
 	}
@@ -212,6 +249,9 @@ func TestOpenCodeFreeSessionFormat(t *testing.T) {
 		"ses_short",
 		"ses_0123456789ab!", // 非法字符
 		"ses_0123456789ab",  // 长度不足
+		// 形状完全合规，但 hex 段按位取反解码出 counter=1620，超出上游
+		// [0,63] 窗口——摘要式会话即使形状正确也几乎必 403。
+		"ses_0123456789abCDEFGHIJKLMN12",
 	}
 	for _, value := range invalid {
 		if isOpenCodeFreeSessionID(value) {
