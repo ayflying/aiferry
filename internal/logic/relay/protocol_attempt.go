@@ -133,9 +133,10 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	// OpenCode Zen 免费层指纹校验只认 chat completions 形态：注入请求体三件套
-	// （强制 stream、bash/read 工具桩、无工具时 tool_choice=none）。协议转换到
+	// OpenCode Zen 免费层指纹校验只认 chat completions 形态：注入官方工具
+	// 定义与流式改写（详见 channel.ApplyOpenCodeFreeBody）。协议转换到
 	// responses/messages 的请求不注入，避免破坏非 chat 结构。
+	upstreamURL := resolveUpstreamURL(candidate.BaseURL, plan.UpstreamEndpoint())
 	forcedStream := false
 	if channel.IsOpenCodeFreeLane(candidate.ChannelType, candidate.BaseURL) && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		var forced bool
@@ -144,6 +145,9 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			return attemptResult{}, false, err
 		}
 		forcedStream = forced
+		// 2026-10-14 起匿名推理端点从 …/zen 迁到 …/inference，chat 请求
+		// 必须改写基址（模型目录与用量查询仍走原基址，无需改写）。
+		upstreamURL = channel.OpenCodeFreeUpstreamURL(candidate.BaseURL, plan.UpstreamEndpoint())
 	} else if plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint && s.declaresUpstreamStreamOnly(ctx, candidate) {
 		// 该上游只接受流式请求（非流式直接被网关 400 且无响应体）：客户端要非流式
 		// JSON 时把请求体改成 stream=true，回包处再把 SSE 聚合回 chat.completion。
@@ -162,7 +166,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(settings.NonStreamTimeoutSeconds)*time.Second)
 	}
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, resolveUpstreamURL(candidate.BaseURL, plan.UpstreamEndpoint()), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "create upstream request")
 	}

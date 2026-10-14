@@ -190,7 +190,13 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	// 模型测试复用转发链路的缓存字段处置，避免「测试通过、正式被上游拒绝」：
 	// 渠道声明 off 时测试同样不下发缓存字段，缺省时同样注入稳定键。
 	identity := fmt.Sprintf("v1|test|m:%s|c:%d|k:%d", model.UpstreamName, channel.Id, credential.ID)
-	req, forcedStream, err := buildTestRequest(ctx, resolveTestURL(baseURL, path), channel.Type, payload, config, identity)
+	testURL := resolveTestURL(baseURL, path)
+	if IsOpenCodeFreeLane(channel.Type, baseURL) {
+		// 2026-10-14 起匿名推理端点从 …/zen 迁到 …/inference，免费车道
+		// 的连通性测试必须打到新基址，否则恒 403。
+		testURL = OpenCodeFreeUpstreamURL(baseURL, path)
+	}
+	req, forcedStream, err := buildTestRequest(ctx, testURL, channel.Type, payload, config, identity)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}

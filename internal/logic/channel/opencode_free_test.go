@@ -40,8 +40,34 @@ func TestIsOpenCodeFreeLaneOnlyZenType(t *testing.T) {
 	}
 }
 
-// opencode_zen：注入官方 CLI 同款指纹（opencode/ UA、会话三处同值、
-// client/request/project 标识），且派生会话跨请求稳定。
+// 2026-10-14 起匿名推理端点从 …/zen 迁到 https://opencode.ai/inference：
+// chat 请求基址必须改写并补 /v1 前缀；绝对端点与非 opencode.ai 基址
+// （本地 mock 联调）原样保留。
+func TestOpenCodeFreeUpstreamURLRewritesAnonymousBase(t *testing.T) {
+	cases := []struct {
+		baseURL  string
+		endpoint string
+		want     string
+	}{
+		{"https://opencode.ai/zen/v1", "/chat/completions", "https://opencode.ai/inference/v1/chat/completions"},
+		{"https://opencode.ai/zen", "/v1/chat/completions", "https://opencode.ai/inference/v1/chat/completions"},
+		{"https://opencode.ai/zen/v1/", "/chat/completions", "https://opencode.ai/inference/v1/chat/completions"},
+		{"https://opencode.ai/zen/v1", "/messages", "https://opencode.ai/inference/v1/messages"},
+		{"HTTPS://OpenCode.AI/Zen/V1", "/chat/completions", "https://opencode.ai/inference/v1/chat/completions"},
+		{"https://opencode.ai/zen/v1", "https://mock.local/v1/chat/completions", "https://mock.local/v1/chat/completions"},
+		{"http://127.0.0.1:9911/v1", "/chat/completions", "http://127.0.0.1:9911/v1/chat/completions"},
+	}
+	for _, item := range cases {
+		if got := OpenCodeFreeUpstreamURL(item.baseURL, item.endpoint); got != item.want {
+			t.Fatalf("OpenCodeFreeUpstreamURL(%q, %q) = %q, want %q", item.baseURL, item.endpoint, got, item.want)
+		}
+	}
+}
+
+// opencode_zen：注入官方 2.x 客户端同款指纹（opencode/latest/<版本>/cli
+// UA、会话四处同值、client/project 标识；2026-10-14 起上游按 UA 形状
+// 拒绝，不再透传客户端 UA；不再发送 x-opencode-request），且派生会话
+// 跨请求稳定。
 func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	identity := UpstreamClientIdentity{
 		ChannelType:  OpenCodeZenChannelType,
@@ -53,9 +79,8 @@ func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	target := http.Header{}
 	ApplyUpstreamClientHeaders(target, http.Header{}, identity)
 
-	ua := target.Get("User-Agent")
-	if !strings.HasPrefix(ua, "opencode/") {
-		t.Fatalf("expected opencode/ UA on free lane, got %q", ua)
+	if got := target.Get("User-Agent"); got != openCodeFreeUserAgent() {
+		t.Fatalf("expected forced %q UA, got %q", openCodeFreeUserAgent(), got)
 	}
 	session := target.Get(openCodeSessionHeader)
 	if !isOpenCodeFreeSessionID(session) {
@@ -64,16 +89,26 @@ func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	if got := target.Get("X-Opencode-Client"); got != "cli" {
 		t.Fatalf("expected x-opencode-client=cli, got %q", got)
 	}
-	for _, name := range []string{"X-Session-Id", "X-Session-Affinity"} {
+	for _, name := range []string{"X-Opencode-Session-Id", "X-Session-Id", "X-Session-Affinity"} {
 		if got := target.Get(name); got != session {
 			t.Fatalf("expected %s to mirror the session, got %q", name, got)
 		}
 	}
-	if got := target.Get("X-Opencode-Request"); !strings.HasPrefix(got, "req_") {
-		t.Fatalf("expected req_ request id, got %q", got)
+	if got := target.Get("X-Opencode-Request"); got != "" {
+		t.Fatalf("expected x-opencode-request to be absent (2026-10-14 gate), got %q", got)
 	}
-	if got := target.Get("X-Opencode-Project"); !strings.HasPrefix(got, "prj_") {
-		t.Fatalf("expected prj_ project id, got %q", got)
+	project := target.Get("X-Opencode-Project")
+	if len(project) != 40 {
+		t.Fatalf("expected bare 40-char project id, got %q", project)
+	}
+	for i := 0; i < len(project); i++ {
+		c := project[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Fatalf("expected lowercase hex project id, got %q", project)
+		}
+	}
+	if strings.HasPrefix(project, "prj_") {
+		t.Fatalf("expected prj_ prefix removed (2026-10-14 gate), got %q", project)
 	}
 
 	second := http.Header{}
@@ -83,8 +118,8 @@ func TestApplyUpstreamClientHeadersFreeLaneInjectsFingerprint(t *testing.T) {
 	}
 }
 
-// 客户端自带合规 ses_ 会话（形状与计数器窗口均合法）与 opencode/ UA
-// 时原样透传。
+// 客户端自带合规 ses_ 会话（形状与计数器窗口均合法）时原样透传保住
+// 会话亲和；UA 一律改写为官方 2.x 形状。
 func TestApplyUpstreamClientHeadersFreeLanePassesThroughClientSession(t *testing.T) {
 	identity := UpstreamClientIdentity{
 		ChannelType:  OpenCodeZenChannelType,
@@ -97,14 +132,14 @@ func TestApplyUpstreamClientHeadersFreeLanePassesThroughClientSession(t *testing
 	canonical := openCodeSessionPrefix + invertedTimestampHex(time.Now().UnixMilli(), 1) + "CDEFGHIJKLMN12"
 	incoming := http.Header{}
 	incoming.Set("x-opencode-session", canonical)
-	incoming.Set("User-Agent", "opencode/1.18.31")
+	incoming.Set("User-Agent", "opencode/1.18.31 (windows amd64; node22.21.1)")
 	target := http.Header{}
 	ApplyUpstreamClientHeaders(target, incoming, identity)
 	if got := target.Get(openCodeSessionHeader); got != canonical {
 		t.Fatalf("expected compliant client session passthrough, got %q", got)
 	}
-	if got := target.Get("User-Agent"); got != "opencode/1.18.31" {
-		t.Fatalf("expected opencode UA passthrough, got %q", got)
+	if got := target.Get("User-Agent"); got != openCodeFreeUserAgent() {
+		t.Fatalf("expected legacy opencode UA rewritten to %q, got %q", openCodeFreeUserAgent(), got)
 	}
 }
 
@@ -134,8 +169,10 @@ func TestApplyUpstreamClientHeadersGoLaneNeverSimulates(t *testing.T) {
 	}
 }
 
-func TestApplyOpenCodeFreeBodyForcesStreamAndTools(t *testing.T) {
-	original := []byte(`{"model":"grok-code-fast-1","messages":[{"role":"user","content":"hi"}]}`)
+// 无工具请求注入全部核心工具，且定义必须来自官方真实抓取（桩定义会被
+// 2026-10-14 门禁 403）；tool_choice:none 同样会被拒绝，必须剥掉。
+func TestApplyOpenCodeFreeBodyInjectsGenuineCoreTools(t *testing.T) {
+	original := []byte(`{"model":"grok-code-fast-1","messages":[{"role":"user","content":"hi"}],"tool_choice":"none"}`)
 	body, forced, err := ApplyOpenCodeFreeBody(original)
 	if err != nil {
 		t.Fatal(err)
@@ -150,16 +187,37 @@ func TestApplyOpenCodeFreeBodyForcesStreamAndTools(t *testing.T) {
 	if stream, _ := payload["stream"].(bool); !stream {
 		t.Fatal("expected stream=true")
 	}
-	if choice, _ := payload["tool_choice"].(string); choice != "none" {
-		t.Fatalf("expected tool_choice=none when original had no tools, got %v", payload["tool_choice"])
+	if _, exists := payload["tool_choice"]; exists {
+		t.Fatalf("expected tool_choice=none stripped (2026-10-14 gate), got %v", payload["tool_choice"])
 	}
 	tools, _ := payload["tools"].([]any)
-	names := map[string]bool{}
+	names := map[string]map[string]any{}
 	for _, item := range tools {
-		names[openCodeToolName(item)] = true
+		object, _ := item.(map[string]any)
+		function, _ := object["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		names[name] = function
 	}
-	if !names["bash"] || !names["read"] {
-		t.Fatalf("expected bash and read tool stubs, got %v", names)
+	if len(tools) != len(openCodeCoreTools) {
+		t.Fatalf("expected %d core tools, got %d", len(openCodeCoreTools), len(tools))
+	}
+	for _, name := range openCodeCoreTools {
+		function, ok := names[name]
+		if !ok {
+			t.Fatalf("expected core tool %q injected, got %v", name, names)
+		}
+		definition, known := knownOpencodeTool(name)
+		if !known {
+			t.Fatalf("official definition for %q must be embedded", name)
+		}
+		if got, _ := function["description"].(string); got != definition.Description {
+			t.Fatalf("expected genuine description for %q, got %.80q", name, got)
+		}
+		parameters, _ := function["parameters"].(map[string]any)
+		properties, _ := parameters["properties"].(map[string]any)
+		if len(properties) != len(definition.Parameters["properties"].(map[string]any)) {
+			t.Fatalf("expected genuine schema for %q, got %v", name, parameters)
+		}
 	}
 	options, _ := payload["stream_options"].(map[string]any)
 	if include, _ := options["include_usage"].(bool); !include {
@@ -167,8 +225,12 @@ func TestApplyOpenCodeFreeBodyForcesStreamAndTools(t *testing.T) {
 	}
 }
 
-func TestApplyOpenCodeFreeBodyKeepsExistingToolsAndStream(t *testing.T) {
-	original := []byte(`{"model":"m","stream":true,"tool_choice":"auto","tools":[{"type":"function","function":{"name":"bash","parameters":{}}},{"type":"function","function":{"name":"get_weather","parameters":{}}}]}`)
+// 下游声明的官方同名工具改写为真实定义、未知工具原样保留、
+// tool_choice:auto 保留。
+func TestApplyOpenCodeFreeBodyRewritesRecognizedToolsKeepsForeign(t *testing.T) {
+	original := []byte(`{"model":"m","stream":true,"tool_choice":"auto","tools":[` +
+		`{"type":"function","function":{"name":"read","description":"stub","parameters":{"type":"object","properties":{}}}},` +
+		`{"type":"function","function":{"name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}`)
 	body, forced, err := ApplyOpenCodeFreeBody(original)
 	if err != nil {
 		t.Fatal(err)
@@ -180,21 +242,36 @@ func TestApplyOpenCodeFreeBodyKeepsExistingToolsAndStream(t *testing.T) {
 	if err = json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
 	}
-	// 原有工具选择策略必须保留。
 	if choice, _ := payload["tool_choice"].(string); choice != "auto" {
 		t.Fatalf("expected tool_choice=auto preserved, got %v", payload["tool_choice"])
 	}
 	tools, _ := payload["tools"].([]any)
-	// 原 bash 保留、read 补桩、get_weather 保留，共 3 个。
-	if len(tools) != 3 {
-		t.Fatalf("expected 3 tools (original bash + added read + get_weather), got %d", len(tools))
+	// read（改写）+ get_weather（保留）+ 补齐 shell/edit/glob/grep 共 6 个。
+	if len(tools) != len(openCodeCoreTools)+1 {
+		t.Fatalf("expected %d tools, got %d", len(openCodeCoreTools)+1, len(tools))
 	}
-	names := map[string]bool{}
+	definition, _ := knownOpencodeTool("read")
+	foundGenuineRead, foundWeather := false, false
 	for _, item := range tools {
-		names[openCodeToolName(item)] = true
+		object, _ := item.(map[string]any)
+		function, _ := object["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		switch name {
+		case "read":
+			if got, _ := function["description"].(string); got == definition.Description {
+				foundGenuineRead = true
+			}
+		case "get_weather":
+			if got, _ := function["description"].(string); got == "Get weather" {
+				foundWeather = true
+			}
+		}
 	}
-	if !names["bash"] || !names["read"] || !names["get_weather"] {
-		t.Fatalf("expected bash+read+get_weather, got %v", names)
+	if !foundGenuineRead {
+		t.Fatal("expected downstream read stub rewritten to genuine definition")
+	}
+	if !foundWeather {
+		t.Fatal("expected foreign get_weather tool preserved verbatim")
 	}
 }
 

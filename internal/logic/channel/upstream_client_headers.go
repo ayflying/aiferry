@@ -62,7 +62,8 @@ type UpstreamClientIdentity struct {
 }
 
 // ApplyUpstreamClientHeaders 按渠道类型补齐上游要求的客户端标识头。
-// 仅类型 opencode_zen 走免费层编辑器指纹模拟（opencode/ UA + ses_ 会话）；
+// 仅类型 opencode_zen 走免费层编辑器指纹模拟（opencode/latest/…/cli UA +
+// ses_ 会话 + x-opencode-session-id 等同值头）；
 // opencode_go 维持 aiferry 会话与 UA 策略，即使地址指向 …/zen/v1 也不模拟。
 // 其余渠道不受影响，转发与测试链路都必须调用。
 // WorkBuddy 对通用 HTTP 库 UA 有渠道校验；使用网关自身标识，不模拟官方客户端。
