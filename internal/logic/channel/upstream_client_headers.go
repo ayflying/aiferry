@@ -65,7 +65,12 @@ type UpstreamClientIdentity struct {
 // 仅类型 opencode_zen 走免费层编辑器指纹模拟（opencode/ UA + ses_ 会话）；
 // opencode_go 维持 aiferry 会话与 UA 策略，即使地址指向 …/zen/v1 也不模拟。
 // 其余渠道不受影响，转发与测试链路都必须调用。
+// WorkBuddy 对通用 HTTP 库 UA 有渠道校验；使用网关自身标识，不模拟官方客户端。
 func ApplyUpstreamClientHeaders(target, incoming http.Header, identity UpstreamClientIdentity) {
+	if identity.ChannelType == "workbuddy" {
+		applyUpstreamUserAgent(target, incoming)
+		return
+	}
 	if IsOpenCodeFreeLane(identity.ChannelType, identity.BaseURL) {
 		applyOpenCodeFreeHeaders(target, incoming, identity)
 		return
