@@ -107,6 +107,7 @@ func (s *sChannel) runRecoveryChecks(ctx context.Context, mode string) {
 	s.runChannelRecoveryChecks(ctx, mode)
 	s.runCredentialRecoveryChecks(ctx, mode)
 	s.runModelRecoveryChecks(ctx, mode)
+	s.runComboRecoveryChecks(ctx)
 }
 
 func (s *sChannel) runChannelRecoveryChecks(ctx context.Context, mode string) {
@@ -197,8 +198,11 @@ func (s *sChannel) runCredentialRecoveryChecks(ctx context.Context, mode string)
 	}
 }
 
-// runModelRecoveryChecks 定期测试被自动禁用的模型；测试成功会清除模型禁用标记
-// 并重置健康评分（见 TestModel 内的 RecoverModelIfAllowed）。
+// runModelRecoveryChecks 定期测试带模型级禁用标记的历史遗留模型。组合健康评分上线后
+// 模型级标记不再写入，新的模型维度禁用改由组合级隔离表示，见 runComboRecoveryChecks；
+// 这里保留是为了修复 2026-09-17 之前遗留的 auto_disabled_at 行——路由仍按该标记过滤，
+// 而这类行拿不到真实流量，不会自己触发投影刷新。测试成功会经组合加分走
+// updateModelHealthProjection 清空该标记。
 func (s *sChannel) runModelRecoveryChecks(ctx context.Context, mode string) {
 	columns := dao.ChannelModels.Columns()
 	models := make([]entity.ChannelModels, 0)

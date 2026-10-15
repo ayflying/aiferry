@@ -47,7 +47,11 @@ type CredentialCostResult struct {
 }
 
 func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input adminapi.CostQueryInput) (CostResult, error) {
-	channel, err := s.GetOwned(ctx, channelID)
+	// 必须用 Get 而不是 GetOwned：Get 在带登录用户的请求上下文里按创建者过滤，
+	// 在后台定时同步（无用户上下文）里不受归属限制。GetOwned 拿不到登录用户就直接
+	// 返回「未登录」，会让每日余额同步在每个渠道上失败，余额快照从此不再回上游校准
+	// （2026-09-25 起的线上回归）。
+	channel, err := s.Get(ctx, channelID)
 	if err != nil {
 		return CostResult{}, err
 	}

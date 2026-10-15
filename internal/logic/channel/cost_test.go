@@ -1,12 +1,24 @@
 package channel
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 )
+
+// TestBackgroundCostSyncMustNotRequireLogin 钉住每日费用同步的渠道读取契约：
+// 后台定时同步没有登录用户上下文，GetOwned 在这种上下文里必然拒绝，所以
+// QueryCost 只能用 Get 读渠道（Get 在有登录用户时仍按创建者过滤）。
+// 2026-09-25 一度把它换成 GetOwned，线上每日余额同步随即在每个渠道上返回「未登录」，
+// 余额快照从此不再回上游校准。
+func TestBackgroundCostSyncMustNotRequireLogin(t *testing.T) {
+	if _, err := (&sChannel{}).GetOwned(context.Background(), 1); err == nil {
+		t.Fatal("GetOwned 在没有登录用户上下文时必须拒绝，后台费用同步不能依赖它读取渠道")
+	}
+}
 
 func TestCostRangeDefaultsToCurrentDay(t *testing.T) {
 	start, end, err := costRange("", "")
