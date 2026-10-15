@@ -53,8 +53,9 @@ const candidateThrottleRetryDelay = 1500 * time.Millisecond
 // attemptOptions 控制单次候选尝试的可选行为。两个开关都只服务「已经无路可走」的兜底场景，
 // 正常的多候选切换流程一律使用零值。
 type attemptOptions struct {
-	// ignoreComboCooldown 为真时不做「模型 × 密钥」组合冷却过滤。仅供「本次请求的全部候选
-	// 都在组合冷却中、零上游尝试就会直接失败」的兜底轮使用。
+	// ignoreComboCooldown 为真时不做「模型 × 密钥」组合冷却过滤。两个来源：其一，「本次
+	// 请求的全部候选都在组合冷却中、零上游尝试就会直接失败」的兜底轮；其二，同候选退避
+	// 重试一旦启动，后续挑选必须绕过组合冷却（见 attemptChannel 内的 bypassComboCooldown）。
 	ignoreComboCooldown bool
 	// throttleRetry 为真时允许对 429 在同一候选同一密钥上退避重试一次。仅由最后一个候选
 	// 携带：上游明确建议稍后重试时给最后一条路一次自愈机会；仍有候选可切换时不额外放大限流。
@@ -93,10 +94,18 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 	candidate.ReasoningEffort = requestReasoningEffort(body)
 	last := channelAttempt{candidate: candidate}
 	sameCandidateRetries := 0
+	// bypassComboCooldown 是传给 acquireKeySlot 的组合冷却旁路：初始值来自兜底轮开关；
+	// 同候选退避重试一旦启动就保持为真——拦截/限流失败本身会扣组合健康分（失败 -20，
+	// 扣到 0 触发 5 分钟隔离），连续被拦可能恰好把分数扣到 0 并隔离该组合，把升级退避
+	// 的后续尝试全部挡在「组合冷却」外空转（0.6.10 生产实证：11:52 请求 2 次真实尝试
+	// + 51.5s 空等后失败，退避时长 1.5+5+15+30 恰好等于请求总时长）。旁路只跳过冷却
+	// 过滤与低分加权，不改绑定与密钥材料；仅由「上游明确建议重发/稍后重试」的最后候选
+	// 退避路径启用，bounded 且上游自身即建议重试。
+	bypassComboCooldown := options.ignoreComboCooldown
 	for {
 		// 占额度必须与选密钥一起做：同渠道其它密钥还有空位时直接换密钥，
 		// 全部占满才排队等待，避免把同一个密钥的等待强加给整个渠道。
-		credential, release, err := s.acquireKeySlot(ctx, apiKeyID, candidate, excluded, options.ignoreComboCooldown)
+		credential, release, err := s.acquireKeySlot(ctx, apiKeyID, candidate, excluded, bypassComboCooldown)
 		if err != nil {
 			// 上游以 429 限流（例如 OpenRouter 共享池的「请稍后重试」），或以内容风控的
 			// 概率性拦截拒绝（如 workbuddy 渠道的 11128「request illegal」，上游 displayTips
@@ -106,6 +115,9 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			if delay, ok := sameCandidateRetryDelay(options, sameCandidateRetries, last, ctx.Err()); ok {
 				sameCandidateRetries++
 				delete(excluded, last.candidate.ChannelCredentialID)
+				// 重试期间的挑选必须绕过组合冷却：健康分被本次失败扣到 0 时，
+				// 冷却会把后续尝试挡在门外，退避窗口全部空转。
+				bypassComboCooldown = true
 				if waitForRetry(ctx, delay) {
 					continue
 				}
@@ -177,6 +189,8 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			if delay, ok := sameCandidateRetryDelay(options, sameCandidateRetries, last, ctx.Err()); ok {
 				sameCandidateRetries++
 				last.channelDead = false
+				// 同上：重试期间的挑选绕过组合冷却，避免健康分归零隔离让退避空转。
+				bypassComboCooldown = true
 				if waitForRetry(ctx, delay) {
 					continue
 				}
