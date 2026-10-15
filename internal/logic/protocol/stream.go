@@ -9,22 +9,26 @@ import (
 )
 
 type StreamConverter struct {
-	plan             Plan
-	id               string
-	model            string
-	created          int64
-	started          bool
-	chatRoleSent     bool
+	plan              Plan
+	id                string
+	model             string
+	created           int64
+	started           bool
+	chatRoleSent      bool
 	anthropicFinished bool
-	contentStarted   bool
-	completed        bool
-	sawToolCall      bool
-	stopReason       string
-	outputText       strings.Builder
-	usage            map[string]any
-	chatToolIndexes  map[string]int
-	chatToolCount    int
-	chatToolNameSent map[string]bool
+	contentStarted    bool
+	completed         bool
+	sawToolCall       bool
+	stopReason        string
+	outputText        strings.Builder
+	usage             map[string]any
+	chatToolIndexes   map[string]int
+	chatToolCount     int
+	chatToolNameSent  map[string]bool
+	chatToolArgs      map[int]*strings.Builder
+	chatToolArgsSent  map[int]int
+	responsesTools    map[int]*responsesToolState
+	responsesToolSeq  int
 }
 
 func NewStreamConverter(plan Plan) *StreamConverter {
@@ -33,6 +37,9 @@ func NewStreamConverter(plan Plan) *StreamConverter {
 		created:          time.Now().Unix(),
 		chatToolIndexes:  make(map[string]int),
 		chatToolNameSent: make(map[string]bool),
+		chatToolArgs:     make(map[int]*strings.Builder),
+		chatToolArgsSent: make(map[int]int),
+		responsesTools:   make(map[int]*responsesToolState),
 	}
 }
 
@@ -109,21 +116,30 @@ func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 		itemID := item.Get("id").String()
 		callID := item.Get("call_id").String()
 		index := c.chatToolIndex(itemID, callID)
+		var result [][]byte
 		// Chat Completions 的 function.name 是增量字段。部分 Responses 上游会
 		// 重复发送 output_item.added；同一调用若再次下发完整名称，客户端会
 		// 按 delta 拼成 PowerShellPowerShell。每个 call 只发送一次名称。
 		nameKey := stringOr(itemID, callID)
-		if c.chatToolNameSent[nameKey] {
-			return nil
+		if !c.chatToolNameSent[nameKey] {
+			c.chatToolNameSent[nameKey] = true
+			c.sawToolCall = true
+			result = append(c.ensureChatRole(), c.chatChunk(map[string]any{"tool_calls": []any{map[string]any{
+				"index":    index,
+				"id":       stringOr(callID, itemID),
+				"type":     "function",
+				"function": map[string]any{"name": item.Get("name").String()},
+			}}}, nil, nil)...)
 		}
-		c.chatToolNameSent[nameKey] = true
-		c.sawToolCall = true
-		return append(c.ensureChatRole(), c.chatChunk(map[string]any{"tool_calls": []any{map[string]any{
-			"index":    index,
-			"id":       stringOr(callID, itemID),
-			"type":     "function",
-			"function": map[string]any{"name": item.Get("name").String()},
-		}}}, nil, nil)...)
+		// 部分上游把完整参数直接放在 added 的 item.arguments 里、不随流式
+		// delta 下发。只转发名称会丢掉全部参数，客户端（如 DSH）拿到的
+		// tool_call 参数为空，校验直接报 missing required property。收进
+		// 累计值并只补发未下发的尾部，重复的 added 不会让参数翻倍。
+		if tail := c.chatToolRecordArgs(index, item.Get("arguments").String()); tail != "" {
+			c.sawToolCall = true
+			result = append(result, c.chatToolArgsChunk(index, stringOr(callID, itemID), tail)...)
+		}
+		return result
 	case "response.function_call_arguments.delta":
 		delta := gjson.GetBytes(payload, "delta").String()
 		if delta == "" {
@@ -133,12 +149,29 @@ func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 		callID := gjson.GetBytes(payload, "call_id").String()
 		index := c.chatToolIndex(itemID, callID)
 		c.sawToolCall = true
-		return append(c.ensureChatRole(), c.chatChunk(map[string]any{"tool_calls": []any{map[string]any{
-			"index":    index,
-			"id":       stringOr(callID, itemID),
-			"type":     "function",
-			"function": map[string]any{"arguments": delta},
-		}}}, nil, nil)...)
+		// 走累计值 + 水位线转发：正常流式下尾部恰好等于本次 delta；上游
+		// 重复或乱序时，已下发过的内容不会重复转发。
+		tail := c.chatToolAppendArgs(index, delta)
+		if tail == "" {
+			return nil
+		}
+		return append(c.ensureChatRole(), c.chatToolArgsChunk(index, stringOr(callID, itemID), tail)...)
+	case "response.function_call_arguments.done":
+		// done 携带该调用的参数权威全量。部分上游不流式发 delta（或只在
+		// added 里给一次性全量），done 是参数到达客户端的最后机会；按水位线
+		// 只补差额，正常流式下累计值与权威全量一致，不会产生重复。
+		itemID := gjson.GetBytes(payload, "item_id").String()
+		callID := gjson.GetBytes(payload, "call_id").String()
+		if itemID == "" && callID == "" {
+			return nil
+		}
+		index := c.chatToolIndex(itemID, callID)
+		tail := c.chatToolRecordArgs(index, gjson.GetBytes(payload, "arguments").String())
+		if tail == "" {
+			return nil
+		}
+		c.sawToolCall = true
+		return append(c.ensureChatRole(), c.chatToolArgsChunk(index, stringOr(callID, itemID), tail)...)
 	case "response.completed":
 		if usage := gjson.GetBytes(payload, "response.usage"); usage.Exists() {
 			c.usage = jsonObject(usage.Raw)
@@ -179,18 +212,29 @@ func (c *StreamConverter) chatToResponses(payload []byte) [][]byte {
 	}
 	choice.Get("delta.tool_calls").ForEach(func(_, value gjson.Result) bool {
 		c.sawToolCall = true
-		result = append(result, c.ensureResponsesStarted()...)
+		tool := c.responsesToolFor(value)
 		function := value.Get("function")
-		if function.Get("name").String() != "" {
-			result = append(result, sseEvent("response.output_item.added", map[string]any{
-				"type": "response.output_item.added", "output_index": 0,
-				"item": map[string]any{"id": value.Get("id").String(), "type": "function_call", "status": "in_progress", "call_id": value.Get("id").String(), "name": function.Get("name").String(), "arguments": ""},
-			}))
+		if name := function.Get("name").String(); name != "" {
+			tool.name = name
+		}
+		if id := value.Get("id").String(); id != "" {
+			tool.callID = id
 		}
 		if arguments := function.Get("arguments").String(); arguments != "" {
-			result = append(result, sseEvent("response.function_call_arguments.delta", map[string]any{
-				"type": "response.function_call_arguments.delta", "output_index": 0, "item_id": value.Get("id").String(), "call_id": value.Get("id").String(), "delta": arguments,
-			}))
+			tool.args.WriteString(arguments)
+		}
+		// output_item.added 只在名称首次确定时申报一次；申报前到达的参数先
+		// 进缓冲，申报后以一条 delta 补发（上游首片即带全量参数时，同一批
+		// 输出 added + delta，参数不会被计入两次）。
+		if !tool.announced && tool.name != "" {
+			result = append(result, c.ensureResponsesStarted()...)
+			tool.announced = true
+			result = append(result, responsesToolAnnounceItem(tool))
+		}
+		if tool.announced {
+			if pending := responsesToolPendingArgs(tool); pending != "" {
+				result = append(result, c.responsesToolArgsDelta(tool, pending))
+			}
 		}
 		return true
 	})
@@ -198,6 +242,10 @@ func (c *StreamConverter) chatToResponses(payload []byte) [][]byte {
 }
 
 func (c *StreamConverter) completeChatStream() [][]byte {
+	// 收尾兜底：把尚未下发的参数尾部补发出去（参数只出现在 done 事件或
+	// 单个分片里时，这是它们到达客户端的最后机会，对应 new-api 的
+	// flushAllPendingTools），再发 finish_reason。
+	result := c.chatToolFlushPendingArgs()
 	finishReason := "stop"
 	if c.sawToolCall {
 		finishReason = "tool_calls"
@@ -206,7 +254,8 @@ func (c *StreamConverter) completeChatStream() [][]byte {
 	if c.usage != nil {
 		usage = responseUsageToChat(c.usage)
 	}
-	return append(c.chatChunk(map[string]any{}, finishReason, usage), []byte("data: [DONE]\n\n"))
+	result = append(result, c.chatChunk(map[string]any{}, finishReason, usage)...)
+	return append(result, []byte("data: [DONE]\n\n"))
 }
 
 func (c *StreamConverter) completeResponsesStream() [][]byte {
@@ -215,6 +264,32 @@ func (c *StreamConverter) completeResponsesStream() [][]byte {
 		result = append(result,
 			sseEvent("response.output_text.done", map[string]any{"type": "response.output_text.done", "output_index": 0, "content_index": 0, "item_id": c.responseMessageID(), "text": c.outputText.String()}),
 			sseEvent("response.content_part.done", map[string]any{"type": "response.content_part.done", "output_index": 0, "content_index": 0, "item_id": c.responseMessageID(), "part": map[string]any{"type": "output_text", "text": c.outputText.String()}}),
+		)
+	}
+	// 收尾逐调用落定（sub2api 的做法）：名称始终没到的调用也强制申报
+	// output_item.added，随后每个调用补 function_call_arguments.done 与
+	// output_item.done——Codex 类客户端只在两者齐备后才把调用落定，缺了
+	// 会话会卡住；参数空缺以 "{}" 收口，避免客户端解析残缺 JSON。
+	for _, tool := range c.sortedResponsesTools() {
+		if !tool.announced {
+			result = append(result, c.ensureResponsesStarted()...)
+			tool.announced = true
+			result = append(result, responsesToolAnnounceItem(tool))
+		}
+		args := tool.finalizedArgs()
+		result = append(result,
+			sseEvent("response.function_call_arguments.done", map[string]any{
+				"type": "response.function_call_arguments.done", "output_index": tool.outputIndex,
+				"item_id": tool.itemID, "call_id": tool.callID, "arguments": args,
+			}),
+			sseEvent("response.output_item.done", map[string]any{
+				"type":         "response.output_item.done",
+				"output_index": tool.outputIndex,
+				"item": map[string]any{
+					"id": tool.itemID, "type": "function_call", "status": "completed",
+					"call_id": tool.callID, "name": tool.name, "arguments": args,
+				},
+			}),
 		)
 	}
 	response := c.responseObject("completed")
@@ -350,7 +425,19 @@ func (c *StreamConverter) responseObject(status string) map[string]any {
 	if id == "" {
 		id = "resp_aiferry"
 	}
-	return map[string]any{"id": id, "object": "response", "created_at": c.created, "status": status, "model": c.model, "output": []any{c.responseOutputItem()}}
+	// 已申报的工具调用并入 response.output（按槽位顺序排在消息项之后）；
+	// 未申报的不出现，避免 response.created 的 output 提前暴露未成形调用。
+	output := []any{c.responseOutputItem()}
+	for _, tool := range c.sortedResponsesTools() {
+		if !tool.announced {
+			continue
+		}
+		output = append(output, map[string]any{
+			"id": tool.itemID, "type": "function_call", "status": "completed",
+			"call_id": tool.callID, "name": tool.name, "arguments": tool.finalizedArgs(),
+		})
+	}
+	return map[string]any{"id": id, "object": "response", "created_at": c.created, "status": status, "model": c.model, "output": output}
 }
 
 func sseDataPayload(line []byte) (payload []byte, done, valid bool) {

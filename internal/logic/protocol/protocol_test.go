@@ -541,3 +541,114 @@ func protocolStreamText(lines [][]byte) string {
 	}
 	return result.String()
 }
+
+// 生产事故回归（2026-10-15）：部分 Responses 上游把完整参数只放在
+// output_item.added 的 item.arguments 里、不随 function_call_arguments.delta
+// 流式下发；早期实现只转发工具名，客户端拿到空参数，DSH 校验直接报
+// missing required property "command"。参数必须从 added 事件补齐送达。
+func TestResponsesStreamArgsOnlyInItemAdded(t *testing.T) {
+	plan, _ := fallbackPlan(ChatCompletionsEndpoint)
+	converter := NewStreamConverter(plan)
+	added := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"pwsh","arguments":"{\"command\":\"dir\",\"description\":\"列目录\"}"}}`)))
+	if !strings.Contains(added, `{\"command\":\"dir\",\"description\":\"列目录\"}`) {
+		t.Fatalf("arguments carried by output_item.added must reach the client: %s", added)
+	}
+	if !strings.Contains(added, `"name":"pwsh"`) {
+		t.Fatalf("tool name missing: %s", added)
+	}
+	completed := protocolStreamText(converter.Transform([]byte("data: [DONE]\n")))
+	if !strings.Contains(completed, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("finish_reason should be tool_calls: %s", completed)
+	}
+	if got := strings.Count(added+completed, `\"command\"`); got != 1 {
+		t.Fatalf("arguments forwarded %d times, want once: %s%s", got, added, completed)
+	}
+}
+
+// 参数只出现在 function_call_arguments.done 的上游也必须送达；done 与累计值
+// 一致时不得重发（水位线幂等），上游重复 done 不会让参数翻倍。
+func TestResponsesStreamArgsOnlyInDone(t *testing.T) {
+	plan, _ := fallbackPlan(ChatCompletionsEndpoint)
+	converter := NewStreamConverter(plan)
+	name := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"read"}}`)))
+	if !strings.Contains(name, `"name":"read"`) {
+		t.Fatalf("tool name missing: %s", name)
+	}
+	done := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.function_call_arguments.done","output_index":1,"item_id":"fc_1","call_id":"call_1","arguments":"{\"file_path\":\"a.go\"}"}`)))
+	if !strings.Contains(done, `{\"file_path\":\"a.go\"}`) {
+		t.Fatalf("arguments carried by done must reach the client: %s", done)
+	}
+	repeat := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.function_call_arguments.done","output_index":1,"item_id":"fc_1","call_id":"call_1","arguments":"{\"file_path\":\"a.go\"}"}`)))
+	if strings.Contains(repeat, "file_path") {
+		t.Fatalf("identical done must not resend arguments: %s", repeat)
+	}
+}
+
+// 正常 delta 流式 + done 全量对账：拼接结果必须与上游全量一致且无重复；
+// 每条 delta 转发的尾部仍是它自己。
+func TestResponsesStreamNormalDeltasStayExact(t *testing.T) {
+	plan, _ := fallbackPlan(ChatCompletionsEndpoint)
+	converter := NewStreamConverter(plan)
+	converter.Transform([]byte(`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"pwsh"}}`))
+	first := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":"{\"command\""}`)))
+	second := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":":\"dir\"}"}`)))
+	done := protocolStreamText(converter.Transform([]byte(`data: {"type":"response.function_call_arguments.done","output_index":1,"item_id":"fc_1","call_id":"call_1","arguments":"{\"command\":\"dir\"}"}`)))
+	if !strings.Contains(first, `{\"command\"`) {
+		t.Fatalf("first delta fragment missing: %s", first)
+	}
+	if !strings.Contains(second, `:\"dir\"}`) {
+		t.Fatalf("second delta fragment missing: %s", second)
+	}
+	if done != "" {
+		t.Fatalf("done must add nothing when the accumulated value matches: %s", done)
+	}
+}
+
+// 客户端 Responses ← 上游 Chat：并行工具调用各占独立 output_index（消息项
+// 占 0，工具项从 1 起），参数分片完整携带 item_id/call_id（上游后续分片不
+// 带 id），收尾逐调用补 function_call_arguments.done 与 output_item.done。
+func TestChatStreamParallelToolCallsGetStableResponsesIdentity(t *testing.T) {
+	plan, _ := fallbackPlan(ResponsesEndpoint)
+	converter := NewStreamConverter(plan)
+	first := protocolStreamText(converter.Transform([]byte(`data: {"id":"chat_1","created":10,"model":"gpt-test","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"read","arguments":"{\"file_path\":\"a.go\""}}]}}]}`)))
+	second := protocolStreamText(converter.Transform([]byte(`data: {"id":"chat_1","created":10,"model":"gpt-test","choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","function":{"name":"read","arguments":"{\"file_path\":\"b.go\"}"}}]}}]}`)))
+	followup := protocolStreamText(converter.Transform([]byte(`data: {"id":"chat_1","created":10,"model":"gpt-test","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":",\"line\":1}"}}]}}]}`)))
+	if !strings.Contains(first, `"output_index":1`) || !strings.Contains(second, `"output_index":2`) {
+		t.Fatalf("parallel calls need distinct output slots: first=%s second=%s", first, second)
+	}
+	if !strings.Contains(followup, `"item_id":"fc_aiferry_1"`) || !strings.Contains(followup, `"call_id":"call_a"`) {
+		t.Fatalf("argument fragments must carry stable identity: %s", followup)
+	}
+	completed := protocolStreamText(converter.Transform([]byte("data: [DONE]\n")))
+	if got := strings.Count(completed, `"type":"response.function_call_arguments.done"`); got != 2 {
+		t.Fatalf("each call needs an arguments.done, got %d: %s", got, completed)
+	}
+	// output_item.done 的 item 与 response.completed 的 output 各出现一次
+	// （function_call_arguments.done 里是 item_id 字段，不会误匹配）。
+	if got := strings.Count(completed, `"id":"fc_aiferry_1"`); got != 2 {
+		t.Fatalf("call one needs item done + completed output, got %d: %s", got, completed)
+	}
+	for _, want := range []string{`\"file_path\":\"a.go\",\"line\":1}`, `\"file_path\":\"b.go\"}`} {
+		if !strings.Contains(completed, want) {
+			t.Fatalf("completed output missing arguments %s: %s", want, completed)
+		}
+	}
+}
+
+// 参数先到、名称后到（部分上游首片不带 function.name）：名称到达前参数只进
+// 缓冲、不提前申报；申报时一次性补发，不得丢失。
+func TestChatStreamArgsBeforeNameAreBuffered(t *testing.T) {
+	plan, _ := fallbackPlan(ResponsesEndpoint)
+	converter := NewStreamConverter(plan)
+	argsFirst := protocolStreamText(converter.Transform([]byte(`data: {"id":"chat_1","created":10,"model":"gpt-test","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"command\""}}]}}]}`)))
+	if strings.Contains(argsFirst, "response.output_item.added") {
+		t.Fatalf("must not announce before the name arrives: %s", argsFirst)
+	}
+	named := protocolStreamText(converter.Transform([]byte(`data: {"id":"chat_1","created":10,"model":"gpt-test","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_x","function":{"name":"pwsh","arguments":":\"dir\"}"}}]}}]}`)))
+	if !strings.Contains(named, `"name":"pwsh"`) {
+		t.Fatalf("announce missing: %s", named)
+	}
+	if !strings.Contains(named, `{\"command\":\"dir\"}`) {
+		t.Fatalf("buffered arguments must flush once announced: %s", named)
+	}
+}
