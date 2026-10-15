@@ -18,6 +18,12 @@ func chatToolsToResponses(value any) []any {
 			continue
 		}
 		converted := copyProtocolFields(function, "name", "description", "parameters", "strict")
+		// Chat 缺省为非严格模式，Responses 缺省却可能把 schema 规范化为
+		// 严格模式，导致可选字段也被要求填写。跨协议时显式保留源端语义；
+		// 客户端指定的 strict（包括 false）不覆盖，parameters 不作改写。
+		if _, exists := function["strict"]; !exists {
+			converted["strict"] = false
+		}
 		converted["type"] = "function"
 		result = append(result, converted)
 	}
