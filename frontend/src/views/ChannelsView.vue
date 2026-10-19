@@ -17,7 +17,7 @@ import ChannelTypeListPanel from '../components/ChannelTypeListPanel.vue'
 import { type ChannelTab, useChannelConfiguration } from '../composables/useChannelConfiguration'
 import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput, supportsOrganizationIdentity } from '../lib/channelForm'
 import { showError, showSuccess } from '../lib/error'
-import { expandModelMappingRows, sortDiscoveredModels, splitPublicModelNames } from '../lib/models'
+import { expandModelMappingRows, groupModelMappingRows, sortDiscoveredModels, splitPublicModelNames } from '../lib/models'
 import { closedWindowPayload, closedWindowsFromModels } from '../lib/time-window'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
@@ -354,9 +354,9 @@ async function discover(channel: Channel) {
       ...discoveredModels.value.filter((item) => item.selected).map((item) => item.name),
       ...[...restored.keys()],
     ]
-    modelMappings.value = channelModels
+    modelMappings.value = groupModelMappingRows(channelModels
       .filter((item) => item.enabled === 1 && item.publicName !== item.upstreamName)
-      .map((item) => ({ id: item.id, upstreamName: item.upstreamName, publicName: item.publicName }))
+      .map((item) => ({ id: item.id, upstreamName: item.upstreamName, publicName: item.publicName })))
     // 已配置的关闭时段随模型一起回填，保存时原样提交，未配过的模型不出现。
     closedWindows.value = closedWindowsFromModels(channelModels.filter((item) => item.enabled === 1))
   } catch (error) {

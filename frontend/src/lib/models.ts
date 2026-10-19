@@ -31,6 +31,17 @@ export function splitPublicModelNames(value: string) {
   return names
 }
 
+// 已保存的独立映射按上游归组，让同一上游的公开名在一个标签输入框内编辑。
+export function groupModelMappingRows(rows: Array<{ id: number; upstreamName: string; publicName: string }>) {
+  const groups = new Map<string, { id: number; upstreamName: string; publicName: string }>()
+  for (const row of rows) {
+    const existing = groups.get(row.upstreamName)
+    const publicName = splitPublicModelNames([existing?.publicName, row.publicName].filter(Boolean).join(',')).join(',')
+    groups.set(row.upstreamName, { ...row, id: existing?.id ?? row.id, publicName })
+  }
+  return [...groups.values()]
+}
+
 // expandModelMappingRows 把对话框里逐行填写的映射展开成提交用的映射关系：
 // 同一行的多个公开名各自生成一条「上游模型 → 公开名」关系，一个上游模型可批量挂多个名字。
 export function expandModelMappingRows(rows: Array<{ upstreamName: string; publicName: string }>) {

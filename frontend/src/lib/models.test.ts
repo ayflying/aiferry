@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChannelModel, DiscoveredModel } from '../api/types'
-import { enabledChannelModels, expandModelMappingRows, sortDiscoveredModels, splitPublicModelNames } from './models'
+import { enabledChannelModels, expandModelMappingRows, groupModelMappingRows, sortDiscoveredModels, splitPublicModelNames } from './models'
 
 describe('model lists', () => {
   it('sorts discovered models by name without mutating the response', () => {
@@ -27,6 +27,25 @@ describe('model lists', () => {
 })
 
 describe('model mapping public names', () => {
+  it('groups saved aliases for tag editing and preserves the expanded payload', () => {
+    const rows = [
+      { id: 1, upstreamName: 'upstream-a', publicName: 'alpha' },
+      { id: 2, upstreamName: 'upstream-b', publicName: 'beta' },
+      { id: 3, upstreamName: 'upstream-a', publicName: 'free' },
+    ]
+    const grouped = groupModelMappingRows(rows)
+    expect(grouped).toEqual([
+      { id: 1, upstreamName: 'upstream-a', publicName: 'alpha,free' },
+      { id: 2, upstreamName: 'upstream-b', publicName: 'beta' },
+    ])
+    expect(expandModelMappingRows(grouped)).toEqual([
+      { upstreamName: 'upstream-a', publicName: 'alpha' },
+      { upstreamName: 'upstream-a', publicName: 'free' },
+      { upstreamName: 'upstream-b', publicName: 'beta' },
+    ])
+    expect(rows[0]!.publicName).toBe('alpha')
+  })
+
   it('splits comma separated public names and drops blank or repeated parts', () => {
     expect(splitPublicModelNames(' space-bunny, free ，space-bunny ,, ')).toEqual(['space-bunny', 'free'])
     expect(splitPublicModelNames(' , ， ')).toEqual([])
