@@ -119,12 +119,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if err != nil {
 		return attemptResult{}, false, err
 	}
-	if plan.Converts() && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
-		// 协议转换会把 Responses 的 function_call 还原成 assistant 的 tool_calls，此时
-		// 客户端是否携带过思考内容已经不可知（Responses 用独立的 reasoning 输入项）。
-		// 转换后再补一次存档内容，让 Responses 客户端也能满足 thinking 模式上游的要求。
-		convertedBody = s.restoreReasoningContent(ctx, convertedBody, apiKeyID)
-	}
+	// 思考历史由客户端提供；不从 Redis 回填、不补空串、不改写思考字段名。
 	body, err := prepareRequestBody(plan.UpstreamEndpoint(), convertedBody, candidate.UpstreamName, advancedConfig)
 	if err != nil {
 		return attemptResult{}, false, err

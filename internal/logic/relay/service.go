@@ -158,12 +158,6 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	if endpoint == "/chat/completions" && isStream {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
-	if endpoint == "/chat/completions" {
-		// 客户端重建历史时只保留 role/content/tool_calls，会丢掉非标准的 reasoning_content，
-		// 而 DeepSeek/Kimi 等 thinking 模式上游要求发生过工具调用后必须原样回传。这里按
-		// tool_call id 补回本网关存档的思考内容，没有存档时保持原样。
-		body = s.restoreReasoningContent(ctx, body, key.Id)
-	}
 	candidates, err := s.routeWithPolicy(ctx, key, requestedModel)
 	if err != nil {
 		return err
@@ -267,10 +261,6 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 					s.maybeAutoDisable(ctx, settings, candidate, failedAttemptResult(result, streamTruncatedReason))
 				case success:
 					s.resilience.ClearAutoDisableFailures(ctx, candidate.ChannelCredentialID)
-					// 流式响应被客户端中断时不存档半截思考内容，避免下一轮回传出残缺的推理。
-					if !isStream || result.streamCompleted {
-						s.rememberReasoningContent(ctx, key.Id, result)
-					}
 					// 成功请求按上游响应速度加分：响应越快，模型健康分增长越多。
 					// 必须带上实际的 ChannelCredentialID，使成功加分与失败扣分落在同一组合上，
 					// 否则成功路径缺密钥会落到 (model, 0) 幽灵组合，与失败组合错配造成双计。
