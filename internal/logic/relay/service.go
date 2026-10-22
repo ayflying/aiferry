@@ -197,19 +197,33 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			g.Log().Warningf(ctx, "relay %s: model %s: every candidate was skipped before any upstream attempt, retrying once with combo cooldown ignored", clientIP, requestedModel)
 		}
 		for index := range candidates {
+			// 候选列表按优先级从高到低排列，最后一个候选是唯一无路可换的位置：只有它才在
+			// 并发额度占满时排队等待，其余候选一律立即切换到下一个候选——同优先级渠道会
+			// 先被轮完，全部占满后才轮到降低优先级的候选。
+			isLastCandidate := index == len(candidates)-1
 			for {
 				outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, key.UserId, key.Id, settings, excludedCredentials, sensitiveDataRestorer, attemptOptions{
 					ignoreComboCooldown: pass > 0,
 					// 只有最后一个候选才允许对 429 / 内容风控拦截退避重试：仍有候选可切换时
 					// 保持原有的「换个候选立刻重试」语义，不给上游额外放大限流压力。
-					throttleRetry:    index == len(candidates)-1,
-					riskControlRetry: index == len(candidates)-1,
+					throttleRetry:    isLastCandidate,
+					riskControlRetry: isLastCandidate,
+					// 并发额度占满时同样只有最后一跳排队：中间候选立即改投下一个候选，
+					// 避免把每个候选的 60 秒排队时间叠加到客户端延迟上。
+					concurrencyWaitWindow: candidateConcurrencyWaitWindow(isLastCandidate),
 				})
 				if outcome.concurrencyExhausted {
-					// 该渠道每把密钥的并发额度都占满，且等待窗口内没有腾出空位。
-					// 这是网关本地限流而非上游故障：不写用量、不参与渠道失败评分
-					// （默认禁用状态码含 429），直接以 429 让客户端稍后重试。
+					// 该渠道每把密钥的并发额度都占满。这是网关本地限流而非上游故障：
+					// 不写用量、不参与渠道失败评分（默认禁用状态码含 429）。
 					channelName := candidates[index].ChannelName
+					if !isLastCandidate {
+						// 还有别的候选渠道可用（同优先级优先，其次降低优先级）：立即改投，
+						// 并记下跳过原因供「零上游尝试」的 503 文案区分本地限流与冷却。
+						skipReasons[candidates[index].ChannelID] = outcome.skipReason
+						g.Log().Warningf(ctx, "relay %s: channel %s (#%d) key concurrency exhausted for model %s, failing over to the next candidate", clientIP, channelName, candidates[index].ChannelID, requestedModel)
+						break
+					}
+					// 最后一个候选已用完整等待窗口排过队，仍未腾出空位：以 429 让客户端稍后重试。
 					g.Log().Warningf(ctx, "relay %s: channel %s (#%d) key concurrency exhausted for model %s", clientIP, channelName, candidates[index].ChannelID, requestedModel)
 					return gerror.Wrapf(ErrChannelConcurrencyExhausted, "channel %s (#%d) key concurrency exhausted", channelName, candidates[index].ChannelID)
 				}

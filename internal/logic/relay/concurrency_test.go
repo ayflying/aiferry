@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -298,6 +299,59 @@ func TestAcquireKeySlotEnforcesLimitUnderConcurrency(t *testing.T) {
 		if value > 3 {
 			t.Fatalf("credential %d reached %d concurrent requests, limit is 3", credentialID, value)
 		}
+	}
+}
+
+// 并发额度占满后的换渠道策略：只有最后一个候选（已无同优先级或更低优先级渠道可换）
+// 才在该渠道排队等待，其余候选的等待窗口为 0——立即切换下一个候选。候选列表按优先级
+// 从高到低排列，因此「立即切换」会先轮完同优先级渠道，全部占满后才轮到降低优先级的渠道。
+func TestCandidateConcurrencyWaitWindowOnlyWaitsOnLastCandidate(t *testing.T) {
+	if got := candidateConcurrencyWaitWindow(true); got != keyConcurrencyWaitWindow {
+		t.Fatalf("last candidate wait window = %s, want %s", got, keyConcurrencyWaitWindow)
+	}
+	if got := candidateConcurrencyWaitWindow(false); got != 0 {
+		t.Fatalf("non-last candidate wait window = %s, want 0 so the request fails over immediately", got)
+	}
+}
+
+// 等待窗口为 0（还有别的候选可换）时不做任何排队：探测完该渠道全部已满密钥后立即返回
+// 并发耗尽错误，由 Handle 立刻改投下一个候选渠道，不占用客户端等待时间。
+func TestAcquireKeySlotWithZeroWaitWindowFailsOverImmediately(t *testing.T) {
+	slots := newKeySlots()
+	busyRelease, ok := slots.TryAcquire(1, 1, 1)
+	if !ok {
+		t.Fatal("credential 1 should be admitted first")
+	}
+	defer busyRelease()
+	picks := 0
+	pick := func(map[uint64]struct{}) (channel.RouteCredential, error) {
+		picks++
+		return credentialOf(1), nil
+	}
+	startedAt := time.Now()
+	_, _, err := acquireKeySlotWith(context.Background(), slots, 1, 1, 0, nil, pick)
+	if !errors.Is(err, ErrChannelConcurrencyExhausted) {
+		t.Fatalf("acquire() error = %v, want ErrChannelConcurrencyExhausted", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > 100*time.Millisecond {
+		t.Fatalf("zero wait window blocked for %s, want an immediate exhaustion", elapsed)
+	}
+	if picks == 0 {
+		t.Fatal("the saturated credential must be probed before failing over")
+	}
+}
+
+// 并发占满被跳过时的诊断原因必须可读，不能是空串，否则零尝试 503 文案会退化成「原因未知」。
+func TestConcurrencyExhaustedSkipReasonIsDiagnosable(t *testing.T) {
+	if strings.TrimSpace(concurrencyExhaustedSkipReason) == "" {
+		t.Fatal("concurrency exhausted skip reason must not be blank")
+	}
+	got := summarizeCandidateSkips(
+		[]Candidate{{ChannelID: 7, ChannelName: "主渠道"}},
+		map[uint64]string{7: concurrencyExhaustedSkipReason},
+	)
+	if !strings.Contains(got, concurrencyExhaustedSkipReason) {
+		t.Fatalf("summary = %q, want it to carry the local rate-limit reason", got)
 	}
 }
 

@@ -65,7 +65,7 @@ const promptCacheMode = computed({
     <div class="limit-field">
       <div class="section-caption">转发并发限制</div>
       <div class="setting-row">
-        <div><strong>每把密钥的并发上限</strong><span>同一时刻允许进行的转发请求数，0 表示不限制；额度按「渠道 × 密钥」独立计数，本渠道配 3 把密钥即 3 倍并发</span></div>
+        <div><strong>每把密钥的并发上限</strong><span>同一时刻允许进行的转发请求数，0 表示不限制；额度按「渠道 × 密钥」独立计数，本渠道配 3 把密钥即 3 倍并发。额度占满时自动切换其它候选渠道（同优先级优先，全部占满才降低优先级），全部候选都满才排队或返回 429</span></div>
         <el-input-number v-model="config.concurrencyLimit" :min="0" :max="1024" :step="1" controls-position="right" />
       </div>
     </div>

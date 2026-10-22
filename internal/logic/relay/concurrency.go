@@ -15,6 +15,24 @@ import (
 // 该窗口必须明显小于非流式上游超时（默认 600 秒），避免排队时间掩盖上游超时判定。
 const keyConcurrencyWaitWindow = 60 * time.Second
 
+// concurrencyExhaustedSkipReason 是候选渠道因「全部密钥并发额度占满」被跳过的诊断原因，
+// 用于「零上游尝试」时的 503 文案，避免把本地限流误写成组合冷却或凭证不可用。
+const concurrencyExhaustedSkipReason = "该渠道全部密钥的并发额度已占满，排队窗口内未腾出空位"
+
+// candidateConcurrencyWaitWindow 返回一个候选渠道在「全部密钥并发额度占满」时允许在该
+// 渠道排队的时长。只有最后一个候选才等满等待窗口：它已无同优先级或更低优先级的渠道可换，
+// 保留「稍后就有空位」的自愈机会。其余候选返回 0，立即切换到下一个候选——候选列表按
+// 优先级从高到低排列，因此会先轮完同优先级渠道，全部占满后才轮到降低优先级的渠道。
+//
+// 逐个候选都排满等待窗口会把时间叠加（N 个候选最长 N×60 秒），客户端往往先于上游超时断开，
+// 因此「并发满即换渠道、只在最后一跳排队」是跨候选兜底与客户端延迟之间的折中。
+func candidateConcurrencyWaitWindow(isLastCandidate bool) time.Duration {
+	if isLastCandidate {
+		return keyConcurrencyWaitWindow
+	}
+	return 0
+}
+
 // keySlotIdleTTL 与 keySlotSweepInterval 控制长期空闲的「渠道 × 密钥」计数项回收。
 const (
 	keySlotIdleTTL       = 10 * time.Minute
@@ -112,10 +130,12 @@ type credentialPicker func(excluded map[uint64]struct{}) (channel.RouteCredentia
 
 // acquireKeySlot 为一次上游尝试占用「渠道 × 密钥」的并发额度并返回释放函数。
 // 未配置并发限制（limit<=0）时只做挑选，不占用额度，行为与历史完全一致。
+// waitWindow 是额度全部占满时在本渠道排队的时长，由调用方按候选位置决定：中间候选为 0
+// （并发满即切换下一个候选），最后一个候选为 keyConcurrencyWaitWindow。
 // ignoreComboCooldown 为真时不做「模型 × 密钥」组合冷却过滤：渠道层在 modelID 为 0 时
 // 会跳过该过滤（见 channel.SelectCredential），仅供「本次请求的全部候选都在组合冷却中」
 // 的兜底轮使用，以免为这一罕见场景扩宽渠道服务接口。
-func (s *sRelay) acquireKeySlot(ctx context.Context, apiKeyID uint64, candidate Candidate, excluded map[uint64]struct{}, ignoreComboCooldown bool) (channel.RouteCredential, func(), error) {
+func (s *sRelay) acquireKeySlot(ctx context.Context, apiKeyID uint64, candidate Candidate, excluded map[uint64]struct{}, ignoreComboCooldown bool, waitWindow time.Duration) (channel.RouteCredential, func(), error) {
 	pick := func(pickExcluded map[uint64]struct{}) (channel.RouteCredential, error) {
 		modelID := candidate.ChannelModelID
 		if ignoreComboCooldown {
@@ -123,12 +143,14 @@ func (s *sRelay) acquireKeySlot(ctx context.Context, apiKeyID uint64, candidate 
 		}
 		return s.channels.SelectCredential(ctx, apiKeyID, candidate.ChannelID, modelID, pickExcluded)
 	}
-	return acquireKeySlotWith(ctx, s.slots, candidate.ChannelID, candidate.ConcurrencyLimit, keyConcurrencyWaitWindow, excluded, pick)
+	return acquireKeySlotWith(ctx, s.slots, candidate.ChannelID, candidate.ConcurrencyLimit, waitWindow, excluded, pick)
 }
 
 // acquireKeySlotWith 是 acquireKeySlot 的可测核心。额度足够时立即返回；同渠道其它密钥
 // 还有空闲额度时改用它（不占用已满密钥的等待窗口）；全部占满后排队等待，任意密钥释放
 // 额度即重新挑选；等待超过 waitWindow 返回 ErrChannelConcurrencyExhausted。
+// waitWindow<=0 表示完全不排队：遍历完该渠道所有已满密钥后立即返回耗尽错误，
+// 供「还有别的候选渠道可换」时快速切换使用。
 func acquireKeySlotWith(ctx context.Context, slots *keySlots, channelID uint64, limit int, waitWindow time.Duration, excluded map[uint64]struct{}, pick credentialPicker) (channel.RouteCredential, func(), error) {
 	if slots == nil || limit <= 0 {
 		credential, err := pick(excluded)

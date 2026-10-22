@@ -50,13 +50,19 @@ const candidateAttemptPasses = 2
 // 错开突发的配额窗口，又不会让已经等过的客户端明显变慢。
 const candidateThrottleRetryDelay = 1500 * time.Millisecond
 
-// attemptOptions 控制单次候选尝试的可选行为。两个开关都只服务「已经无路可走」的兜底场景，
-// 正常的多候选切换流程一律使用零值。
+// attemptOptions 控制单次候选尝试的可选行为。throttleRetry 与 riskControlRetry 两个开关
+// 都只服务「已经无路可走」的兜底场景，正常的多候选切换流程一律使用零值；
+// concurrencyWaitWindow 则由 Handle 按候选位置为每个候选分别设置。
 type attemptOptions struct {
 	// ignoreComboCooldown 为真时不做「模型 × 密钥」组合冷却过滤。两个来源：其一，「本次
 	// 请求的全部候选都在组合冷却中、零上游尝试就会直接失败」的兜底轮；其二，同候选退避
 	// 重试一旦启动，后续挑选必须绕过组合冷却（见 attemptChannel 内的 bypassComboCooldown）。
 	ignoreComboCooldown bool
+	// concurrencyWaitWindow 是本候选渠道的全部密钥并发额度占满时，允许在该渠道排队等待的
+	// 时长。只有最后一个候选传 keyConcurrencyWaitWindow（已无同优先级或低优先级渠道可换，
+	// 给「稍后腾出空位」一次自愈机会），其余候选传 0：立即切换到下一个候选，避免把每个
+	// 候选的排队时间叠加到客户端延迟上。
+	concurrencyWaitWindow time.Duration
 	// throttleRetry 为真时允许对 429 在同一候选同一密钥上退避重试一次。仅由最后一个候选
 	// 携带：上游明确建议稍后重试时给最后一条路一次自愈机会；仍有候选可切换时不额外放大限流。
 	throttleRetry bool
@@ -105,7 +111,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 	for {
 		// 占额度必须与选密钥一起做：同渠道其它密钥还有空位时直接换密钥，
 		// 全部占满才排队等待，避免把同一个密钥的等待强加给整个渠道。
-		credential, release, err := s.acquireKeySlot(ctx, apiKeyID, candidate, excluded, bypassComboCooldown)
+		credential, release, err := s.acquireKeySlot(ctx, apiKeyID, candidate, excluded, bypassComboCooldown, options.concurrencyWaitWindow)
 		if err != nil {
 			// 上游以 429 限流（例如 OpenRouter 共享池的「请稍后重试」），或以内容风控的
 			// 概率性拦截拒绝（如 workbuddy 渠道的 11128「request illegal」，上游 displayTips
@@ -124,6 +130,9 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			}
 			if errors.Is(err, ErrChannelConcurrencyExhausted) {
 				last.concurrencyExhausted = true
+				// 该渠道从未发出上游请求，跳过原因按本地限流记录，供 Handle 组装
+				// 「零上游尝试」的诊断文案时区分「并发占满」与冷却/凭证不可用。
+				last.skipReason = concurrencyExhaustedSkipReason
 				last.result = attemptResult{status: http.StatusTooManyRequests, errorMessage: err.Error(), attemptFlow: last.flow}
 				return last
 			}
