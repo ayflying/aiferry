@@ -32,6 +32,21 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	primary := s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled, settings)
 	primaryStartedAt := time.Now()
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
+	// WorkBuddy 渠道指纹拦截（code 11128）的一次性自愈重试：参考实现实测表明
+	// 该拦截族除「消息开头」外还会命中系统提示内部的整段精确子串，仅加中性
+	// 首行不足以通过。这里沿用参考项目 perturbChannelFingerprints 的做法，在
+	// system/assistant 文本的句读边界插入零宽空格后重发一次；语义不变、对被
+	// 检内容不可见。仅在尚未向客户端写出任何字节、且首跳确为 11128 时触发，
+	// 每个请求最多一次，避免把确定性失败放大成多次上游调用。
+	if attemptErr == nil && !handled && !result.wroteBytes &&
+		channel.IsWorkBuddyGateFailure(candidate.ChannelType, result.status, result.body) {
+		if perturbed, ok := channel.PerturbWorkBuddyBody(originalBody); ok {
+			retryResult, retryHandled, retryErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, perturbed, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
+			retryResult.precedingFlow = append(retryResult.precedingFlow, newAttemptFlowStep(candidate.ChannelName, result))
+			retryResult.latency += result.latency
+			result, handled, attemptErr = retryResult, retryHandled, retryErr
+		}
+	}
 	// 首跳耗时先记在结果上：协议回退时它会成为调用流程步骤的耗时快照；
 	// 不回退时调用方会用整次尝试的耗时覆盖它，不影响既有语义。
 	result.latency = time.Since(primaryStartedAt)

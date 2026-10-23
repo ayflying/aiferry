@@ -7,7 +7,7 @@ WorkBuddy 消息兼容代码参考并移植自：
 - 仓库：https://github.com/dingminhua/dsh-connect-workbuddy
 - 固定提交：`4cdba8a37b277a465b754328737f580254552d34`
 - 源文件：`src/upstream.ts`
-- 对应函数：`ensureSystemHead`、`neutralizeChannelFingerprints`、`isUnapprovedChannelOpening`，以及 `prepareChatBody` 的 developer 角色规范化部分。
+- 对应函数：`ensureSystemHead`、`neutralizeChannelFingerprints`、`isUnapprovedChannelOpening`、`perturbChannelFingerprints`，以及 `prepareChatBody` 的 developer 角色规范化部分。
 - 本项目实现：`internal/logic/channel/workbuddy_body.go`
 - 更新与差异说明：`docs/workbuddy-compatibility.md`
 
