@@ -124,6 +124,12 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if err != nil {
 		return attemptResult{}, false, err
 	}
+	if candidate.ChannelType == "workbuddy" && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
+		body, err = channel.ApplyWorkBuddyBody(body)
+		if err != nil {
+			return attemptResult{}, false, err
+		}
+	}
 	body, err = applyPromptCachePolicy(body, candidate, userID, advancedConfig)
 	if err != nil {
 		return attemptResult{}, false, err
