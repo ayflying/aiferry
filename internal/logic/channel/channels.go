@@ -29,7 +29,14 @@ func (s *sChannel) List(ctx context.Context) ([]View, error) {
 
 func (s *sChannel) listFromDatabase(ctx context.Context, userID uint64) ([]View, error) {
 	var rows []entity.Channels
-	if err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().CreatedByUserId, userID).OrderDesc(dao.Channels.Columns().Priority).OrderDesc(dao.Channels.Columns().Id).Scan(&rows); err != nil {
+	// 渠道列表按「优先级降序 → 权重降序 → ID 降序」展示：优先级决定路由梯队，排在前面的
+	// 渠道先被路由尝试；同一优先级内权重大者更靠前，与加权路由的语义一致；ID 只作为权重
+	// 相同时的稳定兜底，避免刷新列表时顺序抖动。前端渠道表格直接渲染该顺序，不另做排序。
+	if err := dao.Channels.Ctx(ctx).Where(dao.Channels.Columns().CreatedByUserId, userID).
+		OrderDesc(dao.Channels.Columns().Priority).
+		OrderDesc(dao.Channels.Columns().Weight).
+		OrderDesc(dao.Channels.Columns().Id).
+		Scan(&rows); err != nil {
 		return nil, gerror.Wrap(err, "list channels")
 	}
 	views := make([]View, 0, len(rows))
