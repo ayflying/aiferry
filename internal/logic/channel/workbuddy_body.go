@@ -81,27 +81,32 @@ func ApplyWorkBuddyBody(body []byte) ([]byte, error) {
 
 // workBuddyZeroWidthSpace 是参考实现用来打断「精确子串」指纹的不可见字符
 // （U+200B ZERO WIDTH SPACE）：渲染为空、模型照常阅读，但让上游的整段文本
-// 比对不再命中。仅在上游已用 11128 拒绝后的一次性重试里使用。
+// 比对不再命中。0.6.25 起随首跳扰动对每个请求执行。
 const workBuddyZeroWidthSpace = "\u200b"
 
-// workBuddyWordBreak 匹配「首字母大写的词 + 空白 + 首字母大写的词」，
-// 对应参考实现的 WORD_INTERNAL_BREAK（Go 正则不支持前瞻，因此把后半词
-// 一并吃进匹配再原样写回）。只拆专有名词，不碰普通行文。
-var workBuddyWordBreak = regexp.MustCompile(`([A-Z][A-Za-z0-9]*)(\s+)([A-Z][A-Za-z0-9]*)`)
+// workBuddyWordChain 匹配「首字母大写的词」的连续链（如 DeepSeek Harness Web
+// GUI），对应参考实现的 WORD_INTERNAL_BREAK。必须整链匹配再统一打断：若逐对
+// 匹配（Harness Web / Web GUI），相邻两对共享同一个词，全局替换不重叠，一次
+// 只会落第一对，剩余边界要等下一次执行才补插，幂等即被破坏；链内打断后零宽
+// 空格切断 \s+，链在第二次执行时不再成立，天然幂等。
+var workBuddyWordChain = regexp.MustCompile(`[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*)+`)
 
 var (
 	workBuddySentenceBreak = regexp.MustCompile(`([.!?])(\s+)`)
 	workBuddyClauseBreak   = regexp.MustCompile(`([,;])(\s+)`)
-	workBuddyCJKPunct      = regexp.MustCompile(`([。！？])`)
+	// CJK 句号规则本身不带“空白必须干净”的条件（标点后可能直接跟文字），
+	// 因此显式要求后继不是零宽空格（或已是行尾），重复执行才不会叠加。
+	workBuddyCJKPunct = regexp.MustCompile(`([。！？])([^\x{200b}]|$)`)
 )
 
 // PerturbWorkBuddyBody 按参考实现 perturbChannelFingerprints 的同一规则，在
 // system/assistant 文本的句读边界插入零宽空格，让上游按精确子串判定的渠道
-// 指纹不再命中；语义不变、对用户不可见。返回 false 表示没有可改动的内容
-// （例如已扰动过），调用方不应为此多花一次上游请求。
+// 指纹不再命中；语义不变、对用户不可见。返回 false 表示没有可改动的内容，
+// 调用方不应为此多花一次上游请求。
 //
-// 与参考实现一致：只在 11128 拒绝之后作为最后手段调用，正常请求不加扰动；
-// 幂等（已含零宽空格的文本跳过），所以重试不会叠加。
+// 0.6.25 起首跳即调用（先于任何上游请求），不再等 11128 拒绝后补救：带指纹
+// 的原始体首发必被拒，且该拒绝会触发上游分钟级拦截窗口（2026-10-26 生产
+// 实证）。幂等（已含零宽空格的边界不叠加），重复执行安全。
 func PerturbWorkBuddyBody(body []byte) ([]byte, bool) {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -151,14 +156,45 @@ func IsWorkBuddyGateFailure(channelType string, status int, body []byte) bool {
 	return bytes.Contains(body, []byte(`"code":11128`)) || bytes.Contains(body, []byte(`"code": 11128`))
 }
 
+// workBuddyIdentityClause 匹配 agent 提示开场身份从句（对应参考实现 5.11.0
+// 的 IDENTITY_CLAUSE）。上游自 2026-10 起按大小写不敏感的整段子串拦截，
+// 其中 “You are a coding agent powered by the <model> model.” 一句没有相邻
+// 大写词对、没有句中逗号、终结句点落在指纹之外——稀疏扰动的全部规则对它
+// 零命中（0.6.25 生产实证 afreq_862d819d：三发扰动体仍全部 11128
+// “request illegal”）。模型名可变，因此只匹配到 “powered by” 为止，可变
+// 尾部交给从句内处处打断兜底。
+var workBuddyIdentityClause = regexp.MustCompile(`(?i)(you)(\s+are\s+(?:(?:an?\s+)?[\w-]*\s*agent\s+powered\s+by|interacting\s+with\s+the\s+user\s+through\s+the\s+deepseek\s+harness))`)
+
+// workBuddyWhitespace 匹配从句内的空白串；断点插在每个空白串之后，保留
+// 原有间距，阅读与分词看到的词序不变。
+var workBuddyWhitespace = regexp.MustCompile(`(\s+)`)
+
+// breakWorkBuddyIdentityClauses 在身份从句内部的每个词边界插入零宽空格。
+// 上游指纹是子串匹配且无从得知它登记的是从句的哪一段：只打断一处仅能击溃
+// 从该处开始的指纹，从句内处处打断则任何端点的指纹都无法完整命中。幂等：
+// 插入的 U+200B 不属于 \s，已打断的从句不再被匹配，重复执行不叠加。
+func breakWorkBuddyIdentityClauses(text string) string {
+	return workBuddyIdentityClause.ReplaceAllStringFunc(text, func(clause string) string {
+		return workBuddyWhitespace.ReplaceAllString(clause, "$1"+workBuddyZeroWidthSpace)
+	})
+}
+
 func workBuddyPerturbText(text string) (string, bool) {
-	if text == "" || strings.Contains(text, workBuddyZeroWidthSpace) {
+	if text == "" {
 		return text, false
 	}
-	next := workBuddySentenceBreak.ReplaceAllString(text, "$1"+workBuddyZeroWidthSpace+"$2")
-	next = workBuddyCJKPunct.ReplaceAllString(next, "$1"+workBuddyZeroWidthSpace)
+	// 身份从句打断必须先于稀疏扰动：稀疏会在 “DeepSeek Harness” 等词间
+	// 插入零宽空格，而从句正则的 \s 不认零宽空格，先稀疏会让从句匹配
+	// 失败，上游可能登记的前缀指纹（… through the DeepSeek …）继续完整。
+	next := breakWorkBuddyIdentityClauses(text)
+	// 稀疏扰动的每条规则都要求命中点紧邻空白，已插入的零宽空格会让该
+	// 边界自然失配，因此在含零宽空格的文本上继续执行也保持幂等。
+	next = workBuddySentenceBreak.ReplaceAllString(next, "$1"+workBuddyZeroWidthSpace+"$2")
+	next = workBuddyCJKPunct.ReplaceAllString(next, "$1"+workBuddyZeroWidthSpace+"$2")
 	next = workBuddyClauseBreak.ReplaceAllString(next, "$1"+workBuddyZeroWidthSpace+"$2")
-	next = workBuddyWordBreak.ReplaceAllString(next, "$1"+workBuddyZeroWidthSpace+"$2$3")
+	next = workBuddyWordChain.ReplaceAllStringFunc(next, func(chain string) string {
+		return workBuddyWhitespace.ReplaceAllString(chain, "$1"+workBuddyZeroWidthSpace)
+	})
 	if next == text {
 		return text, false
 	}

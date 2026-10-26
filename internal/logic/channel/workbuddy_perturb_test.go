@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+// quoteJSON 把字符串编码为 JSON 字符串字面量（含引号），供用例内联拼装报文。
+func quoteJSON(s string) string {
+	encoded, _ := json.Marshal(s)
+	return string(encoded)
+}
+
 func TestPerturbWorkBuddyBody(t *testing.T) {
 	body := []byte(`{"messages":[{"role":"system","content":"You are an AI agent powered by DeepSeek Harness. 规则。保留"},{"role":"assistant","content":[{"type":"text","text":"Answer. Keep"}]},{"role":"user","content":"你好。请回答"}],"tools":[{"type":"function"}]}`)
 	got, changed := PerturbWorkBuddyBody(body)
@@ -30,8 +36,8 @@ func TestPerturbWorkBuddyBody(t *testing.T) {
 	}
 	var system string
 	_ = json.Unmarshal(msgs[0]["content"], &system)
-	if !strings.Contains(system, "DeepSeek\u200b Harness") {
-		t.Fatalf("应在专有名词内部插入零宽空格: %q", system)
+	if strings.Contains(system, "DeepSeek Harness") {
+		t.Fatalf("DeepSeek 与 Harness 之间必须插入零宽空格: %q", system)
 	}
 	if strings.ReplaceAll(strings.ReplaceAll(system, "\u200b", ""), "  ", " ") == "" {
 		t.Fatal("去掉零宽空格后语义必须保持")
@@ -78,11 +84,102 @@ func TestWorkBuddyNeutralizeThenPerturb(t *testing.T) {
 	if !strings.Contains(system, "helpful assistant") {
 		t.Fatalf("应包含中性首行前缀: %q", system)
 	}
-	if !strings.Contains(system, "DeepSeek\u200b Harness") {
-		t.Fatalf("应在专有名词内部插入零宽空格: %q", system)
+	if strings.Contains(system, "DeepSeek Harness") {
+		t.Fatalf("DeepSeek 与 Harness 之间必须插入零宽空格: %q", system)
 	}
 	if again, ok := PerturbWorkBuddyBody(perturbed); ok || !bytes.Equal(again, perturbed) {
 		t.Fatal("组合变换必须幂等")
+	}
+}
+
+// 0.6.26 生产实证（afreq_862d819d）：「You are a coding agent powered by the
+// hy3 model.」没有相邻大写词对、没有句中逗号、句点落在指纹之外，稀疏扰动的
+// 全部规则对它零命中，三发扰动体仍被 11128 拒绝。身份从句必须在从句内部
+// 每个词边界打断；模型名之后的可变尾部不在匹配范围内，保持原样。
+func TestWorkBuddyIdentityClauseBreak(t *testing.T) {
+	const z = "\u200b"
+	cases := []struct {
+		name  string
+		text  string
+		want  string
+		plain string
+	}{
+		{
+			// 从句打断把零宽空格插在每个空白之后；“the hy3 model.” 是
+			// 可变尾部，不在匹配范围内，保持原样。
+			name:  "powered by 从句",
+			text:  "You are a coding agent powered by the hy3 model.",
+			want:  "You " + z + "are " + z + "a " + z + "coding " + z + "agent " + z + "powered " + z + "by the hy3 model.",
+			plain: "You are a coding agent powered by the hy3 model.",
+		},
+		{
+			// (?i) 大小写不敏感；从句在 “Harness” 处结束，其后的 Web GUI
+			// 交给稀疏扰动的专有名词规则。
+			name:  "interacting 从句大小写不敏感",
+			text:  "Please. You are interacting with the user through the DeepSeek Harness Web GUI.",
+			want:  "You " + z + "are " + z + "interacting " + z + "with " + z + "the " + z + "user " + z + "through " + z + "the " + z + "DeepSeek " + z + "Harness",
+			plain: "Please. You are interacting with the user through the DeepSeek Harness Web GUI.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"messages":[{"role":"system","content":` + quoteJSON(tc.text) + `}]}`)
+			got, changed := PerturbWorkBuddyBody(body)
+			if !changed {
+				t.Fatal("身份从句必须被打断")
+			}
+			var out struct {
+				Messages []struct {
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(got, &out); err != nil {
+				t.Fatal(err)
+			}
+			content := out.Messages[0].Content
+			if !strings.Contains(content, tc.want) {
+				t.Fatalf("打断位置不符:\n got  %q\n want(含) %q", content, tc.want)
+			}
+			if stripped := strings.ReplaceAll(content, z, ""); stripped != tc.plain {
+				t.Fatalf("去掉零宽空格后必须还原原文: %q", stripped)
+			}
+			if again, ok := PerturbWorkBuddyBody(got); ok || !bytes.Equal(again, got) {
+				t.Fatal("身份从句打断必须幂等")
+			}
+		})
+	}
+}
+
+// 身份从句打断与稀疏扰动的叠加：先逐词打断从句，稀疏扰动再补句读与
+// 专有名词边界；两步各自幂等，叠加后整体幂等。
+func TestWorkBuddyIdentityClauseBreakAfterSparse(t *testing.T) {
+	const z = "\u200b"
+	text := "You are a coding agent powered by the hy3 model. DeepSeek Harness 规则。"
+	body := []byte(`{"messages":[{"role":"system","content":` + quoteJSON(text) + `}]}`)
+	got, changed := PerturbWorkBuddyBody(body)
+	if !changed {
+		t.Fatal("应同时执行从句打断与稀疏扰动")
+	}
+	var out struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(got, &out); err != nil {
+		t.Fatal(err)
+	}
+	system := out.Messages[0].Content
+	if strings.Contains(system, "DeepSeek Harness") {
+		t.Fatalf("DeepSeek 与 Harness 之间必须有零宽空格: %q", system)
+	}
+	if !strings.Contains(system, "You "+z+"are "+z+"a "+z+"coding") {
+		t.Fatalf("身份从句应被逐词打断: %q", system)
+	}
+	if stripped := strings.ReplaceAll(system, z, ""); stripped != text {
+		t.Fatalf("去掉零宽空格后必须还原原文: %q", stripped)
+	}
+	if again, ok := PerturbWorkBuddyBody(got); ok || !bytes.Equal(again, got) {
+		t.Fatal("叠加变换必须幂等")
 	}
 }
 
