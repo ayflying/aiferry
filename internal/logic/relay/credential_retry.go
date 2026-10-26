@@ -221,7 +221,7 @@ func sameCandidateRetryDelay(options attemptOptions, retries int, last channelAt
 	if last.candidate.ChannelCredentialID <= 0 || ctxErr != nil {
 		return 0, false
 	}
-	if options.throttleRetry && last.result.status == http.StatusTooManyRequests {
+	if options.throttleRetry && last.result.status == http.StatusTooManyRequests && !isQuotaExhaustedResult(last.result) {
 		if retries == 0 {
 			return candidateThrottleRetryDelay, true
 		}
