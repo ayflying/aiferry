@@ -28,9 +28,8 @@ func reasoningFromContainer(container gjson.Result) (string, string) {
 	return "", ""
 }
 
-// reasoningCapture 从上游 Chat Completions 响应里累积思考内容与工具调用 id。
-// 流式场景必须在响应改写（normalizeSSELine）之前观察：渠道开启 ReasoningToContent 时，
-// 改写会把 reasoning_content 合并进 content 并删除原字段。
+// reasoningCapture 从上游 Chat Completions 响应里累积思考内容与工具调用 id，
+// 仅用于报文记录（payload log），不参与任何请求回填或响应改写。
 type reasoningCapture struct {
 	endpoint  string
 	reasoning strings.Builder

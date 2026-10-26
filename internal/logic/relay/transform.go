@@ -141,20 +141,18 @@ func joinSystemPrompt(channelPrompt, userPrompt string) string {
 	return channelPrompt + "\n\n" + userPrompt
 }
 
+// normalizeResponseBody 只补齐 OpenAI 响应元数据（model/created/object），
+// 对 choices 里的正文、思考与工具字段一律原样保留：所有模型共用这一条
+// 透传路径，网关不搬移、不包裹、不删除任何响应内容字段。
 func normalizeResponseBody(endpoint string, body []byte, upstreamModel string, config channel.AdvancedConfig) []byte {
-	if !config.ForceOpenAIFormat && !config.ReasoningToContent {
+	if !config.ForceOpenAIFormat {
 		return body
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body
 	}
-	if config.ForceOpenAIFormat {
-		applyOpenAIResponseMetadata(endpoint, payload, upstreamModel)
-	}
-	if config.ReasoningToContent {
-		moveReasoningToContent(payload)
-	}
+	applyOpenAIResponseMetadata(endpoint, payload, upstreamModel)
 	result, err := json.Marshal(payload)
 	if err != nil {
 		return body
@@ -163,7 +161,7 @@ func normalizeResponseBody(endpoint string, body []byte, upstreamModel string, c
 }
 
 func normalizeSSELine(endpoint string, line []byte, upstreamModel string, config channel.AdvancedConfig) []byte {
-	if !config.ForceOpenAIFormat && !config.ReasoningToContent {
+	if !config.ForceOpenAIFormat {
 		return line
 	}
 	text := strings.TrimSpace(string(line))
@@ -198,40 +196,6 @@ func applyOpenAIResponseMetadata(endpoint string, payload map[string]any, upstre
 		payload["object"] = "response"
 	case "/embeddings":
 		payload["object"] = "list"
-	}
-}
-
-func moveReasoningToContent(payload map[string]any) {
-	choices, ok := payload["choices"].([]any)
-	if !ok {
-		return
-	}
-	for _, value := range choices {
-		choice, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-		for _, key := range []string{"message", "delta"} {
-			container, ok := choice[key].(map[string]any)
-			if !ok {
-				continue
-			}
-			reasoning, ok := container["reasoning_content"].(string)
-			if !ok || reasoning == "" {
-				continue
-			}
-			content, exists := container["content"]
-			if exists {
-				var text bool
-				content, text = content.(string)
-				if !text {
-					continue
-				}
-			}
-			text, _ := content.(string)
-			container["content"] = "<think>" + reasoning + "</think>" + text
-			delete(container, "reasoning_content")
-		}
 	}
 }
 

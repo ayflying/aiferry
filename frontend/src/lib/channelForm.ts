@@ -4,7 +4,6 @@ export function createDefaultChannelAdvancedConfig(): ChannelAdvancedConfig {
   return {
     backupBaseUrls: [],
     forceOpenAIFormat: false,
-    reasoningToContent: false,
     passthroughRequestBody: false,
     passthroughPromptCache: false,
     promptCacheMode: '',

@@ -332,41 +332,27 @@ func TestPrepareRequestBodyAllowsConfiguredFieldsAndSystemPromptAppend(t *testin
 	}
 }
 
-func TestNormalizeResponseMovesReasoningIntoThinkContent(t *testing.T) {
+// 锁定「响应一律原样透传」的口径：即使开启 ForceOpenAIFormat（只补元数据），
+// 正文、reasoning_content 与多模态内容块都不得被搬移、包裹或删除。
+func TestNormalizeResponseKeepsContentUntouched(t *testing.T) {
 	config := channel.DefaultAdvancedConfig()
-	config.ReasoningToContent = true
 	config.ForceOpenAIFormat = true
-	body := normalizeResponseBody("/chat/completions", []byte(`{"choices":[{"message":{"reasoning_content":"先思考","content":"回答"}}]}`), "upstream-model", config)
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatal(err)
-	}
-	choice := payload["choices"].([]any)[0].(map[string]any)
-	message := choice["message"].(map[string]any)
-	if message["content"] != "<think>先思考</think>回答" {
-		t.Fatalf("unexpected normalized content: %#v", message)
-	}
-	if _, ok := message["reasoning_content"]; ok || payload["object"] != "chat.completion" {
-		t.Fatalf("response was not normalized: %#v", payload)
-	}
-}
-
-func TestNormalizeResponseKeepsMultimodalContent(t *testing.T) {
-	config := channel.DefaultAdvancedConfig()
-	config.ReasoningToContent = true
 	body := normalizeResponseBody("/chat/completions", []byte(`{"choices":[{"message":{"reasoning_content":"先思考","content":[{"type":"text","text":"回答"}]}}]}`), "upstream-model", config)
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
 	}
+	if payload["object"] != "chat.completion" {
+		t.Fatalf("response metadata was not applied: %#v", payload)
+	}
 	choice := payload["choices"].([]any)[0].(map[string]any)
 	message := choice["message"].(map[string]any)
-	if _, ok := message["reasoning_content"]; !ok {
-		t.Fatalf("reasoning content should stay with multimodal content: %#v", message)
+	if message["reasoning_content"] != "先思考" {
+		t.Fatalf("reasoning content must stay untouched: %#v", message)
 	}
 	content, ok := message["content"].([]any)
 	if !ok || len(content) != 1 {
-		t.Fatalf("multimodal content should not be replaced: %#v", message)
+		t.Fatalf("content must not be rewritten: %#v", message)
 	}
 }
 

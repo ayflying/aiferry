@@ -45,10 +45,6 @@ const promptCacheMode = computed({
         <el-switch v-model="config.forceOpenAIFormat" />
       </div>
       <div class="setting-row">
-        <div><strong>思维到内容</strong><span>将 reasoning_content 转为 content 中的 &lt;think&gt; 标签</span></div>
-        <el-switch v-model="config.reasoningToContent" />
-      </div>
-      <div class="setting-row">
         <div><strong>透传请求体</strong><span>默认关闭，仅转发已支持字段；下方字段开关仍优先执行</span></div>
         <el-switch v-model="config.passthroughRequestBody" />
       </div>

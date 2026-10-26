@@ -467,8 +467,9 @@ func TestResponsesToolContinuationToChatRestoresToolCalls(t *testing.T) {
 	if actual := gjson.GetBytes(body, "messages.1.content.0.text").String(); actual != "我并行查一下。" {
 		t.Fatalf("assistant content = %q", actual)
 	}
-	if actual := gjson.GetBytes(body, "messages.1.reasoning_content").String(); actual != "需要先查两个城市" {
-		t.Fatalf("reasoning_content = %q", actual)
+	// 思考历史不做任何加工：reasoning 输入项转换后被丢弃，消息上不出现思考字段。
+	if gjson.GetBytes(body, "messages.1.reasoning_content").Exists() {
+		t.Fatalf("reasoning_content should be dropped, body=%s", body)
 	}
 	if actual := gjson.GetBytes(body, "messages.1.tool_calls.#").Int(); actual != 2 {
 		t.Fatalf("tool_calls count = %d, body=%s", actual, body)

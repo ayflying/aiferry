@@ -11,7 +11,6 @@ export interface CostQueryConfig {
 export interface ChannelAdvancedConfig {
   backupBaseUrls: string[]
   forceOpenAIFormat: boolean
-  reasoningToContent: boolean
   passthroughRequestBody: boolean
   passthroughPromptCache: boolean
   // promptCacheMode 决定该渠道如何处置请求体里的提示缓存字段：'stable'（缺省）

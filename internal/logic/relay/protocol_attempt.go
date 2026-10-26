@@ -221,8 +221,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		if forcedStreamAggregate {
 			responseBody = aggregateChatCompletionSSE(responseBody)
 		}
-		// 思考内容必须在响应改写前捕获：ReasoningToContent 会把 reasoning_content
-		// 合并进 content 并删除原字段，改写后再读就拿不到了。
+		// 思考内容在响应改写前捕获，仅用于报文记录；改写本身不再搬移任何字段。
 		reasoningContent, reasoningField, reasoningToolCallIDs := captureBufferedReasoning(plan.UpstreamEndpoint(), responseBody)
 		responseBody = normalizeResponseBody(plan.UpstreamEndpoint(), responseBody, candidate.UpstreamName, advancedConfig)
 		result := attemptResult{status: resp.StatusCode, body: plan.ConvertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
@@ -321,8 +320,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	scanner.Buffer(make([]byte, 64*1024), 8<<20)
 	for scanner.Scan() {
 		line := append(append([]byte(nil), scanner.Bytes()...), '\n')
-		// 思考内容必须在响应改写前捕获：ReasoningToContent 会把 reasoning_content
-		// 合并进 content 并删除原字段，改写后再观察就拿不到了。
+		// 思考内容在响应改写前捕获，仅用于报文记录；改写本身不再搬移任何字段。
 		reasoning.Observe(line)
 		line = normalizeSSELine(plan.UpstreamEndpoint(), line, candidate.UpstreamName, advancedConfig)
 		capture.Observe(line)

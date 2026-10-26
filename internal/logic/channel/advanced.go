@@ -19,7 +19,6 @@ const maxConcurrencyLimit = 1024
 type AdvancedConfig struct {
 	BackupBaseURLs         []string `json:"backupBaseUrls"`
 	ForceOpenAIFormat      bool     `json:"forceOpenAIFormat"`
-	ReasoningToContent     bool     `json:"reasoningToContent"`
 	PassthroughRequestBody bool     `json:"passthroughRequestBody"`
 	PassthroughPromptCache bool     `json:"passthroughPromptCache"`
 	SkipAsyncPollingDelay  bool     `json:"skipAsyncPollingDelay"`
@@ -63,6 +62,10 @@ func ParseAdvancedConfig(raw []byte) (AdvancedConfig, error) {
 	// JSON 里可能残留该字段，留着会触发下方的 DisallowUnknownFields 报错。
 	// 现行开关是 ProtocolConversion，缺省表示跟随系统设置。
 	delete(fields, "enableProtocolConversion")
+	// 已废弃的 reasoningToContent（「思维到内容」）同样只做兼容删除：该开关会把
+	// 思考内容包上 <think> 标签改写进正文，对能原生解析 reasoning_content 的
+	// 客户端反而是正文污染，已随网关「响应一律原样透传」的口径下线。
+	delete(fields, "reasoningToContent")
 	normalized, err := json.Marshal(fields)
 	if err != nil {
 		return AdvancedConfig{}, gerror.Wrap(err, "normalize channel advanced config")

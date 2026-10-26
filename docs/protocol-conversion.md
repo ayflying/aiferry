@@ -59,9 +59,8 @@ Chat 侧「一次工具调用」是 assistant 消息的一部分，Responses 侧
    「工具结果找不到对应的工具调用」。
 2. **合并**。相邻的 `function_call`（并行调用）合成一条 assistant 消息的多个 `tool_calls`；
    紧邻其前的 assistant 文本消息也一并合并，还原成 Chat 里「content + tool_calls」的单条消息。
-3. **`reasoning` → `reasoning_content`**。同一段里出现的 `reasoning` 输入项，其 `summary` /
-   `content` 文本挂到合并出来的那条 assistant 消息上。只在存在工具调用时携带（没有工具调用
-   时该字段不参与上游校验，丢弃可避免上游拒绝未知字段）。
+3. **`reasoning` 输入项直接丢弃**。思考历史不属于任何协议的消息形态，转换时不回传、不伪造，
+   统一丢弃：所有模型共用「客户端历史原样透传」的同一条路径，网关不代任何上游加工思考字段。
 4. **未知输入项直接跳过**。`local_shell_call`、`computer_call` 等在 Chat 侧没有对应形态，
    跳过它们；早期实现会把它们降级成 `{"role":"user","content":null}`，等于往对话里注入一条空
    用户消息，破坏对话结构。
@@ -82,13 +81,6 @@ Chat 侧「一次工具调用」是 assistant 消息的一部分，Responses 侧
 
 工具名每个调用只发送一次：上游会重复下发 `output_item.added`，重复发送会让客户端把
 `function.name` 按增量拼成 `PowerShellPowerShell`。
-
-### 转换后再补一次思考内容
-
-`reasoning_content` 回传（见 `docs/reasoning-echo.md`）在请求进入时按 Chat 消息结构补写，
-但 Responses 客户端的历史里没有 `messages`，思考内容是以 `reasoning` 输入项表达的。因此
-`attemptWithProtocol` 在 **`responses_to_chat` 转换完成之后**再对转换出来的 Chat 请求体调用一次
-回填：`call_id` 与存档使用的 `tool_call id` 是同一个值，能正常命中。
 
 ## 验证
 
