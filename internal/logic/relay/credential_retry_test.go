@@ -145,7 +145,8 @@ func TestPaymentRequiredStaysRetryableByDefault(t *testing.T) {
 // 同候选退避重试（429 限流 / 内容风控拦截）只在「最后一个候选、且本候选已无别的密钥可
 // 换」时生效：仍有候选可切换时必须保持原有的「换个候选立刻重试」语义，否则会给上游
 // 额外放大限流压力，也会让本来可以立刻自愈的请求白等一个退避窗口。429 维持单次退避；
-// 风控拦截按升级节奏 1.5s/5s/15s/30s 最多 4 次——拦截按窗口成簇，单次短退避覆盖不住。
+// 风控拦截自 0.6.25 起按 2s/8s 最多 2 次——首发即扰动后窗口内重发同一字节是确定性失败，
+// 退避只覆盖秒级短窗口，分钟级窗口交给组合冷却与用户重发。
 func TestSameCandidateRetryDelayOnlyForLastCandidate(t *testing.T) {
 	ctxErr := error(nil)
 	riskControl := attemptResult{status: http.StatusBadRequest, errorMessage: `error: code=11128 msg="request illegal" requestId="d0013ff2" displayMsg={"zh":"请求被拦截，请重新发送"}`}
@@ -165,11 +166,9 @@ func TestSameCandidateRetryDelayOnlyForLastCandidate(t *testing.T) {
 		{"非 429 失败不退避", attemptOptions{throttleRetry: true}, 0, attemptResult{status: http.StatusInternalServerError}, 22, ctxErr, 0, false},
 		{"没发出过真实尝试不退避", attemptOptions{throttleRetry: true}, 0, attemptResult{status: http.StatusTooManyRequests}, 0, ctxErr, 0, false},
 		{"客户端已断开不退避", attemptOptions{throttleRetry: true}, 0, attemptResult{status: http.StatusTooManyRequests}, 22, context.Canceled, 0, false},
-		{"风控拦截第 1 次退避 1.5s", attemptOptions{riskControlRetry: true}, 0, riskControl, 35, ctxErr, 1500 * time.Millisecond, true},
-		{"风控拦截第 2 次退避 5s", attemptOptions{riskControlRetry: true}, 1, riskControl, 35, ctxErr, 5 * time.Second, true},
-		{"风控拦截第 3 次退避 15s", attemptOptions{riskControlRetry: true}, 2, riskControl, 35, ctxErr, 15 * time.Second, true},
-		{"风控拦截第 4 次退避 30s", attemptOptions{riskControlRetry: true}, 3, riskControl, 35, ctxErr, 30 * time.Second, true},
-		{"风控拦截 4 次机会用尽", attemptOptions{riskControlRetry: true}, 4, riskControl, 35, ctxErr, 0, false},
+		{"风控拦截第 1 次退避 2s", attemptOptions{riskControlRetry: true}, 0, riskControl, 35, ctxErr, 2 * time.Second, true},
+		{"风控拦截第 2 次退避 8s", attemptOptions{riskControlRetry: true}, 1, riskControl, 35, ctxErr, 8 * time.Second, true},
+		{"风控拦截 2 次机会用尽", attemptOptions{riskControlRetry: true}, 2, riskControl, 35, ctxErr, 0, false},
 		{"还有候选可切换时风控拦截不退避", attemptOptions{riskControlRetry: false}, 0, riskControl, 35, ctxErr, 0, false},
 		{"429 开关不带风控签名时命中", attemptOptions{throttleRetry: true}, 0, riskControl, 35, ctxErr, 0, false},
 		{"429 与风控开关叠加时按各自节奏", attemptOptions{throttleRetry: true, riskControlRetry: true}, 0, attemptResult{status: http.StatusTooManyRequests}, 22, ctxErr, candidateThrottleRetryDelay, true},

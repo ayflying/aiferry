@@ -53,6 +53,39 @@ func TestPerturbWorkBuddyBodyNoChange(t *testing.T) {
 	}
 }
 
+// 0.6.25 起转发链路对 workbuddy chat 请求「首跳即扰动」：先中和前缀、再插零宽空格，
+// 两个变换叠加后首次上游调用就不再命中渠道指纹。这里锁定组合顺序与幂等性。
+func TestWorkBuddyNeutralizeThenPerturb(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"system","content":"You are an AI agent powered by DeepSeek Harness. 规则。保留"}]}`)
+	neutralized, err := ApplyWorkBuddyBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perturbed, changed := PerturbWorkBuddyBody(neutralized)
+	if !changed {
+		t.Fatal("中和后的体仍应可扰动")
+	}
+	var out struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(perturbed, &out); err != nil {
+		t.Fatal(err)
+	}
+	system := out.Messages[0].Content
+	if !strings.Contains(system, "helpful assistant") {
+		t.Fatalf("应包含中性首行前缀: %q", system)
+	}
+	if !strings.Contains(system, "DeepSeek\u200b Harness") {
+		t.Fatalf("应在专有名词内部插入零宽空格: %q", system)
+	}
+	if again, ok := PerturbWorkBuddyBody(perturbed); ok || !bytes.Equal(again, perturbed) {
+		t.Fatal("组合变换必须幂等")
+	}
+}
+
 func TestIsWorkBuddyGateFailure(t *testing.T) {
 	cases := []struct {
 		name    string

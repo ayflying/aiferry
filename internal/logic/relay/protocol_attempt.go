@@ -32,21 +32,10 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	primary := s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled, settings)
 	primaryStartedAt := time.Now()
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
-	// WorkBuddy 渠道指纹拦截（code 11128）的一次性自愈重试：参考实现实测表明
-	// 该拦截族除「消息开头」外还会命中系统提示内部的整段精确子串，仅加中性
-	// 首行不足以通过。这里沿用参考项目 perturbChannelFingerprints 的做法，在
-	// system/assistant 文本的句读边界插入零宽空格后重发一次；语义不变、对被
-	// 检内容不可见。仅在尚未向客户端写出任何字节、且首跳确为 11128 时触发，
-	// 每个请求最多一次，避免把确定性失败放大成多次上游调用。
-	if attemptErr == nil && !handled && !result.wroteBytes &&
-		channel.IsWorkBuddyGateFailure(candidate.ChannelType, result.status, result.body) {
-		if perturbed, ok := channel.PerturbWorkBuddyBody(originalBody); ok {
-			retryResult, retryHandled, retryErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, perturbed, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
-			retryResult.precedingFlow = append(retryResult.precedingFlow, newAttemptFlowStep(candidate.ChannelName, result))
-			retryResult.latency += result.latency
-			result, handled, attemptErr = retryResult, retryHandled, retryErr
-		}
-	}
+	// 历史说明：0.6.20 曾在这里做「首跳 11128 后扰动重发一次」的自愈重试；0.6.25 起
+	// 扰动已提前到首跳（见 attemptWithProtocol 的 workbuddy 块），重发同一扰动体在
+	// 上游窗口内必然重演失败，只会放大对风控的刺激，因此移除该重试。跨窗口的重试
+	// 由最后候选的风控退避（retry_policy.go）与组合冷却负责。
 	// 首跳耗时先记在结果上：协议回退时它会成为调用流程步骤的耗时快照；
 	// 不回退时调用方会用整次尝试的耗时覆盖它，不影响既有语义。
 	result.latency = time.Since(primaryStartedAt)
@@ -143,6 +132,15 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		body, err = channel.ApplyWorkBuddyBody(body)
 		if err != nil {
 			return attemptResult{}, false, err
+		}
+		// 2026-10-26 生产实证（afreq_50304d2f…，10 次上游尝试全 11128）：带指纹的
+		// 原始体首发必被拒，且这次拒绝本身会把上游推进「账号级拦截窗口」——窗口内
+		// 连扰动体也一并被拒，客户端重发继续喂窗口，形成「用户永远失败」的死循环；
+		// 同一份字节在窗口外单发重放则一次性通过。因此把零宽空格扰动从「失败后重试」
+		// 提前到首跳：第一次上游调用就是扰动体，不再用注定失败的原始体去触发窗口。
+		// 扰动幂等（已含 U+200B 的文本跳过），语义不变、对被检内容不可见。
+		if perturbed, ok := channel.PerturbWorkBuddyBody(body); ok {
+			body = perturbed
 		}
 	}
 	body, err = applyPromptCachePolicy(body, candidate, userID, advancedConfig)

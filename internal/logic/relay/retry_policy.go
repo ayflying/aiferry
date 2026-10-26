@@ -11,9 +11,8 @@ import (
 // 退避重试，并给出本次时长：只有最后一个候选启用相应开关，且上一次真实尝试
 // 命中限流、风控或暂时性服务错误时才允许重试；各类错误共享已消耗的退避计数，
 // 且客户端仍在等待时才成立。429 限流维持单次退避（避免对上游限流放大压力）；风控拦截
-// 按升级节奏最多 4 次——拦截按窗口成簇出现，同一窗口内重发仍会被拦，必须跨越窗口。
-// 暂时性 500/502/503/504 最多退避 3 次；任何已提交输出或下游写失败都不能重放。
-// 抽成纯函数便于单测覆盖边界。
+// 最多退避 2 次（见 riskControlRetryDelays 的 0.6.25 观测说明）。暂时性 500/502/503/504
+// 最多退避 3 次；任何已提交输出或下游写失败都不能重放。抽成纯函数便于单测覆盖边界。
 func sameCandidateRetryDelay(options attemptOptions, retries int, last channelAttempt, ctxErr error) (time.Duration, bool) {
 	if last.candidate.ChannelCredentialID <= 0 || ctxErr != nil || last.result.wroteBytes || last.result.writerFailed {
 		return 0, false
@@ -49,19 +48,20 @@ func isTransientUpstreamFailure(result attemptResult) bool {
 	}
 }
 
-// riskControlRetryDelays 是内容风控拦截的升级退避节奏。生产 8 天观测 11 个拦截窗口，
-// 跨度 0~67s（中位 ~5s）：1.5s/5s/15s/30s 的累计 ~52s 覆盖其中 10 个窗口，仅放过
-// 最长的一个 67s 窗口尾段。被拦请求本身响应极快（<1s），等待成本集中在退避本身。
-var riskControlRetryDelays = [4]time.Duration{
-	1500 * time.Millisecond,
-	5 * time.Second,
-	15 * time.Second,
-	30 * time.Second,
+// riskControlRetryDelays 是内容风控拦截的退避节奏。0.6.18 时代的生产观测（11 个窗口、
+// 跨度 0~67s）曾支撑 1.5s/5s/15s/30s 的 4 级升级退避；0.6.25 的生产实证（afreq_50304d2f…
+// 与 afreq_0f019b68…）表明窗口已演化为分钟级（同一份字节 16:01 被拒、16:05 起连续通过），
+// 分钟级窗口退避覆盖不住，只会把失败请求对上游的打击从 3 发放大到 10 发、把用户晾 90 秒。
+// 首发即扰动（protocol_attempt.go）后同一字节在窗口内是确定性失败，这里只保留 2s/8s 两级
+// 覆盖秒级短窗口；分钟级窗口交给组合冷却与用户稍后重发（窗口外首发即通过）。
+var riskControlRetryDelays = [2]time.Duration{
+	2 * time.Second,
+	8 * time.Second,
 }
 
 // riskControlBlockedMarkers 是上游内容风控「概率性拦截」的错误签名（如 workbuddy 渠道的
-// code=11128「request illegal」）。拦截按窗口成簇：同一窗口内重发仍会被拦，因此同候选
-// 按 riskControlRetryDelays 升级退避跨越窗口；上游 displayTips 亦建议「请重新发送」。
+// code=11128「request illegal」）。拦截按窗口成簇：窗口内同一字节重发必然重演，退避只负责
+// 覆盖秒级短窗口；上游 displayTips 亦建议「请重新发送」。
 // 签名同时覆盖 upstreamerror.Message 的格式化文案与上游原始响应体两种形态。
 var riskControlBlockedMarkers = []string{
 	`code=11128`,      // 格式化文案里的风控码（code=11128）
