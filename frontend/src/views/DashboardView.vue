@@ -12,6 +12,7 @@ import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { dashboardPeriodQuery, type DashboardPeriod } from '../lib/dashboard-range'
 import { convertAmount, displayCurrency, formatCost, formatNumber, successRate } from '../lib/format'
+import { formatCompactTokens, formatCompactDuration } from '../lib/compact-format'
 import { isChannelRoutable } from '../lib/route-display'
 import DashboardPeriodControl from '../components/DashboardPeriodControl.vue'
 import RouteStrip from '../components/RouteStrip.vue'
@@ -159,9 +160,9 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dis
 
     <section class="metric-grid" aria-label="核心指标">
       <article class="metric-card"><div class="label"><Activity :size="15" />总请求</div><div class="value">{{ formatNumber(dashboard.summary.requests) }}</div><div class="detail">成功率 {{ success }}</div></article>
-      <article class="metric-card"><div class="label"><Route :size="15" />总 Token</div><div class="value">{{ formatNumber(dashboard.summary.totalTokens) }}</div><div class="detail">输入 {{ formatNumber(dashboard.summary.inputTokens) }} · 输出 {{ formatNumber(dashboard.summary.outputTokens) }}</div></article>
+      <article class="metric-card"><div class="label"><Route :size="15" />总 Token</div><div class="value" :title="`${formatNumber(dashboard.summary.totalTokens)} Token`">{{ formatCompactTokens(dashboard.summary.totalTokens) }}</div><div class="detail" :title="`输入 ${formatNumber(dashboard.summary.inputTokens)} · 输出 ${formatNumber(dashboard.summary.outputTokens)}`">输入 {{ formatCompactTokens(dashboard.summary.inputTokens) }} · 输出 {{ formatCompactTokens(dashboard.summary.outputTokens) }}</div></article>
       <article class="metric-card"><div class="label"><CircleDollarSign :size="15" />估算成本</div><div class="value">{{ formatCost(dashboard.summary.estimatedCost) }}</div><div class="detail">未定价请求不计入</div></article>
-      <article class="metric-card"><div class="label"><Clock3 :size="15" />平均耗时</div><div class="value">{{ Math.round(dashboard.summary.averageLatency) }} ms</div><div class="detail">包含上游响应时间</div></article>
+      <article class="metric-card"><div class="label"><Clock3 :size="15" />平均耗时</div><div class="value" :title="`${dashboard.summary.averageLatency} ms`">{{ formatCompactDuration(dashboard.summary.averageLatency) }}</div><div class="detail">包含上游响应时间</div></article>
     </section>
 
     <section class="recent-cost-panel panel" aria-label="消费分布">

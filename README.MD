@@ -6,6 +6,7 @@ AiFerry（AI 摆渡）是基于 GoFrame v2 和 Vue 3 的 OpenAI 兼容中转管�
 
 - OpenAI 兼容接口：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/images/generations`
 - 普通响应与 SSE 流式响应
+- 仪表盘总 Token 及输入/输出统计自动换算 K/M/B/T（千/百万/十亿/万亿），平均耗时自动换算毫秒/秒/分钟/小时/天；最多保留两位小数，悬停查看原始值。
 - 暂时性上游错误自愈：优先换备用地址、密钥与渠道；最后候选耗尽路径后，尚未向客户端输出的 500/502/503/504 最多额外重试 3 次（退避 1.5/5/10 秒）。已输出、下游写失败、客户端断开及显式禁用规则不重放；持续过载耗尽机会后仍返回失败，不保证 DSH 等客户端任务一定恢复。
 - 模型列表能力元数据：上游同步、公开模型手动覆盖、输入输出模态与三态能力、上下文长度（见 [模型能力元数据](docs/model-metadata.md)）
 - Responses 与 Chat Completions 之间的协议自动转换（工具调用历史、多模态内容与思考内容的双向还原，见 `docs/protocol-conversion.md`）
