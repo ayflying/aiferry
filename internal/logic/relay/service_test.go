@@ -137,6 +137,7 @@ func TestUncommittedFailuresStayInsideCandidateRetry(t *testing.T) {
 		{name: "upstream 401", result: attemptResult{status: http.StatusUnauthorized}},
 		{name: "transport error", attemptErr: gerror.New("call upstream")},
 		{name: "success", result: attemptResult{status: http.StatusOK}, complete: true},
+		{name: "first downstream write failed", result: attemptResult{status: http.StatusBadGateway, writerFailed: true}, stream: true, complete: true},
 		{name: "stream already written", result: attemptResult{status: http.StatusBadGateway, wroteBytes: true}, stream: true, complete: true},
 		{name: "stream completed", result: attemptResult{status: http.StatusOK, wroteBytes: true, streamCompleted: true}, stream: true, complete: true},
 		{name: "stream truncated after output", result: attemptResult{status: http.StatusOK, wroteBytes: true}, stream: true, complete: true},

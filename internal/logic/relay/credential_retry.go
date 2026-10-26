@@ -50,7 +50,7 @@ const candidateAttemptPasses = 2
 // 错开突发的配额窗口，又不会让已经等过的客户端明显变慢。
 const candidateThrottleRetryDelay = 1500 * time.Millisecond
 
-// attemptOptions 控制单次候选尝试的可选行为。throttleRetry 与 riskControlRetry 两个开关
+// attemptOptions 控制单次候选尝试的可选行为。throttleRetry、riskControlRetry 与 transientRetry 开关
 // 都只服务「已经无路可走」的兜底场景，正常的多候选切换流程一律使用零值；
 // concurrencyWaitWindow 则由 Handle 按候选位置为每个候选分别设置。
 type attemptOptions struct {
@@ -73,6 +73,8 @@ type attemptOptions struct {
 	// 把「请求被拦截，请重新发送」落地为网关自动重发。仍有候选可切换时保持原有的换候选
 	// 语义。推理内容校验等确定性 400 不带风控签名，不会被误判为可重试。
 	riskControlRetry bool
+	// transientRetry 仅在最后候选耗尽其它路径后，为暂时性 5xx 提供有界退避重试。
+	transientRetry bool
 }
 
 type channelAttempt struct {
@@ -116,7 +118,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			// 上游以 429 限流（例如 OpenRouter 共享池的「请稍后重试」），或以内容风控的
 			// 概率性拦截拒绝（如 workbuddy 渠道的 11128「request illegal」，上游 displayTips
 			// 明确建议「请重新发送」），而本候选已没有别的密钥或备用地址可换：按各自节奏
-			// 退避再试，把上游的建议落地。429 保持单次退避；风控拦截按升级节奏最多 4 次。
+			// 退避再试，把上游的建议落地；暂时性 5xx 也给有界自愈机会。
 			// 只由最后一个候选启用；客户端已断开时不再发起上游请求，按原错误路径收尾。
 			if delay, ok := sameCandidateRetryDelay(options, sameCandidateRetries, last, ctx.Err()); ok {
 				sameCandidateRetries++
@@ -192,7 +194,7 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			return last
 		}
 		if last.channelDead {
-			// 禁用类失败默认直接跳渠道；仅最后一个候选的 429 / 内容风控拦截例外——
+			// 禁用类失败默认直接跳渠道；仅最后一个候选的限流、风控沿用原有例外——
 			// 上游限流建议「稍后重试」、风控提示「请重新发送」，按各自节奏退避重试，
 			// 机会用尽仍命中再跳。
 			if delay, ok := sameCandidateRetryDelay(options, sameCandidateRetries, last, ctx.Err()); ok {
@@ -208,80 +210,6 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 			return last
 		}
 		excluded[current.ChannelCredentialID] = struct{}{}
-	}
-}
-
-// sameCandidateRetryDelay 判断一次「挑选密钥失败」或「禁用类失败」是否应改判为同候选
-// 退避重试，并给出本次的退避时长：只有最后一个候选（throttleRetry / riskControlRetry
-// 对应的开关）、上一次真实尝试命中可重试签名（429 限流，或上游内容风控的概率性拦截），
-// 且客户端仍在等待时才成立。429 限流维持单次退避（避免对上游限流放大压力）；风控拦截
-// 按升级节奏最多 4 次——拦截按窗口成簇出现，同一窗口内重发仍会被拦，必须跨越窗口。
-// 抽成纯函数便于单测覆盖边界。
-func sameCandidateRetryDelay(options attemptOptions, retries int, last channelAttempt, ctxErr error) (time.Duration, bool) {
-	if last.candidate.ChannelCredentialID <= 0 || ctxErr != nil {
-		return 0, false
-	}
-	if options.throttleRetry && last.result.status == http.StatusTooManyRequests && !isQuotaExhaustedResult(last.result) {
-		if retries == 0 {
-			return candidateThrottleRetryDelay, true
-		}
-		return 0, false
-	}
-	if options.riskControlRetry && isRiskControlBlockedResult(last.result) && retries < len(riskControlRetryDelays) {
-		return riskControlRetryDelays[retries], true
-	}
-	return 0, false
-}
-
-// riskControlRetryDelays 是内容风控拦截的升级退避节奏。生产 8 天观测 11 个拦截窗口，
-// 跨度 0~67s（中位 ~5s）：1.5s/5s/15s/30s 的累计 ~52s 覆盖其中 10 个窗口，仅放过
-// 最长的一个 67s 窗口尾段。被拦请求本身响应极快（<1s），等待成本集中在退避本身。
-var riskControlRetryDelays = [4]time.Duration{
-	1500 * time.Millisecond,
-	5 * time.Second,
-	15 * time.Second,
-	30 * time.Second,
-}
-
-// riskControlBlockedMarkers 是上游内容风控「概率性拦截」的错误签名（如 workbuddy 渠道的
-// code=11128「request illegal」）。拦截按窗口成簇：同一窗口内重发仍会被拦，因此同候选
-// 按 riskControlRetryDelays 升级退避跨越窗口；上游 displayTips 亦建议「请重新发送」。
-// 签名同时覆盖 upstreamerror.Message 的格式化文案与上游原始响应体两种形态。
-var riskControlBlockedMarkers = []string{
-	`code=11128`,      // 格式化文案里的风控码（code=11128）
-	`request illegal`, // 风控 msg 原文（文案与原始响应体均含）
-	`请求被拦截`,           // displayMsg 中文文案（部分上游只给文案）
-}
-
-// isRiskControlBlockedResult 判断一次失败是否为上游内容风控的概率性拦截：仅 400/422 且
-// 错误文案（errorMessage，缺省回退原始响应体）命中风控签名。推理内容校验等确定性 400
-// 不带这些签名，保持原有「换渠道/透传」语义，绝不会被误判为可重试。
-func isRiskControlBlockedResult(result attemptResult) bool {
-	if result.status != http.StatusBadRequest && result.status != http.StatusUnprocessableEntity {
-		return false
-	}
-	message := result.errorMessage
-	if strings.TrimSpace(message) == "" {
-		message = string(result.body)
-	}
-	for _, marker := range riskControlBlockedMarkers {
-		if strings.Contains(message, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-// waitForRetry 等待一次同候选退避窗口（429 限流单次 1.5s；风控拦截按升级节奏逐次加长）。
-// 客户端在退避期间断开时返回 false，调用方按原错误路径收尾，不再发起上游请求。
-func waitForRetry(ctx context.Context, delay time.Duration) bool {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
 	}
 }
 
@@ -305,8 +233,8 @@ func candidateBaseURLs(candidate Candidate) []string {
 func attemptCompleted(result attemptResult, attemptErr error, stream bool) bool {
 	// Chat/Responses relay requests are expected to return HTTP 200. Any other
 	// status is an upstream error and must remain in the retry/failover decision.
-	if result.wroteBytes {
-		// 已经向客户端写出内容，无法重放，即使随后失败也只能就地收尾。
+	if result.wroteBytes || result.writerFailed {
+		// 已输出或下游写入失败（可能已提交响应头）都不能重放，只能就地收尾。
 		return true
 	}
 	if attemptErr != nil || result.status != http.StatusOK {

@@ -204,10 +204,11 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			for {
 				outcome := s.attemptChannel(ctx, writer, incomingHeaders, endpoint, body, candidates[index], isStream, key.UserId, key.Id, settings, excludedCredentials, sensitiveDataRestorer, attemptOptions{
 					ignoreComboCooldown: pass > 0,
-					// 只有最后一个候选才允许对 429 / 内容风控拦截退避重试：仍有候选可切换时
+					// 只有最后一个候选才允许对限流、风控与暂时性 5xx 退避重试：仍有候选可切换时
 					// 保持原有的「换个候选立刻重试」语义，不给上游额外放大限流压力。
 					throttleRetry:    isLastCandidate,
 					riskControlRetry: isLastCandidate,
+					transientRetry:   isLastCandidate,
 					// 并发额度占满时同样只有最后一跳排队：中间候选立即改投下一个候选，
 					// 避免把每个候选的 60 秒排队时间叠加到客户端延迟上。
 					concurrencyWaitWindow: candidateConcurrencyWaitWindow(isLastCandidate),
