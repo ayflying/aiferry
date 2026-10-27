@@ -30,15 +30,30 @@ const (
 	// workBuddyCheckinHour 是允许自动签到的起始小时（服务端本地时区）。
 	// 定在早上 6 点：避开跨零点时的上游日切边界，也避开凌晨可能的上游维护窗口。
 	workBuddyCheckinHour = 6
+	// workBuddyCheckinStartupDelay 是启动后首轮签到的等待时间：够启动流程跑完
+	// 渠道同步，又不至于让发版当天的补签拖太久。
+	workBuddyCheckinStartupDelay = 90 * time.Second
 )
 
 // StartWorkBuddyCheckins 启动每日自动签到任务。与健康检查一致，由 app 层在
 // 服务启动时调用一次；ctx 结束时协程自行退出。
+//
+// 启动后先等一个短延迟跑首轮：一是避开启动初期的模型/渠道同步风暴，二是让
+// 服务重启或发版当天就能补签，不必等到下一个整点。之后按小时粒度检查。
 func (s *sChannel) StartWorkBuddyCheckins(ctx context.Context) {
 	go func() {
+		firstRun := time.NewTimer(workBuddyCheckinStartupDelay)
+		defer firstRun.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-firstRun.C:
+			if time.Now().Hour() >= workBuddyCheckinHour {
+				s.runWorkBuddyCheckins(ctx)
+			}
+		}
 		ticker := time.NewTicker(workBuddyCheckinTick)
 		defer ticker.Stop()
-		// 启动后先等一个粒度再开始，避免与启动初期的模型/渠道同步争抢上游配额。
 		for {
 			select {
 			case <-ctx.Done():
