@@ -66,10 +66,13 @@ type UpstreamClientIdentity struct {
 // ses_ 会话 + x-opencode-session-id 等同值头）；
 // opencode_go 维持 aiferry 会话与 UA 策略，即使地址指向 …/zen/v1 也不模拟。
 // 其余渠道不受影响，转发与测试链路都必须调用。
-// WorkBuddy 对通用 HTTP 库 UA 有渠道校验；使用网关自身标识，不模拟官方客户端。
+// WorkBuddy 必须伪装成官方客户端：上游按「是否官方客户端发出的」做渠道校验，
+// 缺失官方身份头或带着第三方会话标识都会被 11128 拒绝（详见
+// ApplyWorkBuddyOfficialHeaders 的 2026-10-27 生产实证）。
 func ApplyUpstreamClientHeaders(target, incoming http.Header, identity UpstreamClientIdentity) {
+	_ = incoming
 	if identity.ChannelType == "workbuddy" {
-		applyUpstreamUserAgent(target, incoming)
+		ApplyWorkBuddyOfficialHeaders(target)
 		return
 	}
 	if IsOpenCodeFreeLane(identity.ChannelType, identity.BaseURL) {
