@@ -44,6 +44,16 @@ var workBuddyClientOnlyHeaders = []string{
 	"X-Private-Data",
 }
 
+// applyWorkBuddyClientHeaders 是 workbuddy 渠道在统一头处理里的入口。
+// 上游按「是否官方客户端发出的」做渠道校验，缺失官方身份头或带着第三方会话
+// 标识都会被 11128 拒绝（详见 ApplyWorkBuddyOfficialHeaders 的生产实证）；
+// 因此这里**不看**客户端自报的 UA，直接整体伪装。
+func applyWorkBuddyClientHeaders(target, incoming http.Header, identity UpstreamClientIdentity) {
+	_ = incoming
+	_ = identity
+	ApplyWorkBuddyOfficialHeaders(target)
+}
+
 // ApplyWorkBuddyOfficialHeaders 把上游请求伪装成官方 WorkBuddy 客户端发出的 chat
 // 请求：官方 UA、Origin/Referer、X-Requested-With、X-Product 与 conversation 身份
 // 三连，并清掉客户端自报的第三方会话标识。每次调用生成新的三连（官方客户端同样

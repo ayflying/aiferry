@@ -62,28 +62,38 @@ type UpstreamClientIdentity struct {
 }
 
 // ApplyUpstreamClientHeaders 按渠道类型补齐上游要求的客户端标识头。
-// 仅类型 opencode_zen 走免费层编辑器指纹模拟（opencode/latest/…/cli UA +
-// ses_ 会话 + x-opencode-session-id 等同值头）；
-// opencode_go 维持 aiferry 会话与 UA 策略，即使地址指向 …/zen/v1 也不模拟。
-// 其余渠道不受影响，转发与测试链路都必须调用。
-// WorkBuddy 必须伪装成官方客户端：上游按「是否官方客户端发出的」做渠道校验，
-// 缺失官方身份头或带着第三方会话标识都会被 11128 拒绝（详见
-// ApplyWorkBuddyOfficialHeaders 的 2026-10-27 生产实证）。
+//
+// 这里只做分发：各渠道的特化实现一律放在以渠道命名的文件里，新增渠道时
+// 不需要改动本文件，也不会与其它渠道的分支互相覆盖：
+//
+//	workbuddy   → applyWorkBuddyClientHeaders   （workbuddy_identity.go）
+//	opencode 免费层 → applyOpenCodeFreeHeaders  （opencode_free.go）
+//	opencode_go → applyOpenCodeGoHeaders        （opencode_go.go）
+//
+// 转发链路与模型测试链路都必须调用。
 func ApplyUpstreamClientHeaders(target, incoming http.Header, identity UpstreamClientIdentity) {
-	_ = incoming
-	if identity.ChannelType == "workbuddy" {
-		ApplyWorkBuddyOfficialHeaders(target)
-		return
-	}
-	if IsOpenCodeFreeLane(identity.ChannelType, identity.BaseURL) {
-		applyOpenCodeFreeHeaders(target, incoming, identity)
+	// 渠道特化：按渠道各自文件实现，命中即返回。
+	if applyChannelClientHeaders(target, incoming, identity) {
 		return
 	}
 	if identity.ChannelType != OpenCodeGoChannelType {
 		return
 	}
-	target.Set(openCodeSessionHeader, upstreamSessionID(incoming, identity))
-	applyUpstreamUserAgent(target, incoming)
+	applyOpenCodeGoHeaders(target, incoming, identity)
+}
+
+// applyChannelClientHeaders 按渠道类型分派到各渠道自己的身份头实现。
+// 新增渠道特化时在这里追加一行，实现放在该渠道自己的文件里。
+func applyChannelClientHeaders(target, incoming http.Header, identity UpstreamClientIdentity) bool {
+	switch {
+	case identity.ChannelType == "workbuddy":
+		applyWorkBuddyClientHeaders(target, incoming, identity)
+		return true
+	case IsOpenCodeFreeLane(identity.ChannelType, identity.BaseURL):
+		applyOpenCodeFreeHeaders(target, incoming, identity)
+		return true
+	}
+	return false
 }
 
 // upstreamSessionID 优先透传客户端原生会话标识；客户端未提供时退化为按

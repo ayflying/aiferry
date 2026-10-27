@@ -47,9 +47,9 @@ const (
 )
 
 type workBuddySummaryResponse struct {
-	Code json.Number            `json:"code"`
-	Msg  string                 `json:"msg"`
-	Data workBuddySummaryData   `json:"data"`
+	Code json.Number          `json:"code"`
+	Msg  string               `json:"msg"`
+	Data workBuddySummaryData `json:"data"`
 }
 
 type workBuddySummaryData struct {
@@ -280,6 +280,16 @@ func (s *sChannel) fetchWorkBuddyCreditsSingle(ctx context.Context, channel enti
 	if checkinErr == nil {
 		if checkinView, parseErr := parseWorkBuddyCheckin(checkinBody); parseErr == nil {
 			view.Windows = append(view.Windows, checkinView.Windows...)
+			// 2026-10-27 用户要求：使用时发现没签到就自动签到。状态查询能读到时
+			// 才有依据，读不到（缺 X-Device-Token 风控头）时不盲目领取——那种
+			// 情况下无法判断今天是否已签，重复调用没有意义。
+			if !workBuddyCheckedInToday(checkinBody) {
+				if claim, claimErr := s.claimWorkBuddyCheckin(ctx, channel, config, credential, checkinEndpoint); claimErr != nil {
+					view.PartialErrors = append(view.PartialErrors, fmt.Sprintf("密钥 %s：自动签到失败：%s", credential.Prefix, claimErr.Error()))
+				} else {
+					view.PartialErrors = append(view.PartialErrors, workBuddyCheckinText(credential.Prefix, claim))
+				}
+			}
 		} else {
 			view.PartialErrors = append(view.PartialErrors, fmt.Sprintf("密钥 %s：签到状态解析失败：%s", credential.Prefix, parseErr.Error()))
 		}
@@ -287,4 +297,30 @@ func (s *sChannel) fetchWorkBuddyCreditsSingle(ctx context.Context, channel enti
 		view.PartialErrors = append(view.PartialErrors, fmt.Sprintf("密钥 %s：签到状态查询失败（需 X-Device-Token 风控头）：%s", credential.Prefix, checkinErr.Error()))
 	}
 	return view, nil
+}
+
+// claimWorkBuddyCheckin 调用签到领取接口。checkinEndpoint 是状态查询地址
+// （…/v2/billing/meter/checkin-activity-status），签到领取是同一族下的
+// …/v2/billing/meter/daily-checkin，因此只替换最后一段路径。
+func (s *sChannel) claimWorkBuddyCheckin(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, credential quotaCredential, checkinEndpoint string) (workBuddyCheckinClaim, error) {
+	endpoint := strings.TrimSuffix(checkinEndpoint, workBuddyCheckinPath) + workBuddyDailyCheckinPath
+	body, err := s.fetchUpstreamJSON(ctx, channel, credential.Cipher, upstreamJSONRequest{
+		Method:       "POST",
+		Endpoint:     endpoint,
+		AuthType:     config.AuthType,
+		HeaderName:   config.HeaderName,
+		HeaderPrefix: "Bearer ",
+		BodyLimit:    1 << 20,
+		RequestError: "创建 WorkBuddy 签到请求失败",
+		FetchError:   "请求 WorkBuddy 签到接口失败",
+		ReadError:    "读取 WorkBuddy 签到接口响应失败",
+		InvalidError: "WorkBuddy 签到接口返回了无效 JSON",
+		StatusError: func(status int, payload []byte) error {
+			return gerror.Newf("WorkBuddy 签到接口返回 HTTP %d", status)
+		},
+	})
+	if err != nil {
+		return workBuddyCheckinClaim{}, err
+	}
+	return parseWorkBuddyCheckinClaim(body)
 }
