@@ -74,6 +74,8 @@ type (
 		SelectCredential(ctx context.Context, apiKeyID uint64, channelID uint64, modelID uint64, excluded map[uint64]struct{}) (RouteCredential, error)
 		CredentialForTest(ctx context.Context, channelID uint64, credentialID uint64) (RouteCredential, error)
 		StartHealthChecks(ctx context.Context)
+		// StartWorkBuddyCheckins 启动 WorkBuddy 每日自动签到后台任务。
+		StartWorkBuddyCheckins(ctx context.Context)
 		InvalidateListCache(ctx context.Context)
 		DiscoverModels(ctx context.Context, channelID uint64) ([]DiscoveredModel, error)
 		GetModelMetadata(ctx context.Context, publicName string) (modelmetadata.View, error)

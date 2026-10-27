@@ -82,6 +82,7 @@ var (
 				return err
 			}
 			channelSvc.StartHealthChecks(ctx)
+			channelSvc.StartWorkBuddyCheckins(ctx)
 			channelSvc.StartCostSync(ctx)
 			usageSvc.StartRetentionCleanup(ctx, cfg.UsageRetentionDays)
 			relay.InitPayloadLog(cfg.PayloadLogEnabled, cfg.PayloadLogDir, cfg.PayloadLogMaxFiles)
