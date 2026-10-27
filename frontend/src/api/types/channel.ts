@@ -312,6 +312,10 @@ export interface ChannelQuotaWindow {
   total?: number
   remaining?: number
   nextResetAt?: string
+  /** 计数口径窗口（如每日签到）：表达「N/M 个账号已完成」，不是用量额度 */
+  counts?: boolean
+  doneCount?: number
+  accountCount?: number
 }
 
 export interface ChannelQuotaResult {

@@ -121,8 +121,9 @@ func parseWorkBuddyCredits(body []byte) (QuotaView, error) {
 	return view, nil
 }
 
-// parseWorkBuddyCheckin 解析 checkin-activity-status，生成一条 checkin 窗口：
-// 已用百分比 = 已签到则 100、未签到则 0；used = 累计连续签到天数；total = 今日签到积分。
+// parseWorkBuddyCheckin 解析 checkin-activity-status，生成一条计数型 checkin 窗口：
+// 每个账号贡献「已签 1 / 共 1」，合并后自然得到「今天 N/M 个账号已签到」。
+// 连续签到天数与今日签到积分放在窗口提示里，不占用计数语义。
 func parseWorkBuddyCheckin(body []byte) (QuotaView, error) {
 	var payload workBuddyCheckinResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -135,24 +136,23 @@ func parseWorkBuddyCheckin(body []byte) (QuotaView, error) {
 		}
 		return QuotaView{}, gerror.New("WorkBuddy 签到状态查询失败：" + message)
 	}
-	streak := workBuddyNumber(payload.Data.StreakDays)
-	credit := workBuddyNumber(payload.Data.TodayCredit)
-	percent := 0.0
+	checked := 0.0
 	if payload.Data.TodayCheckedIn {
-		percent = 100
+		checked = 1
 	}
+	one := 1.0
+	percent := checked * 100
 	view := QuotaView{
 		Mode:      channeltype.AdapterWorkBuddy,
-		Level:     "签到",
 		QueriedAt: time.Now(),
 		Windows: []QuotaWindow{
 			{
-				Kind:        workBuddyCheckinKind,
-				Label:       "每日签到",
-				UsedPercent: percent,
-				Used:        &streak,
-				Total:       &credit,
-				Remaining:   &credit,
+				Kind:         workBuddyCheckinKind,
+				Label:        "每日签到",
+				UsedPercent:  percent,
+				Counts:       true,
+				DoneCount:    &checked,
+				AccountCount: &one,
 			},
 		},
 	}

@@ -35,6 +35,14 @@ function windowColor(window: ChannelQuotaWindow) {
 }
 
 function windowDetail(window: ChannelQuotaWindow) {
+  // 计数型窗口（如「每日签到」）表达的是「N/M 个账号已完成」，不是用量额度：
+  // 用 完成数/总数 直接说人话，避免让人把它读成一笔可用余额。
+  if (window.counts) {
+    const done = Math.round(window.doneCount ?? 0)
+    const accounts = Math.round(window.accountCount ?? 0)
+    if (accounts === 0) return '暂无账号'
+    return `今天已有 ${done} / ${accounts} 个账号完成签到`
+  }
   // 百分比统一保留两位小数，避免超长小数串（如 4.554234857142856%）。
   const percent = window.usedPercent.toFixed(2)
   if (window.used !== undefined || window.total !== undefined || window.remaining !== undefined) {
@@ -49,6 +57,15 @@ function windowDetail(window: ChannelQuotaWindow) {
 function resetLabel(window: ChannelQuotaWindow) {
   if (!window.nextResetAt) return ''
   return `重置于 ${formatTime(window.nextResetAt)}`
+}
+
+// windowValue 是进度条右侧的数值标签。计数型窗口显示「已完成/总数」而不是百分比：
+// 「1 / 2」比「50%」更能说明今天两个账号里只签了一个。
+function windowValue(window: ChannelQuotaWindow) {
+  if (window.counts) {
+    return `${Math.round(window.doneCount ?? 0)} / ${Math.round(window.accountCount ?? 0)}`
+  }
+  return ''
 }
 </script>
 
@@ -73,7 +90,7 @@ function resetLabel(window: ChannelQuotaWindow) {
         </el-alert>
         <div v-for="window in props.result.windows" :key="window.kind" class="quota-window">
           <div class="quota-window__header"><strong>{{ window.label }}</strong><span class="muted">{{ resetLabel(window) }}</span></div>
-          <el-progress :percentage="Math.min(100, Math.max(0, Number(window.usedPercent.toFixed(2))))" :color="windowColor(window)" :stroke-width="14" />
+          <el-progress :percentage="Math.min(100, Math.max(0, Number(window.usedPercent.toFixed(2))))" :color="windowColor(window)" :stroke-width="14" :format="() => windowValue(window)" />
           <div class="quota-window__detail">{{ windowDetail(window) }}</div>
         </div>
       </template>

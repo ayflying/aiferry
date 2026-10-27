@@ -39,6 +39,13 @@ type QuotaWindow struct {
 	Total       *float64   `json:"total,omitempty"`
 	Remaining   *float64   `json:"remaining,omitempty"`
 	NextResetAt *time.Time `json:"nextResetAt,omitempty"`
+	// Counts 表示这个窗口是「N/M 个账号已完成」这类计数口径，而不是用量额度。
+	// 合并多个账号时必须累加计数、用 已完成/总数 重算百分比；按百分比取平均会得出
+	// 「两个账号一个签了一个没签 = 50%」这种看着像进度条、实际没有意义的值。
+	Counts bool `json:"counts,omitempty"`
+	// DoneCount / 总数 是计数口径下的两个计数，仅在 Counts 为真时有意义。
+	DoneCount    *float64 `json:"doneCount,omitempty"`
+	AccountCount *float64 `json:"accountCount,omitempty"`
 }
 
 type QuotaView struct {
@@ -304,6 +311,11 @@ func mergeQuotaViews(views []QuotaView) QuotaView {
 	remainCounts := make(map[string]*float64, 3)
 	resetTimes := make(map[string]*time.Time, 3)
 	labels := make(map[string]string, 3)
+	// 计数型窗口（如「今天 N/M 个账号已签到」）单独累加，最后用 完成/总数 重算
+	// 百分比；对它取平均会得出「一个签了一个没签 = 50%」这类没有意义的中间值。
+	counted := make(map[string]bool, 3)
+	doneCounts := make(map[string]*float64, 3)
+	accountCounts := make(map[string]*float64, 3)
 	for _, view := range views {
 		if view.Level != "" {
 			if _, seen := seenLevels[view.Level]; !seen {
@@ -322,18 +334,45 @@ func mergeQuotaViews(views []QuotaView) QuotaView {
 			remainCounts[window.Kind] = addQuotaValue(remainCounts[window.Kind], window.Remaining)
 			resetTimes[window.Kind] = earliestQuotaTime(resetTimes[window.Kind], window.NextResetAt)
 			labels[window.Kind] = window.Label
+			if window.Counts {
+				counted[window.Kind] = true
+				doneCounts[window.Kind] = addQuotaValue(doneCounts[window.Kind], window.DoneCount)
+				accountCounts[window.Kind] = addQuotaValue(accountCounts[window.Kind], window.AccountCount)
+			}
 		}
 	}
 	merged.Level = strings.Join(levels, " / ")
 	for _, kind := range orders {
-		merged.Windows = append(merged.Windows, QuotaWindow{
+		window := QuotaWindow{
 			Kind: kind, Label: labels[kind],
 			UsedPercent: percentSums[kind] / float64(percentCounts[kind]),
 			Used:        usedCounts[kind], Total: totalCounts[kind], Remaining: remainCounts[kind],
 			NextResetAt: resetTimes[kind],
-		})
+		}
+		if counted[kind] {
+			done := quotaValueOrZero(doneCounts[kind])
+			accounts := quotaValueOrZero(accountCounts[kind])
+			window.Counts = true
+			window.DoneCount = &done
+			window.AccountCount = &accounts
+			window.UsedPercent = 0
+			if accounts > 0 {
+				window.UsedPercent = done / accounts * 100
+			}
+			// 计数型窗口不展示额度口径的 已用/总量/剩余 三元组。
+			window.Used, window.Total, window.Remaining = nil, nil, nil
+		}
+		merged.Windows = append(merged.Windows, window)
 	}
 	return merged
+}
+
+// quotaValueOrZero 读取可空计数，缺失按 0 处理，避免合并时出现空指针分支。
+func quotaValueOrZero(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func addQuotaValue(base *float64, value *float64) *float64 {

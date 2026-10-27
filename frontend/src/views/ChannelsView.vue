@@ -548,10 +548,14 @@ async function queryQuota(channel: Channel, forceRefresh = false, credential?: C
   }
 }
 
-// onCredentialQuota 密钥抽屉里按单把密钥查询额度；channel 取抽屉当前渠道。
-function onCredentialQuota(credential: ChannelCredential) {
+// onCredentialQuota 密钥抽屉里的额度入口。
+//
+// 2026-10-27 用户要求：这个入口要看整个渠道全部账号的积分合并结果，不按账号分开
+// 显示。所以这里故意不传 credentialId——传了就变成只查那一个账号的即时诊断视图。
+// 逐账号排查仍可用渠道级返回里的 partialErrors（列出是哪把密钥失败）。
+function onCredentialQuota() {
   if (!credentialChannel.value) return
-  void queryQuota(credentialChannel.value, false, credential)
+  void queryQuota(credentialChannel.value, false)
 }
 
 async function setChannelStatus(channel: Channel, enabled: boolean) {
