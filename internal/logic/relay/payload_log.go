@@ -16,6 +16,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/yunloli/aiferry/internal/logic/protocol"
+	"github.com/yunloli/aiferry/internal/logic/schedule"
 )
 
 // 收发报文落盘（payload log）：每条请求写一个 <requestID>.json，内容为客户端
@@ -124,13 +125,27 @@ func truncatePayloadField(data []byte) (json.RawMessage, bool) {
 	return json.RawMessage(data[:maxPayloadFieldBytes]), true
 }
 
+// payloadCleanupTaskKey 是「报文文件清理」在计划任务中心的标识。
+const payloadCleanupTaskKey = "relay.payload_cleanup"
+
 // StartPayloadCleanup 启动报文目录的每小时清理任务：按文件修改时间从旧到新删除，
 // 保证目录文件数不超过 PayloadLogMaxFiles。
 func StartPayloadCleanup(ctx context.Context) {
+	spec := schedule.Spec{
+		Key:         payloadCleanupTaskKey,
+		Name:        "请求报文文件清理",
+		Description: "每小时清理一次请求报文目录，按修改时间从旧到新删除，保证文件数不超过上限。用于保留失败请求原文供排障，默认关闭。",
+		Kind:        schedule.KindInterval,
+		Interval:    payloadCleanupInterval,
+		Enabled:     payloadLogState.enabled,
+	}
 	if !payloadLogState.enabled {
+		spec.DisabledReason = "未开启报文记录（PAYLOAD_LOG_ENABLED=false），无需清理"
+		schedule.Register(spec)
 		g.Log().Infof(ctx, "payload log disabled (PAYLOAD_LOG_ENABLED=false), cleanup not started")
 		return
 	}
+	schedule.Register(spec)
 	go func() {
 		ticker := time.NewTicker(payloadCleanupInterval)
 		defer ticker.Stop()
@@ -139,7 +154,10 @@ func StartPayloadCleanup(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				cleanupPayloads(ctx)
+				_ = schedule.Run(ctx, payloadCleanupTaskKey, func(ctx context.Context) error {
+					cleanupPayloads(ctx)
+					return nil
+				})
 			}
 		}
 	}()

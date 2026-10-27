@@ -19,6 +19,7 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/redemption"
 	"github.com/yunloli/aiferry/internal/logic/relay"
 	"github.com/yunloli/aiferry/internal/logic/requestfirewall"
+	"github.com/yunloli/aiferry/internal/logic/schedule"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/logic/user"
@@ -90,6 +91,9 @@ func (c *Controller) registerAdmin(group *ghttp.RouterGroup) {
 	group.PUT("/channel-types/{id}/status", c.updateChannelTypeStatus)
 	group.DELETE("/channel-types/{id}", c.deleteChannelType)
 	group.GET("/channel-groups", c.listChannelGroups)
+	// 计划任务列表：所有系统后台定时任务的可视化视图（上次/下次执行时间、结果、耗时）。
+	// 只读接口，数据来自进程内注册中心，不落库。
+	group.GET("/scheduled-tasks", c.listScheduledTasks)
 	group.POST("/channel-groups", c.createChannelGroup)
 	group.PUT("/channel-groups/{id}", c.updateChannelGroup)
 	group.DELETE("/channel-groups/{id}", c.deleteChannelGroup)
@@ -228,6 +232,12 @@ func (c *Controller) queryChannelCost(r *ghttp.Request) {
 func (c *Controller) queryChannelQuota(r *ghttp.Request) {
 	data, err := c.channels.QueryQuota(r.Context(), routeID(r), r.GetQuery("credentialId").Uint64(), r.GetQuery("refresh").Bool())
 	respond(r, data, err)
+}
+
+// listScheduledTasks 返回全部系统后台定时任务的运行状态。数据来自进程内注册中心，
+// 因此反映的是「当前这个副本」的真实调度情况，不需要查库。
+func (c *Controller) listScheduledTasks(r *ghttp.Request) {
+	respond(r, schedule.List(), nil)
 }
 
 func (c *Controller) listPriceRules(r *ghttp.Request) {

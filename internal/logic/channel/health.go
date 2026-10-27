@@ -8,6 +8,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/schedule"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -15,7 +16,18 @@ import (
 
 const healthCheckTick = 10 * time.Second
 
+// healthCheckTaskKey 是「渠道健康巡检」在计划任务中心的标识。
+const healthCheckTaskKey = "channel.health_check"
+
 func (s *sChannel) StartHealthChecks(ctx context.Context) {
+	schedule.Register(schedule.Spec{
+		Key:         healthCheckTaskKey,
+		Name:        "渠道健康巡检",
+		Description: "按系统设置里的巡检间隔，自动测试被禁用的渠道/模型/密钥并尝试恢复，同时主动巡检正常渠道。间隔与开关都在系统设置里配置。",
+		Kind:        schedule.KindInterval,
+		Interval:    healthCheckTick,
+		Enabled:     true,
+	})
 	go func() {
 		lastHealthCheck := time.Now()
 		ticker := time.NewTicker(healthCheckTick)
@@ -35,12 +47,15 @@ func (s *sChannel) StartHealthChecks(ctx context.Context) {
 				}
 				lastHealthCheck = now
 				recovery, regular := healthActions(settings)
-				if recovery {
-					s.runRecoveryChecks(ctx, settings.HealthCheckMode)
-				}
-				if regular {
-					s.runRegularHealthChecks(ctx, settings.HealthCheckMode)
-				}
+				_ = schedule.Run(ctx, healthCheckTaskKey, func(ctx context.Context) error {
+					if recovery {
+						s.runRecoveryChecks(ctx, settings.HealthCheckMode)
+					}
+					if regular {
+						s.runRegularHealthChecks(ctx, settings.HealthCheckMode)
+					}
+					return nil
+				})
 			}
 		}
 	}()

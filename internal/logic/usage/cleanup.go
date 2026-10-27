@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/schedule"
 )
 
 const (
@@ -32,15 +33,30 @@ type expiredLogID struct {
 	Id uint64 `orm:"id"`
 }
 
+// usageCleanupTaskKey 是「用量明细保留清理」在计划任务中心的标识。
+const usageCleanupTaskKey = "usage.retention_cleanup"
+
 // StartRetentionCleanup 启动按保留窗口清理历史使用明细的后台任务。
 // retentionDays <= 0 表示关闭清理（默认），此时不删除任何明细：
 // 本项目的消费统计（仪表盘、用户用量、榜单）都实时聚合自 usage_logs，
 // 删除明细会同时缩短历史统计的可查询窗口，必须由部署方显式开启。
 func (s *sUsage) StartRetentionCleanup(ctx context.Context, retentionDays int) {
+	spec := schedule.Spec{
+		Key:         usageCleanupTaskKey,
+		Name:        "用量明细保留清理",
+		Description: "每天 03:30 删除超过保留天数的历史调用明细。默认关闭，需由部署方设置 USAGE_RETENTION_DAYS 才会执行。注意明细同时是消费统计的数据源，保留天数越短可查历史越短。",
+		Kind:        schedule.KindDailyAt,
+		Hour:        retentionRunHour,
+		Minute:      retentionRunMinute,
+		Enabled:     retentionDays > 0,
+	}
 	if retentionDays <= 0 {
+		spec.DisabledReason = "未设置保留天数（USAGE_RETENTION_DAYS），不会删除任何明细"
+		schedule.Register(spec)
 		g.Log().Infof(ctx, "usage retention cleanup disabled (USAGE_RETENTION_DAYS=%d)", retentionDays)
 		return
 	}
+	schedule.Register(spec)
 	go func() {
 		var lastRun time.Time
 		ticker := time.NewTicker(retentionCheckTick)
@@ -54,7 +70,10 @@ func (s *sUsage) StartRetentionCleanup(ctx context.Context, retentionDays int) {
 					continue
 				}
 				lastRun = now
-				s.cleanupExpiredLogs(ctx, retentionDays)
+				_ = schedule.Run(ctx, usageCleanupTaskKey, func(ctx context.Context) error {
+					s.cleanupExpiredLogs(ctx, retentionDays)
+					return nil
+				})
 			}
 		}
 	}()

@@ -9,6 +9,7 @@ import (
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
+	"github.com/yunloli/aiferry/internal/logic/schedule"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
@@ -35,12 +36,24 @@ const (
 	workBuddyCheckinStartupDelay = 90 * time.Second
 )
 
+// workBuddyCheckinTaskKey 是「WorkBuddy 每日签到」在计划任务中心的标识。
+const workBuddyCheckinTaskKey = "channel.workbuddy_checkin"
+
 // StartWorkBuddyCheckins 启动每日自动签到任务。与健康检查一致，由 app 层在
 // 服务启动时调用一次；ctx 结束时协程自行退出。
 //
 // 启动后先等一个短延迟跑首轮：一是避开启动初期的模型/渠道同步风暴，二是让
 // 服务重启或发版当天就能补签，不必等到下一个整点。之后按小时粒度检查。
 func (s *sChannel) StartWorkBuddyCheckins(ctx context.Context) {
+	schedule.Register(schedule.Spec{
+		Key:         workBuddyCheckinTaskKey,
+		Name:        "WorkBuddy 每日签到",
+		Description: "每小时检查一次，只在每天 6 点后执行；遍历所有 WorkBuddy 渠道的每个账号，未签到的自动领取签到奖励。服务启动 90 秒后先补跑一轮。",
+		Kind:        schedule.KindHourlyAfter,
+		Interval:    workBuddyCheckinTick,
+		AfterHour:   workBuddyCheckinHour,
+		Enabled:     true,
+	})
 	go func() {
 		firstRun := time.NewTimer(workBuddyCheckinStartupDelay)
 		defer firstRun.Stop()
@@ -49,7 +62,10 @@ func (s *sChannel) StartWorkBuddyCheckins(ctx context.Context) {
 			return
 		case <-firstRun.C:
 			if time.Now().Hour() >= workBuddyCheckinHour {
-				s.runWorkBuddyCheckins(ctx)
+				_ = schedule.Run(ctx, workBuddyCheckinTaskKey, func(ctx context.Context) error {
+					s.runWorkBuddyCheckins(ctx)
+					return nil
+				})
 			}
 		}
 		ticker := time.NewTicker(workBuddyCheckinTick)
@@ -62,7 +78,10 @@ func (s *sChannel) StartWorkBuddyCheckins(ctx context.Context) {
 				if now.Hour() < workBuddyCheckinHour {
 					continue
 				}
-				s.runWorkBuddyCheckins(ctx)
+				_ = schedule.Run(ctx, workBuddyCheckinTaskKey, func(ctx context.Context) error {
+					s.runWorkBuddyCheckins(ctx)
+					return nil
+				})
 			}
 		}
 	}()

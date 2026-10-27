@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch, type Component } from 'vu
 import { useRoute, useRouter } from 'vue-router'
 import {
   Activity,
+  AlarmClock,
   Cable,
   ChartNoAxesCombined,
   ChevronDown,
@@ -52,6 +53,7 @@ const adminItems: NavigationItem[] = [
     ],
   },
   { path: '/models', label: '模型与价格', icon: ChartNoAxesCombined },
+  { path: '/scheduled-tasks', label: '计划任务', icon: AlarmClock },
   { path: '/users', label: '用户管理', icon: UsersRound },
   { path: '/redemption-codes', label: '兑换码', icon: Ticket },
   {

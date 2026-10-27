@@ -10,6 +10,7 @@ import (
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
+	"github.com/yunloli/aiferry/internal/logic/schedule"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
@@ -23,9 +24,27 @@ var shanghaiLocation = func() *time.Location {
 	return location
 }()
 
+// costSyncTaskKey 是「每日余额同步」在计划任务中心的标识。
+const costSyncTaskKey = "channel.cost_sync"
+
 func (s *sChannel) StartCostSync(ctx context.Context) {
+	schedule.Register(schedule.Spec{
+		Key:         costSyncTaskKey,
+		Name:        "每日余额同步",
+		Description: "每天 00:01（北京时间）拉取各渠道上游费用与余额，失败按 5 分钟、10 分钟重试两轮；启动时先跑一次。",
+		Kind:        schedule.KindDailyAt,
+		Hour:        0,
+		Minute:      1,
+		Enabled:     true,
+	})
 	go func() {
-		s.syncPlatformCosts(ctx, "startup")
+		// 启动时立即同步一次：进程重启后余额不应该等到第二天零点才刷新。
+		if err := schedule.Run(ctx, costSyncTaskKey, func(ctx context.Context) error {
+			s.syncPlatformCosts(ctx, "startup")
+			return nil
+		}); err != nil {
+			g.Log().Warningf(ctx, "startup cost sync failed: %v", err)
+		}
 		for {
 			timer := time.NewTimer(nextCostSync(time.Now()))
 			select {
@@ -33,7 +52,10 @@ func (s *sChannel) StartCostSync(ctx context.Context) {
 				timer.Stop()
 				return
 			case <-timer.C:
-				s.syncCostWindow(ctx)
+				_ = schedule.Run(ctx, costSyncTaskKey, func(ctx context.Context) error {
+					s.syncCostWindow(ctx)
+					return nil
+				})
 			}
 		}
 	}()
