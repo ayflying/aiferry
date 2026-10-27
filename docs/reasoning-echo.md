@@ -2,11 +2,28 @@
 
 ## 当前行为
 
-网关对思考内容不做任何加工，请求与响应共用同一条透传路径，所有模型一个方法：
+网关对思考内容不做加工，请求与响应共用同一条透传路径，所有模型一个方法：
 
 - 请求侧：客户端历史里的 `reasoning_content` / `reasoning` 字段原样透传，不读取 Redis 存档、不补空串、不归一 null、不删除或重命名；Responses 转 Chat 时 `reasoning` 输入项直接丢弃（见 `docs/protocol-conversion.md`）。
-- 响应侧：上游返回的思考字段原样到达客户端。渠道「思维到内容」（`reasoningToContent`）开关已删除，全仓不再有任何把思考内容搬进正文的位置。
+- 响应侧：上游返回的思考字段原样到达客户端。渠道「思维到内容」（`reasoningToContent`）开关已删除。
+- **唯一例外是正文污染守卫**（0.6.28 起，`internal/logic/relay/content_guard.go`）：上游把标签或客户端协议标记写进正文时，
+  守卫在交付前处理一次，规则与渠道、模型无关：
+  - 思考块泄漏（`<thinking>…</thinking>` 包住整段思考）：搬回 `reasoning_content`、剥掉标签，正文只留真正的回答；
+  - 客户端协议标记泄漏（`<tool_result …>`、`<tool_calls>`、`<tool invoke …>`、`｜…｜` DSML 标记）：
+    还原不成正确的工具调用，判定为上游坏响应，不交付给客户端，交回候选循环切换或重试。
 - 历史渠道 JSON 里残留的 `reasoningToContent` 字段在解析时被兼容删除，不报错、不生效（`internal/logic/channel/advanced.go`）。
+
+### 正文污染守卫的实证（2026-10-27 生产报文）
+
+两类污染都会让客户端把坏内容存进会话历史、下一轮再回传，表现为「对话在没有回答的情况下中断」：
+
+| 形态 | 渠道 | 证据 |
+| --- | --- | --- |
+| 正文以 `<thinking>` 开头，思考与回答混在 `content`，`reasoning_content` 为空 | adesk（deepseek 系列） | 6 小时内 8~18 条；已出现 74 条请求的 assistant 历史带着 `<thinking>` 开头正文 |
+| 正文是一整坨 `<tool_result name=read>` 文件块 + `｜…｜` DSML 收尾 | workbuddy | `afreq_084947456a50178aff2cf4dd`（用户截图那次，`attempts=1` 直接交付） |
+
+守卫只在正文第一次出现时判断一次，判定不成立就立刻按原样放行；只对上游是 `/chat/completions` 的响应生效，
+`/responses`、Messages 等其它协议结构不参与判定。单测见 `internal/logic/relay/content_guard_test.go`。
 
 背景：自动思考历史回填曾用于满足 DeepSeek/Kimi 等思考模式上游「工具调用后必须回传思考」的校验，为排查长任务中断与正文标签污染已全部删除；若严格上游要求回传思考，会返回原始校验错误，由客户端携带完整历史解决。
 

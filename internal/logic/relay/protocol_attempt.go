@@ -220,6 +220,18 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			responseBody = aggregateChatCompletionSSE(responseBody)
 		}
 		// 思考内容在响应改写前捕获，仅用于报文记录；改写本身不再搬移任何字段。
+		// 唯一的例外是「正文污染守卫」：思考块泄漏搬回 reasoning_content，
+		// 客户端协议标记泄漏则判定为上游坏响应，不交给客户端。
+		responseBody, markupLeak := inspectBufferedContent(plan.UpstreamEndpoint(), responseBody)
+		if markupLeak {
+			message := "上游把客户端工具协议标记写进了正文，未作为回答交付"
+			return attemptResult{
+				status:       http.StatusBadGateway,
+				body:         openAIError("upstream_error", message),
+				errorMessage: message,
+				headers:      responseHeaders(resp.Header, plan),
+			}, false, nil
+		}
 		reasoningContent, reasoningField, reasoningToolCallIDs := captureBufferedReasoning(plan.UpstreamEndpoint(), responseBody)
 		responseBody = normalizeResponseBody(plan.UpstreamEndpoint(), responseBody, candidate.UpstreamName, advancedConfig)
 		result := attemptResult{status: resp.StatusCode, body: plan.ConvertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
@@ -254,6 +266,9 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	}
 	capture := newStreamResponseCapture(plan.UpstreamEndpoint())
 	reasoning := newReasoningCapture(plan.UpstreamEndpoint())
+	// 正文污染守卫：只在正文第一次出现时判定一次，认出思考块就把正文改写成
+	// reasoning_content，认出客户端协议标记则拒绝该响应。形态不符时原样放行。
+	contentGuard := newStreamContentGuard(plan.UpstreamEndpoint())
 	payloadCapture := newPayloadStreamCapture(plan.ClientEndpoint())
 	streamRestorer := newSensitiveDataStreamRestorer(sensitiveDataRestorer)
 	pending := make([][]byte, 0)
@@ -318,6 +333,26 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	scanner.Buffer(make([]byte, 64*1024), 8<<20)
 	for scanner.Scan() {
 		line := append(append([]byte(nil), scanner.Bytes()...), '\n')
+		// 正文污染守卫先于捕获与转换：后面的报文记录、协议转换与客户端收到的
+		// 字节都以守卫后的形态为准，客户端不会再拿到被标签或协议标记包裹的正文。
+		var markupLeak bool
+		if line, markupLeak = contentGuard.Observe(line); markupLeak {
+			// 上游把自家客户端的工具协议标记当正文写出：既不能当回答交付（客户端会
+			// 解析失败并把垃圾存进历史），也还原不成正确的工具调用。尚未写出内容时
+			// 交回候选循环切换；已经写出内容只能就地收尾，补发终止帧说明原因。
+			message := "上游把客户端工具协议标记写进了正文，未作为回答交付"
+			result.status = http.StatusBadGateway
+			result.body = openAIError("upstream_error", message)
+			result.errorMessage = message
+			if result.wroteBytes {
+				terminateTruncated(streamTerminal{status: http.StatusBadGateway, message: message})
+				return result, true, nil
+			}
+			return result, false, nil
+		}
+		if line == nil {
+			continue
+		}
 		// 思考内容在响应改写前捕获，仅用于报文记录；改写本身不再搬移任何字段。
 		reasoning.Observe(line)
 		line = normalizeSSELine(plan.UpstreamEndpoint(), line, candidate.UpstreamName, advancedConfig)
