@@ -100,6 +100,14 @@ func (s *sChannel) queryCredentialQuota(ctx context.Context, channel entity.Chan
 		}
 		return s.queryVolcAFP(ctx, channel, cipher)
 	}
+	// WorkBuddy 的接口路径由适配器常量决定，不读 quota.path（配置里那条只是
+	// 展示用的形状），单密钥查询同样走这条特化实现，否则会拼出错地址。
+	if config.Adapter == channeltype.AdapterWorkBuddy {
+		return s.fetchWorkBuddyCreditsForCredential(ctx, channel, config, quotaCredential{
+			Prefix: credential.KeyPrefix,
+			Cipher: credential.ApiKeyCipher,
+		})
+	}
 	endpoint, err := resolveQuotaURL(channel.BaseUrl, config.Path)
 	if err != nil {
 		return QuotaView{}, err

@@ -237,6 +237,21 @@ func (s *sChannel) fetchWorkBuddyCredits(ctx context.Context, channel entity.Cha
 	return view, nil
 }
 
+// fetchWorkBuddyCreditsForCredential 查询单个上游密钥（一个账号）的积分与签到，
+// 供管理端「按账号查积分」使用。与渠道级查询共用同一套积分/签到实现，只是
+// 不并发、不合并，失败直接返回，便于逐账号诊断。
+func (s *sChannel) fetchWorkBuddyCreditsForCredential(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, credential quotaCredential) (QuotaView, error) {
+	creditsEndpoint, err := resolveHostURL(channel.BaseUrl, workBuddyCreditsPath)
+	if err != nil {
+		return QuotaView{}, err
+	}
+	checkinEndpoint, err := resolveHostURL(channel.BaseUrl, "/v2"+workBuddyCheckinPath)
+	if err != nil {
+		return QuotaView{}, err
+	}
+	return s.fetchWorkBuddyCreditsSingle(ctx, channel, config, credential, creditsEndpoint, checkinEndpoint)
+}
+
 // fetchWorkBuddyCreditsSingle 先查积分，成功后再尽力查签到；签到失败写入
 // view.PartialErrors，不向上抛错（避免把一次风控头缺失的降级也当成积分失败）。
 func (s *sChannel) fetchWorkBuddyCreditsSingle(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, credential quotaCredential, creditsEndpoint, checkinEndpoint string) (QuotaView, error) {

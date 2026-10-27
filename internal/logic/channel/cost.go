@@ -46,8 +46,17 @@ type CredentialCostResult struct {
 	Error           string    `json:"error"`
 }
 
-func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input adminapi.CostQueryInput) (CostResult, error) {
-	// 必须用 Get 而不是 GetOwned：Get 在带登录用户的请求上下文里按创建者过滤，
+// isCostAdapterUnset 判断费用查询适配器是否「没配置」。
+//
+// 为什么不能只比对 AdapterNone：渠道类型在 builtins.json 里省略 costs 段时，解析
+// 结果拿到的是零值空串，而不是显式的 "none"。只看 AdapterNone 会把这类未配置的
+// 类型放进后续鉴权与请求流程，最终报出「channel type requires a management key」
+// ——一个和真实原因（本来就没有费用查询）无关的错误，用户完全无法据此自查。
+func isCostAdapterUnset(adapter string) bool {
+	return adapter == "" || adapter == channeltype.AdapterNone
+}
+
+func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input adminapi.CostQueryInput) (CostResult, error) { // 必须用 Get 而不是 GetOwned：Get 在带登录用户的请求上下文里按创建者过滤，
 	// 在后台定时同步（无用户上下文）里不受归属限制。GetOwned 拿不到登录用户就直接
 	// 返回「未登录」，会让每日余额同步在每个渠道上失败，余额快照从此不再回上游校准
 	// （2026-09-25 起的线上回归）。
@@ -70,7 +79,11 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 		Mode: config.Costs.Adapter, Currency: defaultCostCurrency(config.Costs), PeriodStart: &start, PeriodEnd: &end, QueriedAt: time.Now(),
 		Credentials: make([]CredentialCostResult, 0),
 	}
-	if config.Costs.Adapter == channeltype.AdapterNone {
+	// 未配置费用查询的类型（builtins.json 里没有 costs 段，例如 workbuddy）解析出来
+	// Adapter 是空串而不是 "none"：只比对 AdapterNone 会漏掉这种零值，让它继续往下
+	// 走到鉴权分支，最终以「channel type requires a management key」这种与真实原因
+	// 无关的报错收场。这里把空值一并视为未配置。
+	if isCostAdapterUnset(config.Costs.Adapter) {
 		return CostResult{}, gerror.New("cost query is not configured")
 	}
 	if config.Costs.AuthType == channeltype.AuthChannelKey {
