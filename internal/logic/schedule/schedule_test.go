@@ -92,10 +92,10 @@ func TestHumanDuration(t *testing.T) {
 		input time.Duration
 		want  string
 	}{
-		{10 * time.Second, "10 秒"},
-		{5 * time.Minute, "5 分钟"},
-		{time.Hour, "1 小时"},
-		{90 * time.Second, "90 秒"},
+		{10 * time.Second, "10秒"},
+		{5 * time.Minute, "5分钟"},
+		{time.Hour, "1小时"},
+		{90 * time.Second, "90秒"},
 	}
 	for _, item := range cases {
 		if got := humanDuration(item.input); got != item.want {

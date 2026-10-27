@@ -66,25 +66,27 @@ func scheduleText(spec Spec) string {
 		if spec.Interval <= 0 {
 			return "周期未设置"
 		}
-		return "每 " + humanDuration(spec.Interval) + " 一次"
+		return "每" + humanDuration(spec.Interval) + "一次"
 	case KindDailyAt:
 		return "每天 " + twoDigits(spec.Hour) + ":" + twoDigits(spec.Minute)
 	case KindHourlyAfter:
-		return "每 " + humanDuration(spec.Interval) + " 检查一次，仅每天 " + twoDigits(spec.AfterHour) + " 点后执行"
+		return "每" + humanDuration(spec.Interval) + "检查一次，仅每天 " + twoDigits(spec.AfterHour) + " 点后执行"
 	default:
 		return "事件驱动（启动时执行）"
 	}
 }
 
 // humanDuration 把时长渲染成「10 秒」「5 分钟」「1 小时」这类可读文本。
+// 刻意不在数字与单位之间留空格，因为调用方直接拼在「每」与「一次」中间，
+// 留空格会拼出「每 10 秒 一次」这种读起来别扭的文本。
 func humanDuration(value time.Duration) string {
 	switch {
 	case value >= time.Hour && value%time.Hour == 0:
-		return strconv.Itoa(int(value/time.Hour)) + " 小时"
+		return strconv.Itoa(int(value/time.Hour)) + "小时"
 	case value >= time.Minute && value%time.Minute == 0:
-		return strconv.Itoa(int(value/time.Minute)) + " 分钟"
+		return strconv.Itoa(int(value/time.Minute)) + "分钟"
 	default:
-		return strconv.Itoa(int(value/time.Second)) + " 秒"
+		return strconv.Itoa(int(value/time.Second)) + "秒"
 	}
 }
 
