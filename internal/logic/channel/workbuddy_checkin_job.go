@@ -139,7 +139,7 @@ func (s *sChannel) checkinWorkBuddyChannel(ctx context.Context, channel entity.C
 				g.Log().Warningf(ctx, "workbuddy 自动签到：渠道 %d 密钥 %s 失败：%v", channel.Id, credential.Prefix, claimErr)
 				return
 			}
-			g.Log().Infof(ctx, "workbuddy 自动签到：渠道 %d 密钥 %s %s", channel.Id, credential.Prefix, workBuddyCheckinText("", claim))
+			g.Log().Infof(ctx, "workbuddy 自动签到：渠道 %d 密钥 %s %s", channel.Id, credential.Prefix, workBuddyCheckinText(credential.Prefix, claim))
 		}(credential)
 	}
 	wg.Wait()
