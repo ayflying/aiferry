@@ -314,11 +314,20 @@ func (s *sChannel) fetchWorkBuddyCreditsSingle(ctx context.Context, channel enti
 	return view, nil
 }
 
-// claimWorkBuddyCheckin 调用签到领取接口。checkinEndpoint 是状态查询地址
-// （…/v2/billing/meter/checkin-activity-status），签到领取是同一族下的
-// …/v2/billing/meter/daily-checkin，因此只替换最后一段路径。
-func (s *sChannel) claimWorkBuddyCheckin(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, credential quotaCredential, checkinEndpoint string) (workBuddyCheckinClaim, error) {
-	endpoint := strings.TrimSuffix(checkinEndpoint, workBuddyCheckinPath) + workBuddyDailyCheckinPath
+// claimWorkBuddyCheckin 调用签到领取接口。签到领取是同族下的
+// …/v2/billing/meter/daily-checkin，与状态查询只在最后一段不同。
+//
+// 这里不能对传入的 checkinEndpoint 做 TrimSuffix：那是 resolveHostURL 拼好的完整
+// URL（形如 https://host/v2/billing/meter/checkin-activity-status），而
+// workBuddyCheckinPath 不含 /v2 前缀，TrimSuffix 匹配不上，端点会原样保留成
+// 状态查询地址，领取请求必然 404（2026-10-27 生产日志实测）。改为直接按渠道
+// baseUrl 重新拼领取地址，不依赖入参的字符串形态。
+// 注意 workBuddyDailyCheckinPath 常量自带 /v2 前缀，这里不能再补。
+func (s *sChannel) claimWorkBuddyCheckin(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, credential quotaCredential, _ string) (workBuddyCheckinClaim, error) {
+	endpoint, err := resolveHostURL(channel.BaseUrl, workBuddyDailyCheckinPath)
+	if err != nil {
+		return workBuddyCheckinClaim{}, fmt.Errorf("渠道 %d 地址无效：%w", channel.Id, err)
+	}
 	body, err := s.fetchUpstreamJSON(ctx, channel, credential.Cipher, upstreamJSONRequest{
 		Method:       "POST",
 		Endpoint:     endpoint,
