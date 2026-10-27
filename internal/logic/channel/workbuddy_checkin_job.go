@@ -76,6 +76,7 @@ func (s *sChannel) runWorkBuddyCheckins(ctx context.Context) {
 		g.Log().Warningf(ctx, "workbuddy 自动签到：读取渠道失败：%v", err)
 		return
 	}
+	g.Log().Infof(ctx, "workbuddy 自动签到：本轮共 %d 个 WorkBuddy 渠道待检查", len(channels))
 	for _, channel := range channels {
 		s.checkinWorkBuddyChannel(ctx, channel)
 	}
@@ -97,6 +98,7 @@ func (s *sChannel) checkinWorkBuddyChannel(ctx context.Context, channel entity.C
 	}
 	config, ok := s.workBuddyQuotaConfig(ctx, channel)
 	if !ok {
+		g.Log().Warningf(ctx, "workbuddy 自动签到：渠道 %d 未声明 workbuddy_credits 额度适配器，跳过", channel.Id)
 		return
 	}
 	var wg sync.WaitGroup
@@ -107,7 +109,11 @@ func (s *sChannel) checkinWorkBuddyChannel(ctx context.Context, channel entity.C
 			// 先读状态：明确已签到就跳过，避免无意义的上游调用。
 			statusBody, statusErr := s.fetchWorkBuddyCheckinStatus(ctx, channel, config, credential, checkinEndpoint)
 			if statusErr == nil && workBuddyCheckedInToday(statusBody) {
+				g.Log().Infof(ctx, "workbuddy 自动签到：渠道 %d 密钥 %s 今天已签到，跳过", channel.Id, credential.Prefix)
 				return
+			}
+			if statusErr != nil {
+				g.Log().Infof(ctx, "workbuddy 自动签到：渠道 %d 密钥 %s 状态未知（%v），直接尝试领取", channel.Id, credential.Prefix, statusErr)
 			}
 			claim, claimErr := s.claimWorkBuddyCheckin(ctx, channel, config, credential, checkinEndpoint)
 			if claimErr != nil {
