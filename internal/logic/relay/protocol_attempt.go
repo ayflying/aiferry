@@ -224,7 +224,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		// 客户端协议标记泄漏则判定为上游坏响应，不交给客户端。
 		responseBody, markupLeak := inspectBufferedContent(plan.UpstreamEndpoint(), responseBody)
 		if markupLeak {
-			message := "上游把客户端工具协议标记写进了正文，未作为回答交付"
+			message := "上游把客户端内部标记（工具协议或摘要信封）写进了正文，未作为回答交付"
 			return attemptResult{
 				status:       http.StatusBadGateway,
 				body:         openAIError("upstream_error", message),
@@ -340,7 +340,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			// 上游把自家客户端的工具协议标记当正文写出：既不能当回答交付（客户端会
 			// 解析失败并把垃圾存进历史），也还原不成正确的工具调用。尚未写出内容时
 			// 交回候选循环切换；已经写出内容只能就地收尾，补发终止帧说明原因。
-			message := "上游把客户端工具协议标记写进了正文，未作为回答交付"
+			message := "上游把客户端内部标记（工具协议或摘要信封）写进了正文，未作为回答交付"
 			result.status = http.StatusBadGateway
 			result.body = openAIError("upstream_error", message)
 			result.errorMessage = message

@@ -16,9 +16,10 @@ import (
 //
 //	1. 思考块泄漏：上游把整段思考用 <thinking>…</thinking> 包进正文，而不是放进
 //	   reasoning_content（adesk 渠道 deepseek 系列实证）。
-//	2. 客户端协议标记泄漏：上游把自家客户端的工具协议标记当正文写出，例如
-//	   <tool_result name=read> 整块文件内容、<tool_call(s)>/<tool invoke>，以及
-//	   ｜…｜ 形式的 DSML 收尾标记（workbuddy 渠道实证，报文 afreq_0849474…）。
+//	2. 客户端内部标记泄漏：上游把自家客户端/Agent 框架的内部标记当正文写出，例如
+//	   <tool_result name=read> 整块文件内容、<tool_call(s)>/<tool invoke>、｜…｜ 形式的
+//	   DSML 收尾标记（workbuddy 渠道实证），以及 Agent 框架上下文压缩用的
+//	   <summary>…</summary> 摘要信封（adesk 渠道实证）。
 //
 // 处理规则不区分渠道和模型，全部响应共用一条：
 //   - 思考块：搬回 reasoning_content、剥掉标签，正文只留真正的回答，可以安全交付；
@@ -39,11 +40,17 @@ const (
 // leakOpeners 是观察到的思考块开头写法。只认这几种，避免误伤 "<" 开头的普通文本。
 var leakOpeners = []string{"<thinking>", "<thinking ", "<thinking:", "<thinkingState:"}
 
-// markupLeakPrefixes 是上游自家客户端的工具协议标记开头。这些标记对任何 OpenAI
-// 兼容客户端都不是合法正文，出现即说明这条响应不能直接交付。
+// markupLeakPrefixes 是上游自家客户端/Agent 框架的内部标记开头。这些标记对任何
+// OpenAI 兼容客户端都不是合法正文，出现即说明这条响应不能直接交付。
+//
+// 其中 <summary> 来自 Agent 框架的上下文压缩格式：客户端把 checkpoint（含
+// <compacted-summary> 段落）当作一条 user 消息塞进请求后，上游模型会照抄这个格式，
+// 把新写的一段摘要当成本轮回答（生产实证 afreq_04b72bca01aaab19292942ab）。
+// 压缩结果本身用 <compacted-summary> 承载，这里刻意不拦，避免把正常的上下文压缩打断。
 var markupLeakPrefixes = []string{
 	"<tool_result", "<tool_calls>", "<tool_calls ", "<tool_call>", "<tool_call ",
 	"<tool invoke", "<function_results", "<function_calls", "<｜", "｜DSML｜", "<|tool",
+	"<summary>",
 }
 
 // guardDecision 是对正文开头形态的判定结果。

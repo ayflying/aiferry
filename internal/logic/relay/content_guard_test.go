@@ -46,6 +46,24 @@ func TestInspectBufferedContentRejectsToolMarkup(t *testing.T) {
 	}
 }
 
+// 生产实证形态（adesk 渠道 afreq_04b72bca01…）：上游照抄客户端上下文压缩格式，
+// 把一段 <summary> 摘要当成本轮回答，同样不能交付。
+func TestInspectBufferedContentRejectsSummaryEnvelope(t *testing.T) {
+	body := []byte(`{"choices":[{"message":{"content":"<summary>\n1. 用户当前两项要求：…\n</summary>"}}]}`)
+	if _, markup := inspectBufferedContent("/chat/completions", body); !markup {
+		t.Fatal("摘要信封应判定为不可交付")
+	}
+}
+
+// 客户端上下文压缩本身用 <compacted-summary> 承载，不能被守卫拦掉。
+func TestInspectBufferedContentKeepsCompactedSummary(t *testing.T) {
+	body := []byte(`{"choices":[{"message":{"content":"<compacted-summary>## Primary Request\n- 用户要求…</compacted-summary>"}}]}`)
+	fixed, markup := inspectBufferedContent("/chat/completions", body)
+	if markup || string(fixed) != string(body) {
+		t.Fatalf("压缩结果不应被拦截：markup=%v body=%s", markup, fixed)
+	}
+}
+
 // 上游已经按标准字段分离思考时不动正文。
 func TestInspectBufferedContentKeepsStandardField(t *testing.T) {
 	body := []byte(`{"choices":[{"message":{"content":"<thinking>这是正文里的标签","reasoning_content":"已有思考"}}]}`)
@@ -98,6 +116,14 @@ func TestStreamContentGuardRejectsToolMarkup(t *testing.T) {
 	guard := newStreamContentGuard("/chat/completions")
 	if out, markup := guard.Observe([]byte(`data: {"choices":[{"index":0,"delta":{"content":"<tool_result name=read>"}}]}` + "\n")); !markup {
 		t.Fatalf("应拒绝协议标记，out=%s", out)
+	}
+}
+
+// 流式：摘要信封同样拒绝。
+func TestStreamContentGuardRejectsSummaryEnvelope(t *testing.T) {
+	guard := newStreamContentGuard("/chat/completions")
+	if out, markup := guard.Observe([]byte(`data: {"choices":[{"index":0,"delta":{"content":"<summary>\n1. 用户要求"}}]}` + "\n")); !markup {
+		t.Fatalf("应拒绝摘要信封，out=%s", out)
 	}
 }
 
