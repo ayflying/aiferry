@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { convertAmount, displayCurrency, formatBalance, formatCost, formatLatency, formatNumber, formatReasoningEffort, formatTime, formatTokenSpeed, formatUsageDuration, setDisplayCurrency, setDisplayTimeZone, successRate } from './format'
+import { convertAmount, displayCurrency, formatBalance, formatCost, formatCurrencyAmount, formatLatency, formatNumber, formatReasoningEffort, formatTime, formatTokenSpeed, formatUsageDuration, formatUsageValue, setDisplayCurrency, setDisplayTimeZone, successRate } from './format'
 
 describe('format helpers', () => {
   it('does not report missing prices as zero', () => {
@@ -12,6 +12,13 @@ describe('format helpers', () => {
 
   it('formats token counts', () => {
     expect(formatNumber(12345)).toBe('12,345')
+  })
+
+  it('formats credit balances without a currency symbol', () => {
+    // XXX 是计数口径（积分/用量）的币种标记，不能被 Intl 排成「XXX 1,500.00」。
+    expect(formatCurrencyAmount(1500, 'XXX')).toBe('1,500')
+    expect(formatUsageValue(1234.5)).toBe('1,234.5')
+    expect(formatUsageValue(undefined)).toBe('—')
   })
 
   it('calculates success rate', () => {

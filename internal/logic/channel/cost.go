@@ -104,6 +104,11 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 			detail := costCredentialResult(credential.Id, credential.KeyPrefix, false, cost, queryErr)
 			result.Credentials = append(result.Credentials, detail)
 			if queryErr != nil {
+				// 查询拿到的是上游自己的结论（如 401/402 余额耗尽），正是自动
+				// 禁用最该生效的时刻，不必等真实用户请求打进来再禁用。
+				if !costQuerySkipAutoDisable(config.Costs.Adapter) {
+					s.applyCredentialCostHealthCheck(ctx, channel.Id, credential.Id, credentialCostFailureStatus(queryErr), queryErr.Error())
+				}
 				continue
 			}
 			if saveErr := s.saveCredentialCostResult(ctx, credential.Id, cost); saveErr != nil {
@@ -147,6 +152,11 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 				detail := costCredentialResult(credential.Id, credential.KeyPrefix, false, cost, queryErr)
 				result.Credentials = append(result.Credentials, detail)
 				if queryErr != nil {
+					// 管理密钥鉴权失败说明该账号的用量查询凭据本身失效，同样进入
+					// 自动禁用判定；判定只看明确的 401/402 与余额不足文案。
+					if !costQuerySkipAutoDisable(config.Costs.Adapter) {
+						s.applyCredentialCostHealthCheck(ctx, channel.Id, credential.Id, credentialCostFailureStatus(queryErr), queryErr.Error())
+					}
 					continue
 				}
 				if saveErr := s.saveCredentialCostResult(ctx, credential.Id, cost); saveErr != nil {
@@ -209,6 +219,11 @@ func (s *sChannel) QueryCost(ctx context.Context, channelID uint64, input admina
 }
 
 func defaultCostCurrency(config channeltype.CostConfig) string {
+	// 计数口径（用量/积分）没有货币：写 XXX（ISO 4217「无货币」），让前端与
+	// 折算逻辑按未知币种原样展示，避免把积分当成美元或人民币。
+	if channeltype.IsUsageCost(config) {
+		return costUsageCurrency
+	}
 	if config.FixedCurrency != "" {
 		return strings.ToUpper(config.FixedCurrency)
 	}
@@ -235,6 +250,10 @@ func (s *sChannel) queryCredentialCost(ctx context.Context, channel entity.Chann
 		err = s.queryQiniuCosts(ctx, channel, credentialCipher, config, &result)
 	case channeltype.AdapterQiniuUsage:
 		err = s.queryQiniuUsage(ctx, channel, credentialCipher, config, start, end, &result)
+	case channeltype.AdapterWorkBuddy:
+		// 积分余额没有时间窗口概念（套餐按周期滚动结算，不按起止日期求和），
+		// 上游接口也不接受日期参数，因此忽略 start/end，只取当前快照。
+		err = s.queryWorkBuddyCosts(ctx, channel, credentialCipher, config, &result)
 	default:
 		err = gerror.New("cost query is not configured")
 	}

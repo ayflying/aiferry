@@ -7,7 +7,7 @@ import type { Channel, ChannelCostResult, ChannelCredential, ChannelLoginResult,
 import { mergeCostSummaries } from '../lib/cost'
 import { showError, showSuccess, showWarning } from '../lib/error'
 import { copyText } from '../lib/clipboard'
-import { formatBalance, formatCost, formatTime, formatNumber } from '../lib/format'
+import { formatBalance, formatCost, formatTime, formatNumber, formatUsageValue, usageCurrency } from '../lib/format'
 import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
 
 const props = defineProps<{ modelValue: boolean; channel?: Channel; quotaSupported?: boolean; managementKeySupported?: boolean; managementKeyPair?: boolean; loginSupported?: boolean }>()
@@ -59,9 +59,21 @@ let codeCountdownTimer: ReturnType<typeof setInterval> | undefined
 let pendingRevealId: number | null = null
 const drawerSize = window.innerWidth <= 600 ? '94%' : '760px'
 const usageQuery = computed(() => isUsageMode(props.channel?.costQueryType, props.channel?.costQueryMode))
+// usageQuery 表示该渠道的「查询」查的是计数额度（积分/Token）而不是金额。
+// WorkBuddy 这类上游没有钱包余额，只有按周期滚动的积分套餐；把积分套上
+// 「已用 $0.03」这种货币口径会误导用户，因此计数口径单独走一套文案。
+// querySupported 决定「查询」按钮是否可点。旧实现用 costQueryMode === 'none'
+// 判定，workbuddy 这类只有积分套餐的渠道因此永远点不动；现在只要渠道类型
+// 声明了任意一种查询适配器（金额或计数）就允许查询，真正的失败原因由接口返回。
+const querySupported = computed(() => {
+  const mode = props.channel?.costQueryMode
+  return mode !== undefined && mode !== '' && mode !== 'none'
+})
 // 各上游密钥可能挂在不同币种账户上，汇总卡片只展示折算合并后的一条，
 // 折算到同一货币再求和才是可比口径；每把密钥的原始币种仍保留在下方明细里。
 const mergedSummary = computed(() => mergeCostSummaries(summaries.value))
+// 计数口径没有货币单位，汇总卡片上不能显示币种标记（XXX），只显示数值。
+const summaryCurrencyLabel = computed(() => (mergedSummary.value?.currency || '').toUpperCase() === usageCurrency ? '' : mergedSummary.value?.currency || '')
 const queryLabel = computed(() => {
   return `查询${channelQueryValueLabel(props.channel?.costQueryType, props.channel?.costQueryMode)}`
 })
@@ -357,7 +369,7 @@ async function queryCosts() {
     await load(false)
     emit('changed')
   } catch (error) {
-    showError(error, usageQuery.value ? '查询上游用量失败' : '查询上游费用失败')
+    showError(error, usageQuery.value ? `查询上游${channelQueryValueLabel(props.channel?.costQueryType, props.channel?.costQueryMode)}失败` : '查询上游费用失败')
   } finally {
     querying.value = false
   }
@@ -376,6 +388,24 @@ function autoDisabledDetail(item: ChannelCredential) {
 
 function costDetail(item: ChannelCredential) {
   return queryDetails.value.find((detail) => detail.credentialId === item.id)
+}
+
+// isCreditsCurrency 判断某个上游余额是不是计数口径（积分/用量）。
+// 计数口径只显示数值与单位，不加货币符号，也不折算汇率。
+function isCreditsCurrency(currency?: string | null) {
+  return (currency || '').toUpperCase() === usageCurrency
+}
+
+// creditBalanceText 是计数口径的「余额」文案。后端把积分余额写在
+// remainingAmount（兼容渠道级的「余额」语义），但展示上必须叫「积分余额」，
+// 否则用户会以为这是一笔现金。
+function creditBalanceText(value?: number | null) {
+  return value === undefined || value === null ? '—' : formatUsageValue(value)
+}
+
+// creditUsedText 是计数口径的「已用」文案：WorkBuddy 的周期已用积分。
+function creditUsedText(value?: number | null) {
+  return value === undefined || value === null ? '—' : formatUsageValue(value)
 }
 
 function secretLabel(item: ChannelCredential) {
@@ -487,15 +517,19 @@ function stopCodeCountdown() {
   <el-drawer v-model="visible" :title="`上游密钥 · ${channel?.name || ''}`" :size="drawerSize" destroy-on-close>
     <div class="credential-toolbar">
       <el-button type="primary" :icon="Plus" @click="openAddCredential">添加密钥</el-button>
-      <el-button :icon="Coins" :loading="querying" :disabled="channel?.costQueryMode === 'none'" @click="queryCosts">{{ queryLabel }}</el-button>
+      <el-button :icon="Coins" :loading="querying" :disabled="!querySupported" @click="queryCosts">{{ queryLabel }}</el-button>
     </div>
 
     <div v-if="mergedSummary" class="cost-summary-grid">
       <div class="summary-item">
-        <strong>{{ mergedSummary.currency }}</strong>
-        <span v-if="!usageQuery && mergedSummary.usedAmount !== undefined">已用 {{ formatCost(mergedSummary.usedAmount, mergedSummary.currency) }}</span>
-        <span v-if="!usageQuery && mergedSummary.remainingAmount !== undefined">余额 {{ formatBalance(mergedSummary.remainingAmount, mergedSummary.currency) }}</span>
-        <span v-if="mergedSummary.usage !== undefined || (usageQuery && mergedSummary.usedAmount !== undefined)">{{ mergedSummary.usageType || '用量' }} {{ formatNumber(mergedSummary.usage ?? mergedSummary.usedAmount) }} {{ mergedSummary.usageUnit || 'kToken' }}<small v-if="mergedSummary.usageDimension"> · {{ mergedSummary.usageDimension }}</small></span>
+        <strong v-if="summaryCurrencyLabel">{{ summaryCurrencyLabel }}</strong>
+        <template v-if="!usageQuery">
+          <span v-if="mergedSummary.usedAmount !== undefined">已用 {{ formatCost(mergedSummary.usedAmount, mergedSummary.currency) }}</span>
+          <span v-if="mergedSummary.remainingAmount !== undefined">余额 {{ formatBalance(mergedSummary.remainingAmount, mergedSummary.currency) }}</span>
+        </template>
+        <template v-else>
+          <span>{{ mergedSummary.usageType || '用量' }} 剩余 {{ creditBalanceText(mergedSummary.usage ?? mergedSummary.remainingAmount ?? mergedSummary.usedAmount) }} {{ mergedSummary.usageUnit || 'kToken' }}<small v-if="mergedSummary.usageDimension"> · {{ mergedSummary.usageDimension }}</small></span>
+        </template>
       </div>
     </div>
 
@@ -503,7 +537,18 @@ function stopCodeCountdown() {
       <el-table :data="rows" row-key="id" size="small">
         <el-table-column label="上游密钥" min-width="200"><template #default="{ row }"><span class="mono key-prefix"><el-tooltip content="固定序号：按创建顺序编号（含已删密钥占位），与用量明细的「渠道 #N」一致；删除后不重排" placement="top"><span class="cred-index">#{{ row.index }}</span></el-tooltip><KeyRound :size="14" />{{ row.keyPrefix }}<el-tooltip v-if="props.managementKeySupported && row.hasManagementKey" content="已配置该账号的管理密钥"><span class="mgmt-badge">管</span></el-tooltip></span></template></el-table-column>
         <el-table-column label="状态" min-width="156"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="autoDisabledDetail(row)" placement="top-start"><div class="credential-status"><span class="status-dot warning">自动禁用</span><small v-if="row.autoDisabledAt">{{ formatTime(row.autoDisabledAt) }}</small></div></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
-        <el-table-column :label="usageQuery ? '用量与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else><span v-if="!usageQuery && row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="!usageQuery && row.lastCostRemaining !== undefined">余额 {{ formatBalance(row.lastCostRemaining, row.lastCostCurrency) }}</span><span v-if="usageQuery && (row.lastCostUsage !== undefined || row.lastCostUsed !== undefined)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span><small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small><span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined && row.lastCostUsage === undefined" class="muted">尚未查询</span></template></div></template></el-table-column>
+        <el-table-column :label="usageQuery ? '积分与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else>
+          <template v-if="!usageQuery"><span v-if="row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="row.lastCostRemaining !== undefined">余额 {{ formatBalance(row.lastCostRemaining, row.lastCostCurrency) }}</span></template>
+          <template v-else>
+            <!-- 计数口径：后端把「积分余额」写在 lastCostRemaining、周期已用写在
+                 lastCostUsed；这里按「积分余额 / 已用积分」说人话，不套货币符号。 -->
+            <span v-if="isCreditsCurrency(row.lastCostCurrency)">积分余额 {{ creditBalanceText(row.lastCostRemaining) }}</span>
+            <span v-if="isCreditsCurrency(row.lastCostCurrency) && row.lastCostUsed !== undefined">已用 {{ creditUsedText(row.lastCostUsed) }}</span>
+            <span v-if="!isCreditsCurrency(row.lastCostCurrency) && (row.lastCostUsage !== undefined || row.lastCostUsed !== undefined)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span>
+          </template>
+          <small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small>
+          <span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined && row.lastCostUsage === undefined" class="muted">尚未查询</span>
+        </template></div></template></el-table-column>
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
         <el-table-column label="操作" width="150" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip content="查看完整密钥"><button class="icon-button" type="button" :aria-label="`查看 ${row.keyPrefix}`" :disabled="secretLoading[row.id]" @click="openSecret(row)"><Eye :size="16" /></button></el-tooltip><el-tooltip v-if="props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询全部账号的套餐额度"><button class="icon-button" type="button" :aria-label="`查询全部账号的套餐额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
       </el-table>
@@ -512,7 +557,7 @@ function stopCodeCountdown() {
 
     <div v-if="props.managementKeySupported && queryDetails.some(item => item.shared)" class="shared-balance">
       <strong>管理密钥共享余额</strong>
-      <span v-for="item in queryDetails.filter(detail => detail.shared)" :key="item.queriedAt">{{ item.remainingAmount === undefined ? '未返回余额' : formatBalance(item.remainingAmount, item.currency) }}</span>
+      <span v-for="item in queryDetails.filter(detail => detail.shared)" :key="item.queriedAt">{{ item.remainingAmount === undefined ? '未返回余额' : isCreditsCurrency(item.currency) ? `${creditBalanceText(item.remainingAmount)} 积分` : formatBalance(item.remainingAmount, item.currency) }}</span>
     </div>
 
     <el-dialog v-model="mgmtDialogVisible" :title="`管理密钥（AK/SK） · #${mgmtDialogTarget?.index ?? ''} ${mgmtDialogTarget?.keyPrefix || ''}`" width="460px" append-to-body>

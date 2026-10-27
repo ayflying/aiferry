@@ -4,7 +4,7 @@ import { Coins, FlaskConical, Gauge, KeyRound, LoaderCircle, Pencil, Plus, Refre
 import type { Channel, CostSummary } from '../api/types'
 import { channelStatusLabel, isChannelEnabled } from '../lib/channelDisplay'
 import { mergeCostSummaries } from '../lib/cost'
-import { formatBalance, formatCost, formatLatency, formatNumber, formatTime } from '../lib/format'
+import { formatBalance, formatCost, formatLatency, formatNumber, formatTime, formatUsageValue, usageCurrency } from '../lib/format'
 import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
 import MobileRecordList from './MobileRecordList.vue'
 import ResponsiveList from './ResponsiveList.vue'
@@ -21,6 +21,22 @@ const props = defineProps<{
 // 列表只展示一行，避免同一渠道并列出现人民币与美元两种货币。
 function costSummary(row: Channel): CostSummary | undefined {
   return mergeCostSummaries(row.costSummaries)
+}
+
+// isCounterSummary 判断这条汇总是计数口径（积分/Token 额度）而不是金额。
+// 计数口径不能显示货币符号，也不能套汇率折算，文案要单独写。
+function isCounterSummary(summary?: CostSummary) {
+  return (summary?.currency || '').toUpperCase() === usageCurrency
+}
+
+// creditBalanceLabel 是计数口径的「余额」文案：WorkBuddy 的积分余额。
+function creditBalanceLabel(value?: number | null) {
+  return value === undefined || value === null ? '—' : formatUsageValue(value)
+}
+
+// creditUsedLabel 是计数口径的「已用」文案：周期内已消耗的积分。
+function creditUsedLabel(value?: number | null) {
+  return value === undefined || value === null ? '—' : formatUsageValue(value)
 }
 
 const emit = defineEmits<{
@@ -83,6 +99,11 @@ const emit = defineEmits<{
                     <span v-if="costSummary(row)!.usedAmount !== undefined">已用 {{ formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }}</span>
                     <span v-if="costSummary(row)!.remainingAmount !== undefined">余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</span>
                   </template>
+                  <template v-else-if="isCounterSummary(costSummary(row))">
+                    <!-- 积分余额：数值是额度不是钱，只加千分位、不加货币符号。 -->
+                    <span>积分余额 {{ creditBalanceLabel(costSummary(row)!.remainingAmount ?? costSummary(row)!.usedAmount) }}</span>
+                    <span v-if="costSummary(row)!.usedAmount !== undefined && costSummary(row)!.remainingAmount !== undefined">已用 {{ creditUsedLabel(costSummary(row)!.usedAmount) }}</span>
+                  </template>
                   <span v-if="costSummary(row)!.usage !== undefined">{{ costSummary(row)!.usageType || '用量' }} {{ formatNumber(costSummary(row)!.usage) }} {{ costSummary(row)!.usageUnit || '' }}</span>
                   <small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small>
                 </div>
@@ -96,7 +117,7 @@ const emit = defineEmits<{
                 <el-tooltip content="管理上游密钥"><button class="icon-button" type="button" :aria-label="`管理 ${row.name} 的上游密钥`" @click="emit('open-credentials', row)"><KeyRound :size="16" /></button></el-tooltip>
                 <el-tooltip content="发现与映射模型"><button class="icon-button" type="button" :aria-label="`发现并映射 ${row.name} 的模型`" @click="emit('discover', row)"><ScanSearch :size="16" /></button></el-tooltip>
                 <el-tooltip content="测试模型"><button class="icon-button" type="button" :aria-label="`测试 ${row.name} 的模型`" @click="emit('test', row)"><FlaskConical :size="16" /></button></el-tooltip>
-                <el-tooltip v-if="!row.quotaSupported" :content="props.queryingCostID === row.id ? '正在查询' : `查询${channelQueryValueLabel(row.costQueryType, row.costQueryMode)}`"><button class="icon-button" type="button" :aria-label="`${props.queryingCostID === row.id ? '正在查询' : '查询'} ${row.name} 的${channelQueryValueLabel(row.costQueryType, row.costQueryMode)}`" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)"><LoaderCircle v-if="props.queryingCostID === row.id" :size="16" class="cost-query-spinner" /><Coins v-else :size="16" /></button></el-tooltip>
+                <el-tooltip :content="props.queryingCostID === row.id ? '正在查询' : `查询${channelQueryValueLabel(row.costQueryType, row.costQueryMode)}`"><button class="icon-button" type="button" :aria-label="`${props.queryingCostID === row.id ? '正在查询' : '查询'} ${row.name} 的${channelQueryValueLabel(row.costQueryType, row.costQueryMode)}`" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)"><LoaderCircle v-if="props.queryingCostID === row.id" :size="16" class="cost-query-spinner" /><Coins v-else :size="16" /></button></el-tooltip>
                 <el-tooltip v-if="row.quotaSupported" :content="props.queryingQuotaID === row.id ? '正在查询套餐额度' : '查询套餐额度'"><button class="icon-button" type="button" :aria-label="`查询 ${row.name} 的套餐额度`" :disabled="props.queryingQuotaID !== undefined" @click="emit('queryQuota', row)"><LoaderCircle v-if="props.queryingQuotaID === row.id" :size="16" class="cost-query-spinner" /><Gauge v-else :size="16" /></button></el-tooltip>
                 <el-tooltip content="编辑"><button class="icon-button" type="button" :aria-label="`编辑渠道 ${row.name}`" @click="emit('edit', row)"><Pencil :size="16" /></button></el-tooltip>
                 <el-tooltip content="删除"><button class="icon-button danger" type="button" :aria-label="`删除渠道 ${row.name}`" @click="emit('remove', row)"><Trash2 :size="16" /></button></el-tooltip>
@@ -123,11 +144,11 @@ const emit = defineEmits<{
               <div><dt>路由</dt><dd class="mono">P{{ row.priority }} / W{{ row.weight }}</dd></div>
               <div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}<span v-if="row.disabledModelCount > 0">（被禁用 {{ row.disabledModelCount }}）</span></dd></div>
               <div><dt>最近测试</dt><dd>{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : row.lastTestStatus ? '失败' : '未测试' }}</dd></div>
-              <div class="mobile-record__wide"><dt>上游费用 / 余额 / 用量</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="costSummary(row)"><template v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">已用 {{ costSummary(row)!.usedAmount === undefined ? '—' : formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }} · 余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</template><span v-if="costSummary(row)!.usage !== undefined">{{ costSummary(row)!.usageType || '用量' }} {{ formatNumber(costSummary(row)!.usage) }} {{ costSummary(row)!.usageUnit || '' }}</span></span><span v-else class="muted">查看明细</span></button></dd></div>
+              <div class="mobile-record__wide"><dt>上游费用 / 余额 / 用量</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="costSummary(row)"><template v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">已用 {{ costSummary(row)!.usedAmount === undefined ? '—' : formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }} · 余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</template><template v-else-if="isCounterSummary(costSummary(row))">积分余额 {{ creditBalanceLabel(costSummary(row)!.remainingAmount ?? costSummary(row)!.usedAmount) }} · 已用 {{ creditUsedLabel(costSummary(row)!.usedAmount) }}</template><span v-if="costSummary(row)!.usage !== undefined">{{ costSummary(row)!.usageType || '用量' }} {{ formatNumber(costSummary(row)!.usage) }} {{ costSummary(row)!.usageUnit || '' }}</span></span><span v-else class="muted">查看明细</span></button></dd></div>
             </dl>
             <div class="mobile-record__footer">
               <span class="muted">渠道操作</span>
-              <div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="emit('open-credentials', row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="emit('discover', row)">模型</el-button><el-button size="small" :icon="FlaskConical" @click="emit('test', row)">测试</el-button><el-button v-if="!row.quotaSupported" size="small" :icon="Coins" :loading="props.queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)">{{ channelQueryValueLabel(row.costQueryType, row.costQueryMode) }}</el-button><el-button v-if="row.quotaSupported" size="small" :icon="Gauge" :loading="props.queryingQuotaID === row.id" :disabled="props.queryingQuotaID !== undefined" @click="emit('queryQuota', row)">额度</el-button><el-button size="small" :icon="Pencil" @click="emit('edit', row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="emit('remove', row)">删除</el-button></div>
+              <div class="mobile-record__actions"><el-button size="small" :icon="KeyRound" @click="emit('open-credentials', row)">密钥</el-button><el-button size="small" :icon="ScanSearch" @click="emit('discover', row)">模型</el-button><el-button size="small" :icon="FlaskConical" @click="emit('test', row)">测试</el-button><el-button size="small" :icon="Coins" :loading="props.queryingCostID === row.id" :disabled="row.costQueryMode === 'none' || props.queryingCostID !== undefined" @click="emit('queryCost', row)">{{ channelQueryValueLabel(row.costQueryType, row.costQueryMode) }}</el-button><el-button v-if="row.quotaSupported" size="small" :icon="Gauge" :loading="props.queryingQuotaID === row.id" :disabled="props.queryingQuotaID !== undefined" @click="emit('queryQuota', row)">套餐额度</el-button><el-button size="small" :icon="Pencil" @click="emit('edit', row)">编辑</el-button><el-button size="small" :icon="Trash2" type="danger" plain @click="emit('remove', row)">删除</el-button></div>
             </div>
           </article>
         </MobileRecordList>

@@ -68,4 +68,14 @@ describe('mergeCostSummaries', () => {
     const merged = mergeCostSummaries([{ currency: 'CNY', usedAmount: 7.2, remainingAmount: 0 }])
     expect(merged?.remainingAmount).toBe(0)
   })
+
+  it('keeps credit (XXX) totals out of money conversion', () => {
+    setDisplayCurrency(rate)
+    // WorkBuddy 积分是计数口径，币种标记为 XXX（无货币）。1500 积分绝不能被
+    // 当成 1500 美元再折算成 10800 人民币，也不能并入美元金额里。
+    const merged = mergeCostSummaries([{ currency: 'XXX', usedAmount: 1500, remainingAmount: 1500 }])
+    expect(merged?.currency).toBe('XXX')
+    expect(merged?.usedAmount).toBe(1500)
+    expect(merged?.remainingAmount).toBe(1500)
+  })
 })

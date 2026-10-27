@@ -55,6 +55,10 @@ describe('channel type config helpers', () => {
 
     // 旧版七牛用量适配器即使没写 valueType 也按用量处理，与后端 IsUsageCost 对齐。
     expect(costsShowsUsageFields({ costs: { adapter: 'qiniu_usage' } })).toBe(true)
+    // WorkBuddy 积分同样是计数口径：漏写 valueType 也必须显示用量字段，
+    // 否则编辑该类型时会把积分当成金额字段去填「已用/余额」。
+    expect(costsShowsUsageFields({ costs: { adapter: 'workbuddy_credits' } })).toBe(true)
+    expect(costsShowsBalanceFields({ costs: { adapter: 'workbuddy_credits' } })).toBe(false)
 
     expect(costsShowsBalanceFields({ costs: { adapter: 'none' } })).toBe(false)
     expect(costsShowsUsageFields({ costs: { adapter: 'none' } })).toBe(false)

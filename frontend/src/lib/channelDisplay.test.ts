@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { channelNameForID, channelStatusLabel, isChannelEnabled } from './channelDisplay'
-import { channelQueryValueLabel, channelTypeCostLabel, channelTypeQueryLabel, isUsageAdapter } from './channelTypeDisplay'
+import { channelQueryValueLabel, channelTypeCostLabel, channelTypeQueryLabel, isUsageAdapter, isUsageMode } from './channelTypeDisplay'
 
 describe('channel display helpers', () => {
   it('derives route availability from every blocking status', () => {
@@ -47,5 +47,17 @@ describe('channel display helpers', () => {
     expect(channelTypeQueryLabel(usage)).toBe('Token/积分用量查询')
     expect(isUsageAdapter(usage)).toBe(true)
     expect(channelQueryValueLabel('usage', 'custom_json')).toBe('用量')
+  })
+
+  it('treats WorkBuddy credits as a counter, never as money', () => {
+    // workbuddy_credits 回的是积分额度：按钮文案要写「积分余额」，且必须被识别为
+    // 计数口径，否则前端会用货币格式化+汇率折算把积分显示成金额（2026-10-27 的诉求）。
+    const workbuddy = { config: { costs: { adapter: 'workbuddy_credits' } } } as never
+    expect(channelTypeCostLabel(workbuddy)).toBe('积分余额')
+    expect(channelTypeQueryLabel(workbuddy)).toBe('积分余额查询')
+    expect(isUsageAdapter(workbuddy)).toBe(true)
+    // 渠道列表只拿到 costQueryMode（没有 valueType），也必须判成计数口径。
+    expect(isUsageMode(undefined, 'workbuddy_credits')).toBe(true)
+    expect(channelQueryValueLabel(undefined, 'workbuddy_credits')).toBe('积分余额')
   })
 })

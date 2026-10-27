@@ -45,11 +45,12 @@ func TestWorkBuddyQuotaAdapterDeclared(t *testing.T) {
 	if config.Quota.Adapter != channeltype.AdapterWorkBuddy {
 		t.Fatalf("workbuddy quota.adapter = %q, want %q", config.Quota.Adapter, channeltype.AdapterWorkBuddy)
 	}
-	// workbuddy 没有 OpenAI 风格的 /organization/costs 接口，必须显式声明不查询费用。
-	// 缺这段时 DefaultConfig 会兜底成 openai_costs + management_key，管理端点「查询
-	// 费用」就会报「需要管理密钥」——一个和真实原因无关的错误（2026-10-27 现场问题）。
-	if !isCostAdapterUnset(config.Costs.Adapter) {
-		t.Fatalf("workbuddy costs.adapter = %q, 必须显式声明为 none 或留空", config.Costs.Adapter)
+	// 0.6.36 起 workbuddy 的「查询费用」按钮改为查积分余额（costs.adapter =
+	// workbuddy_credits）。仍然不能落到 DefaultConfig 兜底的 openai_costs +
+	// management_key，否则会报「需要管理密钥」——一个和真实原因无关的错误
+	// （2026-10-27 现场问题）。
+	if config.Costs.Adapter != channeltype.AdapterWorkBuddy {
+		t.Fatalf("workbuddy costs.adapter = %q, want %q", config.Costs.Adapter, channeltype.AdapterWorkBuddy)
 	}
 	if isCostAdapterUnset("volcengine_afp") {
 		t.Fatal("已配置的适配器不能被判为未配置")

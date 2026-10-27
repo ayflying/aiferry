@@ -325,10 +325,22 @@ func normalizeModelConfig(config *ModelConfig) error {
 	return nil
 }
 
+// normalizeCostConfig 校验费用/余额查询配置。启用 adapter 时默认 GET 请求；
+// workbuddy_credits 例外：积分接口是 POST + 推理密钥，且不按日期区间查询。
 func normalizeCostConfig(config *CostConfig) error {
 	config.Adapter = strings.TrimSpace(config.Adapter)
 	if config.Adapter == "" {
 		config.Adapter = AdapterNone
+	}
+	// workbuddy_credits 是「积分余额」适配器，不是美元/人民币意义上的费用：
+	// 即使清单没写 valueType，也必须按计数口径（用量）记账，否则余额汇总会把
+	// 积分当成金额去乘汇率、触发金额提醒，折算意义不成立。
+	//
+	// 注意：DefaultConfig 给 costs 预置了 valueType=cost，Decode 只会覆盖 JSON 里
+	// 出现过的字段，所以「清单没写 valueType」在解析后同样是 cost，这里必须无条件
+	// 覆盖，不能只看空串。
+	if config.Adapter == AdapterWorkBuddy {
+		config.ValueType = ValueTypeUsage
 	}
 	config.ValueType = strings.TrimSpace(config.ValueType)
 	if config.ValueType == "" {
@@ -350,6 +362,26 @@ func normalizeCostConfig(config *CostConfig) error {
 		return gerror.New("unsupported costs.valueType")
 	}
 	if config.Adapter == AdapterNone {
+		return nil
+	}
+	if config.Adapter == AdapterWorkBuddy {
+		// WorkBuddy 积分接口是 POST + 推理密钥，与 workbuddy_credits 额度适配器
+		// 查的是同一个接口，因此沿用同一套形状校验；不套用 GET 系列的默认值。
+		config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
+		if config.Method == "" {
+			config.Method = httpMethodPost
+		}
+		if config.Method != httpMethodPost {
+			return gerror.Newf("costs adapter %s only supports the POST method", config.Adapter)
+		}
+		config.AuthType = normalizeAuth(config.AuthType)
+		if config.AuthType == AuthNone {
+			config.AuthType = AuthChannelKey
+		}
+		config.HeaderName = normalizeHeader(config.HeaderName, config.AuthType)
+		if !validAuth(config.AuthType) {
+			return gerror.New("unsupported costs.authType")
+		}
 		return nil
 	}
 	if config.Path == "" {
@@ -397,5 +429,5 @@ func validAuth(value string) bool {
 }
 
 func validCostAdapter(value string) bool {
-	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterNewAPI || value == AdapterCustomJSON || value == AdapterQiniuCosts || value == AdapterSiliconFlow || value == AdapterOpenRouter || value == AdapterQiniuUsage
+	return value == AdapterNone || value == AdapterOpenAICosts || value == AdapterSub2API || value == AdapterNewAPI || value == AdapterCustomJSON || value == AdapterQiniuCosts || value == AdapterSiliconFlow || value == AdapterOpenRouter || value == AdapterQiniuUsage || value == AdapterWorkBuddy
 }

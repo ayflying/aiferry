@@ -42,6 +42,7 @@ export const COST_ADAPTER_OPTIONS: ConfigOption[] = [
   { value: 'qiniu_usage', label: '七牛云用量（旧版）' },
   { value: 'siliconflow_balance', label: '硅基流动余额' },
   { value: 'openrouter_credits', label: 'OpenRouter 余额' },
+  { value: 'workbuddy_credits', label: 'WorkBuddy 积分余额' },
 ]
 
 export const VALUE_TYPE_OPTIONS: ConfigOption[] = [
@@ -154,7 +155,9 @@ export function costsShowsBalanceFields(config: TypeConfigRecord): boolean {
 export function costsShowsUsageFields(config: TypeConfigRecord): boolean {
   const costs = config?.costs
   if (!costs) return false
-  return String(costs.valueType ?? '') === 'usage' || String(costs.adapter ?? '') === 'qiniu_usage'
+  const adapter = String(costs.adapter ?? '')
+  // workbuddy_credits 回的是积分额度，按计数口径展示，绝不能当金额折算。
+  return String(costs.valueType ?? '') === 'usage' || adapter === 'qiniu_usage' || adapter === 'workbuddy_credits'
 }
 
 /** 价格同步的路径字段仅在 adapter 为 json 时可见。 */

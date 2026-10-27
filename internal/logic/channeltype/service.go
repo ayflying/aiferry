@@ -76,8 +76,10 @@ type CostConfig struct {
 	UsageDimension string `json:"usageDimension"`
 }
 
+// IsUsageCost 判断该费用配置是「计数口径（额度/积分/Token 用量）」而不是金额。
+// 计数口径的数值不能乘汇率、不能参与金额提醒与金额汇总。
 func IsUsageCost(config CostConfig) bool {
-	return config.ValueType == ValueTypeUsage || config.Adapter == AdapterQiniuUsage
+	return config.ValueType == ValueTypeUsage || config.Adapter == AdapterQiniuUsage || config.Adapter == AdapterWorkBuddy
 }
 
 type PricingConfig struct {

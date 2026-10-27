@@ -10,6 +10,7 @@ const costAdapterLabels: Record<string, string> = {
   siliconflow_balance: '硅基流动余额',
   openrouter_credits: 'OpenRouter 余额',
   qiniu_usage: '七牛用量',
+  workbuddy_credits: '积分余额',
 }
 
 export function channelTypeCostLabel(channelType: Pick<ChannelType, 'config'>) {
@@ -20,20 +21,25 @@ export function channelTypeCostLabel(channelType: Pick<ChannelType, 'config'>) {
 export function channelTypeQueryLabel(channelType: Pick<ChannelType, 'config'>) {
   const { adapter, valueType } = channelType.config.costs
   if (adapter === 'none') return '不查询'
+  if (adapter === 'workbuddy_credits') return '积分余额查询'
   if (valueType === 'usage' || adapter === 'qiniu_usage') return 'Token/积分用量查询'
   return '费用/余额查询'
 }
 
+// 计数口径适配器：数值是额度/积分/Token，不是金额，不能套货币与汇率。
+const usageAdapters = ['qiniu_usage', 'workbuddy_credits']
+
 export function isUsageAdapter(channelType: Pick<ChannelType, 'config'> | undefined) {
   const costs = channelType?.config.costs
-  return costs?.valueType === 'usage' || costs?.adapter === 'qiniu_usage'
+  return costs?.valueType === 'usage' || usageAdapters.includes(costs?.adapter || '')
 }
 
 export function isUsageMode(queryType?: string, queryMode?: string) {
-  return queryType === 'usage' || queryMode === 'qiniu_usage'
+  return queryType === 'usage' || usageAdapters.includes(queryMode || '')
 }
 
 export function channelQueryValueLabel(queryType?: string, queryMode?: string) {
+  if (queryMode === 'workbuddy_credits') return '积分余额'
   if (isUsageMode(queryType, queryMode)) return '用量'
   if (queryMode === 'qiniu_costs') return '预估费用'
   return queryMode === 'newapi_balance' || queryMode === 'siliconflow_balance' || queryMode === 'openrouter_credits' ? '余额' : '费用'

@@ -95,9 +95,22 @@ export function formatBalance(value?: number | string | null, currency = 'USD'):
   return formatCost(value, currency)
 }
 
+// usageCurrency 是计数口径（用量、积分、Token）在接口里使用的币种标记：
+// 后端对 costs.valueType=usage 的适配器统一回 XXX（ISO 4217「无货币」）。
+export const usageCurrency = 'XXX'
+
+// formatUsageValue 排版计数口径数值：只加千分位，不套任何货币符号、不做汇率折算。
+// 「积分 1,234」比「XXX 1,234.00」更能说明这是一笔额度而不是金额。
+export function formatUsageValue(value?: number | null): string {
+  if (value === undefined || value === null) return '—'
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value)
+}
+
 // formatCurrencyAmount 只负责按指定币种排版，不做折算。
 export function formatCurrencyAmount(value: number, currency: string, maximumFractionDigits = 6): string {
   const normalizedCurrency = (currency || 'USD').toUpperCase()
+  // 计数口径没有货币单位：直接输出数值，避免前端拼出非法币种标签（如 XXX 1,234.00）。
+  if (normalizedCurrency === usageCurrency) return formatUsageValue(value)
   return new Intl.NumberFormat(normalizedCurrency === 'USD' ? 'en-US' : 'zh-CN', {
     style: 'currency',
     currency: normalizedCurrency,

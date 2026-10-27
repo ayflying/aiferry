@@ -46,7 +46,7 @@ export interface ChannelTypeModelConfig {
 }
 
 export interface ChannelTypeCostConfig {
-  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'newapi_balance' | 'custom_json' | 'qiniu_costs' | 'siliconflow_balance' | 'openrouter_credits' | 'qiniu_usage'
+  adapter: 'none' | 'openai_costs' | 'sub2api_usage' | 'newapi_balance' | 'custom_json' | 'qiniu_costs' | 'siliconflow_balance' | 'openrouter_credits' | 'qiniu_usage' | 'workbuddy_credits'
   valueType?: 'cost' | 'usage'
   method: string
   path: string
@@ -97,7 +97,7 @@ export interface ChannelTypeEndpointConfig {
 }
 
 export interface ChannelTypeQuotaConfig {
-  adapter: 'none' | 'zhipu_coding_plan' | 'opencode_go_usage' | 'volcengine_afp'
+  adapter: 'none' | 'zhipu_coding_plan' | 'opencode_go_usage' | 'volcengine_afp' | 'workbuddy_credits'
   method: string
   path: string
   authType: 'none' | 'channel_key' | 'management_key'
