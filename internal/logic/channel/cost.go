@@ -305,6 +305,13 @@ func allCredentialCostQueryError(results []CredentialCostResult) error {
 func localizedCostQueryError(message string) string {
 	message = strings.TrimSpace(message)
 	switch {
+	// WorkBuddy 的积分汇总路由由上游网关把守：同一把密钥在签到接口
+	// （/v2/billing/meter/checkin-activity-status）上可用、在这条路由上却 401，
+	// 说明门槛在网关侧（要求网页登录会话或被风控限流），不是密钥失效。这一条
+	// 必须排在通用 HTTP 401 之前，否则会被改写成「密钥无效」把排查方向带偏
+	// （2026-10-27 生产实测）。
+	case strings.Contains(message, "上游网关拒绝"):
+		return message
 	case strings.Contains(message, "HTTP 401"):
 		return "上游接口返回 HTTP 401，密钥无效、已过期或没有余额查询权限"
 	case strings.Contains(message, "HTTP 403"):

@@ -13,8 +13,14 @@ import { convertAmount, displayCurrency, usageCurrency } from './format'
 //
 // 计数口径（XXX＝无货币）单独处理：它绝不能参与货币折算与合并到展示货币的
 // 金额里，否则「积分 1500 抵 1500 美元」这种错误金额会出现在渠道汇总上。
-export function mergeCostSummaries(summaries?: CostSummary[] | null): CostSummary | undefined {
+//
+// countersOnly 用于纯积分渠道（workbuddy_credits）：这类渠道的上游密钥可能同时
+// 带着网关按定价累计出来的美元费用（last_cost_used，单位是钱）和积分余额（单位
+// 是积分）。两者不是同一把尺子，混在一条汇总里会出现「USD 积分余额 剩余 0.04
+// 积分」这种自相矛盾的展示（2026-10-27 生产截图），所以这类渠道只合并计数行。
+export function mergeCostSummaries(summaries?: CostSummary[] | null, options?: { countersOnly?: boolean }): CostSummary | undefined {
   if (!summaries || summaries.length === 0) return undefined
+  const countersOnly = options?.countersOnly === true
   const merged: CostSummary = { currency: displayCurrency.value }
   let usedTotal = 0
   let remainingTotal = 0
@@ -23,22 +29,30 @@ export function mergeCostSummaries(summaries?: CostSummary[] | null): CostSummar
   let usageTotal = 0
   let hasUsage = false
   // 计数口径的合计单独记账，代表值取第一条的币种标记（XXX）。
-  let countTotal = 0
-  let hasCount = false
+  let countUsed = 0
+  let countRemaining = 0
+  let hasCountUsed = false
+  let hasCountRemaining = false
   for (const summary of summaries) {
     const counter = (summary.currency || '').toUpperCase() === usageCurrency
+    if (countersOnly && !counter) continue
     if (summary.usedAmount !== undefined && summary.usedAmount !== null) {
       if (counter) {
-        countTotal += summary.usedAmount
-        hasCount = true
+        countUsed += summary.usedAmount
+        hasCountUsed = true
       } else {
         usedTotal += convertAmount(summary.usedAmount, summary.currency)
         hasUsed = true
       }
     }
-    if (summary.remainingAmount !== undefined && summary.remainingAmount !== null && !counter) {
-      remainingTotal += convertAmount(summary.remainingAmount, summary.currency)
-      hasRemaining = true
+    if (summary.remainingAmount !== undefined && summary.remainingAmount !== null) {
+      if (counter) {
+        countRemaining += summary.remainingAmount
+        hasCountRemaining = true
+      } else {
+        remainingTotal += convertAmount(summary.remainingAmount, summary.currency)
+        hasRemaining = true
+      }
     }
     if (summary.usage !== undefined && summary.usage !== null) {
       usageTotal += summary.usage
@@ -49,11 +63,11 @@ export function mergeCostSummaries(summaries?: CostSummary[] | null): CostSummar
     if (!merged.usageType && summary.usageType) merged.usageType = summary.usageType
     if (!merged.usageDimension && summary.usageDimension) merged.usageDimension = summary.usageDimension
   }
-  if (hasCount && !hasUsed && !hasRemaining && !hasUsage) {
-    // 纯计数口径（如 WorkBuddy 积分）：保留「无货币」标记并给出已用量（余额）。
+  if (countersOnly || ((hasCountUsed || hasCountRemaining) && !hasUsed && !hasRemaining && !hasUsage)) {
+    // 纯计数口径（如 WorkBuddy 积分）：保留「无货币」标记，已用与余额各自求和。
     merged.currency = usageCurrency
-    merged.usedAmount = countTotal
-    merged.remainingAmount = countTotal
+    if (hasCountUsed) merged.usedAmount = countUsed
+    if (hasCountRemaining) merged.remainingAmount = countRemaining
     return merged
   }
   if (hasUsed) merged.usedAmount = usedTotal

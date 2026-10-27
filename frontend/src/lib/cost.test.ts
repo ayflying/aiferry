@@ -78,4 +78,39 @@ describe('mergeCostSummaries', () => {
     expect(merged?.usedAmount).toBe(1500)
     expect(merged?.remainingAmount).toBe(1500)
   })
+
+  it('sums credit used and remaining separately', () => {
+    setDisplayCurrency(rate)
+    // 两把密钥各自有已用与余额，合并后必须分别求和，不能把已用当余额覆盖。
+    const merged = mergeCostSummaries([
+      { currency: 'XXX', usedAmount: 100, remainingAmount: 900 },
+      { currency: 'XXX', usedAmount: 40, remainingAmount: 0 },
+    ])
+    expect(merged?.currency).toBe('XXX')
+    expect(merged?.usedAmount).toBe(140)
+    expect(merged?.remainingAmount).toBe(900)
+  })
+
+  it('ignores money rows for credits channels when countersOnly is set', () => {
+    setDisplayCurrency(rate)
+    // 纯积分渠道会同时带网关按定价累计的美元费用与积分余额：单位不同不能混。
+    // 2026-10-27 生产上因此出现「USD 积分余额 剩余 0.04 积分」的错误汇总。
+    const summaries = [
+      { currency: 'XXX', usedAmount: 0, remainingAmount: 0 },
+      { currency: 'USD', usedAmount: 0.038418 },
+    ]
+    const merged = mergeCostSummaries(summaries, { countersOnly: true })
+    expect(merged?.currency).toBe('XXX')
+    expect(merged?.usedAmount).toBe(0)
+    expect(merged?.remainingAmount).toBe(0)
+  })
+
+  it('returns an empty credit summary when no counter row exists', () => {
+    setDisplayCurrency(rate)
+    // 查询全失败时只剩美元行：计数口径下不应把美元金额当成积分展示。
+    const merged = mergeCostSummaries([{ currency: 'USD', usedAmount: 0.038418 }], { countersOnly: true })
+    expect(merged?.currency).toBe('XXX')
+    expect(merged?.usedAmount).toBeUndefined()
+    expect(merged?.remainingAmount).toBeUndefined()
+  })
 })

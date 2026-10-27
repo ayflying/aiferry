@@ -8,7 +8,7 @@ import { mergeCostSummaries } from '../lib/cost'
 import { showError, showSuccess, showWarning } from '../lib/error'
 import { copyText } from '../lib/clipboard'
 import { formatBalance, formatCost, formatTime, formatNumber, formatUsageValue, usageCurrency } from '../lib/format'
-import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
+import { channelQueryValueLabel, isCreditsQueryType, isUsageMode } from '../lib/channelTypeDisplay'
 
 const props = defineProps<{ modelValue: boolean; channel?: Channel; quotaSupported?: boolean; managementKeySupported?: boolean; managementKeyPair?: boolean; loginSupported?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; changed: []; 'query-quota': [credential: ChannelCredential] }>()
@@ -71,7 +71,9 @@ const querySupported = computed(() => {
 })
 // 各上游密钥可能挂在不同币种账户上，汇总卡片只展示折算合并后的一条，
 // 折算到同一货币再求和才是可比口径；每把密钥的原始币种仍保留在下方明细里。
-const mergedSummary = computed(() => mergeCostSummaries(summaries.value))
+// 纯积分渠道（workbuddy_credits）另外排除金额行：它的密钥常同时带网关累计的
+// 美元费用与积分余额，混在一起会显示成「USD 积分余额 剩余 0.04 积分」。
+const mergedSummary = computed(() => mergeCostSummaries(summaries.value, { countersOnly: isCreditsQueryType(props.channel?.costQueryType) }))
 // 计数口径没有货币单位，汇总卡片上不能显示币种标记（XXX），只显示数值。
 const summaryCurrencyLabel = computed(() => (mergedSummary.value?.currency || '').toUpperCase() === usageCurrency ? '' : mergedSummary.value?.currency || '')
 const queryLabel = computed(() => {
@@ -408,6 +410,13 @@ function creditUsedText(value?: number | null) {
   return value === undefined || value === null ? '—' : formatUsageValue(value)
 }
 
+// hasNumber 判断这一项是否真的有数值。后端把「没有数据」写成 JSON null，
+// 只判断 !== undefined 会把 null 当成有值，渲染出「用量 — kToken」这种残片
+// （2026-10-27 生产截图），所以统一用数值类型判断。
+function hasNumber(value?: number | null) {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 function secretLabel(item: ChannelCredential) {
   return `#${item.index} ${item.keyPrefix}`
 }
@@ -538,16 +547,17 @@ function stopCodeCountdown() {
         <el-table-column label="上游密钥" min-width="200"><template #default="{ row }"><span class="mono key-prefix"><el-tooltip content="固定序号：按创建顺序编号（含已删密钥占位），与用量明细的「渠道 #N」一致；删除后不重排" placement="top"><span class="cred-index">#{{ row.index }}</span></el-tooltip><KeyRound :size="14" />{{ row.keyPrefix }}<el-tooltip v-if="props.managementKeySupported && row.hasManagementKey" content="已配置该账号的管理密钥"><span class="mgmt-badge">管</span></el-tooltip></span></template></el-table-column>
         <el-table-column label="状态" min-width="156"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="autoDisabledDetail(row)" placement="top-start"><div class="credential-status"><span class="status-dot warning">自动禁用</span><small v-if="row.autoDisabledAt">{{ formatTime(row.autoDisabledAt) }}</small></div></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
         <el-table-column :label="usageQuery ? '积分与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else>
-          <template v-if="!usageQuery"><span v-if="row.lastCostUsed !== undefined">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="row.lastCostRemaining !== undefined">余额 {{ formatBalance(row.lastCostRemaining, row.lastCostCurrency) }}</span></template>
+          <template v-if="!usageQuery"><span v-if="hasNumber(row.lastCostUsed)">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="hasNumber(row.lastCostRemaining)">余额 {{ formatBalance(row.lastCostRemaining, row.lastCostCurrency) }}</span></template>
           <template v-else>
             <!-- 计数口径：后端把「积分余额」写在 lastCostRemaining、周期已用写在
-                 lastCostUsed；这里按「积分余额 / 已用积分」说人话，不套货币符号。 -->
-            <span v-if="isCreditsCurrency(row.lastCostCurrency)">积分余额 {{ creditBalanceText(row.lastCostRemaining) }}</span>
-            <span v-if="isCreditsCurrency(row.lastCostCurrency) && row.lastCostUsed !== undefined">已用 {{ creditUsedText(row.lastCostUsed) }}</span>
-            <span v-if="!isCreditsCurrency(row.lastCostCurrency) && (row.lastCostUsage !== undefined || row.lastCostUsed !== undefined)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span>
+                 lastCostUsed；这里按「积分余额 / 已用积分」说人话，不套货币符号。
+                 每一项都先确认是真数值，null/undefined 不渲染，避免出现「— kToken」。 -->
+            <span v-if="isCreditsCurrency(row.lastCostCurrency) && hasNumber(row.lastCostRemaining)">积分余额 {{ creditBalanceText(row.lastCostRemaining) }}</span>
+            <span v-if="isCreditsCurrency(row.lastCostCurrency) && hasNumber(row.lastCostUsed)">已用 {{ creditUsedText(row.lastCostUsed) }}</span>
+            <span v-if="!isCreditsCurrency(row.lastCostCurrency) && hasNumber(row.lastCostUsage ?? row.lastCostUsed)">{{ row.lastCostUsageType || '用量' }} {{ formatNumber(row.lastCostUsage ?? row.lastCostUsed) }} {{ row.lastCostUsageUnit || 'kToken' }}<small v-if="row.lastCostUsageDimension"> · {{ row.lastCostUsageDimension }}</small></span>
           </template>
           <small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small>
-          <span v-if="row.lastCostUsed === undefined && row.lastCostRemaining === undefined && row.lastCostUsage === undefined" class="muted">尚未查询</span>
+          <span v-if="!hasNumber(row.lastCostUsed) && !hasNumber(row.lastCostRemaining) && !hasNumber(row.lastCostUsage)" class="muted">尚未查询</span>
         </template></div></template></el-table-column>
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
         <el-table-column label="操作" width="150" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip content="查看完整密钥"><button class="icon-button" type="button" :aria-label="`查看 ${row.keyPrefix}`" :disabled="secretLoading[row.id]" @click="openSecret(row)"><Eye :size="16" /></button></el-tooltip><el-tooltip v-if="props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询全部账号的套餐额度"><button class="icon-button" type="button" :aria-label="`查询全部账号的套餐额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>

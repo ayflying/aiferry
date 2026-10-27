@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/frame/g"
 
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -39,15 +40,20 @@ const workBuddyCreditsCurrency = costUsageCurrency
 // 响应解析复用 parseWorkBuddyCredits，保证「费用与余额」和「套餐额度」两个入口
 // 拿到的是同一份上游数据、同一套窗口定义，不会出现两处算法漂移。
 func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, result *CostResult) error {
-	// 与 WorkBuddy 其它请求一致：接口带 /v2 版本前缀，鉴权头由类型配置决定，
-	// 未配置时回退 Bearer（桌面端实际使用的形状）。
+	// 鉴权头形状由类型配置决定，未配置时回退 Bearer（桌面端实际使用的形状）。
+	//
+	// 地址来自 workBuddyCreditsEndpointURL：积分汇总接口只挂在 host 根之下，
+	// 加 /v2 前缀会得到上游的 404 Route Not Found（2026-10-27 实测四条路由，
+	// 只有 /billing/meter/get-user-resource-summary 与 /v2/billing/meter/
+	// checkin-activity-status 存在）。
 	headerPrefix := strings.TrimSpace(config.HeaderPrefix)
 	if headerPrefix == "" {
 		headerPrefix = "Bearer "
 	}
+	endpoint := workBuddyCreditsEndpointURL(channel)
 	body, err := s.fetchUpstreamJSON(ctx, channel, credentialCipher, upstreamJSONRequest{
 		Method:       costWorkBuddyMethod(config.Method),
-		Endpoint:     workBuddyCreditsEndpointURL(channel),
+		Endpoint:     endpoint,
 		AuthType:     costWorkBuddyAuthType(config.AuthType),
 		HeaderName:   config.HeaderName,
 		HeaderPrefix: headerPrefix,
@@ -57,7 +63,17 @@ func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Chann
 		ReadError:    "读取 WorkBuddy 积分余额接口响应失败",
 		InvalidError: "WorkBuddy 积分余额接口返回了无效 JSON",
 		StatusError: func(status int, payload []byte) error {
-			return gerror.Newf("WorkBuddy 积分余额接口返回 HTTP %d", status)
+			// 401/403 是网关层拒绝，请求根本没进业务逻辑：同一把密钥在
+			// /v2/billing/meter/checkin-activity-status（签到）上能用，在
+			// 积分汇总路由上却 401，说明这条路由另有门槛（网页登录会话 /
+			// 平台风控），不是密钥拼错、也不是地址拼错。把上游原始响应体
+			// 打进日志，下次失败可直接判断是登录页还是业务错误。
+			if status == 401 || status == 403 {
+				g.Log().Warningf(ctx, "workbuddy credits query rejected: channel=%d endpoint=%s status=%d body=%s",
+					channel.Id, endpoint, status, workBuddyStatusPreview(payload))
+				return gerror.Newf("WorkBuddy 积分接口返回 HTTP %d（上游网关拒绝：该接口需要网页登录会话，或该账号被平台风控限流；同一账号的签到接口可用，可稍后重试）", status)
+			}
+			return gerror.Newf("WorkBuddy 积分余额接口返回 HTTP %d（地址 %s）", status, endpoint)
 		},
 	})
 	if err != nil {
@@ -101,6 +117,22 @@ func workBuddyCreditsEndpointURL(channel entity.Channels) string {
 		return ""
 	}
 	return endpoint
+}
+
+// workBuddyStatusPreview 截取上游响应体的可读片段用于日志。上游 401 常常返回
+// 空 body（网关 HTML 页被抹掉），此时返回空串，日志里 body= 后面留空即可。
+// 只截前 160 字节并压掉换行，避免把整页 HTML 灌进日志。
+func workBuddyStatusPreview(payload []byte) string {
+	preview := strings.TrimSpace(string(payload))
+	if preview == "" {
+		return "(empty)"
+	}
+	preview = strings.Join(strings.Fields(preview), " ")
+	runes := []rune(preview)
+	if len(runes) > 160 {
+		return string(runes[:160]) + "…"
+	}
+	return preview
 }
 
 // costWorkBuddyMethod 默认 POST：桌面端的资源汇总接口只有 POST。

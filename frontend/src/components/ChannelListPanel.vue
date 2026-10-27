@@ -5,7 +5,7 @@ import type { Channel, CostSummary } from '../api/types'
 import { channelStatusLabel, isChannelEnabled } from '../lib/channelDisplay'
 import { mergeCostSummaries } from '../lib/cost'
 import { formatBalance, formatCost, formatLatency, formatNumber, formatTime, formatUsageValue, usageCurrency } from '../lib/format'
-import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
+import { channelQueryValueLabel, isCreditsQueryType, isUsageMode } from '../lib/channelTypeDisplay'
 import MobileRecordList from './MobileRecordList.vue'
 import ResponsiveList from './ResponsiveList.vue'
 
@@ -19,8 +19,10 @@ const props = defineProps<{
 
 // costSummary 把渠道的多币种费用汇总折算合并成一条：
 // 列表只展示一行，避免同一渠道并列出现人民币与美元两种货币。
+// 纯积分渠道（workbuddy_credits）只合并计数行：它的上游密钥常同时带着网关累计
+// 的美元费用和积分余额，两者单位不同，合并后会出现「USD … 积分」的错乱展示。
 function costSummary(row: Channel): CostSummary | undefined {
-  return mergeCostSummaries(row.costSummaries)
+  return mergeCostSummaries(row.costSummaries, { countersOnly: isCreditsQueryType(row.costQueryType) })
 }
 
 // isCounterSummary 判断这条汇总是计数口径（积分/Token 额度）而不是金额。
@@ -37,6 +39,12 @@ function creditBalanceLabel(value?: number | null) {
 // creditUsedLabel 是计数口径的「已用」文案：周期内已消耗的积分。
 function creditUsedLabel(value?: number | null) {
   return value === undefined || value === null ? '—' : formatUsageValue(value)
+}
+
+// hasAmount 判断这一项是否真有数值。后端把「没数据」写成 JSON null，
+// 只判断 !== undefined 会把 null 当有值，渲染出「积分余额 —」这种残片。
+function hasAmount(value?: number | null) {
+  return typeof value === 'number' && Number.isFinite(value)
 }
 
 const emit = defineEmits<{
@@ -96,13 +104,15 @@ const emit = defineEmits<{
               <button class="cost-link" type="button" @click="emit('open-credentials', row)">
                 <div v-if="costSummary(row)" class="cost-cell">
                   <template v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">
-                    <span v-if="costSummary(row)!.usedAmount !== undefined">已用 {{ formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }}</span>
-                    <span v-if="costSummary(row)!.remainingAmount !== undefined">余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</span>
+                    <span v-if="hasAmount(costSummary(row)!.usedAmount)">已用 {{ formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }}</span>
+                    <span v-if="hasAmount(costSummary(row)!.remainingAmount)">余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</span>
                   </template>
                   <template v-else-if="isCounterSummary(costSummary(row))">
-                    <!-- 积分余额：数值是额度不是钱，只加千分位、不加货币符号。 -->
-                    <span>积分余额 {{ creditBalanceLabel(costSummary(row)!.remainingAmount ?? costSummary(row)!.usedAmount) }}</span>
-                    <span v-if="costSummary(row)!.usedAmount !== undefined && costSummary(row)!.remainingAmount !== undefined">已用 {{ creditUsedLabel(costSummary(row)!.usedAmount) }}</span>
+                    <!-- 积分余额：数值是额度不是钱，只加千分位、不加货币符号。
+                         只有拿到真数值才渲染，避免「积分余额 —」这类空壳。 -->
+                    <span v-if="hasAmount(costSummary(row)!.remainingAmount)">积分余额 {{ creditBalanceLabel(costSummary(row)!.remainingAmount) }}</span>
+                    <span v-if="hasAmount(costSummary(row)!.usedAmount)">已用 {{ creditUsedLabel(costSummary(row)!.usedAmount) }}</span>
+                    <span v-if="!hasAmount(costSummary(row)!.remainingAmount) && !hasAmount(costSummary(row)!.usedAmount)" class="muted">尚未查询</span>
                   </template>
                   <span v-if="costSummary(row)!.usage !== undefined">{{ costSummary(row)!.usageType || '用量' }} {{ formatNumber(costSummary(row)!.usage) }} {{ costSummary(row)!.usageUnit || '' }}</span>
                   <small v-if="row.lastCostAt">{{ formatTime(row.lastCostAt) }}</small>
@@ -144,7 +154,7 @@ const emit = defineEmits<{
               <div><dt>路由</dt><dd class="mono">P{{ row.priority }} / W{{ row.weight }}</dd></div>
               <div><dt>模型</dt><dd>{{ row.enabledModelCount }} / {{ row.discoveredModels }}<span v-if="row.disabledModelCount > 0">（被禁用 {{ row.disabledModelCount }}）</span></dd></div>
               <div><dt>最近测试</dt><dd>{{ row.lastTestStatus === 'success' ? formatLatency(row.lastTestLatencyMs) : row.lastTestStatus ? '失败' : '未测试' }}</dd></div>
-              <div class="mobile-record__wide"><dt>上游费用 / 余额 / 用量</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="costSummary(row)"><template v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">已用 {{ costSummary(row)!.usedAmount === undefined ? '—' : formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }} · 余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</template><template v-else-if="isCounterSummary(costSummary(row))">积分余额 {{ creditBalanceLabel(costSummary(row)!.remainingAmount ?? costSummary(row)!.usedAmount) }} · 已用 {{ creditUsedLabel(costSummary(row)!.usedAmount) }}</template><span v-if="costSummary(row)!.usage !== undefined">{{ costSummary(row)!.usageType || '用量' }} {{ formatNumber(costSummary(row)!.usage) }} {{ costSummary(row)!.usageUnit || '' }}</span></span><span v-else class="muted">查看明细</span></button></dd></div>
+              <div class="mobile-record__wide"><dt>上游费用 / 余额 / 用量</dt><dd><button class="cost-link" type="button" @click="emit('open-credentials', row)"><span v-if="costSummary(row)"><template v-if="!isUsageMode(row.costQueryType, row.costQueryMode)">已用 {{ costSummary(row)!.usedAmount === undefined ? '—' : formatCost(costSummary(row)!.usedAmount, costSummary(row)!.currency) }} · 余额 {{ formatBalance(costSummary(row)!.remainingAmount, costSummary(row)!.currency) }}</template><template v-else-if="isCounterSummary(costSummary(row))"><span v-if="hasAmount(costSummary(row)!.remainingAmount)">积分余额 {{ creditBalanceLabel(costSummary(row)!.remainingAmount) }}</span><span v-if="hasAmount(costSummary(row)!.usedAmount)">已用 {{ creditUsedLabel(costSummary(row)!.usedAmount) }}</span><span v-if="!hasAmount(costSummary(row)!.remainingAmount) && !hasAmount(costSummary(row)!.usedAmount)">尚未查询</span></template><span v-if="costSummary(row)!.usage !== undefined">{{ costSummary(row)!.usageType || '用量' }} {{ formatNumber(costSummary(row)!.usage) }} {{ costSummary(row)!.usageUnit || '' }}</span></span><span v-else class="muted">查看明细</span></button></dd></div>
             </dl>
             <div class="mobile-record__footer">
               <span class="muted">渠道操作</span>

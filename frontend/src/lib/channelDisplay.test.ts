@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { channelNameForID, channelStatusLabel, isChannelEnabled } from './channelDisplay'
-import { channelQueryValueLabel, channelTypeCostLabel, channelTypeQueryLabel, isUsageAdapter, isUsageMode } from './channelTypeDisplay'
+import { channelQueryValueLabel, channelTypeCostLabel, channelTypeQueryLabel, isCreditsQueryType, isUsageAdapter, isUsageMode } from './channelTypeDisplay'
 
 describe('channel display helpers', () => {
   it('derives route availability from every blocking status', () => {
@@ -59,5 +59,10 @@ describe('channel display helpers', () => {
     // 渠道列表只拿到 costQueryMode（没有 valueType），也必须判成计数口径。
     expect(isUsageMode(undefined, 'workbuddy_credits')).toBe(true)
     expect(channelQueryValueLabel(undefined, 'workbuddy_credits')).toBe('积分余额')
+    // isCreditsQueryType 让汇总只合并计数行，避免把网关累计的美元费用与积分
+    // 混成一条（否则出现「USD 积分余额 剩余 0.04 积分」）。
+    expect(isCreditsQueryType('workbuddy_credits')).toBe(true)
+    expect(isCreditsQueryType('qiniu_usage')).toBe(false)
+    expect(isCreditsQueryType(undefined)).toBe(false)
   })
 })

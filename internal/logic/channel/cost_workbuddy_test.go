@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
@@ -108,5 +109,41 @@ func TestWorkBuddyCreditsEndpointKeepsHostRoot(t *testing.T) {
 	channel := entity.Channels{BaseUrl: "https://www.workbuddy.cn/v2/"}
 	if got := workBuddyCreditsEndpointURL(channel); got != want {
 		t.Fatalf("endpoint = %q, want %q", got, want)
+	}
+}
+
+// TestWorkBuddyStatusPreview 守住日志片段：上游 401 常常返回空 body，
+// 日志里要能区分「空响应」与「有内容但被截断」，且不把整页 HTML 灌进日志。
+func TestWorkBuddyStatusPreview(t *testing.T) {
+	if got := workBuddyStatusPreview(nil); got != "(empty)" {
+		t.Fatalf("空 body 应标记为 (empty)，got %q", got)
+	}
+	if got := workBuddyStatusPreview([]byte("  \n\t ")); got != "(empty)" {
+		t.Fatalf("纯空白 body 应标记为 (empty)，got %q", got)
+	}
+	if got := workBuddyStatusPreview([]byte("{\n  \"error_msg\": \"401\"\n}")); got != `{ "error_msg": "401" }` {
+		t.Fatalf("换行应压成空格，got %q", got)
+	}
+	long := strings.Repeat("a", 400)
+	got := workBuddyStatusPreview([]byte(long))
+	if len([]rune(got)) != 161 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("超长 body 应截断到 160 字并加省略号，got 长度 %d", len([]rune(got)))
+	}
+}
+
+// TestLocalizedCostQueryErrorKeepsGatewayVerdict 守住 401 的措辞优先级。
+//
+// 2026-10-27 生产实测：workbuddy 积分接口被上游网关拒绝（HTTP 401），而同一把
+// 密钥在 /v2/billing/meter/checkin-activity-status 签到接口上是可用的，说明门槛
+// 在网关侧而不是「密钥无效」。通用 401 文案会把结论改写成「密钥失效」，把排查
+// 方向带偏，所以网关结论必须原样保留。
+func TestLocalizedCostQueryErrorKeepsGatewayVerdict(t *testing.T) {
+	gateway := "WorkBuddy 积分接口返回 HTTP 401（上游网关拒绝：该接口需要网页登录会话，或该账号被平台风控限流；同一账号的签到接口可用，可稍后重试）"
+	if got := localizedCostQueryError(gateway); got != gateway {
+		t.Fatalf("网关拒绝结论被改写：%q", got)
+	}
+	generic := "WorkBuddy 积分余额接口返回 HTTP 401"
+	if got := localizedCostQueryError(generic); !strings.Contains(got, "密钥无效") {
+		t.Fatalf("普通 401 仍应提示密钥可能失效，got %q", got)
 	}
 }

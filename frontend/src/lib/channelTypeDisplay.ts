@@ -38,6 +38,13 @@ export function isUsageMode(queryType?: string, queryMode?: string) {
   return queryType === 'usage' || usageAdapters.includes(queryMode || '')
 }
 
+// isCreditsQueryType 判断渠道查询的是「积分余额」（workbuddy_credits）而不是
+// 货币余额。积分与网关按定价累计的钱是两种单位，展示时必须分开合并，否则会
+// 出现「USD 积分余额 剩余 0.04 积分」这种自相矛盾的汇总。
+export function isCreditsQueryType(queryType?: string) {
+  return queryType === 'workbuddy_credits'
+}
+
 export function channelQueryValueLabel(queryType?: string, queryMode?: string) {
   if (queryMode === 'workbuddy_credits') return '积分余额'
   if (isUsageMode(queryType, queryMode)) return '用量'
