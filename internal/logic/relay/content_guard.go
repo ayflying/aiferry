@@ -157,8 +157,19 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 		return line, false
 	}
 	if hasReasoning(delta) {
-		// 上游已经按标准字段分离思考，这条响应不需要修复。
-		g.state = guardDone
+		// 上游已按标准字段分离思考，正文不需要再改写；但正文形态仍要判一次：
+		// 模型写歪时会把摘要信封、协议标记塞进 content，思考开关开着同样会污染。
+		if content, _ := delta["content"].(string); content != "" {
+			switch classifyGuardPrefix(content) {
+			case guardMarkup, guardThinking:
+				// 思考已单独交付，正文里这段仍然不能当回答留给客户端。
+				g.state = guardDone
+				return nil, true
+			case guardNone:
+				// 正文形态正常，后面分片不再判，避免把正常文本误判。
+				g.state = guardDone
+			}
+		}
 		return line, false
 	}
 	content, _ := delta["content"].(string)

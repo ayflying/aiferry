@@ -43,9 +43,6 @@ func inspectBufferedContent(endpoint string, body []byte) ([]byte, bool) {
 		case guardMarkup:
 			return body, true
 		case guardThinking:
-			if hasReasoning(message) {
-				continue
-			}
 			thinking, answer, _, ok := splitLeakedThinking(strings.TrimLeft(content, " \t\r\n"))
 			if !ok {
 				continue
@@ -54,6 +51,17 @@ func inspectBufferedContent(endpoint string, body []byte) ([]byte, bool) {
 			// 紧跟 <summary>…</summary>，那段摘要同样不能当回答交付。
 			if classifyGuardPrefix(answer) == guardMarkup {
 				return body, true
+			}
+			// 正文里混进了思考块：上游已单独给出思考时不覆盖它。
+			if hasReasoning(message) {
+				// 只有正文确实还带一段回答时才摘掉草稿段，避免把
+				// 「只有标签、没有回答」的正文抹成空字符串。
+				if answer == "" {
+					continue
+				}
+				message["content"] = answer
+				changed = true
+				continue
 			}
 			message[reasoningFieldStandard] = thinking
 			message["content"] = answer

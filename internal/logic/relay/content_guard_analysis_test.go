@@ -169,3 +169,52 @@ func mustJSON(t *testing.T, value string) string {
 	}
 	return string(encoded)
 }
+
+// 上游已经单独给出 reasoning_content 时，正文仍要判形态：
+// 开着思考的渠道同样会把摘要信封写进 content（0.6.48 及之前完全跳过判定）。
+func TestStreamContentGuardRejectsEnvelopeWhenReasoningPresent(t *testing.T) {
+	guard := newStreamContentGuard("/chat/completions")
+	line := `data: {"choices":[{"index":0,"delta":{"reasoning_content":"先想想","content":"<summary>1. 干完了</summary>"}}]}` + "\n"
+	if _, markup := guard.Observe([]byte(line)); !markup {
+		t.Fatal("思考非空时正文里的摘要信封仍应判定为不可交付")
+	}
+}
+
+// 思考非空、正文正常时不能误伤：原样放行，不做任何改写。
+func TestStreamContentGuardKeepsNormalContentWhenReasoningPresent(t *testing.T) {
+	guard := newStreamContentGuard("/chat/completions")
+	line := `data: {"choices":[{"index":0,"delta":{"reasoning_content":"先想想","content":"已经改好了，请复查。"}}]}` + "\n"
+	out, markup := guard.Observe([]byte(line))
+	if markup {
+		t.Fatal("正常正文不应被拒绝")
+	}
+	if got := gjson.GetBytes(out[len("data: "):], "choices.0.delta.content").String(); got != "已经改好了，请复查。" {
+		t.Fatalf("content=%q", got)
+	}
+	if got := gjson.GetBytes(out[len("data: "):], "choices.0.delta.reasoning_content").String(); got != "先想想" {
+		t.Fatalf("reasoning_content=%q", got)
+	}
+}
+
+// 非流式同形态：思考非空时正文里的摘要信封同样要拦。
+func TestInspectBufferedContentRejectsSummaryWhenReasoningPresent(t *testing.T) {
+	body := []byte(`{"choices":[{"message":{"reasoning_content":"先想想","content":"<analysis>草稿</analysis>\n\n<summary>1. 干完了</summary>"}}]}`)
+	if _, markup := inspectBufferedContent("/chat/completions", body); !markup {
+		t.Fatal("思考非空时正文里的摘要信封应判定为不可交付")
+	}
+}
+
+// 思考非空 + 正文混着草稿与真回答：只摘掉草稿段，不覆盖上游给出的思考。
+func TestInspectBufferedContentKeepsUpstreamReasoning(t *testing.T) {
+	body := []byte(`{"choices":[{"message":{"reasoning_content":"上游的思考","content":"<analysis>自己又写了一段草稿</analysis>已经改好了，请复查。"}}]}`)
+	fixed, markup := inspectBufferedContent("/chat/completions", body)
+	if markup {
+		t.Fatal("不是协议标记")
+	}
+	if got := gjson.GetBytes(fixed, "choices.0.message.content").String(); got != "已经改好了，请复查。" {
+		t.Fatalf("content=%q", got)
+	}
+	if got := gjson.GetBytes(fixed, "choices.0.message.reasoning_content").String(); got != "上游的思考" {
+		t.Fatalf("reasoning_content 被覆盖成 %q", got)
+	}
+}
