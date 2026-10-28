@@ -33,12 +33,7 @@ const (
 	// guardProbeLimit 限制探测窗口：攒够这么多字节还认不出形态，就按普通正文放行，
 	// 避免把以 "<" 开头的正常文本长期压在缓冲区里。
 	guardProbeLimit = 24
-	// leakCloser 是思考块的结束标签；上游连结束标签都没给时，整段正文都算思考。
-	leakCloser = "</thinking>"
 )
-
-// leakOpeners 是观察到的思考块开头写法。只认这几种，避免误伤 "<" 开头的普通文本。
-var leakOpeners = []string{"<thinking>", "<thinking ", "<thinking:", "<thinkingState:"}
 
 // markupLeakPrefixes 是上游自家客户端/Agent 框架的内部标记开头。这些标记对任何
 // OpenAI 兼容客户端都不是合法正文，出现即说明这条响应不能直接交付。
@@ -66,7 +61,7 @@ const (
 
 // classifyGuardPrefix 判定一段正文开头的形态。
 func classifyGuardPrefix(text string) guardDecision {
-	if _, ok := stripLeakOpener(text); ok {
+	if _, _, ok := stripLeakOpener(text); ok {
 		return guardThinking
 	}
 	for _, prefix := range markupLeakPrefixes {
@@ -84,39 +79,6 @@ func classifyGuardPrefix(text string) guardDecision {
 func isMarkupPrefix(text string) bool {
 	for _, prefix := range markupLeakPrefixes {
 		if strings.HasPrefix(prefix, text) {
-			return true
-		}
-	}
-	return false
-}
-
-// splitLeakedThinking 把一段以思考块开头的文本拆成思考内容与正文。
-// 第三个返回值表示这段文本确实以思考块开头；结束时剥掉结束标签并去掉其后的空白。
-func splitLeakedThinking(text string) (thinking, content string, ok bool) {
-	rest, ok := stripLeakOpener(text)
-	if !ok {
-		return "", "", false
-	}
-	if closer := strings.Index(rest, leakCloser); closer >= 0 {
-		return rest[:closer], strings.TrimLeft(rest[closer+len(leakCloser):], " \t\r\n"), true
-	}
-	return rest, "", true
-}
-
-// stripLeakOpener 判断文本是否以完整思考块开头，并返回去掉开头后的剩余文本。
-func stripLeakOpener(text string) (string, bool) {
-	for _, opener := range leakOpeners {
-		if strings.HasPrefix(text, opener) {
-			return text[len(opener):], true
-		}
-	}
-	return text, false
-}
-
-// isLeakOpenerPrefix 判断文本是否仍是某个思考块开头的**前缀**（含完整开头）。
-func isLeakOpenerPrefix(text string) bool {
-	for _, opener := range leakOpeners {
-		if strings.HasPrefix(opener, text) {
 			return true
 		}
 	}
@@ -159,9 +121,14 @@ func inspectBufferedContent(endpoint string, body []byte) ([]byte, bool) {
 			if hasReasoning(message) {
 				continue
 			}
-			thinking, answer, ok := splitLeakedThinking(strings.TrimLeft(content, " \t\r\n"))
+			thinking, answer, _, ok := splitLeakedThinking(strings.TrimLeft(content, " \t\r\n"))
 			if !ok {
 				continue
+			}
+			// 思考块之后的正文要重新判定：模型跑偏时是 <analysis>…</analysis>
+			// 紧跟 <summary>…</summary>，那段摘要同样不能当回答交付。
+			if classifyGuardPrefix(answer) == guardMarkup {
+				return body, true
 			}
 			message[reasoningFieldStandard] = thinking
 			message["content"] = answer
@@ -181,11 +148,14 @@ func inspectBufferedContent(endpoint string, body []byte) ([]byte, bool) {
 // streamContentGuard 是流式响应的状态机：只在正文第一次出现时判定一次，
 // 认出思考块后把后续正文改写成 reasoning_content，认出协议标记则上报拒绝。
 type streamContentGuard struct {
-	state    guardState
-	buffer   strings.Builder
+	state  guardState
+	buffer strings.Builder
 	// template 保存判定所在那一行的报文，改写思考内容时以它为骨架，
 	// 保留 index/role/finish_reason 等与正文无关的字段。
 	template map[string]any
+	// closer 是当前思考块的结束标签：<thinking> 与 <analysis> 各用各的，
+	// 不能混用一个常量，否则 <analysis> 块永远等不到闭合。
+	closer string
 }
 
 type guardState int
@@ -252,20 +222,45 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 		g.buffer.WriteString(content)
 		return g.probe()
 	case guardProbing:
+		if content == "" {
+			// 空正文（role 首包、finish_reason、结尾块）原样放行，继续等真正的正文。
+			return line, false
+		}
 		g.buffer.WriteString(content)
-		if g.buffer.Len() > guardProbeLimit {
+		out, markup := g.probe()
+		if out == nil && !markup && g.buffer.Len() > guardProbeLimit {
+			// 攒够探测窗口仍认不出形态（以 "<" 开头的普通文本），按普通正文放行。
 			return g.flushAsContent()
 		}
-		return g.probe()
+		return out, markup
 	}
 	// guardThinkingInside：正文都属于思考，直到出现结束标签为止。
 	if content == "" {
 		return line, false
 	}
-	if closer := strings.Index(content, leakCloser); closer >= 0 {
-		g.state = guardDone
-		delta[reasoningFieldStandard] = content[:closer]
-		delta["content"] = strings.TrimLeft(content[closer+len(leakCloser):], " \t\r\n")
+	closerTag := g.closer
+	if closerTag == "" {
+		closerTag = leakCloser
+	}
+	if at := strings.Index(content, closerTag); at >= 0 {
+		delta[reasoningFieldStandard] = content[:at]
+		rest := strings.TrimLeft(content[at+len(closerTag):], " \t\r\n")
+		// 思考块收起后紧跟的正文要重新判形态：是客户端协议标记（典型是
+		// <summary> 摘要信封）则整条响应不可交付，是普通回答就照常交付。
+		switch classifyGuardPrefix(rest) {
+		case guardMarkup:
+			g.state = guardDone
+			return nil, true
+		case guardNone:
+			g.state = guardDone
+			delta["content"] = rest
+			return encodeGuardLine(body), false
+		}
+		// 正文开头还是标签或标签的前半截：这一行先只交付思考，正文等后续分片到齐。
+		delete(delta, "content")
+		g.buffer.Reset()
+		g.buffer.WriteString(rest)
+		g.state = guardProbing
 		return encodeGuardLine(body), false
 	}
 	delete(delta, "content")
@@ -287,19 +282,41 @@ func (g *streamContentGuard) probe() ([]byte, bool) {
 			g.state = guardDone
 			return nil, false
 		}
-		thinking, answer, _ := splitLeakedThinking(text)
-		delta[reasoningFieldStandard] = thinking
-		// 缓冲里已经出现结束标签，说明思考块在这一行就结束，后续正文按普通正文处理。
-		if strings.Contains(text, leakCloser) {
-			g.state = guardDone
-		} else {
-			g.state = guardThinkingInside
-		}
+		thinking, answer, closer, _ := splitLeakedThinking(text)
+		mergeGuardReasoning(delta, thinking)
 		if answer == "" {
+			// 思考块还没收起：整段正文继续按思考处理。
 			delete(delta, "content")
-		} else {
-			delta["content"] = answer
+			if strings.Contains(text, closer) {
+				// 块已收起但后面还没有正文（生产报文里 <analysis> 与 <summary>
+				// 常常分在两个分片）：等下一段正文再决定形态，不能直接收工。
+				g.buffer.Reset()
+				g.state = guardProbing
+			} else {
+				g.closer = closer
+				g.state = guardThinkingInside
+			}
+			return encodeGuardLine(g.template), false
 		}
+		// 思考块在本段内收起，后面还带着正文：标签之后的正文必须重新按开头判定。
+		// 模型跑偏时这里是 <summary>…</summary> 摘要信封，要拦成不可交付；
+		// 是真正的回答时按普通正文交付。
+		g.buffer.Reset()
+		g.buffer.WriteString(answer)
+		switch classifyGuardPrefix(answer) {
+		case guardMarkup:
+			g.state = guardDone
+			return nil, true
+		case guardNone:
+			// 明确是普通回答：思考与正文同行交付，思考内容不丢。
+			g.state = guardDone
+			delta["content"] = answer
+			return encodeGuardLine(g.template), false
+		}
+		// 正文开头还是个标签（或标签的前半截）：这一行先只交付思考，
+		// 正文留在缓冲区，等后续分片到齐再判形态。
+		delete(delta, "content")
+		g.state = guardProbing
 		return encodeGuardLine(g.template), false
 	case guardUndecided:
 		return nil, false
@@ -331,6 +348,19 @@ func chatDelta(body map[string]any) (map[string]any, bool) {
 	}
 	delta, ok := choice["delta"].(map[string]any)
 	return delta, ok
+}
+
+// mergeGuardReasoning 把思考内容并入 delta。同一行里可能先后判定出两段思考
+// （例如 <analysis> 收起后又紧跟一段思考写法），拼接而不是覆盖，避免丢内容。
+func mergeGuardReasoning(delta map[string]any, thinking string) {
+	if thinking == "" {
+		return
+	}
+	if prev, ok := delta[reasoningFieldStandard].(string); ok && prev != "" {
+		delta[reasoningFieldStandard] = prev + thinking
+		return
+	}
+	delta[reasoningFieldStandard] = thinking
 }
 
 // hasReasoning 判断 message/delta 里是否已经有非空思考内容。

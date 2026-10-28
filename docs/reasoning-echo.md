@@ -8,7 +8,9 @@
 - 响应侧：上游返回的思考字段原样到达客户端。渠道「思维到内容」（`reasoningToContent`）开关已删除。
 - **唯一例外是正文污染守卫**（0.6.28 起，`internal/logic/relay/content_guard.go`）：上游把标签或客户端协议标记写进正文时，
   守卫在交付前处理一次，规则与渠道、模型无关：
-  - 思考块泄漏（`<thinking>…</thinking>` 包住整段思考）：搬回 `reasoning_content`、剥掉标签，正文只留真正的回答；
+  - 思考块泄漏（`<thinking>…</thinking>`、`<analysis>…</analysis>` 包住整段草稿）：搬回 `reasoning_content`、
+    剥掉标签，正文只留真正的回答；思考块收起后紧跟的正文会**再判一次**形态，因此
+    `<analysis>…</analysis><summary>…</summary>` 这种「草稿 + 摘要」整段信封仍会被拦下；
   - 客户端内部标记泄漏（`<tool_result …>`、`<tool_calls>`、`<tool invoke …>`、`｜…｜` DSML 标记、`<summary>…</summary>` 摘要信封）：
     还原不成正常的回答或工具调用，判定为上游坏响应，不交付给客户端，交回候选循环切换或重试。
     `<compacted-summary>` 是客户端上下文压缩的正常产物，刻意不拦。
@@ -23,9 +25,15 @@
 | 正文以 `<thinking>` 开头，思考与回答混在 `content`，`reasoning_content` 为空 | adesk（deepseek 系列） | 6 小时内 8~18 条；已出现 74 条请求的 assistant 历史带着 `<thinking>` 开头正文 |
 | 正文是一整坨 `<tool_result name=read>` 文件块 + `｜…｜` DSML 收尾 | workbuddy | `afreq_084947456a50178aff2cf4dd`（用户截图那次，`attempts=1` 直接交付） |
 | 正文是 `<summary>…</summary>` 摘要信封：模型照抄请求里的 checkpoint 压缩格式，把一段新摘要当回答 | adesk（deepseek-v4.1-flash） | `afreq_04b72bca01aaab19292942ab`（14:22，`attempts=1` 直接交付，本轮没有真正回答） |
+| 正文是 `<analysis>…</analysis><summary>…</summary>`：模型先写「按时间顺序梳理」的草稿，再写一段摘要，整段当回答交付 | adesk（deepseek-v4.1-flash） | `afreq_fba9d1d66070e5bf78235cea`（2026-10-28 16:01，`attempts=1`，正文 13 891 字节；近 40 分钟同类 5 条，正文开头是 `<analysis>`，旧版守卫按「正文开头」判定因此全部漏过） |
 
-守卫只在正文第一次出现时判断一次，判定不成立就立刻按原样放行；只对上游是 `/chat/completions` 的响应生效，
-`/responses`、Messages 等其它协议结构不参与判定。单测见 `internal/logic/relay/content_guard_test.go`。
+客户端自己的上下文压缩用的是 `<compacted-summary>` 标签（见 `docs/` 与 DSH 运行时说明），与
+`<analysis>` / `<summary>` 无关，因此这两段不是任何客户端的合法协议内容，可以安全判定为坏响应。
+
+守卫只在正文第一次出现时判断一次，判定不成立就立刻按原样放行；唯一例外是思考块收起的瞬间——
+标签之后的正文会再判一次（否则 `<analysis>…</analysis><summary>…</summary>` 的摘要段会漏过）。
+只对上游是 `/chat/completions` 的响应生效，`/responses`、Messages 等其它协议结构不参与判定。
+单测见 `internal/logic/relay/content_guard_test.go` 与 `content_guard_analysis_test.go`。
 
 背景：自动思考历史回填曾用于满足 DeepSeek/Kimi 等思考模式上游「工具调用后必须回传思考」的校验，为排查长任务中断与正文标签污染已全部删除；若严格上游要求回传思考，会返回原始校验错误，由客户端携带完整历史解决。
 
