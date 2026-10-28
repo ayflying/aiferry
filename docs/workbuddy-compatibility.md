@@ -64,6 +64,14 @@
 
 该接口不是稳定的公开 API，上游限制可能变化；此适配不保证账号或接口持续可用。生产修改必须单独授权，单元测试通过不等于已部署。
 
+### 0.6.42：积分查询改走 `/v2` API 网关
+
+**现象**。管理端「查询积分余额」长期返回 `HTTP 401，密钥无效、已过期或没有余额查询权限`，而同一把密钥的自动签到一直正常。
+
+**根因**。积分走的是桌面端网页路由 `POST /billing/meter/get-user-resource-summary`（host 根），该地址在 openresty 的网页会话门之后：服务端带渠道密钥请求只拿到 `401 Authorization Required` 的 **HTML** 页，请求根本没进业务逻辑。用无效密钥逐条探测可区分「路由不存在（404）」与「路由存在但缺鉴权（401）」，结果是 `/v2/billing/meter/get-user-resource` 存在且与签到接口同族，而 `/v2/.../get-user-resource-summary` 为 404。
+
+**改法**。积分请求路径改为 `/v2/billing/meter/get-user-resource`，与签到一起走接受渠道密钥的 API 网关；积分明细解析改成字段名无关的递归扫描（识别 `CycleTotalCapacity` / `total_capacity` / `TotalCredit` 等别名，去重后累加），避免 `/v2` 路由的外壳与旧网页接口不一致时再次失效。查询成功与解析失败都会打日志（端点、窗口数、已用/余额、原始响应片段），生产上可直接看到真实结构。
+
 ## 跟随更新
 
 1. 对比固定提交之后的 `src/upstream.ts` 及 `tests/issue98-channel-gate.spec.ts`、`tests/issue113-channel-gate-evidence.spec.ts`。

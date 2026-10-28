@@ -22,21 +22,34 @@
   "config": {
     "baseUrl": "https://www.workbuddy.cn/v2",
     "models": {"method":"GET","path":"/enterprises/personal/models","listPath":"data.models","idPath":"id","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer "},
-    "quota": {"adapter":"workbuddy_credits","method":"POST","path":"/billing/meter/get-user-resource-summary","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer "}
+    "quota": {"adapter":"workbuddy_credits","method":"POST","path":"/v2/billing/meter/get-user-resource","authType":"channel_key","headerName":"Authorization","headerPrefix":"Bearer "}
   }
 }
 ```
 
-- 额度查询路径：`POST /billing/meter/get-user-resource-summary`（桌面端 `resourcePrefix` 为空，不带 `/v2` 前缀；由 `resolveHostURL` 自动拼接 `https://www.workbuddy.cn` + `/billing/meter/get-user-resource-summary`）
-- 签到状态路径：`POST /v2/billing/meter/checkin-activity-status`（桌面端 `billingPrefix` 固定为 `/v2`）
+- 额度查询路径：`POST /v2/billing/meter/get-user-resource`（API 网关下，只认渠道密钥）
+- 签到状态路径：`POST /v2/billing/meter/checkin-activity-status`（同上，另需 `X-Device-Token`）
 - 模型发现路径：`GET /enterprises/personal/models`（相对于 `baseUrl`，自动包含 `/v2` 前缀）；响应中的 `data` 是对象，模型数组位于 `data.models`，模型名称字段为 `id`。官方客户端先解包 `data`，再读取 `models`；不能按 OpenAI 的 `data` 数组解析。
+
+### 为什么积分查询必须走 `/v2`（2026-10-28 更正）
+
+此前用的是桌面端网页路由 `POST /billing/meter/get-user-resource-summary`（host 根）。该地址挂在 openresty 的网页会话门之后，服务端带渠道密钥请求只会拿到 `401 Authorization Required` 的 **HTML** 响应，不是 JSON 业务错误，所以「密钥无效」的判断是错的。用无效密钥逐条探测（`404` 表示路由不存在，`401` 表示路由存在但缺鉴权）结论如下：
+
+| 地址 | 结果 | 含义 |
+| --- | --- | --- |
+| `/billing/meter/get-user-resource-summary` | 401 HTML | 网页会话门，服务端进不去 |
+| `/v2/billing/meter/get-user-resource` | 401 JSON | API 网关路由存在，只认渠道密钥 |
+| `/v2/billing/meter/get-user-resource-summary` | 404 | 该名字在 `/v2` 下不存在 |
+| `/v2/billing/meter/checkin-activity-status` | 401 JSON | 同族签到路由，同一把密钥可用 |
+
+因此积分与签到统一走 `/v2` 网关；`/v2` 路由的响应外壳可能和旧网页接口不同，积分明细由字段名无关的扫描解析（`quota_workbuddy_packages.go`），不再依赖固定 `Packages` 数组。
 
 ## 额度解析适配器（`workbuddy_credits`）
 
-- 主请求：`get-user-resource-summary` → 解析每个 `Packages[].{PackageCode,CycleTotalCapacity,CycleRemainCapacity,CycleUsedCapacity}` 映射为 `QuotaWindow{kind:monthly}`
+- 主请求：`get-user-resource` → 递归扫描响应里所有带容量类字段（`CycleTotalCapacity` / `total_capacity` / `TotalCredit` 等别名）的对象，每个映射为 `QuotaWindow{kind:monthly}`；完全相同的重复对象去重，避免积分翻倍
 - 尽力而为的第二请求：`checkin-activity-status` → 解析 `streak_days` / `today_credit` 映射为 `QuotaWindow{kind:checkin}`
 - 签到请求需要 `X-Device-Token`（Turing 风控头），服务端无法复现；失败时不阻塞积分结果，只把失败明细写入 `PartialErrors`
-- 已用百分比计算：`used / total * 100`（缺失 `CycleUsedCapacity` 时用 `total - remain` 补齐）
+- 已用百分比计算：`used / total * 100`（缺失已用值时用 `total - remain` 补齐；只下发剩余与已用、没有总量时用两者之和还原总量）
 
 ## 添加密钥与平台登录
 

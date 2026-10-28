@@ -15,16 +15,20 @@ import (
 )
 
 // WorkBuddy（腾讯 CodeBuddy 系桌面客户端）没有面向第三方的开放接口文档，
-// 这里的积分口径取自桌面端自身的用量面板。桌面端把额度查询拆成两个接口：
+// 这里的积分口径取自桌面端自身的用量面板。积分与签到分属两层路由：
 //
-//	POST {host}/billing/meter/get-user-resource-summary   积分余额（仅 Authorization 头）
-//	POST {host}/billing/meter/checkin-activity-status    签到状态（额外需 X-Device-Token）
+//	POST {host}/v2/billing/meter/get-user-resource        积分余额（仅 Authorization 头）
+//	POST {host}/v2/billing/meter/checkin-activity-status   签到状态（额外需 X-Device-Token）
 //
-// 前者只需 Authorization: Bearer <accessToken>；后者还要求 WorkBuddy 自带
-// Turing 风控 SDK 生成的 X-Device-Token，该头无法在服务端复现，因此本适配器
-// 把签到查询作为尽力而为的第二请求，失败时降级为 PartialErrors 提示。
+// 两条都在 API 网关的 /v2 之下，都只认渠道密钥；host 根的同名网页路由
+// （/billing/meter/...）被 openresty 会话门挡住，服务端请求一律 401，不可用。
+// 签到状态那条还要求 WorkBuddy 自带 Turing 风控 SDK 生成的 X-Device-Token，
+// 该头无法在服务端复现，因此本适配器把签到查询作为尽力而为的第二请求，
+// 失败时降级为 PartialErrors 提示。
 //
-// 积分响应（code=0）：
+// 积分响应（code=0）的外壳可能随接口版本变化，解析交给 collectWorkBuddyPackages
+// 做字段名无关的扫描（见 quota_workbuddy_packages.go），历史上桌面端网页接口的
+// 形状是：
 //
 //	{"code":0,"msg":"ok","data":{"Packages":[
 //	   {"PackageCode":"...","CycleTotalCapacity":3000,
@@ -37,15 +41,27 @@ import (
 //	   "streak_days":9,"is_streak_day":false,"next_streak_day":0,
 //	   "today_credit":100,"streak_bonus_days":0,"streak_bonus_credit":0}}
 
-// workBuddyCreditsPath 是桌面端资源汇总接口的路径（host 根，无 /v2 前缀）。
-// workBuddyCheckinPath 是桌面端签到状态接口的路径（/v2 前缀由渠道 baseUrl 提供）。
+// workBuddyCreditsPath 是 API 网关上的积分资源接口路径（自带 /v2 前缀）。
+// workBuddyCheckinPath 是签到状态接口的路径（/v2 前缀由调用方补）。
+//
+// 2026-10-28 更正：此前用的是桌面端网页接口
+// /billing/meter/get-user-resource-summary。该地址挂在 host 根，被 openresty
+// 的网页会话门保护，服务端带着渠道密钥请求只会拿到 401 Authorization Required
+// （HTML，非 JSON）——同一把密钥在 /v2/billing/meter/* 上完全可用，说明问题在
+// 路由层级而不是密钥。逐条探测确认 /v2 网关上是 get-user-resource（不带
+// -summary），返回 401 而非 404，即路由存在、只是缺鉴权。
+//
+// 由此两条链路彻底分开：积分查询走 API 网关的 /v2 路由，签到状态走桌面端路由，
+// 不再共用同一个 host 根地址，避免一处不可用连带另一处被误判。
 const (
-	workBuddyCreditsPath = "/billing/meter/get-user-resource-summary"
+	workBuddyCreditsPath = "/v2/billing/meter/get-user-resource"
 	workBuddyCheckinPath = "/billing/meter/checkin-activity-status"
 	workBuddyCreditsKind = "monthly"
 	workBuddyCheckinKind = "checkin"
 )
 
+// workBuddySummaryResponse 只解析外壳里的状态码与套餐等级信息。额度明细不走
+// 固定结构体，统一由 collectWorkBuddyPackages 扫描得到，见该文件开头说明。
 type workBuddySummaryResponse struct {
 	Code json.Number          `json:"code"`
 	Msg  string               `json:"msg"`
@@ -53,16 +69,8 @@ type workBuddySummaryResponse struct {
 }
 
 type workBuddySummaryData struct {
-	Packages                []workBuddyPackage `json:"Packages"`
-	SubscriptionPackageCode string             `json:"SubscriptionPackageCode"`
-	IsPaidUser              bool               `json:"IsPaidUser"`
-}
-
-type workBuddyPackage struct {
-	PackageCode         string      `json:"PackageCode"`
-	CycleTotalCapacity  json.Number `json:"CycleTotalCapacity"`
-	CycleRemainCapacity json.Number `json:"CycleRemainCapacity"`
-	CycleUsedCapacity   json.Number `json:"CycleUsedCapacity"`
+	SubscriptionPackageCode string `json:"SubscriptionPackageCode"`
+	IsPaidUser              bool   `json:"IsPaidUser"`
 }
 
 type workBuddyCheckinResponse struct {
@@ -76,9 +84,12 @@ type workBuddyCheckinResponse struct {
 	} `json:"data"`
 }
 
-// parseWorkBuddyCredits 解析 get-user-resource-summary，把每个有效套餐映射成
-// 一个 monthly 窗口（桌面端把积分按订阅周期滚动结算，月度窗口语义最贴合）。
-// 已用 = 上游 CycleUsedCapacity；缺失时用 总 − 剩余 补齐。
+// parseWorkBuddyCredits 解析积分资源响应，把每个有效套餐映射成一个 monthly 窗口
+// （桌面端把积分按订阅周期滚动结算，月度窗口语义最贴合）。
+// 已用取上游值；缺失或为 0 时用 总量 − 剩余 补齐。
+//
+// 明细用字段名无关的扫描收集：host 根的老接口与 /v2 网关的新接口外壳可能不同，
+// 写死一种结构一旦猜错就要再发一版。
 func parseWorkBuddyCredits(body []byte) (QuotaView, error) {
 	var payload workBuddySummaryResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -92,27 +103,42 @@ func parseWorkBuddyCredits(body []byte) (QuotaView, error) {
 		return QuotaView{}, gerror.New("WorkBuddy 积分查询失败：" + message)
 	}
 	view := QuotaView{Mode: channeltype.AdapterWorkBuddy, QueriedAt: time.Now()}
-	for _, item := range payload.Data.Packages {
-		packageTotal := workBuddyNumber(item.CycleTotalCapacity)
-		if packageTotal <= 0 {
+	for _, item := range collectWorkBuddyPackages(body) {
+		packageTotal := item.Total
+		if packageTotal > 0 {
+			packageRemain := item.Remain
+			used := item.Used
+			if used <= 0 {
+				used = max(packageTotal-packageRemain, 0)
+			}
+			remaining := min(max(packageRemain, 0), packageTotal)
+			percent := used / packageTotal * 100
+			view.Windows = append(view.Windows, QuotaWindow{
+				Kind:        workBuddyCreditsKind,
+				Label:       workBuddyPackageLabel(item.PackageCode),
+				UsedPercent: percent,
+				Used:        &used,
+				Total:       &packageTotal,
+				Remaining:   &remaining,
+			})
 			continue
 		}
-		packageRemain := workBuddyNumber(item.CycleRemainCapacity)
-		used := workBuddyNumber(item.CycleUsedCapacity)
-		if used <= 0 {
-			used = max(packageTotal-packageRemain, 0)
+		// 个别套餐只下发剩余与已用、不给总量：用两者之和还原周期总量。
+		if item.Remain <= 0 && item.Used <= 0 {
+			continue
 		}
-		remaining := min(max(packageRemain, 0), packageTotal)
+		used := max(item.Used, 0)
+		remaining := max(item.Remain, 0)
+		packageTotal = used + remaining
 		percent := used / packageTotal * 100
-		window := QuotaWindow{
+		view.Windows = append(view.Windows, QuotaWindow{
 			Kind:        workBuddyCreditsKind,
 			Label:       workBuddyPackageLabel(item.PackageCode),
 			UsedPercent: percent,
 			Used:        &used,
 			Total:       &packageTotal,
 			Remaining:   &remaining,
-		}
-		view.Windows = append(view.Windows, window)
+		})
 	}
 	if len(view.Windows) == 0 {
 		return QuotaView{}, gerror.Newf("WorkBuddy 未返回有效的积分额度窗口，原始响应：%s", quotaRawSnippet(body))

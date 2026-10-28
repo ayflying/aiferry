@@ -11,9 +11,11 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-// WorkBuddy 没有 OpenAI 风格的 /organization/costs 接口，桌面端只提供
-// get-user-resource-summary（见 quota_workbuddy.go）这一个资源汇总接口，
+// WorkBuddy 没有 OpenAI 风格的 /organization/costs 接口，只在 API 网关的
+// /v2/billing/meter/get-user-resource（见 quota_workbuddy.go）上提供积分资源汇总，
 // 返回的是每个套餐的「周期总量 / 周期已用 / 周期剩余」积分。
+// host 根的同名网页路由（/billing/meter/...）被 openresty 会话门保护，
+// 服务端请求一律 401，已不再使用。
 //
 // 0.6.36 起把它同时接进「费用与余额」这条通用链路（costs.adapter =
 // workbuddy_credits），原因是：积分本质就是可消费额度，管理端密钥表里的
@@ -42,10 +44,9 @@ const workBuddyCreditsCurrency = costUsageCurrency
 func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, result *CostResult) error {
 	// 鉴权头形状由类型配置决定，未配置时回退 Bearer（桌面端实际使用的形状）。
 	//
-	// 地址来自 workBuddyCreditsEndpointURL：积分汇总接口只挂在 host 根之下，
-	// 加 /v2 前缀会得到上游的 404 Route Not Found（2026-10-27 实测四条路由，
-	// 只有 /billing/meter/get-user-resource-summary 与 /v2/billing/meter/
-	// checkin-activity-status 存在）。
+	// 地址来自 workBuddyCreditsEndpointURL：积分资源接口在 API 网关的 /v2 之下
+	// （见 quota_workbuddy.go 的 workBuddyCreditsPath 说明），与签到接口同族，
+	// 都认渠道密钥。历史上曾用 host 根的网页路由，被 openresty 会话门挡成 401。
 	headerPrefix := strings.TrimSpace(config.HeaderPrefix)
 	if headerPrefix == "" {
 		headerPrefix = "Bearer "
@@ -63,11 +64,8 @@ func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Chann
 		ReadError:    "读取 WorkBuddy 积分余额接口响应失败",
 		InvalidError: "WorkBuddy 积分余额接口返回了无效 JSON",
 		StatusError: func(status int, payload []byte) error {
-			// 401/403 是网关层拒绝，请求根本没进业务逻辑：同一把密钥在
-			// /v2/billing/meter/checkin-activity-status（签到）上能用，在
-			// 积分汇总路由上却 401，说明这条路由另有门槛（网页登录会话 /
-			// 平台风控），不是密钥拼错、也不是地址拼错。把上游原始响应体
-			// 打进日志，下次失败可直接判断是登录页还是业务错误。
+			// 401/403 是网关层拒绝，请求根本没进业务逻辑。把上游原始响应体
+			// 打进日志，下次失败可直接判断是登录页、风控还是业务错误。
 			if status == 401 || status == 403 {
 				g.Log().Warningf(ctx, "workbuddy credits query rejected: channel=%d endpoint=%s status=%d body=%s",
 					channel.Id, endpoint, status, workBuddyStatusPreview(payload))
@@ -81,9 +79,16 @@ func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Chann
 	}
 	view, err := parseWorkBuddyCredits(body)
 	if err != nil {
+		// 解析失败时把原始响应打进日志：/v2 路由的字段命名与旧网页接口未必一致，
+		// 日志是唯一能在生产上看到真实结构的地方。
+		g.Log().Warningf(ctx, "workbuddy credits query unparsable: channel=%d endpoint=%s body=%s",
+			channel.Id, endpoint, workBuddyStatusPreview(body))
 		return err
 	}
 	used, remaining := sumWorkBuddyWindows(view)
+	// 成功路径同样留痕：确认新路由确实被上游接受，并能看到额度口径是否符合预期。
+	g.Log().Infof(ctx, "workbuddy credits query ok: channel=%d endpoint=%s windows=%d used=%s remaining=%s",
+		channel.Id, endpoint, len(view.Windows), workBuddyAmountText(used), workBuddyAmountText(remaining))
 	result.Currency = workBuddyCreditsCurrency
 	result.UsedAmount = used
 	result.RemainingAmount = remaining
@@ -117,6 +122,14 @@ func workBuddyCreditsEndpointURL(channel entity.Channels) string {
 		return ""
 	}
 	return endpoint
+}
+
+// workBuddyAmountText 把可能为空的积分值渲染成日志友好文本。
+func workBuddyAmountText(value *float64) string {
+	if value == nil {
+		return "-"
+	}
+	return workBuddyNumberText(*value)
 }
 
 // workBuddyStatusPreview 截取上游响应体的可读片段用于日志。上游 401 常常返回
