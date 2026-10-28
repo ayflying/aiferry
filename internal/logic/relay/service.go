@@ -173,6 +173,19 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 			return err
 		}
 	}
+	// 会话粘性：同一段连续对话固定同一套候选顺序与上游密钥（见 conversation_affinity.go）。
+	// 优先级/权重只在第一次对话时按加权随机定下来，后续请求沿用记忆，避免在多条同权重
+	// 渠道之间来回跳；坏掉的渠道不在候选里，自然落到备用，恢复后靠记忆顺序自动回到首选。
+	conversationKey := conversationKeyForRequest(incomingHeaders, body, key.Id)
+	if conversationKey != "" {
+		affinityKey := conversationAffinityRedisKey(key.Id, requestedModel, conversationKey)
+		if pinned := s.readConversationChannelAffinity(ctx, affinityKey); len(pinned) > 0 {
+			candidates = applyConversationChannelAffinity(candidates, pinned)
+		} else if channelIDs := candidateChannelIDs(candidates); len(channelIDs) > 0 {
+			s.writeConversationChannelAffinity(ctx, affinityKey, channelIDs)
+		}
+		ctx = channel.WithConversationAffinity(ctx, conversationKey)
+	}
 	requestID := newRequestID()
 	startedAt := time.Now()
 	settings, settingsErr := s.resilience.Get(ctx)

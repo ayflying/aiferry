@@ -100,16 +100,27 @@ func applyChannelClientHeaders(target, incoming http.Header, identity UpstreamCl
 // 渠道、密钥、模型（以及转发时的用户）维度派生的稳定标识。这里不能使用
 // 随机值：随机会话会让上游每次请求都重新选择路由、丢掉提示词缓存命中。
 func upstreamSessionID(incoming http.Header, identity UpstreamClientIdentity) string {
-	if incoming != nil {
-		for _, name := range clientSessionHeaders {
-			if value := strings.TrimSpace(incoming.Get(name)); value != "" {
-				return value
-			}
-		}
+	if session := ClientSessionID(incoming); session != "" {
+		return session
 	}
 	identityKey := fmt.Sprintf("v1|u:%d|c:%d|k:%d|m:%s", identity.UserID, identity.ChannelID, identity.CredentialID, identity.ModelName)
 	digest := sha256.Sum256([]byte(identityKey))
 	return "aiferry-" + hex.EncodeToString(digest[:16])
+}
+
+// ClientSessionID 返回客户端自带的原生会话标识（按 clientSessionHeaders 的顺序探测）。
+// 转发层用它做「同一段连续对话」的识别：编码代理本来就会带这套头，因此同一段对话
+// 能稳定命中同一条路由与密钥记忆。客户端未提供时返回空串，调用方自行退化。
+func ClientSessionID(incoming http.Header) string {
+	if incoming == nil {
+		return ""
+	}
+	for _, name := range clientSessionHeaders {
+		if value := strings.TrimSpace(incoming.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // applyUpstreamUserAgent 只在客户端未标识自己（空 UA）或使用通用 SDK / HTTP

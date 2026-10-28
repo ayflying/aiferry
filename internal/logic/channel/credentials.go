@@ -326,7 +326,14 @@ func (s *sChannel) invalidateCredentialBinding(ctx context.Context, apiKeyID, ch
 // 组合分数越低被选中的概率越低（低分加权），但不直接归零，仍为恢复探测保留窗口。
 // 绑定亲和优先：若 apiKey 已绑定某券且它当前可选（未被排除、未冷却），直接复用，绑定亲和
 // 不得绕过冷却。
+//
+// 会话粘性优先于键级绑定：请求带会话标识时（见 credential_affinity.go），同一段对话
+// 始终用同一把密钥，新对话重新随机——键级绑定是「这个 API Key 的所有对话共用一把」，
+// 与「新对话随机一把」相反，因此有会话标识时不再走绑定表。
 func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID, modelID uint64, excluded map[uint64]struct{}) (RouteCredential, error) {
+	if credential, ok := s.selectCredentialForConversation(ctx, channelID, modelID, excluded); ok {
+		return credential, nil
+	}
 	credentials, err := s.availableCredentials(ctx, channelID, excluded)
 	if err != nil {
 		return RouteCredential{}, err
