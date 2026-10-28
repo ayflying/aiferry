@@ -116,7 +116,14 @@ type streamContentGuard struct {
 	closer string
 	// tail 暂存上一分片末尾可能与结束标签重合的一小段，避免标签跨分片时丢失判定。
 	tail string
+	// held 暂存「已判定不是回答、但还没下发给客户端」的思考正文。
+	// 目的是保住重试窗口：一旦摘要信封在块收起后出现，客户端还没收到任何字节，
+	// 候选循环就能换渠道重试，而不是在流中间直接报 502。
+	held strings.Builder
+	// heldBody 是暂存思考时所在行的报文骨架，补发时用它保留 index/role/finish_reason。
+	heldBody map[string]any
 }
+
 
 type guardState int
 
@@ -163,8 +170,7 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 			switch classifyGuardPrefix(content) {
 			case guardMarkup, guardThinking:
 				// 思考已单独交付，正文里这段仍然不能当回答留给客户端。
-				g.state = guardDone
-				return nil, true
+				return g.reject()
 			case guardNone:
 				// 正文形态正常，后面分片不再判，避免把正常文本误判。
 				g.state = guardDone
@@ -178,15 +184,17 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 		// 首包常常只带 role、正文为空，空正文不算「已经判过」，
 		// 要继续等真正的第一段正文再决定。
 		if content == "" {
-			return line, false
+			if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
+				return out, markup
+				}
+				return line, false
 		}
 		switch classifyGuardPrefix(content) {
 		case guardNone:
 			g.state = guardDone
 			return line, false
 		case guardMarkup:
-			g.state = guardDone
-			return nil, true
+			return g.reject()
 		}
 		g.state = guardProbing
 		g.template = body
@@ -195,12 +203,20 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 	case guardProbing:
 		if content == "" {
 			// 空正文（role 首包、finish_reason、结尾块）原样放行，继续等真正的正文。
-			return line, false
+			if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
+				return out, markup
+				}
+				return line, false
 		}
 		g.buffer.WriteString(content)
 		out, markup := g.probe()
 		if out == nil && !markup && g.buffer.Len() > guardProbeLimit {
 			// 攒够探测窗口仍认不出形态（以 "<" 开头的普通文本），按普通正文放行。
+			g.state = guardDone
+			if g.held.Len() > 0 {
+				// 前面暂存的思考要跟着这段正文一起交给客户端，不能丢。
+				return g.releaseHeld(g.template, g.buffer.String())
+			}
 			return g.flushAsContent()
 		}
 		return out, markup
@@ -215,39 +231,39 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 	text := g.tail + content
 	g.tail = ""
 	if text == "" {
-		return line, false
+		if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
+				return out, markup
+				}
+				return line, false
 	}
 	if at := strings.Index(text, closerTag); at >= 0 {
-		delta[reasoningFieldStandard] = text[:at]
+		thinking := text[:at]
 		rest := strings.TrimLeft(text[at+len(closerTag):], " \t\r\n")
 		// 思考块收起后紧跟的正文要重新判形态：是客户端协议标记（典型是
 		// <summary> 摘要信封）则整条响应不可交付，是普通回答就照常交付。
 		switch classifyGuardPrefix(rest) {
 		case guardMarkup:
-			g.state = guardDone
-			return nil, true
+			return g.reject()
 		case guardNone:
 			g.state = guardDone
-			delta["content"] = rest
-			return encodeGuardLine(body), false
+			// 本片收尾的这段思考并入暂存，和正文同行交付。
+			g.heldBody = body
+			g.held.WriteString(thinking)
+			return g.releaseHeld(body, rest)
 		}
-		// 正文开头还是标签或标签的前半截：这一行先只交付思考，正文等后续分片到齐。
+		// 正文开头还是标签或标签的前半截：这段思考先暂存，正文等后续分片到齐。
 		delete(delta, "content")
 		g.buffer.Reset()
 		g.buffer.WriteString(rest)
 		g.state = guardProbing
-		return encodeGuardLine(body), false
+		return g.holdThinking(body, thinking)
 	}
-	// 没有结束标签：末尾可能是半个标签，先留下来等下一片，其余按思考交付。
+	// 没有结束标签：末尾可能是半个标签，先留下来等下一片，其余暂存为思考。
 	keep := closerTagSuffixLen(text, closerTag)
 	thinking := text[:len(text)-keep]
 	g.tail = text[len(text)-keep:]
-	if thinking == "" {
-		return nil, false
-	}
 	delete(delta, "content")
-	delta[reasoningFieldStandard] = thinking
-	return encodeGuardLine(body), false
+	return g.holdThinking(body, thinking)
 }
 
 // closerTagSuffixLen 返回文本尾部与结束标签开头重合的最大字节数。
@@ -265,74 +281,13 @@ func closerTagSuffixLen(text, closer string) int {
 	return 0
 }
 
-// probe 在探测状态下判断缓冲区是否已能定论：思考块转入改写，
-// 协议标记上报拒绝，普通正文整段放行，仍认不出则继续等下一行。
-func (g *streamContentGuard) probe() ([]byte, bool) {
-	text := g.buffer.String()
-	switch classifyGuardPrefix(text) {
-	case guardMarkup:
-		g.state = guardDone
-		return nil, true
-	case guardThinking:
-		delta, ok := chatDelta(g.template)
-		if !ok {
-			g.state = guardDone
-			return nil, false
-		}
-		thinking, answer, closer, _ := splitLeakedThinking(text)
-		if answer == "" && !strings.Contains(text, closer) {
-			// 本段末尾可能是半个结束标签（上游常把标签拆在两个分片里）：
-			// 先留住这段尾巴，否则这里会把半截标签当思考交付，
-			// 后面真正的摘要也永远判不出形态。
-			if keep := closerTagSuffixLen(thinking, closer); keep > 0 {
-				g.tail = thinking[len(thinking)-keep:]
-				thinking = thinking[:len(thinking)-keep]
-			}
-		}
-		mergeGuardReasoning(delta, thinking)
-		if answer == "" {
-			// 思考块还没收起：整段正文继续按思考处理。
-			delete(delta, "content")
-			if strings.Contains(text, closer) {
-				// 块已收起但后面还没有正文（生产报文里 <analysis> 与 <summary>
-				// 常常分在两个分片）：等下一段正文再决定形态，不能直接收工。
-				g.buffer.Reset()
-				g.state = guardProbing
-			} else {
-				g.closer = closer
-				g.state = guardThinkingInside
-			}
-			return encodeGuardLine(g.template), false
-		}
-		// 思考块在本段内收起，后面还带着正文：标签之后的正文必须重新按开头判定。
-		// 模型跑偏时这里是 <summary>…</summary> 摘要信封，要拦成不可交付；
-		// 是真正的回答时按普通正文交付。
-		g.buffer.Reset()
-		g.buffer.WriteString(answer)
-		switch classifyGuardPrefix(answer) {
-		case guardMarkup:
-			g.state = guardDone
-			return nil, true
-		case guardNone:
-			// 明确是普通回答：思考与正文同行交付，思考内容不丢。
-			g.state = guardDone
-			delta["content"] = answer
-			return encodeGuardLine(g.template), false
-		}
-		// 正文开头还是个标签（或标签的前半截）：这一行先只交付思考，
-		// 正文留在缓冲区，等后续分片到齐再判形态。
-		delete(delta, "content")
-		g.state = guardProbing
-		return encodeGuardLine(g.template), false
-	case guardUndecided:
-		return nil, false
-	}
-	return g.flushAsContent()
-}
 
-// flushAsContent 把缓冲区按普通正文原样交还，并结束本次探测。
 func (g *streamContentGuard) flushAsContent() ([]byte, bool) {
 	g.state = guardDone
+	if g.held.Len() > 0 {
+		// 前面暂存的思考要跟这段正文一起交给客户端，不能丢。
+		return g.releaseHeld(g.template, g.buffer.String())
+	}
 	delta, ok := chatDelta(g.template)
 	if !ok {
 		return nil, false

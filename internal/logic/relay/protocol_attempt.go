@@ -457,6 +457,20 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			return result, true, nil
 		}
 	}
+	// 流结束时守卫还在暂存思考，说明这一轮只有草稿、没有回答（上游甚至可能连
+	// finish_reason 都没给）。与流内判定一致：还没写出内容就交回候选循环换渠道
+	// 重试，别把「没有回答」的一轮当成成功响应交给客户端。
+	if contentGuard.Finish() {
+		message := "上游只写出了思考草稿，没有给出可交付的回答"
+		result.status = http.StatusBadGateway
+		result.body = openAIError("upstream_error", message)
+		result.errorMessage = message
+		if result.wroteBytes {
+			terminateTruncated(streamTerminal{status: http.StatusBadGateway, message: message})
+			return result, true, nil
+		}
+		return result, false, nil
+	}
 	result.responseText = capture.Text()
 	result.responseModel = capture.Model()
 	result.streamCompleted = capture.Completed()

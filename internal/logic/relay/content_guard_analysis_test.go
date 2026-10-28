@@ -71,20 +71,38 @@ func TestStreamContentGuardSplitsAnalysisThenAnswer(t *testing.T) {
 	}
 }
 
-// <analysis> 没给结束标签时，整段正文都算草稿，正文置空。
+// <analysis> 没给结束标签时，整段正文都算草稿：先暂存不下发，到收尾行仍是
+// 「只有草稿没有回答」，判为不可交付——交回候选循环换渠道重试，
+// 而不是把一轮没有回答的响应交给客户端。
 func TestStreamContentGuardAnalysisWithoutCloser(t *testing.T) {
 	guard := newStreamContentGuard("/chat/completions")
-	line := `data: {"choices":[{"index":0,"delta":{"content":"<analysis>只写了草稿"}}]}` + "\n"
-	out, markup := guard.Observe([]byte(line))
-	if markup || out == nil {
+	held, markup := guard.Observe([]byte(`data: {"choices":[{"index":0,"delta":{"content":"<analysis>只写了草稿"}}]}` + "\n"))
+	if markup {
 		t.Fatalf("草稿不应被拒绝，markup=%v", markup)
 	}
-	payload := out[len("data: "):]
-	if got := gjson.GetBytes(payload, "choices.0.delta.reasoning_content").String(); got != "只写了草稿" {
-		t.Fatalf("reasoning_content=%q", got)
+	if held != nil {
+		t.Fatalf("草稿块没收起前不应下发给客户端：%s", held)
 	}
-	if got := gjson.GetBytes(payload, "choices.0.delta.content").String(); got != "" {
-		t.Fatalf("content=%q", got)
+	_, markup = guard.Observe([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n"))
+	if !markup {
+		t.Fatal("收尾时只有草稿没有回答，应判为不可交付以便换候选重试")
+	}
+	if guard.held.Len() != 0 {
+		t.Fatalf("拒绝后不应残留暂存内容：%q", guard.held.String())
+	}
+}
+
+// 上游连 finish_reason 都不给就断流时，同样在收尾处判为不可交付。
+func TestStreamContentGuardFinishRejectsUnansweredThinking(t *testing.T) {
+	guard := newStreamContentGuard("/chat/completions")
+	if out, markup := guard.Observe([]byte(`data: {"choices":[{"index":0,"delta":{"content":"<thinking>只有思考"}}]}` + "\n")); markup || out != nil {
+		t.Fatalf("暂存阶段不应下发：markup=%v out=%s", markup, out)
+	}
+	if !guard.Finish() {
+		t.Fatal("流结束时仍在暂存思考，应判为不可交付")
+	}
+	if guard.held.Len() != 0 {
+		t.Fatalf("收尾后不应残留暂存内容：%q", guard.held.String())
 	}
 }
 
@@ -168,6 +186,43 @@ func mustJSON(t *testing.T, value string) string {
 		t.Fatalf("编码失败: %v", err)
 	}
 	return string(encoded)
+}
+
+// 关键回归：草稿先到、摘要信封后到时，判定之前不能给客户端写任何字节。
+// 只有这样才能保住重试窗口（wroteBytes 仍为 false，候选循环换渠道重试），
+// 而不是在流中间直接报 502。
+func TestStreamContentGuardHoldsThinkingUntilEnvelopeKnown(t *testing.T) {
+	guard := newStreamContentGuard("/chat/completions")
+	draft := `data: {"choices":[{"index":0,"delta":{"content":"<analysis>先按时间顺序梳理</analysis>"}}]}` + "\n"
+	if out, markup := guard.Observe([]byte(draft)); markup || out != nil {
+		t.Fatalf("块收起但后面还没有正文时不应下发任何字节：markup=%v out=%s", markup, out)
+	}
+	envelope := `data: {"choices":[{"index":0,"delta":{"content":"<summary>1. 干完了</summary>"}}]}` + "\n"
+	if _, markup := guard.Observe([]byte(envelope)); !markup {
+		t.Fatal("摘要信封应判定为不可交付，且此时客户端还没收到字节")
+	}
+	if guard.held.Len() != 0 {
+		t.Fatalf("拒绝后不应残留暂存内容：%q", guard.held.String())
+	}
+}
+
+// 跨分片：草稿暂存后，真正的回答到达时把整段思考与回答合并到同一行交付。
+func TestStreamContentGuardDeliversHeldThinkingWithAnswer(t *testing.T) {
+	guard := newStreamContentGuard("/chat/completions")
+	if out, markup := guard.Observe([]byte(`data: {"choices":[{"index":0,"delta":{"content":"<analysis>先看日志</analysis>"}}]}` + "\n")); markup || out != nil {
+		t.Fatalf("暂存阶段不应下发：markup=%v out=%s", markup, out)
+	}
+	out, markup := guard.Observe([]byte(`data: {"choices":[{"index":0,"delta":{"content":"已经改好了"}}]}` + "\n"))
+	if markup || out == nil {
+		t.Fatalf("普通回答应连同暂存思考一起交付，markup=%v", markup)
+	}
+	payload := out[len("data: "):]
+	if got := gjson.GetBytes(payload, "choices.0.delta.reasoning_content").String(); got != "先看日志" {
+		t.Fatalf("reasoning_content=%q", got)
+	}
+	if got := gjson.GetBytes(payload, "choices.0.delta.content").String(); got != "已经改好了" {
+		t.Fatalf("content=%q", got)
+	}
 }
 
 // 上游已经单独给出 reasoning_content 时，正文仍要判形态：
