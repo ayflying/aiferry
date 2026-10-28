@@ -18,21 +18,26 @@ import (
 // 触发点有两个，互为补充：
 //  1. 额度查询时（quota_workbuddy.go）：用户打开渠道额度详情、或页面刷新时
 //     顺手签到，属于「使用的时候发现没签到就签」；
-//  2. 本文件的后台任务：即使用户当天完全没打开管理端，也会在固定时间遍历
-//     所有 WorkBuddy 渠道下的每个账号各签一次。
+//  2. 本文件的后台任务：即使用户当天完全没打开管理端，也会在每天固定时刻
+//     遍历所有 WorkBuddy 渠道下的每个账号各签一次。
 //
 // 两个入口都只对「读到明确未签到」的账号调用领取接口，并且签到本身在上游是
 // 幂等的（重复调用返回 code=0、credit=0），因此同一天重复触发不会出错。
 const (
-	// workBuddyCheckinTick 是后台任务的检查粒度。签到按自然日生效，只要每天
-	// 检查一次即可；用小时级粒度是为了让服务重启后能在当天补签，而不是必须
-	// 恰好卡在某个整点。
-	workBuddyCheckinTick = time.Hour
-	// workBuddyCheckinHour 是允许自动签到的起始小时（服务端本地时区）。
-	// 定在早上 6 点：避开跨零点时的上游日切边界，也避开凌晨可能的上游维护窗口。
-	workBuddyCheckinHour = 6
-	// workBuddyCheckinStartupDelay 是启动后首轮签到的等待时间：够启动流程跑完
+	// workBuddyCheckinHour / workBuddyCheckinMinute 是每天执行签到的时刻
+	// （服务端本地时区）。签到按自然日生效，每天一次就够；定在早上 6 点是为了
+	// 避开跨零点时的上游日切边界，也避开凌晨可能的上游维护窗口。
+	//
+	// 2026-10-28 用户指出：签到是每日一次的动作，不该按小时反复检查。
+	// 之前用 KindHourlyAfter 每小时检查一次，虽然已签到的账号会跳过、不会重复
+	// 领取，但每小时都打一轮上游状态请求既没有意义，也让日志噪声变大。
+	workBuddyCheckinHour   = 6
+	workBuddyCheckinMinute = 0
+	// workBuddyCheckinStartupDelay 是启动后首轮补签的等待时间：够启动流程跑完
 	// 渠道同步，又不至于让发版当天的补签拖太久。
+	//
+	// 这一轮是「补签」而不是「多签」：它先读当天签到状态，已签到的账号直接跳过。
+	// 保留它是为了让发版/重启当天不漏签——若只等下一个 6 点，当天可能整天没签。
 	workBuddyCheckinStartupDelay = 90 * time.Second
 )
 
@@ -48,13 +53,14 @@ func (s *sChannel) StartWorkBuddyCheckins(ctx context.Context) {
 	schedule.Register(schedule.Spec{
 		Key:         workBuddyCheckinTaskKey,
 		Name:        "WorkBuddy 每日签到",
-		Description: "每小时检查一次，只在每天 6 点后执行；遍历所有 WorkBuddy 渠道的每个账号，未签到的自动领取签到奖励。服务启动 90 秒后先补跑一轮。",
-		Kind:        schedule.KindHourlyAfter,
-		Interval:    workBuddyCheckinTick,
-		AfterHour:   workBuddyCheckinHour,
+		Description: "每天 6:00 执行一次；遍历所有 WorkBuddy 渠道的每个账号，未签到的自动领取签到奖励。服务启动 90 秒后若已过 6 点先补跑一轮（已签到的账号自动跳过）。",
+		Kind:        schedule.KindDailyAt,
+		Hour:        workBuddyCheckinHour,
+		Minute:      workBuddyCheckinMinute,
 		Enabled:     true,
 	})
 	go func() {
+		// 启动补签：发版或重启当天已过 6 点时立刻补一轮，避免等满一天。
 		firstRun := time.NewTimer(workBuddyCheckinStartupDelay)
 		defer firstRun.Stop()
 		select {
@@ -62,29 +68,42 @@ func (s *sChannel) StartWorkBuddyCheckins(ctx context.Context) {
 			return
 		case <-firstRun.C:
 			if time.Now().Hour() >= workBuddyCheckinHour {
-				_ = schedule.Run(ctx, workBuddyCheckinTaskKey, func(ctx context.Context) error {
-					s.runWorkBuddyCheckins(ctx)
-					return nil
-				})
+				s.runWorkBuddyCheckinsOnce(ctx)
 			}
 		}
-		ticker := time.NewTicker(workBuddyCheckinTick)
-		defer ticker.Stop()
+		// 之后每天只在固定时刻跑一次。用「算到下一个 6:00 再睡」而不是按小时
+		// 轮询：签到是自然日一次的动作，每小时都问一遍上游既无意义又刷日志。
 		for {
+			wait := time.Until(nextWorkBuddyCheckinAt(time.Now()))
+			timer := time.NewTimer(wait)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case now := <-ticker.C:
-				if now.Hour() < workBuddyCheckinHour {
-					continue
-				}
-				_ = schedule.Run(ctx, workBuddyCheckinTaskKey, func(ctx context.Context) error {
-					s.runWorkBuddyCheckins(ctx)
-					return nil
-				})
+			case <-timer.C:
+				s.runWorkBuddyCheckinsOnce(ctx)
 			}
 		}
 	}()
+}
+
+// nextWorkBuddyCheckinAt 返回下一次签到的时刻：今天的 6:00，已经过了就是明天。
+// 抽成独立函数便于单测覆盖跨日/整点边界。
+func nextWorkBuddyCheckinAt(from time.Time) time.Time {
+	next := time.Date(from.Year(), from.Month(), from.Day(), workBuddyCheckinHour, workBuddyCheckinMinute, 0, 0, from.Location())
+	if !next.After(from) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
+}
+
+// runWorkBuddyCheckinsOnce 在一轮签到外加上计划任务的状态上报，让管理端的
+// 任务中心能看到执行次数、耗时与失败原因。
+func (s *sChannel) runWorkBuddyCheckinsOnce(ctx context.Context) {
+	_ = schedule.Run(ctx, workBuddyCheckinTaskKey, func(ctx context.Context) error {
+		s.runWorkBuddyCheckins(ctx)
+		return nil
+	})
 }
 
 // runWorkBuddyCheckins 遍历所有启用中的 WorkBuddy 渠道，对每个渠道下的每个账号

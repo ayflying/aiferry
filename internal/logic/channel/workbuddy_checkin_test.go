@@ -2,6 +2,7 @@ package channel
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParseWorkBuddyCheckinClaim(t *testing.T) {
@@ -53,5 +54,25 @@ func TestWorkBuddyCheckinText(t *testing.T) {
 	}
 	if got := workBuddyNumberText(0); got != "0" {
 		t.Fatalf("workBuddyNumberText(0) = %q", got)
+	}
+}
+
+// TestNextWorkBuddyCheckinAt 锁住「每天一次」的边界：未到 6 点排到今天 6:00，
+// 正好 6 点与已过 6 点都排到明天，避免同日重复执行。
+func TestNextWorkBuddyCheckinAt(t *testing.T) {
+	zone := time.FixedZone("CST", 8*3600)
+	cases := []struct {
+		name string
+		from time.Time
+		want time.Time
+	}{
+		{"凌晨排到当天", time.Date(2026, 10, 28, 3, 20, 0, 0, zone), time.Date(2026, 10, 28, 6, 0, 0, 0, zone)},
+		{"正好整点排到明天", time.Date(2026, 10, 28, 6, 0, 0, 0, zone), time.Date(2026, 10, 29, 6, 0, 0, 0, zone)},
+		{"白天排到明天", time.Date(2026, 10, 28, 11, 9, 0, 0, zone), time.Date(2026, 10, 29, 6, 0, 0, 0, zone)},
+	}
+	for _, item := range cases {
+		if got := nextWorkBuddyCheckinAt(item.from); !got.Equal(item.want) {
+			t.Fatalf("%s：nextWorkBuddyCheckinAt(%s) = %s, want %s", item.name, item.from, got, item.want)
+		}
 	}
 }
