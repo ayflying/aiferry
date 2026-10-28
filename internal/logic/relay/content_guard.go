@@ -60,7 +60,15 @@ const (
 )
 
 // classifyGuardPrefix 判定一段正文开头的形态。
-func classifyGuardPrefix(text string) guardDecision {
+//
+// 先跳过前导空白再判定：生产报文里思考块收起与摘要信封之间往往隔着换行
+// （`</analysis>\n\n<summary>`），分片下发时标签也可能落在新分片的开头，
+// 不跳过空白就会把紧接着的标签当成普通正文放行。
+func classifyGuardPrefix(raw string) guardDecision {
+	text := strings.TrimLeft(raw, " \t\r\n")
+	if text == "" {
+		return guardUndecided
+	}
 	if _, _, ok := stripLeakOpener(text); ok {
 		return guardThinking
 	}
@@ -75,6 +83,16 @@ func classifyGuardPrefix(text string) guardDecision {
 	return guardNone
 }
 
+// hasAngleBracket 判断报文里是否可能出现标签形态的正文。
+// 除了字面 "<"，还要认转义写法：部分上游（以及 Go 的 json.Marshal 默认行为）
+// 会把尖括号写成 \u003c / \u003C，只看字面 "<" 会让整条响应跳过判定。
+func hasAngleBracket(body []byte) bool {
+	if bytes.Contains(body, []byte("<")) {
+		return true
+	}
+	return bytes.Contains(body, []byte(`\u003c`)) || bytes.Contains(body, []byte(`\u003C`))
+}
+
 // isMarkupPrefix 判断文本是否仍是某个协议标记的**前缀**（分片下发时先到一半）。
 func isMarkupPrefix(text string) bool {
 	for _, prefix := range markupLeakPrefixes {
@@ -83,66 +101,6 @@ func isMarkupPrefix(text string) bool {
 		}
 	}
 	return false
-}
-
-// inspectBufferedContent 处理非流式 chat.completion 响应：先修思考块泄漏，
-// 再把「正文整体就是客户端协议标记」的响应标记出来交给上层次处理。
-// 第二个返回值表示该响应应当按上游失败处理，不再交付给客户端。
-func inspectBufferedContent(endpoint string, body []byte) ([]byte, bool) {
-	if endpoint != protocol.ChatCompletionsEndpoint || !bytes.Contains(body, []byte("<")) {
-		return body, false
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return body, false
-	}
-	choices, ok := payload["choices"].([]any)
-	if !ok {
-		return body, false
-	}
-	changed := false
-	for _, value := range choices {
-		choice, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-		message, ok := choice["message"].(map[string]any)
-		if !ok {
-			continue
-		}
-		content, ok := message["content"].(string)
-		if !ok || strings.TrimSpace(content) == "" {
-			continue
-		}
-		switch classifyGuardPrefix(strings.TrimLeft(content, " \t\r\n")) {
-		case guardMarkup:
-			return body, true
-		case guardThinking:
-			if hasReasoning(message) {
-				continue
-			}
-			thinking, answer, _, ok := splitLeakedThinking(strings.TrimLeft(content, " \t\r\n"))
-			if !ok {
-				continue
-			}
-			// 思考块之后的正文要重新判定：模型跑偏时是 <analysis>…</analysis>
-			// 紧跟 <summary>…</summary>，那段摘要同样不能当回答交付。
-			if classifyGuardPrefix(answer) == guardMarkup {
-				return body, true
-			}
-			message[reasoningFieldStandard] = thinking
-			message["content"] = answer
-			changed = true
-		}
-	}
-	if !changed {
-		return body, false
-	}
-	result, err := json.Marshal(payload)
-	if err != nil {
-		return body, false
-	}
-	return result, false
 }
 
 // streamContentGuard 是流式响应的状态机：只在正文第一次出现时判定一次，
@@ -156,6 +114,8 @@ type streamContentGuard struct {
 	// closer 是当前思考块的结束标签：<thinking> 与 <analysis> 各用各的，
 	// 不能混用一个常量，否则 <analysis> 块永远等不到闭合。
 	closer string
+	// tail 暂存上一分片末尾可能与结束标签重合的一小段，避免标签跨分片时丢失判定。
+	tail string
 }
 
 type guardState int
@@ -235,16 +195,20 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 		return out, markup
 	}
 	// guardThinkingInside：正文都属于思考，直到出现结束标签为止。
-	if content == "" {
-		return line, false
-	}
 	closerTag := g.closer
 	if closerTag == "" {
 		closerTag = leakCloser
 	}
-	if at := strings.Index(content, closerTag); at >= 0 {
-		delta[reasoningFieldStandard] = content[:at]
-		rest := strings.TrimLeft(content[at+len(closerTag):], " \t\r\n")
+	// 结束标签可能被上游拆在两个分片之间：把上一片留下的半截标签接回来再找，
+	// 否则永远等不到闭合，后面的回答会被整段当成思考吞掉（既不交付也不报错）。
+	text := g.tail + content
+	g.tail = ""
+	if text == "" {
+		return line, false
+	}
+	if at := strings.Index(text, closerTag); at >= 0 {
+		delta[reasoningFieldStandard] = text[:at]
+		rest := strings.TrimLeft(text[at+len(closerTag):], " \t\r\n")
 		// 思考块收起后紧跟的正文要重新判形态：是客户端协议标记（典型是
 		// <summary> 摘要信封）则整条响应不可交付，是普通回答就照常交付。
 		switch classifyGuardPrefix(rest) {
@@ -263,9 +227,31 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 		g.state = guardProbing
 		return encodeGuardLine(body), false
 	}
+	// 没有结束标签：末尾可能是半个标签，先留下来等下一片，其余按思考交付。
+	keep := closerTagSuffixLen(text, closerTag)
+	thinking := text[:len(text)-keep]
+	g.tail = text[len(text)-keep:]
+	if thinking == "" {
+		return nil, false
+	}
 	delete(delta, "content")
-	delta[reasoningFieldStandard] = content
+	delta[reasoningFieldStandard] = thinking
 	return encodeGuardLine(body), false
+}
+
+// closerTagSuffixLen 返回文本尾部与结束标签开头重合的最大字节数。
+// 结束标签是纯 ASCII，按字节截断不会切断多字节字符。
+func closerTagSuffixLen(text, closer string) int {
+	limit := len(closer) - 1
+	if limit > len(text) {
+		limit = len(text)
+	}
+	for size := limit; size > 0; size-- {
+		if strings.HasSuffix(text, closer[:size]) {
+			return size
+		}
+	}
+	return 0
 }
 
 // probe 在探测状态下判断缓冲区是否已能定论：思考块转入改写，
@@ -283,6 +269,15 @@ func (g *streamContentGuard) probe() ([]byte, bool) {
 			return nil, false
 		}
 		thinking, answer, closer, _ := splitLeakedThinking(text)
+		if answer == "" && !strings.Contains(text, closer) {
+			// 本段末尾可能是半个结束标签（上游常把标签拆在两个分片里）：
+			// 先留住这段尾巴，否则这里会把半截标签当思考交付，
+			// 后面真正的摘要也永远判不出形态。
+			if keep := closerTagSuffixLen(thinking, closer); keep > 0 {
+				g.tail = thinking[len(thinking)-keep:]
+				thinking = thinking[:len(thinking)-keep]
+			}
+		}
 		mergeGuardReasoning(delta, thinking)
 		if answer == "" {
 			// 思考块还没收起：整段正文继续按思考处理。
