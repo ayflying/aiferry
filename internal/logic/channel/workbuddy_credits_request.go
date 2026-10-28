@@ -12,35 +12,16 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-// WorkBuddy 积分接口的请求特征选择。
+// WorkBuddy 积分查询独立于推理请求的客户端身份契约。
 //
-// WHY。2026-10-28 用户反馈：早期版本的 AiFerry 能查到 WorkBuddy 积分余额，
-// 后来查不到了。定位到 0.6.27（2026-10-27）给「所有」WorkBuddy 上游请求注入
-// 官方 chat 客户端身份头（ApplyWorkBuddyOfficialHeaders），其中 Origin/Referer
-// 被固定写成 https://www.codebuddy.cn，而积分接口实际打在 https://www.workbuddy.cn。
-// openresty 会话门按请求的 Origin/Referer 与自身站点比对，跨站即拒绝：
-// 生产日志里的「401 Authorization Required … openresty」正是这道门的 HTML 页，
-// 换路径、换密钥、加 Cookie、加 X-Device-Token 都不会改变结果（2026-10-28 实测四种
-// 请求头组合全部返回同一个 HTML 401）。
+// 历史回归：0.6.27 把 chat 身份头施加给所有请求；0.6.42 又换掉了原积分 URL。
+// 后续仅在新 URL 上比较请求头，不能证明旧 URL 已不可用，更不能用签到接口的
+// Cookie 成功推断积分必须 Cookie。401 也不能作为路由正确的证据。
 //
-// 因此这里按两种请求特征**依次尝试**，而不是继续猜路径：
-//
-//	1. browser-origin：与本接口同源的浏览器 XHR 形态（不带 chat 身份头）
-//	2. official-chat：0.6.27 之后的 chat 身份形态（回退，保持现状不退化）
-//
-// 成功的一次会写日志，使「上游接受哪种特征」在生产上可见；两种都失败时，
-// 错误信息带上每种形态的上游状态，一次部署就能看清边界。
-//
-// 2026-10-28 实测结论（0.6.44 已证伪“跨站 Origin 是原因”）：两种形态在生产上
-// 都返回同一个 HTML 401，说明这道门不看请求头形态，而看**网页登录会话**。
-// 用登录态的浏览器抓包看到的事实：
-//   - 网页端 POST https://www.workbuddy.cn/billing/meter/checkin-status 返回 200
-//   - 该请求带 cookie，**完全没有 Authorization 头**
-//   - 同一批探针里 /v2 下不存在的路由返回 404 text/plain，
-//     而 /v2/billing/meter/get-user-resource 返回 HTML 401 —— 路由存在但拒绝密钥
-// 也就是说：host 根 /billing/* 与网页共用一套 Cookie 会话；渠道密钥（accessToken）
-// 能查签到与用量，却拿不到这份会话，因此积分余额对服务端不可查询。
-// 这条结论决定了下面的错误文案：不再猜测“风控限流”，而是如实说明会话边界。
+// 2026-10-29 官网实际积分请求仍是 POST /billing/meter/get-user-resource-summary，
+// 返回 Packages、CreditGroups 和 TotalCredits；本适配器恢复原 URL，首选早期的
+// 鉴权头形态，不注入 chat 专属身份，再回退同源浏览器头形态。服务端是否恢复
+// 必须单独实测，官网成功和本地模拟测试都不能代替生产验收。
 
 const (
 	// workBuddyCreditsBrowserOrigin 是积分接口所在站点，用作 Origin/Referer。
@@ -95,8 +76,11 @@ type workBuddyCreditsRequestVariant struct {
 
 // workBuddyCreditsRequestVariants 是候选请求形态，顺序即尝试顺序。
 var workBuddyCreditsRequestVariants = []workBuddyCreditsRequestVariant{
+	// 优先恢复早期积分请求契约：只保留鉴权，不混入推理专属身份头。
+	// 官网抓包确认积分仍使用 host 根的 summary 接口，不能拿新 URL 的 401
+	// 来证明旧契约失效；浏览器形态仅作为兼容回退。
+	{Name: "legacy-api", SkipIdentity: true},
 	{Name: "browser-origin", SkipIdentity: true, Apply: applyWorkBuddyCreditsBrowserHeaders},
-	{Name: "official-chat", SkipIdentity: false, Apply: nil},
 }
 
 // workBuddyCreditsRequest 是一次积分查询请求的模板。
@@ -112,10 +96,9 @@ type workBuddyCreditsRequest struct {
 // 措辞依据 2026-10-28 的实测（见文件头 WHY），不写“风控限流”这类猜测：
 // 网页端能用是因为它带网页登录会话（Cookie），渠道密钥没有这份会话。
 func workBuddyCreditsRejectedText(status int) string {
-	return fmt.Sprintf("WorkBuddy 积分余额接口返回 HTTP %d：该接口只对网页登录会话开放"+
-		"（网页端同源请求只带 Cookie、不带密钥头即可读余额），渠道密钥能查签到与用量，"+
-		"但拿不到这份会话，所以服务端查不到余额；请到 https://www.workbuddy.cn 查看余额。"+
-		"签到与用量不受影响，无需重复重试", status)
+	return fmt.Sprintf("WorkBuddy 积分余额接口返回 HTTP %d：当前请求未通过上游鉴权。"+
+		"请核对账号密钥及积分接口地址；此状态本身不能证明接口仅支持网页登录会话。"+
+		"可暂到 https://www.workbuddy.cn/app 查看余额", status)
 }
 
 // fetchWorkBuddyCreditsBody 按 workBuddyCreditsRequestVariants 依次尝试查询积分

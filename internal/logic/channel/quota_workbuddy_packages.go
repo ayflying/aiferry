@@ -8,13 +8,11 @@ import (
 
 // 本文件负责从 WorkBuddy 积分响应里取出「套餐额度」对象。
 //
-// 为什么要做一次与字段名无关的递归扫描：WorkBuddy 同族有两条资源接口，
-// host 根的 /billing/meter/get-user-resource-summary（网页会话门，服务端进不去）
-// 与 /v2/billing/meter/get-user-resource（API 网关，服务端可用）。后者是新启用的
-// 路由，它的外壳与字段命名不一定和前者完全一致（Packages 数组可能换成
-// user_resource 之类的单对象，CycleTotalCapacity 也可能写成 total_capacity）。
-// 写死一种结构一旦猜错就要再发一版，所以这里按「字段名 + 大小写 + 层级都不敏感」
-// 的方式收集，只要对象里出现容量类字段就当作一个套餐。
+// 新官网真实响应的 data.Packages 与 data.CreditGroups 是同一份额度的不同视图，
+// 不可递归累加两者。data.Packages 存在时以它为唯一权威来源，空数组也不回退镜像。
+// 只有缺少 Packages 时，才递归扫描兼容历史外壳与容量字段别名。
+// /v2/billing/meter/get-user-resource 曾是候选路由，不能据此认定服务端可用，
+// 也不能把兼容的字段形状当作该接口已验证的响应契约。
 //
 // 边界：只认容量类字段，不认金额；一个对象至少要有「总量」或同时有「剩余+已用」
 // 才算套餐，避免把其他业务对象里的散字段误当额度。
@@ -39,7 +37,7 @@ type workBuddyPackageValues struct {
 	Used        float64
 }
 
-// collectWorkBuddyPackages 递归扫描响应体，按出现顺序返回积分套餐。
+// collectWorkBuddyPackages 优先解析 data.Packages，缺失时才递归扫描响应体。
 // JSON 无法解析时返回 nil，由调用方用原始片段报错。
 func collectWorkBuddyPackages(body []byte) []workBuddyPackageValues {
 	var root any
@@ -47,6 +45,14 @@ func collectWorkBuddyPackages(body []byte) []workBuddyPackageValues {
 		return nil
 	}
 	var found []workBuddyPackageValues
+	if envelope, ok := root.(map[string]any); ok {
+		if data, ok := envelope["data"].(map[string]any); ok {
+			if packages, exists := data["Packages"]; exists {
+				walkWorkBuddyNode(packages, &found)
+				return dedupeWorkBuddyPackages(found)
+			}
+		}
+	}
 	walkWorkBuddyNode(root, &found)
 	return dedupeWorkBuddyPackages(found)
 }

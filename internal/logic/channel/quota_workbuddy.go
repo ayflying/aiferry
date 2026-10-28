@@ -14,26 +14,9 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-// WorkBuddy（腾讯 CodeBuddy 系桌面客户端）没有面向第三方的开放接口文档，
-// 这里的积分口径取自桌面端自身的用量面板。积分与签到分属两层路由：
-//
-//	POST {host}/v2/billing/meter/get-user-resource        积分余额（仅 Authorization 头）
-//	POST {host}/v2/billing/meter/checkin-activity-status   签到状态（额外需 X-Device-Token）
-//
-// 两条都在 API 网关的 /v2 之下，都只认渠道密钥；host 根的同名网页路由
-// （/billing/meter/...）被 openresty 会话门挡住，服务端请求一律 401，不可用。
-// 签到状态那条还要求 WorkBuddy 自带 Turing 风控 SDK 生成的 X-Device-Token，
-// 该头无法在服务端复现，因此本适配器把签到查询作为尽力而为的第二请求，
-// 失败时降级为 PartialErrors 提示。
-//
-// 积分响应（code=0）的外壳可能随接口版本变化，解析交给 collectWorkBuddyPackages
-// 做字段名无关的扫描（见 quota_workbuddy_packages.go），历史上桌面端网页接口的
-// 形状是：
-//
-//	{"code":0,"msg":"ok","data":{"Packages":[
-//	   {"PackageCode":"...","CycleTotalCapacity":3000,
-//	    "CycleRemainCapacity":1500,"CycleUsedCapacity":1500}],
-//	  "SubscriptionPackageCode":"...","IsPaidUser":true}}
+// WorkBuddy 积分使用 host 根的资源汇总接口，与 /v2 下的签到路由分开。
+// 官网实际返回 data.Packages 和镜像 CreditGroups，解析只累计一份权威明细。
+// 渠道密钥是否被上游接受需真实请求验证，不能从签到接口或 HTTP 401 推断。
 //
 // 签到响应（code=0）：
 //
@@ -41,20 +24,11 @@ import (
 //	   "streak_days":9,"is_streak_day":false,"next_streak_day":0,
 //	   "today_credit":100,"streak_bonus_days":0,"streak_bonus_credit":0}}
 
-// workBuddyCreditsPath 是 API 网关上的积分资源接口路径（自带 /v2 前缀）。
-// workBuddyCheckinPath 是签到状态接口的路径（/v2 前缀由调用方补）。
-//
-// 2026-10-28 更正：此前用的是桌面端网页接口
-// /billing/meter/get-user-resource-summary。该地址挂在 host 根，被 openresty
-// 的网页会话门保护，服务端带着渠道密钥请求只会拿到 401 Authorization Required
-// （HTML，非 JSON）——同一把密钥在 /v2/billing/meter/* 上完全可用，说明问题在
-// 路由层级而不是密钥。逐条探测确认 /v2 网关上是 get-user-resource（不带
-// -summary），返回 401 而非 404，即路由存在、只是缺鉴权。
-//
-// 由此两条链路彻底分开：积分查询走 API 网关的 /v2 路由，签到状态走桌面端路由，
-// 不再共用同一个 host 根地址，避免一处不可用连带另一处被误判。
+// workBuddyCreditsPath 恢复官网实际使用、早期适配器使用的 host 根 summary 路由。
+// 不能根据另一路由返回 401 而非 404，推断它提供同样的积分业务。
+// workBuddyCheckinPath 保持原签到路径，/v2 前缀仍由调用方补齐。
 const (
-	workBuddyCreditsPath = "/v2/billing/meter/get-user-resource"
+	workBuddyCreditsPath = "/billing/meter/get-user-resource-summary"
 	workBuddyCheckinPath = "/billing/meter/checkin-activity-status"
 	workBuddyCreditsKind = "monthly"
 	workBuddyCheckinKind = "checkin"

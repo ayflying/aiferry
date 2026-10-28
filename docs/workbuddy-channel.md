@@ -1,5 +1,11 @@
 # WorkBuddy（腾讯桌面 AI Agent / CodeBuddy 系）渠道适配
 
+> **2026-10-29 回归纠正（0.6.51）**：下文关于 `/v2` 积分路由、服务端一律不可查、Cookie 必需的旧结论证据不足，保留作历史记录，不作为现行契约。
+> 官网真实积分请求为 `POST /billing/meter/get-user-resource-summary`，返回 `data.Packages`、`CreditGroups` 和 `TotalCredits`；本次抓包余额为 3215.73000005，页面显示 3,215.73。
+> 修复费用入口裁剪 `Bearer ` 尾空格的确定性回归，恢复 host 根 summary 地址，并隔离推理专属头；优先恢复早期仅鉴权的请求形态，浏览器同源头仅作回退。
+> 解析只累计 `data.Packages`，不把镜像 `CreditGroups` 重复相加；字段存在且为空时不借镜像伪造余额。
+> 官网成功与本地完整 HTTP 契约测试并不证明生产渠道密钥已可查；生产验收结果另列，401 本身不证明路由存在或 Cookie 必需。
+
 新增内置渠道类型（`workbuddy`，id `9000000000000024`）。适配桌面端 `WorkBuddy.exe`（进程 PID 34320）的官方后端接口，无第三方 SDK 授权。
 
 ## 上游来源（本机侦察）

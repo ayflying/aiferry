@@ -1,6 +1,9 @@
 package channel
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // TestCollectWorkBuddyPackagesPascalCase 锁住历史桌面端网页接口的形状：
 // Packages 数组 + PascalCase 容量字段。改解析实现时这条必须继续通过。
@@ -19,8 +22,8 @@ func TestCollectWorkBuddyPackagesPascalCase(t *testing.T) {
 	}
 }
 
-// TestCollectWorkBuddyPackagesSnakeCase 覆盖 /v2 网关接口可能使用的
-// 小写下划线命名与不同嵌套层级，解析不能依赖固定外壳。
+// TestCollectWorkBuddyPackagesSnakeCase 覆盖没有 Packages 时的历史兼容：
+// 小写下划线命名与不同嵌套层级，不代表 /v2 接口已验证可用。
 func TestCollectWorkBuddyPackagesSnakeCase(t *testing.T) {
 	body := []byte(`{"code":0,"data":{"user_resource":{
 		"package_name":"free","total_capacity":"200","remain_capacity":"80","used_capacity":"120"}}}`)
@@ -39,10 +42,10 @@ func TestCollectWorkBuddyPackagesSnakeCase(t *testing.T) {
 // 重复累加会把积分翻倍，比查不到更有害，所以必须去重。
 func TestCollectWorkBuddyPackagesDedupes(t *testing.T) {
 	body := []byte(`{"data":{"summary":{"CycleTotalCapacity":100,"CycleRemainCapacity":40},
-		"Packages":[{"PackageCode":"a","CycleTotalCapacity":100,"CycleRemainCapacity":40}]}}`)
+		"legacy_packages":[{"PackageCode":"a","CycleTotalCapacity":100,"CycleRemainCapacity":40}]}}`)
 
 	packages := collectWorkBuddyPackages(body)
-	// summary 与 Packages 里的对象容量相同但套餐名为空/不同，属不同键，保留两条；
+	// 缺少 Packages 时仍递归兼容；容量相同但套餐名不同的对象保留两条。
 	// 完全相同（含套餐名）的重复必须只留一条。
 	same := []byte(`{"data":{"Packages":[
 		{"PackageCode":"a","CycleTotalCapacity":100,"CycleRemainCapacity":40},
@@ -52,6 +55,61 @@ func TestCollectWorkBuddyPackagesDedupes(t *testing.T) {
 	}
 	if got := len(packages); got != 2 {
 		t.Fatalf("packages = %d, want 2", got)
+	}
+}
+
+// TestParseWorkBuddyCreditsPackagesExcludeCreditGroups 锁住官网同时返回两份额度视图时不双算。
+func TestParseWorkBuddyCreditsPackagesExcludeCreditGroups(t *testing.T) {
+	body := []byte(`{"code":0,"data":{"Packages":[
+		{"PackageCode":"monthly","CycleTotalCapacity":3000,"CycleRemainCapacity":2630,"CycleUsedCapacity":370},
+		{"PackageCode":"bonus","CycleTotalCapacity":500,"CycleRemainCapacity":485.73000005,"CycleUsedCapacity":14.26999995},
+		{"PackageCode":"gift","CycleTotalCapacity":100,"CycleRemainCapacity":100,"CycleUsedCapacity":0}
+	],"CreditGroups":[
+		{"TotalCredit":3600,"RemainCredit":3215.73000005,"UsedCredit":384.26999995}
+	]}}`)
+
+	packages := collectWorkBuddyPackages(body)
+	if len(packages) != 3 {
+		t.Fatalf("packages = %d, want 3", len(packages))
+	}
+	view, err := parseWorkBuddyCredits(body)
+	if err != nil {
+		t.Fatalf("parse err = %v", err)
+	}
+	if len(view.Windows) != 3 {
+		t.Fatalf("windows = %d, want 3", len(view.Windows))
+	}
+	var remaining float64
+	for _, window := range view.Windows {
+		if window.Remaining == nil {
+			t.Fatal("remaining is nil")
+		}
+		remaining += *window.Remaining
+	}
+	if math.Abs(remaining-3215.73000005) > 1e-9 {
+		t.Fatalf("remaining = %.11f, want 3215.73000005", remaining)
+	}
+}
+
+func TestCollectWorkBuddyPackagesEmptyPackagesExcludeMirrors(t *testing.T) {
+	body := []byte(`{"code":0,"data":{"Packages":[],"CreditGroups":[
+		{"TotalCredit":3600,"RemainCredit":3215.73000005,"UsedCredit":384.26999995}
+	]}}`)
+	if packages := collectWorkBuddyPackages(body); len(packages) != 0 {
+		t.Fatalf("packages = %+v, want none for authoritative empty Packages", packages)
+	}
+	if _, err := parseWorkBuddyCredits(body); err == nil {
+		t.Fatal("empty Packages must not produce quota windows from mirrors")
+	}
+}
+
+func TestCollectWorkBuddyPackagesWithoutPackagesUsesCreditGroups(t *testing.T) {
+	body := []byte(`{"data":{"CreditGroups":[
+		{"TotalCredit":3600,"RemainCredit":3215.73000005,"UsedCredit":384.26999995}
+	]}}`)
+	packages := collectWorkBuddyPackages(body)
+	if len(packages) != 1 || packages[0].Remain != 3215.73000005 {
+		t.Fatalf("packages = %+v, want historical CreditGroups fallback", packages)
 	}
 }
 

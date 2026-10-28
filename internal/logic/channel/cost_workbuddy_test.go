@@ -47,6 +47,30 @@ func TestWorkBuddyCostsValueTypeDefaultsToUsage(t *testing.T) {
 	}
 }
 
+// TestCostWorkBuddyHeaderPrefix 守住前缀原字节：仅空值或纯空白回退 Bearer。
+func TestCostWorkBuddyHeaderPrefix(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "Bearer 后空格", value: "Bearer ", want: "Bearer "},
+		{name: "自定义前缀", value: "Api-Key ", want: "Api-Key "},
+		{name: "自定义前缀保留首尾空白", value: " \tCustom  \t", want: " \tCustom  \t"},
+		{name: "自定义前缀不补空格", value: "Token", want: "Token"},
+		{name: "空值", value: "", want: "Bearer "},
+		{name: "纯空白", value: " \t\r\n", want: "Bearer "},
+		{name: "Unicode 空白", value: "\u3000\u00a0", want: "Bearer "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := costWorkBuddyHeaderPrefix(tc.value); got != tc.want {
+				t.Fatalf("costWorkBuddyHeaderPrefix(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSumWorkBuddyWindows 校验积分合计口径：多套餐累加，签到这类计数窗口不参与。
 func TestSumWorkBuddyWindows(t *testing.T) {
 	body := []byte(`{"code":0,"data":{"Packages":[` +

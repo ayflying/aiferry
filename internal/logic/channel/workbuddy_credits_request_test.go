@@ -13,15 +13,15 @@ func TestWorkBuddyCreditsVariantsOrder(t *testing.T) {
 		t.Fatalf("候选形态数量 = %d，期望 2", len(workBuddyCreditsRequestVariants))
 	}
 	first := workBuddyCreditsRequestVariants[0]
-	if first.Name != "browser-origin" {
-		t.Fatalf("首个形态 = %q，期望 browser-origin", first.Name)
+	if first.Name != "legacy-api" {
+		t.Fatalf("首个形态 = %q，期望 legacy-api", first.Name)
 	}
-	if !first.SkipIdentity || first.Apply == nil {
-		t.Fatal("browser-origin 必须跳过 chat 身份头并自带请求头")
+	if !first.SkipIdentity || first.Apply != nil {
+		t.Fatal("legacy-api 必须跳过 chat 身份头且不追加浏览器头")
 	}
 	second := workBuddyCreditsRequestVariants[1]
-	if second.Name != "official-chat" || second.SkipIdentity {
-		t.Fatalf("回退形态 = %q skip=%v，期望 official-chat 且保留默认身份头", second.Name, second.SkipIdentity)
+	if second.Name != "browser-origin" || !second.SkipIdentity || second.Apply == nil {
+		t.Fatalf("回退形态 = %q skip=%v，期望 browser-origin 且跳过 chat 身份头", second.Name, second.SkipIdentity)
 	}
 }
 

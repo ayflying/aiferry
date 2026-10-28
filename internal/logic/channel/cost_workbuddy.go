@@ -11,11 +11,7 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-// WorkBuddy 没有 OpenAI 风格的 /organization/costs 接口，只在 API 网关的
-// /v2/billing/meter/get-user-resource（见 quota_workbuddy.go）上提供积分资源汇总，
-// 返回的是每个套餐的「周期总量 / 周期已用 / 周期剩余」积分。
-// host 根的同名网页路由（/billing/meter/...）被 openresty 会话门保护，
-// 服务端请求一律 401，已不再使用。
+// WorkBuddy 积分与套餐额度共用 host 根的 summary 接口，避免两个入口漂移。
 //
 // 0.6.36 起把它同时接进「费用与余额」这条通用链路（costs.adapter =
 // workbuddy_credits），原因是：积分本质就是可消费额度，管理端密钥表里的
@@ -44,13 +40,8 @@ const workBuddyCreditsCurrency = costUsageCurrency
 func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, result *CostResult) error {
 	// 鉴权头形状由类型配置决定，未配置时回退 Bearer（桌面端实际使用的形状）。
 	//
-	// 地址来自 workBuddyCreditsEndpointURL。该接口目前只对网页登录会话开放，
-	// 渠道密钥会拿到 HTML 401（见 workbuddy_credits_request.go 的实测记录），
-	// 因此这里既保留请求形态回退，也把真实边界写进错误文案。
-	headerPrefix := strings.TrimSpace(config.HeaderPrefix)
-	if headerPrefix == "" {
-		headerPrefix = "Bearer "
-	}
+	// URL 和请求形态与套餐额度共用实现，拒绝时只报告鉴权失败，不猜测会话边界。
+	headerPrefix := costWorkBuddyHeaderPrefix(config.HeaderPrefix)
 	endpoint := workBuddyCreditsEndpointURL(channel)
 	body, err := s.fetchWorkBuddyCreditsBody(ctx, channel, credentialCipher, workBuddyCreditsRequest{Base: upstreamJSONRequest{
 		Method:       costWorkBuddyMethod(config.Method),
@@ -146,6 +137,15 @@ func workBuddyStatusPreview(payload []byte) string {
 		return string(runes[:160]) + "…"
 	}
 	return preview
+}
+
+// costWorkBuddyHeaderPrefix 仅在空白配置时回退 Bearer，非空前缀保留原字节，
+// 避免丢失鉴权方案与密钥之间的空格分隔符。
+func costWorkBuddyHeaderPrefix(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "Bearer "
+	}
+	return value
 }
 
 // costWorkBuddyMethod 默认 POST：桌面端的资源汇总接口只有 POST。
