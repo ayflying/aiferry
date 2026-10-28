@@ -74,6 +74,16 @@
 
 **改法**。积分请求路径改为 `/v2/billing/meter/get-user-resource`，与签到一起走接受渠道密钥的 API 网关；积分明细解析改成字段名无关的递归扫描（识别 `CycleTotalCapacity` / `total_capacity` / `TotalCredit` 等别名，去重后累加），避免 `/v2` 路由的外壳与旧网页接口不一致时再次失效。查询成功与解析失败都会打日志（端点、窗口数、已用/余额、原始响应片段），生产上可直接看到真实结构。
 
+### 0.6.44：积分余额确认只对网页登录会话开放
+
+**现象**。0.6.42 改走 `/v2` 后，生产日志里积分查询依旧每次都是 `status=401` + openresty 的 HTML 页；同一把密钥的签到与用量查询正常。用户反馈「网页上能查到，早期版本也能查」。
+
+**复核过程**。用登录态浏览器抓包看到决定性的两条事实：网页端真正调用的余额同族接口 `POST https://www.workbuddy.cn/billing/meter/checkin-status` 返回 200，但该请求带 `cookie` 且**完全没有 Authorization 头**；而无效密钥探测显示 `/v2` 下不存在的路由返回 `404 text/plain`，`/v2/billing/meter/get-user-resource` 返回 HTML 401——路由存在，但拒绝渠道密钥。0.6.44 又追加了「Origin/Referer 与积分站点同源 + 浏览器 UA + 清除 chat 身份头」的请求形态优先尝试，两种形态在生产上仍都是 HTML 401，因此**跨站 Origin 不是原因**，会话才是门槛。
+
+**结论**。`/billing/*` 与网页共用 Cookie 会话；渠道 accessToken 能查签到与用量，但拿不到这份会话，服务端因此读不到积分余额。这不是可以靠改请求头修掉的回归。
+
+**改法**。请求形态回退保留（同源浏览器形态优先，chat 身份形态兜底），成功会打 `workbuddy credits query ok: variant=...`；失败文案不再猜测“风控限流”，而是如实说明会话边界并指向官网查看余额。签到与用量链路不受影响。
+
 ## 跟随更新
 
 1. 对比固定提交之后的 `src/upstream.ts` 及 `tests/issue98-channel-gate.spec.ts`、`tests/issue113-channel-gate-evidence.spec.ts`。

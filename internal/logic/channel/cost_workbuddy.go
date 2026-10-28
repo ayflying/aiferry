@@ -44,9 +44,9 @@ const workBuddyCreditsCurrency = costUsageCurrency
 func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Channels, credentialCipher string, config channeltype.CostConfig, result *CostResult) error {
 	// 鉴权头形状由类型配置决定，未配置时回退 Bearer（桌面端实际使用的形状）。
 	//
-	// 地址来自 workBuddyCreditsEndpointURL：积分资源接口在 API 网关的 /v2 之下
-	// （见 quota_workbuddy.go 的 workBuddyCreditsPath 说明），与签到接口同族，
-	// 都认渠道密钥。历史上曾用 host 根的网页路由，被 openresty 会话门挡成 401。
+	// 地址来自 workBuddyCreditsEndpointURL。该接口目前只对网页登录会话开放，
+	// 渠道密钥会拿到 HTML 401（见 workbuddy_credits_request.go 的实测记录），
+	// 因此这里既保留请求形态回退，也把真实边界写进错误文案。
 	headerPrefix := strings.TrimSpace(config.HeaderPrefix)
 	if headerPrefix == "" {
 		headerPrefix = "Bearer "
@@ -65,11 +65,11 @@ func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Chann
 		InvalidError: "WorkBuddy 积分余额接口返回了无效 JSON",
 		StatusError: func(status int, payload []byte) error {
 			// 401/403 是网关层拒绝，请求根本没进业务逻辑。把上游原始响应体
-			// 打进日志，下次失败可直接判断是登录页、风控还是业务错误。
+			// 打进日志，日志是唯一能在生产上看到上游真实响应的地方。
 			if status == 401 || status == 403 {
 				g.Log().Warningf(ctx, "workbuddy credits query rejected: channel=%d endpoint=%s status=%d body=%s",
 					channel.Id, endpoint, status, workBuddyStatusPreview(payload))
-				return gerror.Newf("WorkBuddy 积分接口返回 HTTP %d（上游网关拒绝：该接口需要网页登录会话，或该账号被平台风控限流；同一账号的签到接口可用，可稍后重试）", status)
+				return gerror.New(workBuddyCreditsRejectedText(status))
 			}
 			return gerror.Newf("WorkBuddy 积分余额接口返回 HTTP %d（地址 %s）", status, endpoint)
 		},

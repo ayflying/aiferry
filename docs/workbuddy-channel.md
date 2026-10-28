@@ -78,8 +78,8 @@
 ## 接口约束与限制
 
 - **不提供独立 API Key 创建入口**：使用官方外链登录取得 accessToken，无需读取桌面端文件或进程内存。下方本机侦察结果属于历史记录，不代表当前获取凭据的方式。
-- **积分余额可查询**：只要渠道密钥（`channel_key`）包含有效的 `accessToken`（Bearer 令牌，格式见 `C:\Users\ay\.workbuddy` 下多个日志中的 `Authorization: Bearer ...c-kg`），即可读取积分
-- **签到状态不可保证查询成功**：由于缺失 `X-Device-Token`，签到接口在多数服务器环境下会返回 HTTP 401/403，结果以 `PartialErrors` 提示，不阻塞积分窗口
+- **积分余额服务端不可查询（2026-10-28 更正）**：网页端能读到余额，是因为它带**网页登录会话（Cookie）**；用登录态浏览器抓包可见 `POST https://www.workbuddy.cn/billing/meter/checkin-status` 返回 200，该请求带 cookie 且**完全没有 Authorization 头**。渠道密钥（accessToken）能查签到与用量，但没有这份会话，因此查余额会被会话门挡成 HTML 401。0.6.39 起接入的余额查询从未在生产上成功过；0.6.44 追加“同源浏览器形态”回退后两种形态仍然都是 401，已证伪“跨站 Origin 导致拒绝”的假设。
+- **签到状态可以查询**：`POST /v2/billing/meter/checkin-activity-status` 用渠道密钥即可成功（生产已验证），签到领取幂等。旧文档“签到状态不可保证查询成功（缺 X-Device-Token）”的说法已被生产推翻。
 - **渠道密钥格式**：仅填入 `accessToken`（`Bearer` 前缀由适配器自动拼接）；不支持同时传入 `X-User-Id`（渠道配置只支持单个鉴权头 `headerName+headerPrefix`，见 `service.go:52-153`）
 
 ## 文件位置
@@ -87,6 +87,7 @@
 - 内置类型配置：`manifest/builtins.json`（条目 id 9000000000000024）
 - 适配器常量：`internal/logic/channeltype/service.go`（`AdapterWorkBuddy = "workbuddy_credits"`）
 - 解析器实现：`internal/logic/channel/quota_workbuddy.go`
+- 积分请求形态与拒绝文案：`internal/logic/channel/workbuddy_credits_request.go`（含实测记录与单测）
 - 单测：`internal/logic/channel/quota_workbuddy_test.go`（6 例，覆盖积分解析、已用补齐、空窗口拒绝、错误响应、签到解析、未签到状态）
 - 配置断言：`internal/config/builtins_test.go`（更新为 23 条内置类型，新增 `workbuddy` 映射）
 - 文档：本文件

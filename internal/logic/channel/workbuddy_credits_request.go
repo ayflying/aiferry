@@ -30,6 +30,17 @@ import (
 //
 // 成功的一次会写日志，使「上游接受哪种特征」在生产上可见；两种都失败时，
 // 错误信息带上每种形态的上游状态，一次部署就能看清边界。
+//
+// 2026-10-28 实测结论（0.6.44 已证伪“跨站 Origin 是原因”）：两种形态在生产上
+// 都返回同一个 HTML 401，说明这道门不看请求头形态，而看**网页登录会话**。
+// 用登录态的浏览器抓包看到的事实：
+//   - 网页端 POST https://www.workbuddy.cn/billing/meter/checkin-status 返回 200
+//   - 该请求带 cookie，**完全没有 Authorization 头**
+//   - 同一批探针里 /v2 下不存在的路由返回 404 text/plain，
+//     而 /v2/billing/meter/get-user-resource 返回 HTML 401 —— 路由存在但拒绝密钥
+// 也就是说：host 根 /billing/* 与网页共用一套 Cookie 会话；渠道密钥（accessToken）
+// 能查签到与用量，却拿不到这份会话，因此积分余额对服务端不可查询。
+// 这条结论决定了下面的错误文案：不再猜测“风控限流”，而是如实说明会话边界。
 
 const (
 	// workBuddyCreditsBrowserOrigin 是积分接口所在站点，用作 Origin/Referer。
@@ -93,6 +104,18 @@ type workBuddyCreditsRequest struct {
 	// Base 是各形态共用的请求参数：方法、地址、鉴权与错误文案。
 	// 其中的 Headers 与 SkipClientIdentity 由本文件的形态表覆盖，调用方不必设置。
 	Base upstreamJSONRequest
+}
+
+// workBuddyCreditsRejectedText 是积分接口被上游会话门拒绝时的用户可读说明。
+// 额度弹窗与密钥列表的查询按钮共用同一段文案，避免两个入口说法不一致。
+//
+// 措辞依据 2026-10-28 的实测（见文件头 WHY），不写“风控限流”这类猜测：
+// 网页端能用是因为它带网页登录会话（Cookie），渠道密钥没有这份会话。
+func workBuddyCreditsRejectedText(status int) string {
+	return fmt.Sprintf("WorkBuddy 积分余额接口返回 HTTP %d：该接口只对网页登录会话开放"+
+		"（网页端同源请求只带 Cookie、不带密钥头即可读余额），渠道密钥能查签到与用量，"+
+		"但拿不到这份会话，所以服务端查不到余额；请到 https://www.workbuddy.cn 查看余额。"+
+		"签到与用量不受影响，无需重复重试", status)
 }
 
 // fetchWorkBuddyCreditsBody 按 workBuddyCreditsRequestVariants 依次尝试查询积分

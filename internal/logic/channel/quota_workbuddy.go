@@ -293,6 +293,9 @@ func (s *sChannel) fetchWorkBuddyCreditsSingle(ctx context.Context, channel enti
 		ReadError:    "读取 WorkBuddy 积分接口响应失败",
 		InvalidError: "WorkBuddy 积分接口返回了无效 JSON",
 		StatusError: func(status int, payload []byte) error {
+			if status == 401 || status == 403 {
+				return gerror.New(workBuddyCreditsRejectedText(status))
+			}
 			return gerror.Newf("WorkBuddy 积分接口返回 HTTP %d", status)
 		},
 	}})
