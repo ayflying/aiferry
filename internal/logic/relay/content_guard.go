@@ -124,7 +124,6 @@ type streamContentGuard struct {
 	heldBody map[string]any
 }
 
-
 type guardState int
 
 const (
@@ -163,6 +162,9 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 	if !ok {
 		return line, false
 	}
+	if hasGuardToolCalls(delta) {
+		return g.releaseToolCall(line, body, delta)
+	}
 	if hasReasoning(delta) {
 		// 上游已按标准字段分离思考，正文不需要再改写；但正文形态仍要判一次：
 		// 模型写歪时会把摘要信封、协议标记塞进 content，思考开关开着同样会污染。
@@ -174,6 +176,9 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 			case guardNone:
 				// 正文形态正常，后面分片不再判，避免把正常文本误判。
 				g.state = guardDone
+				if g.held.Len() > 0 {
+					return g.releaseHeld(body, content)
+				}
 			}
 		}
 		return line, false
@@ -186,8 +191,8 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 		if content == "" {
 			if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
 				return out, markup
-				}
-				return line, false
+			}
+			return line, false
 		}
 		switch classifyGuardPrefix(content) {
 		case guardNone:
@@ -205,8 +210,8 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 			// 空正文（role 首包、finish_reason、结尾块）原样放行，继续等真正的正文。
 			if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
 				return out, markup
-				}
-				return line, false
+			}
+			return line, false
 		}
 		g.buffer.WriteString(content)
 		out, markup := g.probe()
@@ -232,9 +237,9 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 	g.tail = ""
 	if text == "" {
 		if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
-				return out, markup
-				}
-				return line, false
+			return out, markup
+		}
+		return line, false
 	}
 	if at := strings.Index(text, closerTag); at >= 0 {
 		thinking := text[:at]
@@ -281,7 +286,6 @@ func closerTagSuffixLen(text, closer string) int {
 	return 0
 }
 
-
 func (g *streamContentGuard) flushAsContent() ([]byte, bool) {
 	g.state = guardDone
 	if g.held.Len() > 0 {
@@ -311,14 +315,14 @@ func chatDelta(body map[string]any) (map[string]any, bool) {
 	return delta, ok
 }
 
-// mergeGuardReasoning 把思考内容并入 delta。同一行里可能先后判定出两段思考
-// （例如 <analysis> 收起后又紧跟一段思考写法），拼接而不是覆盖，避免丢内容。
+// mergeGuardReasoning 把先前暂存的思考放在当前 delta 的标准思考之前，
+// 按到达顺序拼接而不是覆盖，避免丢失上游标准 reasoning_content。
 func mergeGuardReasoning(delta map[string]any, thinking string) {
 	if thinking == "" {
 		return
 	}
 	if prev, ok := delta[reasoningFieldStandard].(string); ok && prev != "" {
-		delta[reasoningFieldStandard] = prev + thinking
+		delta[reasoningFieldStandard] = thinking + prev
 		return
 	}
 	delta[reasoningFieldStandard] = thinking
