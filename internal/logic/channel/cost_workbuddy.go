@@ -52,7 +52,7 @@ func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Chann
 		headerPrefix = "Bearer "
 	}
 	endpoint := workBuddyCreditsEndpointURL(channel)
-	body, err := s.fetchUpstreamJSON(ctx, channel, credentialCipher, upstreamJSONRequest{
+	body, err := s.fetchWorkBuddyCreditsBody(ctx, channel, credentialCipher, workBuddyCreditsRequest{Base: upstreamJSONRequest{
 		Method:       costWorkBuddyMethod(config.Method),
 		Endpoint:     endpoint,
 		AuthType:     costWorkBuddyAuthType(config.AuthType),
@@ -73,7 +73,7 @@ func (s *sChannel) queryWorkBuddyCosts(ctx context.Context, channel entity.Chann
 			}
 			return gerror.Newf("WorkBuddy 积分余额接口返回 HTTP %d（地址 %s）", status, endpoint)
 		},
-	})
+	}})
 	if err != nil {
 		return err
 	}

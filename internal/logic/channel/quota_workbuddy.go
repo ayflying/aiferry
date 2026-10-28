@@ -281,7 +281,7 @@ func (s *sChannel) fetchWorkBuddyCreditsForCredential(ctx context.Context, chann
 // fetchWorkBuddyCreditsSingle 先查积分，成功后再尽力查签到；签到失败写入
 // view.PartialErrors，不向上抛错（避免把一次风控头缺失的降级也当成积分失败）。
 func (s *sChannel) fetchWorkBuddyCreditsSingle(ctx context.Context, channel entity.Channels, config channeltype.QuotaConfig, credential quotaCredential, creditsEndpoint, checkinEndpoint string) (QuotaView, error) {
-	creditsBody, err := s.fetchUpstreamJSON(ctx, channel, credential.Cipher, upstreamJSONRequest{
+	creditsBody, err := s.fetchWorkBuddyCreditsBody(ctx, channel, credential.Cipher, workBuddyCreditsRequest{Base: upstreamJSONRequest{
 		Method:       "POST",
 		Endpoint:     creditsEndpoint,
 		AuthType:     config.AuthType,
@@ -295,7 +295,7 @@ func (s *sChannel) fetchWorkBuddyCreditsSingle(ctx context.Context, channel enti
 		StatusError: func(status int, payload []byte) error {
 			return gerror.Newf("WorkBuddy 积分接口返回 HTTP %d", status)
 		},
-	})
+	}})
 	if err != nil {
 		return QuotaView{}, err
 	}

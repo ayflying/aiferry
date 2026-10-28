@@ -18,6 +18,12 @@ type upstreamJSONRequest struct {
 	HeaderName   string
 	HeaderPrefix string
 	BodyLimit    int64
+	// SkipClientIdentity 为真时不注入渠道的客户端身份头。少数上游路由
+	// （如 WorkBuddy 官网额度接口）属于网页会话域，chat 身份头反而会被
+	// 会话门当成跨站请求拒绝，需要它们自己指定更"浏览器"的请求特征。
+	SkipClientIdentity bool
+	// Headers 是在鉴权头与身份头之后追加的请求头，优先级最高。
+	Headers      http.Header
 	RequestError string
 	FetchError   string
 	ReadError    string
@@ -44,11 +50,21 @@ func (s *sChannel) fetchUpstreamJSON(ctx context.Context, channel entity.Channel
 		return nil, err
 	}
 	// OpenCode Go 等上游要求稳定的客户端标识头，模型同步与额度查询同样需要。
-	ApplyUpstreamClientHeaders(req.Header, nil, UpstreamClientIdentity{
-		ChannelType: channel.Type,
-		ChannelID:   channel.Id,
-		BaseURL:     channel.BaseUrl,
-	})
+	// WorkBuddy 的网页额度路由例外：见 SkipClientIdentity 的说明。
+	if !input.SkipClientIdentity {
+		ApplyUpstreamClientHeaders(req.Header, nil, UpstreamClientIdentity{
+			ChannelType: channel.Type,
+			ChannelID:   channel.Id,
+			BaseURL:     channel.BaseUrl,
+		})
+	}
+	// 调用方显式指定的请求头最后写入，覆盖前面按渠道派生的默认值。
+	for name, values := range input.Headers {
+		req.Header.Del(name)
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
 	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
 	if err != nil {
 		return nil, err
