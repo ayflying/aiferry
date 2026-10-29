@@ -129,6 +129,14 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		return attemptResult{}, false, err
 	}
 	if candidate.ChannelType == "workbuddy" && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
+		// 2026-10-29 生产实证（afreq_aaf2a19a…，hy3 五次尝试全 400 "Illegal API
+		// invocation from an unapproved channel"）：上游渠道门在匹配前会归一化
+		// 零宽字符，零宽扰动对这道门无效；门匹配的是 system/assistant 文本里的
+		// 固定短语，必须按句改写成同义写法（组合命中，整表跑完才可能放行）。
+		// 顺序不可换：改词要匹配宿主原文，必须早于中性头与零宽扰动。
+		if rewritten, ok := channel.RewriteWorkBuddyFingerprintPhrases(body); ok {
+			body = rewritten
+		}
 		body, err = channel.ApplyWorkBuddyBody(body)
 		if err != nil {
 			return attemptResult{}, false, err

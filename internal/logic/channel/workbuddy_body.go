@@ -201,43 +201,10 @@ func workBuddyPerturbText(text string) (string, bool) {
 	return next, true
 }
 
+// workBuddyPerturbContent 对 string content 或 array 里的每个 text part 施加
+// 零宽扰动；文本遍历与改写边界由 workBuddyTransformContent 统一提供。
 func workBuddyPerturbContent(raw json.RawMessage) (json.RawMessage, bool) {
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		if next, ok := workBuddyPerturbText(text); ok {
-			encoded, _ := json.Marshal(next)
-			return encoded, true
-		}
-		return raw, false
-	}
-	var parts []json.RawMessage
-	if json.Unmarshal(raw, &parts) != nil {
-		return raw, false
-	}
-	changed := false
-	for i, part := range parts {
-		var record map[string]json.RawMessage
-		if json.Unmarshal(part, &record) != nil || record == nil {
-			continue
-		}
-		var kind, value string
-		_ = json.Unmarshal(record["type"], &kind)
-		if !strings.EqualFold(strings.TrimSpace(kind), "text") || json.Unmarshal(record["text"], &value) != nil {
-			continue
-		}
-		next, ok := workBuddyPerturbText(value)
-		if !ok {
-			continue
-		}
-		record["text"], _ = json.Marshal(next)
-		parts[i], _ = json.Marshal(record)
-		changed = true
-	}
-	if !changed {
-		return raw, false
-	}
-	encoded, _ := json.Marshal(parts)
-	return encoded, true
+	return workBuddyTransformContent(raw, workBuddyPerturbText)
 }
 
 func workBuddyNeutralText(text string) (string, bool) {
@@ -250,39 +217,11 @@ func workBuddyNeutralText(text string) (string, bool) {
 	return text, false
 }
 
+// workBuddyNeutralContent 对 string content 或 array 里的每个 text part 施加
+// 中性头；文本遍历与改写边界由 workBuddyTransformContent 统一提供。
 func workBuddyNeutralContent(raw json.RawMessage) (json.RawMessage, bool) {
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		if result, ok := workBuddyNeutralText(text); ok {
-			encoded, _ := json.Marshal(result)
-			return encoded, true
-		}
-		return raw, false
-	}
-	var parts []json.RawMessage
-	if json.Unmarshal(raw, &parts) != nil {
-		return raw, false
-	}
-	changed := false
-	for i, part := range parts {
-		var record map[string]json.RawMessage
-		if json.Unmarshal(part, &record) != nil || record == nil {
-			continue
-		}
-		var kind, value string
-		_ = json.Unmarshal(record["type"], &kind)
-		if !strings.EqualFold(strings.TrimSpace(kind), "text") || json.Unmarshal(record["text"], &value) != nil {
-			continue
-		}
-		if result, ok := workBuddyNeutralText(value); ok {
-			record["text"], _ = json.Marshal(result)
-			parts[i], _ = json.Marshal(record)
-			changed = true
-		}
-	}
-	if !changed {
-		return raw, false
-	}
-	encoded, _ := json.Marshal(parts)
-	return encoded, true
+	return workBuddyTransformContent(raw, workBuddyNeutralText)
 }
+
+// 说明：零宽扰动与中性头共用 workBuddyTransformContent（见
+// workbuddy_fingerprint.go），保证「只改文本、不动图片与工具」的边界只有一份实现。

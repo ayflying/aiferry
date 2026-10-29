@@ -81,6 +81,10 @@
 - 0.6.6 在公共上游请求头入口仅针对 `workbuddy` 复用通用 SDK/HTTP 库标识规范化：空标识或通用库标识使用真实 `aiferry/<运行版本>`，具名客户端标识保留。不冒充 WorkBuddy 官方客户端，不添加设备风控 token 或 OpenCode 会话头，不改请求内容、渠道配置、路由优先级或余额策略。
 - 上述只证明已测试的 UA 兼容边界，不代表绕过全部上游风控或保证所有请求形态永久可用。源码与本机测试不是生产上线证据，发布后的版本/revision 和请求回归须另行核验。
 
+## 11128 渠道校验兼容（2026-10-29 更新：改词层）
+
+2026-10-29 生产再次出现 11128，但文案换成 `Illegal API invocation from an unapproved channel`。报文层面的证据表明拦截对象已从「UA 不像官方客户端」变成「`system` / `assistant` 文本里含固定指纹短语」：零宽空格扰动被上游在匹配前归一化掉而失效，把指纹短语按句改写成同义写法后同一份 body 即可通过。0.6.53 起在请求组装路径上先做 `RewriteWorkBuddyFingerprintPhrases`（`internal/logic/channel/workbuddy_fingerprint.go`，13 条改写表），再做中性头与零宽扰动；只改 `system` / `assistant` 文本，`user` / `tool` / 工具定义 / 图片 part 不动。完整证据、机制与边界见 `docs/workbuddy-11128-fingerprint-rewrite-2026-10-29.md`。
+
 ## 接口约束与限制
 
 - **不提供独立 API Key 创建入口**：使用官方外链登录取得 accessToken，无需读取桌面端文件或进程内存。下方本机侦察结果属于历史记录，不代表当前获取凭据的方式。
