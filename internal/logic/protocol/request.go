@@ -1,5 +1,10 @@
 package protocol
 
+import (
+	"fmt"
+	"strings"
+)
+
 func chatToolsToResponses(value any) []any {
 	result := make([]any, 0)
 	for _, itemValue := range arrayValue(value) {
@@ -71,8 +76,10 @@ func responsesToolChoiceToChat(value any) any {
 // 一条 assistant 消息；紧随其后的 function_call_output 再落成 role=tool 消息，两者的 call_id
 // 必须一一对应，否则上游会因为「工具结果找不到对应的工具调用」而拒绝请求。
 //
-// 同一段里出现的 reasoning 输入项（思考模式的历史）不属于任何协议的消息形态，
-// 转换时统一丢弃：网关不代任何模型回传或伪造思考历史，客户端历史按原样透传。
+// 同一段里出现的 reasoning 输入项（思考模式的历史）会作为 reasoning_content 挂到这条
+// assistant 消息上：DeepSeek/Kimi 等开启思考的上游要求发生过工具调用后必须原样回传思考，
+// 否则直接 400（实测口径见 docs/reasoning-echo.md）。这不涉及改写响应正文——只是把客户端
+// 自己带来的思考历史换一个字段名交给上游。
 func responsesInputToChat(value any) []any {
 	if text, ok := value.(string); ok {
 		return []any{map[string]any{"role": "user", "content": text}}
@@ -81,6 +88,7 @@ func responsesInputToChat(value any) []any {
 	var (
 		pendingAssistant map[string]any
 		pendingToolCalls []any
+		pendingReasoning string
 	)
 	flush := func() {
 		if len(pendingToolCalls) > 0 {
@@ -88,11 +96,19 @@ func responsesInputToChat(value any) []any {
 			if pendingAssistant != nil {
 				message["content"] = pendingAssistant["content"]
 			}
+			if pendingReasoning != "" {
+				message["reasoning_content"] = pendingReasoning
+			}
 			result = append(result, message)
 		} else if pendingAssistant != nil {
+			// 没有工具调用时该消息不参与上游校验；但思考内容若客户端带来了，
+			// 一并挂上也符合「原样透传」口径，字段名用标准 reasoning_content。
+			if pendingReasoning != "" {
+				pendingAssistant["reasoning_content"] = pendingReasoning
+			}
 			result = append(result, pendingAssistant)
 		}
-		pendingAssistant, pendingToolCalls = nil, nil
+		pendingAssistant, pendingToolCalls, pendingReasoning = nil, nil, ""
 	}
 	for _, itemValue := range arrayValue(value) {
 		item, ok := objectValue(itemValue)
@@ -114,7 +130,12 @@ func responsesInputToChat(value any) []any {
 				},
 			})
 		case "reasoning":
-			// 思考历史不做任何加工：既不回传也不伪造，转换后直接丢弃。
+			// 思考历史挂到随后那条 assistant 消息上（Responses 的顺序是
+			// reasoning -> assistant 文本 -> function_call）。空内容不写字段，
+			// 避免给非思考模型平白加一个空 reasoning_content。
+			if text := responsesReasoningText(item); text != "" {
+				pendingReasoning = text
+			}
 		case "function_call_output":
 			flush()
 			result = append(result, map[string]any{"role": "tool", "tool_call_id": stringValue(item["call_id"]), "content": item["output"]})
@@ -127,6 +148,8 @@ func responsesInputToChat(value any) []any {
 			role := stringOr(item["role"], "user")
 			if role == "assistant" {
 				// 缓冲 assistant 文本，等待可能紧随其后的 function_call 合并成同一条消息。
+				// 只有确实存在待发出的内容时才 flush：否则 `reasoning -> assistant`
+				// 这种顺序里，刚缓冲的思考会被空 flush 清掉。
 				if len(pendingToolCalls) > 0 || pendingAssistant != nil {
 					flush()
 				}
@@ -141,6 +164,26 @@ func responsesInputToChat(value any) []any {
 	return result
 }
 
+// responsesReasoningText 提取 Responses reasoning 输入项里的思考文本。
+// summary 是 Responses 的公开摘要，content 是完整思考内容的回传形态，两者都可能出现；
+// 都为空时退回裸 text 字段（部分客户端直接写扁平结构）。
+func responsesReasoningText(item map[string]any) string {
+	var text strings.Builder
+	for _, field := range []string{"summary", "content"} {
+		for _, partValue := range arrayValue(item[field]) {
+			part, ok := objectValue(partValue)
+			if !ok {
+				continue
+			}
+			text.WriteString(stringValue(part["text"]))
+		}
+	}
+	if text.Len() > 0 {
+		return text.String()
+	}
+	return stringValue(item["text"])
+}
+
 func chatToolCallsToResponses(value any) []any {
 	result := make([]any, 0)
 	for _, itemValue := range arrayValue(value) {
@@ -152,7 +195,12 @@ func chatToolCallsToResponses(value any) []any {
 		if !ok {
 			continue
 		}
-		callID := stringValue(item["id"])
+		// 上游或客户端可能没给 id：空 call_id 会让 Responses 客户端无法把
+		// function_call_output 对回这次调用。按出现顺序补一个稳定 id。
+		callID := strings.TrimSpace(stringValue(item["id"]))
+		if callID == "" {
+			callID = fmt.Sprintf("call_aiferry_%d", len(result)+1)
+		}
 		result = append(result, map[string]any{
 			"type":      "function_call",
 			"id":        callID,

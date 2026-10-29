@@ -54,8 +54,9 @@ func (c *StreamConverter) responsesToolFor(value gjson.Result) *responsesToolSta
 	if tool, exists := c.responsesTools[upstreamIndex]; exists {
 		return tool
 	}
-	// 消息项固定占用 output_index 0，工具项从 1 起连续分配。
-	next := c.responsesToolSeq + 1
+	// 消息项占用 responsesMessageIndex()（reasoning 已申报时为 1，否则 0），
+	// 工具项紧随其后连续分配。
+	next := c.responsesMessageIndex() + 1 + c.responsesToolSeq
 	tool := &responsesToolState{
 		upstreamIndex: upstreamIndex,
 		outputIndex:   next,

@@ -4,7 +4,7 @@
 
 网关对思考内容不做加工，请求与响应共用同一条透传路径，所有模型一个方法：
 
-- 请求侧：客户端历史里的 `reasoning_content` / `reasoning` 字段原样透传，不读取 Redis 存档、不补空串、不归一 null、不删除或重命名；Responses 转 Chat 时 `reasoning` 输入项直接丢弃（见 `docs/protocol-conversion.md`）。
+- 请求侧：客户端历史里的 `reasoning_content` / `reasoning` 字段原样透传，不读取 Redis 存档、不补空串、不归一 null、不删除或重命名；Responses 转 Chat 时 `reasoning` 输入项**回填成 `reasoning_content`** 挂到对应的 assistant 消息上（2026-10-29 恢复：丢弃会让开启思考的上游在工具调用后直接 400，见 `docs/protocol-conversion.md`）。
 - 响应侧：上游返回的思考字段原样到达客户端。渠道「思维到内容」（`reasoningToContent`）开关已删除。
 - **唯一例外是正文污染守卫**（0.6.28 起，`internal/logic/relay/content_guard.go`）：上游把标签或客户端协议标记写进正文时，
   守卫在交付前处理一次，规则与渠道、模型无关：

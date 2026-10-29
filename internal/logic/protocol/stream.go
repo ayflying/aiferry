@@ -17,10 +17,18 @@ type StreamConverter struct {
 	chatRoleSent      bool
 	anthropicFinished bool
 	contentStarted    bool
-	completed         bool
-	sawToolCall       bool
-	stopReason        string
-	outputText        strings.Builder
+	// reasoningStarted 标记 Responses 的 reasoning 输出项是否已向客户端申报。
+	// Chat 转 Responses 时，思考内容走独立的 reasoning 输出项（output_index 0），
+	// 消息项排在其后，因此两者各自维护申报状态与下标。
+	reasoningStarted bool
+	// reasoningAfterMessage 表示思考项在正文项之后才到达（罕见顺序）。此时两个
+	// 输出项的下标与常规相反，必须显式记录，否则下标与 output 数组顺序错位。
+	reasoningAfterMessage bool
+	reasoningText         strings.Builder
+	completed        bool
+	sawToolCall      bool
+	stopReason       string
+	outputText       strings.Builder
 	usage             map[string]any
 	chatToolIndexes   map[string]int
 	chatToolCount     int
@@ -95,6 +103,20 @@ func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 	c.captureResponseMetadata(payload)
 	eventType := gjson.GetBytes(payload, "type").String()
 	switch eventType {
+	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+		// 思考内容统一落成 Chat 的 delta.reasoning_content：这是各上游与客户端
+		// 唯一都认的标准字段名（reasoning 在 DeepSeek/GLM 系会被拒，见
+		// docs/reasoning-echo.md）。summary 与 text 两种事件都承载思考正文，
+		// 上游按自身能力择一发送。
+		delta := gjson.GetBytes(payload, "delta").String()
+		if delta == "" {
+			return nil
+		}
+		return append(c.ensureChatRole(), c.chatChunk(map[string]any{"reasoning_content": delta}, nil, nil)...)
+	case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done",
+		"response.reasoning_text.done":
+		// 分段边界与收尾事件只带汇总信息，思考正文已由 delta 送达，无需转发。
+		return nil
 	case "response.output_text.delta":
 		delta := gjson.GetBytes(payload, "delta").String()
 		if delta == "" {
@@ -203,11 +225,21 @@ func (c *StreamConverter) chatToResponses(payload []byte) [][]byte {
 		c.usage = jsonObject(usage.Raw)
 	}
 	var result [][]byte
+	// 思考内容先于正文：上游 thinking 模型的首包通常就是 reasoning_content，
+	// 正文要晚得多（见 docs/stream-failure-handling.md）。落成独立的 reasoning
+	// 输出项，客户端据此展示思考过程。
+	if delta, _ := chatDeltaReasoning(choice.Get("delta")); delta != "" {
+		result = append(result, c.ensureResponsesReasoningStarted()...)
+		c.reasoningText.WriteString(delta)
+		result = append(result, sseEvent("response.reasoning_summary_text.delta", map[string]any{
+			"type": "response.reasoning_summary_text.delta", "delta": delta, "output_index": 0, "summary_index": 0, "item_id": c.responseReasoningID(),
+		}))
+	}
 	if delta := choice.Get("delta.content").String(); delta != "" {
 		result = append(result, c.ensureResponsesTextStarted()...)
 		c.outputText.WriteString(delta)
 		result = append(result, sseEvent("response.output_text.delta", map[string]any{
-			"type": "response.output_text.delta", "delta": delta, "output_index": 0, "content_index": 0, "item_id": c.responseMessageID(),
+			"type": "response.output_text.delta", "delta": delta, "output_index": c.responsesMessageIndex(), "content_index": 0, "item_id": c.responseMessageID(),
 		}))
 	}
 	choice.Get("delta.tool_calls").ForEach(func(_, value gjson.Result) bool {
@@ -259,11 +291,30 @@ func (c *StreamConverter) completeChatStream() [][]byte {
 }
 
 func (c *StreamConverter) completeResponsesStream() [][]byte {
-	result := c.ensureResponsesTextStarted()
+	// 思考项先收尾：客户端按 output_item.done 落定每一项，缺了会让思考块
+	// 停在「进行中」状态（与工具调用同理）。
+	var reasoningResult [][]byte
+	if c.reasoningStarted && c.reasoningText.Len() > 0 {
+		reasoningIndex := c.responsesReasoningIndex()
+		reasoningResult = append(reasoningResult,
+			sseEvent("response.reasoning_summary_part.done", map[string]any{
+				"type": "response.reasoning_summary_part.done", "output_index": reasoningIndex, "summary_index": 0,
+				"item_id": c.responseReasoningID(), "part": map[string]any{"type": "summary_text", "text": c.reasoningText.String()},
+			}),
+			sseEvent("response.reasoning_summary_text.done", map[string]any{
+				"type": "response.reasoning_summary_text.done", "output_index": reasoningIndex, "summary_index": 0,
+				"item_id": c.responseReasoningID(), "text": c.reasoningText.String(),
+			}),
+			sseEvent("response.output_item.done", map[string]any{
+				"type": "response.output_item.done", "output_index": reasoningIndex, "item": c.responseReasoningItem(),
+			}),
+		)
+	}
+	result := append(reasoningResult, c.ensureResponsesTextStarted()...)
 	if c.contentStarted {
 		result = append(result,
-			sseEvent("response.output_text.done", map[string]any{"type": "response.output_text.done", "output_index": 0, "content_index": 0, "item_id": c.responseMessageID(), "text": c.outputText.String()}),
-			sseEvent("response.content_part.done", map[string]any{"type": "response.content_part.done", "output_index": 0, "content_index": 0, "item_id": c.responseMessageID(), "part": map[string]any{"type": "output_text", "text": c.outputText.String()}}),
+			sseEvent("response.output_text.done", map[string]any{"type": "response.output_text.done", "output_index": c.responsesMessageIndex(), "content_index": 0, "item_id": c.responseMessageID(), "text": c.outputText.String()}),
+			sseEvent("response.content_part.done", map[string]any{"type": "response.content_part.done", "output_index": c.responsesMessageIndex(), "content_index": 0, "item_id": c.responseMessageID(), "part": map[string]any{"type": "output_text", "text": c.outputText.String()}}),
 		)
 	}
 	// 收尾逐调用落定（sub2api 的做法）：名称始终没到的调用也强制申报
@@ -297,7 +348,7 @@ func (c *StreamConverter) completeResponsesStream() [][]byte {
 		response["usage"] = chatUsageToResponse(c.usage)
 	}
 	result = append(result,
-		sseEvent("response.output_item.done", map[string]any{"type": "response.output_item.done", "output_index": 0, "item": c.responseOutputItem()}),
+		sseEvent("response.output_item.done", map[string]any{"type": "response.output_item.done", "output_index": c.responsesMessageIndex(), "item": c.responseOutputItem()}),
 		sseEvent("response.completed", map[string]any{"type": "response.completed", "response": response}),
 	)
 	return result
@@ -311,6 +362,24 @@ func (c *StreamConverter) ensureChatRole() [][]byte {
 	return c.chatChunk(map[string]any{"role": "assistant"}, nil, nil)
 }
 
+// responsesMessageIndex 返回消息正文项在 output 里的下标。reasoning 项若先申报
+// 则占据 0，消息顺延到 1；Responses 要求 output_index 与最终 output 数组顺序一致。
+func (c *StreamConverter) responsesMessageIndex() int {
+	if c.reasoningStarted && !c.reasoningAfterMessage {
+		return 1
+	}
+	return 0
+}
+
+// responsesReasoningIndex 返回 reasoning 项的下标：先到的思考占 0，正文之后才
+// 到达的思考顺延到 1（下标必须与最终 output 数组顺序一致）。
+func (c *StreamConverter) responsesReasoningIndex() int {
+	if c.reasoningAfterMessage {
+		return 1
+	}
+	return 0
+}
+
 func (c *StreamConverter) ensureResponsesStarted() [][]byte {
 	if c.started {
 		return nil
@@ -318,8 +387,49 @@ func (c *StreamConverter) ensureResponsesStarted() [][]byte {
 	c.started = true
 	return [][]byte{
 		sseEvent("response.created", map[string]any{"type": "response.created", "response": c.responseObject("in_progress")}),
-		sseEvent("response.output_item.added", map[string]any{"type": "response.output_item.added", "output_index": 0, "item": c.responseOutputItem()}),
+		sseEvent("response.output_item.added", map[string]any{"type": "response.output_item.added", "output_index": c.responsesMessageIndex(), "item": c.responseOutputItem()}),
 	}
+}
+
+// ensureResponsesReasoningStarted 申报 reasoning 输出项。它必须早于消息项申报，
+// 否则消息已占用 output_index 0，思考项无处安放。
+func (c *StreamConverter) ensureResponsesReasoningStarted() [][]byte {
+	if c.reasoningStarted {
+		if c.started {
+			return nil
+		}
+		return c.ensureResponsesStarted()
+	}
+	c.reasoningStarted = true
+	var result [][]byte
+	if c.started {
+		// 消息项已先行申报（上游先发正文再发思考的罕见顺序）：此时无法再让
+		// reasoning 回到 output_index 0，改用排在消息之后的第二个下标，保持
+		// 下标递增与 output 数组顺序一致。
+		c.reasoningAfterMessage = true
+		reasoningIndex := c.responsesReasoningIndex()
+		result = append(result, sseEvent("response.output_item.added", map[string]any{
+			"type": "response.output_item.added", "output_index": reasoningIndex, "item": c.responseReasoningItem(),
+		}))
+		result = append(result, sseEvent("response.reasoning_summary_part.added", map[string]any{
+			"type": "response.reasoning_summary_part.added", "output_index": reasoningIndex, "summary_index": 0, "item_id": c.responseReasoningID(),
+			"part": map[string]any{"type": "summary_text", "text": ""},
+		}))
+		return result
+	}
+	c.started = true
+	result = append(result,
+		sseEvent("response.created", map[string]any{"type": "response.created", "response": c.responseObject("in_progress")}),
+		sseEvent("response.output_item.added", map[string]any{"type": "response.output_item.added", "output_index": 0, "item": c.responseReasoningItem()}),
+		sseEvent("response.reasoning_summary_part.added", map[string]any{
+			"type": "response.reasoning_summary_part.added", "output_index": 0, "summary_index": 0, "item_id": c.responseReasoningID(),
+			"part": map[string]any{"type": "summary_text", "text": ""},
+		}),
+		// 消息项紧随思考项申报：它的下标顺延到 1，客户端据此建立两个输出槽。
+		// 不申报会让 message 的 added 永远缺失，正文增量落到未知槽位。
+		sseEvent("response.output_item.added", map[string]any{"type": "response.output_item.added", "output_index": c.responsesMessageIndex(), "item": c.responseOutputItem()}),
+	)
+	return result
 }
 
 func (c *StreamConverter) ensureResponsesTextStarted() [][]byte {
@@ -329,7 +439,7 @@ func (c *StreamConverter) ensureResponsesTextStarted() [][]byte {
 	}
 	c.contentStarted = true
 	return append(result, sseEvent("response.content_part.added", map[string]any{
-		"type": "response.content_part.added", "output_index": 0, "content_index": 0, "item_id": c.responseMessageID(), "part": map[string]any{"type": "output_text", "text": ""},
+		"type": "response.content_part.added", "output_index": c.responsesMessageIndex(), "content_index": 0, "item_id": c.responseMessageID(), "part": map[string]any{"type": "output_text", "text": ""},
 	}))
 }
 
@@ -412,6 +522,23 @@ func (c *StreamConverter) responseMessageID() string {
 	return "msg_aiferry"
 }
 
+func (c *StreamConverter) responseReasoningID() string {
+	return "rs_aiferry"
+}
+
+// chatDeltaReasoning 从 Chat 的 delta 里读取思考增量，返回内容与实际字段名。
+// 两种方言都要认：标准字段 reasoning_content，以及部分聚合渠道的 reasoning。
+// （与 relay 侧的捕获口径一致，避免同一语义在两处各写一套。）
+func chatDeltaReasoning(delta gjson.Result) (string, string) {
+	if text := delta.Get("reasoning_content").String(); text != "" {
+		return text, "reasoning_content"
+	}
+	if text := delta.Get("reasoning").String(); text != "" {
+		return text, "reasoning"
+	}
+	return "", ""
+}
+
 func (c *StreamConverter) responseOutputItem() map[string]any {
 	content := make([]any, 0)
 	if c.contentStarted {
@@ -420,14 +547,31 @@ func (c *StreamConverter) responseOutputItem() map[string]any {
 	return map[string]any{"id": c.responseMessageID(), "type": "message", "status": "completed", "role": "assistant", "content": content}
 }
 
+// responseReasoningItem 构造 Responses 的 reasoning 输出项：思考内容以 summary
+// 形式承载（客户端普遍只展示 summary，content 用于内部推理链）。
+func (c *StreamConverter) responseReasoningItem() map[string]any {
+	summary := make([]any, 0)
+	if c.reasoningText.Len() > 0 {
+		summary = append(summary, map[string]any{"type": "summary_text", "text": c.reasoningText.String()})
+	}
+	return map[string]any{"id": c.responseReasoningID(), "type": "reasoning", "summary": summary}
+}
+
 func (c *StreamConverter) responseObject(status string) map[string]any {
 	id := c.id
 	if id == "" {
 		id = "resp_aiferry"
 	}
-	// 已申报的工具调用并入 response.output（按槽位顺序排在消息项之后）；
-	// 未申报的不出现，避免 response.created 的 output 提前暴露未成形调用。
-	output := []any{c.responseOutputItem()}
+	// 已申报的 reasoning 项与消息项按实际到达顺序排列：常规顺序是思考在前，
+	// 少数上游先发正文再补思考，此时下标已互换，数组顺序必须跟着走。
+	output := make([]any, 0, 3)
+	if c.reasoningStarted && !c.reasoningAfterMessage {
+		output = append(output, c.responseReasoningItem())
+	}
+	output = append(output, c.responseOutputItem())
+	if c.reasoningStarted && c.reasoningAfterMessage {
+		output = append(output, c.responseReasoningItem())
+	}
 	for _, tool := range c.sortedResponsesTools() {
 		if !tool.announced {
 			continue

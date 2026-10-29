@@ -37,8 +37,10 @@ func responsesResponseToChat(body []byte) []byte {
 				}
 			}
 		case "function_call":
+			// call_id 是与 function_call_output 对应的键；部分上游只填了条目 id，
+			// 缺失时回退到 id，避免工具调用拿到空 id 后客户端无法回填结果。
 			toolCalls = append(toolCalls, map[string]any{
-				"id":   stringValue(item["call_id"]),
+				"id":   stringOr(item["call_id"], stringValue(item["id"])),
 				"type": "function",
 				"function": map[string]any{
 					"name":      stringValue(item["name"]),

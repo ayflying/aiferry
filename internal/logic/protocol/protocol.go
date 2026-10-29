@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -287,7 +288,13 @@ func chatRequestToResponses(body []byte) ([]byte, error) {
 			// 工具结果可能携带上一次 Responses 输出的嵌套 output 数组。
 			// 其中的 Chat image_url 也必须递归转换，否则会落到
 			// input[n].output[0].type=image_url 的上游校验错误。
-			input = append(input, map[string]any{"type": "function_call_output", "call_id": stringValue(message["tool_call_id"]), "output": normalizeNestedChatContent(content)})
+			// call_id 缺失时补一个稳定值：空 call_id 会让 Responses 客户端找不到
+			// 对应的 function_call 而丢弃结果（严格上游直接 400）。
+			callID := stringValue(message["tool_call_id"])
+			if strings.TrimSpace(callID) == "" {
+				callID = fmt.Sprintf("call_aiferry_orphan_%d", len(input))
+			}
+			input = append(input, map[string]any{"type": "function_call_output", "call_id": callID, "output": normalizeNestedChatContent(content)})
 			continue
 		case "assistant":
 			assistantContent := chatAssistantContentToResponses(content)

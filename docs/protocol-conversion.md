@@ -59,9 +59,13 @@ Chat 侧「一次工具调用」是 assistant 消息的一部分，Responses 侧
    「工具结果找不到对应的工具调用」。
 2. **合并**。相邻的 `function_call`（并行调用）合成一条 assistant 消息的多个 `tool_calls`；
    紧邻其前的 assistant 文本消息也一并合并，还原成 Chat 里「content + tool_calls」的单条消息。
-3. **`reasoning` 输入项直接丢弃**。思考历史不属于任何协议的消息形态，转换时不回传、不伪造，
-   统一丢弃：所有模型共用「客户端历史原样透传」的同一条路径，网关不代任何上游加工思考字段。
-4. **未知输入项直接跳过**。`local_shell_call`、`computer_call` 等在 Chat 侧没有对应形态，
+3. **`reasoning` 输入项回填成 `reasoning_content`**。挂到随后那条 assistant 消息上：开启思考的
+   上游（DeepSeek/Kimi 等）要求发生过工具调用后必须原样回传思考，否则直接 400。只写标准字段
+   `reasoning_content`，不回写聚合方言 `reasoning`；`summary` 与 `content` 两种形态都认，
+   内容为空时不写字段（对非思考模型保持无副作用）。
+4. **工具调用 id 兜底**。上游 `call_id` 缺失时回退条目 `id`；Chat 侧 `tool_calls[].id` 缺失时
+   按出现顺序补 `call_aiferry_N`，两端 id 必须一致，否则客户端回填结果时找不到对应调用。
+5. **未知输入项直接跳过**。`local_shell_call`、`computer_call` 等在 Chat 侧没有对应形态，
    跳过它们；早期实现会把它们降级成 `{"role":"user","content":null}`，等于往对话里注入一条空
    用户消息，破坏对话结构。
 
@@ -82,6 +86,19 @@ Chat 侧「一次工具调用」是 assistant 消息的一部分，Responses 侧
 工具名每个调用只发送一次：上游会重复下发 `output_item.added`，重复发送会让客户端把
 `function.name` 按增量拼成 `PowerShellPowerShell`。
 
+### 流式响应的思考内容
+
+思考内容在两个方向都要转换，否则 Codex 这类 Responses 客户端接思考模型时看不到思考过程：
+
+| 方向 | 上游事件 / 字段 | 客户端收到的形态 |
+| --- | --- | --- |
+| 上游是 Responses | `response.reasoning_summary_text.delta`、`response.reasoning_text.delta` | `choices[0].delta.reasoning_content` |
+| 上游是 Chat | `choices[0].delta.reasoning_content`（或 `reasoning`） | `response.reasoning_summary_text.delta` + 收尾的 `output_item.done` |
+
+`output_index` 的分配规则：思考项先到就占 0、消息项顺延到 1，工具调用再从 2 起；
+少数上游先发正文后补思考时顺序反转，此时由 `reasoningAfterMessage` 记录，`output` 数组
+顺序与下标同步反转。思考项未申报时不产生任何 reasoning 事件，非思考模型行为保持原样。
+
 ## 验证
 
 ```bash
@@ -91,7 +108,12 @@ go test ./internal/logic/protocol/...
 覆盖用例：`TestResponsesRequestToChat`、`TestResponsesToolContinuationToChatRestoresToolCalls`、
 `TestResponsesUnknownInputItemDoesNotBecomeUserMessage`、`TestChatToolContinuationToResponsesIncludesFunctionCallItems`
 （反向转换）、`TestResponsesStreamDoesNotRepeatToolName`、`TestResponsesStreamKeepsParallelToolIndexes`、
-`TestResponsesStreamMatchesToolArgumentsByItemID`（delta 只带 item_id 时的下标一致性）。
+`TestResponsesStreamMatchesToolArgumentsByItemID`（delta 只带 item_id 时的下标一致性）、
+`TestResponsesReasoningBackfillsReasoningContent`、`TestResponsesReasoningAcceptsContentParts`、
+`TestResponsesEmptyReasoningWritesNothing`、`TestResponsesReasoningDeltasBecomeChatReasoningContent`、
+`TestChatReasoningContentBecomesResponsesReasoning`、`TestChatWithoutReasoningSkipsReasoningItem`、
+`TestChatAggregateReasoningDialectIsConverted`、`TestChatReasoningShiftsToolOutputIndex`、
+`TestResponsesToolCallFallsBackToItemID`、`TestChatToolCallsToResponsesFillsMissingID`。
 
 开关相关：`TestProtocolConversionDisabledPinsClientEndpoint`（relay 侧）、
 `TestParseAdvancedConfigProtocolConversionThreeStates`（渠道配置三态解析）。
