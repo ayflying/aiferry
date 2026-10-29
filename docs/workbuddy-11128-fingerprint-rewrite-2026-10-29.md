@@ -94,6 +94,12 @@ Tokens prefixed with @ are paths the user explicitly referenced.
 
 验证：用该条生产失败报文走「改词 → 中性头 → 零宽扰动」全链路，129 条消息最终为 `system:1 / assistant:58 / tool:52 / user:18`，system 文本中残留原指纹 **0 条**（修复前此处残留全部 13 条）。
 
+生产 0.6.54（2026-10-29 14:28 发布，healthz `version=0.6.54` / `revision=00b8ee4a152884390fca42a973ee90ac0b1c7201`）验证：
+
+- 发布后 132 条请求，响应含 `code=11128` 的 **0 条**。
+- 真实用户请求（14:43:53，`deepseek-flash`）仍是「1 developer、无 system」形态——与 14:07 失败的那条同形态——返回 **200**。14:30—14:43 期间同渠道 `deepseek-flash` / `deepseek-flash-1017` 连续 30 余条全部 200。
+- 同形态换版本即通过，确认差异来自**覆盖到的角色**，与模型无关：此前「hy3 通、另一个模型不通」是两条会话的消息角色形态不同造成的假象。
+
 ## 边界
 
 - 改词表是**大小写精确**匹配：宿主 system 是固定大小写；上游本身不区分大小写，若
