@@ -168,8 +168,8 @@ func normalizeSettings(input adminapi.SystemResilienceSettingsInput) (adminapi.S
 	}
 	input.FailureKeywords = normalizeKeywords(input.FailureKeywords)
 	// Messages 名单与 FailureKeywords 同构：去重、限长、归一小写（匹配本就忽略大小写）。
+	// 端点地址不在这里维护——它由渠道类型声明，见 channeltype.ResolveMessagesEndpoint。
 	input.MessagesModels = normalizeKeywords(input.MessagesModels)
-	input.MessagesPath = strings.TrimSpace(input.MessagesPath)
 	return input, nil
 }
 

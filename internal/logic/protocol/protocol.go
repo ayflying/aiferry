@@ -176,6 +176,51 @@ func (p Plan) ConvertResponse(body []byte) []byte {
 	}
 }
 
+// EmptyCompletion 判断上游响应是不是「给了 2xx，但没有任何可交付输出」。
+// 这类响应在协议转换后只剩一个空壳（Responses 的 output 为空、Chat 的 content 与
+// tool_calls 都为空），客户端既拿不到回答问题也没有可执行的工具调用，只会把它当
+// 结构化错误原样展示（Codex 的 error: ... output=[] status="completed"）。转发层据此
+// 把它当作一次上游失败计入候选重试，而不是当成功响应交付。
+//
+// 判定读的是**上游原始响应**（body 参数传入转换前的字节）：转换层已经会把空回包
+// 改写成错误体，若按转换后的字节判断会被 error 字段短路而失效。
+//
+// upstreamEndpoint 决定按哪套 schema 读取：转换到 Chat 时读 choices/message，
+// 转换到 Responses 时读 output。直连（p.Converts() 为 false）不做判定：上游的响应
+// 形态归上游自己负责，网关不额外干预。
+func (p Plan) EmptyCompletion(body []byte) bool {
+	if !p.Converts() || !json.Valid(body) || gjson.GetBytes(body, "error").Exists() {
+		return false
+	}
+	switch p.upstreamEndpoint {
+	case ChatCompletionsEndpoint:
+		choices := gjson.GetBytes(body, "choices")
+		switch {
+		case !choices.Exists():
+			// 连 choices 字段都没有：不是 Chat Completions 的成功回包。
+			return true
+		case !choices.IsArray():
+			return true
+		case len(choices.Array()) == 0:
+			return true
+		}
+		message := choices.Array()[0].Get("message")
+		if !message.Exists() {
+			return true
+		}
+		hasContent := strings.TrimSpace(message.Get("content").String()) != "" ||
+			strings.TrimSpace(message.Get("refusal").String()) != ""
+		return !hasContent && message.Get("tool_calls.#").Int() == 0
+	case ResponsesEndpoint:
+		output := gjson.GetBytes(body, "output")
+		if !output.Exists() || !output.IsArray() {
+			return false
+		}
+		return len(output.Array()) == 0
+	default:
+		return false
+	}
+}
 func ShouldFallback(status int, body []byte) bool {
 	switch status {
 	case 404, 405, 501:

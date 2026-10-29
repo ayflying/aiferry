@@ -61,7 +61,7 @@
         "costs": { "adapter": "none" },
         "pricing": { "adapter": "none" },
         "quota": { "adapter": "opencode_go_usage", "method": "GET", "path": "https://opencode.ai/zen/v1/usage", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
-        "protocol": { "messagesPath": "/messages" }
+        "protocol": { "messagesPath": "/messages", "messagesModels": ["union-*"] }
       }
     },
     {

@@ -143,9 +143,13 @@ func TestOpenCodeZenBuiltinSeparatesFromGoLane(t *testing.T) {
 	if strings.Contains(string(config.Quota), `zen/go/v1/usage`) {
 		t.Fatalf("OpenCode Zen quota must not reuse the Go lane usage URL, got %s", config.Quota)
 	}
-	// Anthropic Messages 端点相对免费层根地址声明。
+	// Anthropic Messages 端点与模型名单都相对该渠道类型声明：端点地址属于渠道专属
+	// 事实，不再由全局设置提供，否则所有命中名单的渠道都会被送到同一个域名。
 	if !strings.Contains(string(config.Protocol), `"/messages"`) {
 		t.Fatalf("OpenCode Zen protocol messagesPath = %s, want /messages", config.Protocol)
+	}
+	if !strings.Contains(string(config.Protocol), `"union-*"`) {
+		t.Fatalf("OpenCode Zen protocol messagesModels = %s, want union-*", config.Protocol)
 	}
 }
 

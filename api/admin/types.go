@@ -232,11 +232,12 @@ type SystemResilienceSettingsInput struct {
 	// MessagesModels 是全局 Anthropic Messages 模型名单（`前缀-*` 通配或精确名）。
 	// 渠道启用协议转换后，上游模型命中名单即改走 Messages 端点，无需改渠道类型。
 	// 空名单表示不启用全局名单转换，判定退回渠道类型声明与模型名推断。
+	//
+	// 这里刻意只有名单、没有端点地址：Messages 端点是渠道专属事实（各家用各自的
+	// 域名与路径前缀），全局放一个固定地址会把所有命中名单的渠道都送到同一个域名。
+	// 需要非标准路径的渠道在它自己的渠道类型里声明 protocol.messagesPath，命中全局
+	// 名单的模型一律使用协议缺省 /v1/messages。
 	MessagesModels []string `json:"messagesModels"`
-	// MessagesPath 是全局 Messages 端点地址：相对路径拼在渠道 BaseURL 之后，
-	// 完整 URL 直接使用（如 Zen 的 https://opencode.ai/zen/v1/messages）。
-	// 留空使用协议缺省值 /v1/messages。
-	MessagesPath string `json:"messagesPath"`
 }
 
 type ModelQualitySettingsInput struct {

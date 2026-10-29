@@ -352,10 +352,10 @@ export interface SystemResilienceSettings {
   streamFailureEventEnabled: boolean
   // messagesModels 是全局 Anthropic Messages 模型名单（前缀-* 通配或精确名）；
   // 渠道启用协议转换后命中即自动转 messages，无需改渠道类型。空名单不启用。
+  //
+  // 只维护名单、没有端点地址：端点属于渠道专属事实，由渠道类型的
+  // protocol.messagesPath 声明；命中全局名单的模型使用协议缺省 /v1/messages。
   messagesModels: string[]
-  // messagesPath 是全局 messages 端点：相对路径拼渠道 baseUrl，完整 URL 直接
-  // 使用（如 Zen 的跨源 /zen/v1/messages）；留空用协议缺省 /v1/messages。
-  messagesPath: string
 }
 
 export interface BaseSettings {

@@ -110,8 +110,16 @@ func chatResponseToResponses(body []byte) []byte {
 			output = append(output, map[string]any{"type": "function_call", "call_id": stringValue(tool["id"]), "name": stringValue(function["name"]), "arguments": stringValue(function["arguments"]), "status": "completed"})
 		}
 	}
+	// 上游 Chat 回包没有任何可交付的输出（choices 缺失或为空、message 不成形）时，
+	// 不能合成一个「已成功完成、output 为空」的 Responses 响应。Codex 等客户端会把它
+	// 当成结构化错误原样展示（error: created_at=... id="" model="" object="response"
+	// output=[] status="completed"），既没有可读原因，也无法据此重试。这里改为返回
+	// 明确的错误体，让客户端拿到可读的失败原因。
+	if len(output) == 0 {
+		return encodeProtocolError(upstreamEmptyCompletionMessage)
+	}
 	target := map[string]any{
-		"id":         stringValue(source["id"]),
+		"id":         stringOr(source["id"], generatedResponseID()),
 		"object":     "response",
 		"created_at": protocolCreated(source, "created"),
 		"status":     "completed",
@@ -126,6 +134,31 @@ func chatResponseToResponses(body []byte) []byte {
 		return body
 	}
 	return result
+}
+
+// upstreamEmptyCompletionMessage 是「上游 Chat 回包没有产生任何输出」时对外的失败原因。
+// 文案要能直接指向可操作的方向：这是上游/渠道侧的空回包，不是客户端请求有误。
+const upstreamEmptyCompletionMessage = "上游返回了空响应：Chat Completions 回包中没有 choices 或消息内容，无法转换为 Responses 输出"
+
+// encodeProtocolError 生成 OpenAI 风格的错误体。协议转换层发现无法交付的响应时用它
+// 替换结果，客户端据此展示可读的失败原因而不是一个畸形的成功响应。
+func encodeProtocolError(message string) []byte {
+	result, err := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"message": message,
+			"type":    "upstream_error",
+			"code":    "empty_completion",
+		},
+	})
+	if err != nil {
+		return []byte(`{"error":{"message":"` + upstreamEmptyCompletionMessage + `","type":"upstream_error","code":"empty_completion"}}`)
+	}
+	return result
+}
+
+// generatedResponseID 在没有上游 id 时给出一个稳定前缀的响应标识，避免客户端拿到空 id。
+func generatedResponseID() string {
+	return "resp_aiferry"
 }
 
 func chatContentToResponseOutput(value any) []any {

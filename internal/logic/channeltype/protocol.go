@@ -18,14 +18,16 @@ func MatchesMessagesModel(config Config, model string) bool {
 // 声明的名单优先（类型专属知识），类型级未配置时退回全局名单（系统设置）。
 // 命中返回端点 URL（完整 URL 原样、相对路径由调用方拼接、空回退协议缺省值），
 // 未命中返回空串。
+//
+// 端点地址只由**渠道类型**声明：Messages 端点是渠道专属事实（各家用各自的域名与
+// 路径前缀），全局设置里放一个固定地址会让所有命中名单的渠道都被送到同一个域名。
+// 全局名单只承载「哪些模型名说 Anthropic 协议」这类与渠道无关的模型知识，命中后
+// 使用协议缺省的 /v1/messages 相对路径，用户要非标准路径就在渠道类型里声明。
 func ResolveMessagesEndpoint(typeConfig Config, settings adminapi.SystemResilienceSettingsInput, model string) string {
 	if matchMessagePatterns(typeConfig.Protocol.MessagesModels, model) {
 		return MessagesEndpointURL(typeConfig)
 	}
 	if len(settings.MessagesModels) > 0 && matchMessagePatterns(settings.MessagesModels, model) {
-		if path := strings.TrimSpace(settings.MessagesPath); path != "" {
-			return path
-		}
 		return protocol.MessagesEndpoint
 	}
 	return ""

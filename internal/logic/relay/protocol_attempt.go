@@ -109,6 +109,10 @@ func isZhipuResponsesBaseURL(baseURL string) bool {
 	return strings.EqualFold(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "https://open.bigmodel.cn/api/v1")
 }
 
+// upstreamEmptyCompletionMessage 是上游 2xx 但没有任何可交付输出时的失败原因。文案要
+// 直接指向可操作方向：这是上游的空回包，不是客户端请求有误。
+const upstreamEmptyCompletionMessage = "上游返回了空响应：渠道回包中没有任何正文或工具调用，无法交付给客户端"
+
 // resolveUpstreamURL 拼接上游地址：端点是完整 URL（如渠道类型声明的
 // Messages 地址）时原样使用，否则拼在渠道根地址之后。
 func resolveUpstreamURL(baseURL, endpoint string) string {
@@ -242,7 +246,24 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		}
 		reasoningContent, reasoningField, reasoningToolCallIDs := captureBufferedReasoning(plan.UpstreamEndpoint(), responseBody)
 		responseBody = normalizeResponseBody(plan.UpstreamEndpoint(), responseBody, candidate.UpstreamName, advancedConfig)
-		result := attemptResult{status: resp.StatusCode, body: plan.ConvertResponse(responseBody), tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
+		// 协议转换后只剩空壳（2xx 但没有任何正文与工具调用）：这不是可交付的回答。
+		// 判成 502 让候选循环换个渠道重试；若全部候选都这样，失败路径会把可读的错误
+		// 原因交给客户端，而不是一个畸形成功响应（Codex 的 output=[] 报错即此形态）。
+		// 判定必须读转换前的上游原文：转换层已会把空回包改写成错误体。
+		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices &&
+			plan.EmptyCompletion(responseBody) {
+			message := upstreamEmptyCompletionMessage
+			return attemptResult{
+				status:             http.StatusBadGateway,
+				body:               openAIError("upstream_error", message),
+				errorMessage:       message,
+				headers:            responseHeaders(resp.Header, plan),
+				upstreamEndpoint:   plan.UpstreamEndpoint(),
+				protocolConversion: plan.Conversion(),
+			}, false, nil
+		}
+		converted := plan.ConvertResponse(responseBody)
+		result := attemptResult{status: resp.StatusCode, body: converted, tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
 		if forcedStreamAggregate {
 			// 上游按流式回了 text/event-stream，聚合后给客户端的是 JSON，必须改写
 			// Content-Type，否则客户端按 SSE 解析 JSON 会直接报错。
