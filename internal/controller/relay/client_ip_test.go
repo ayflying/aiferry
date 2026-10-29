@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"testing"
@@ -61,6 +62,26 @@ func TestNormalizedVideoClientResponsePreservesNonEmptyBody(t *testing.T) {
 	}
 }
 
+// freeTestPort 申请一个当前空闲的端口号供测试服务器使用。
+//
+// 必须显式指定端口：GoFrame 缺省监听 8080，而 8080 是开发机上的热门端口——
+// 本机跑着任意一个 http.server 或既有网关实例时，GoFrame 的 Start() 仍会打印
+// 「listening on :8080」并把 GetListenedPort() 报成 8080，请求却被那个进程接走，
+// 测试拿回的是别人返回的 404 页面（2026-10-29 实测：python -m http.server 8080）。
+// 先 Listen 再关闭只能缩小竞争窗口，无法彻底消除，但足以避免与常驻服务撞车。
+func freeTestPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve free port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("release reserved port: %v", err)
+	}
+	return port
+}
+
 func TestVideoContentRoutesMatchPathParameters(t *testing.T) {
 	const webRoot = "web"
 	if err := os.MkdirAll(webRoot, 0o700); err != nil {
@@ -73,6 +94,8 @@ func TestVideoContentRoutesMatchPathParameters(t *testing.T) {
 	s := g.Server(guid.S())
 	s.SetDumpRouterMap(false)
 	s.SetFileServerEnabled(false)
+	// 绑 127.0.0.1 且用空闲端口：绑定失败会直接暴露，不会静默落到别人的服务上。
+	s.SetAddr(fmt.Sprintf("127.0.0.1:%d", freeTestPort(t)))
 	s.Group("/v1", func(group *ghttp.RouterGroup) {
 		group.GET("/video/generations/:task_id/content", func(r *ghttp.Request) {
 			r.Response.Write("legacy:" + r.GetRouter("task_id").String())
@@ -86,7 +109,7 @@ func TestVideoContentRoutesMatchPathParameters(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	client := g.Client()
-	client.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
+	client.SetPrefix(fmt.Sprintf("http://%s", s.GetListenedAddress()))
 	for path, want := range map[string]string{
 		"/v1/video/generations/task_123/content": "legacy:task_123",
 		"/v1/videos/video_456/content":           "openai:video_456",
