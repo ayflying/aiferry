@@ -8,26 +8,30 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/protocol"
 )
 
-// 正文污染守卫（content guard）。
+// 协议标记守卫（content guard）。
 //
-// 生产报文里有两类「标签写进正文」的污染，客户端都会把它当成正常回答存进会话
-// 历史，下一轮再原样回传；上游于是继续按这个坏形态输出，最终表现为对话在没有
-// 回答的情况下中断（实证见 2026-10-27 生产报文）。
+// 【已删除的一半，2026-10-29】原先这里还有一套「思考块改写」：上游把整段思考用
+// <thinking>…</thinking> 或 <analysis>…</analysis> 包进正文时，网关把它搬进
+// reasoning_content、剥掉标签，正文只留真正的回答。那是按 adesk 渠道 deepseek
+// 系列的实证加的模型专用补丁。用户 2026-10-29 确认上游已修复标签错乱，网关不再为
+// 这类模型做特殊处理，整套分支已删除（实现见 git 历史 58319ba 之前的
+// content_guard_thinking.go / content_guard_probe.go / content_guard_hold.go）。
+// 现在上游若仍把思考标签写进正文，网关按普通正文原样透传：不改写、不搬移、
+// 不因它拒答。
 //
-//	1. 思考块泄漏：上游把整段思考用 <thinking>…</thinking> 包进正文，而不是放进
-//	   reasoning_content（adesk 渠道 deepseek 系列实证）。
-//	2. 客户端内部标记泄漏：上游把自家客户端/Agent 框架的内部标记当正文写出，例如
-//	   <tool_result name=read> 整块文件内容、<tool_call(s)>/<tool invoke>、｜…｜ 形式的
-//	   DSML 收尾标记（workbuddy 渠道实证），以及 Agent 框架上下文压缩用的
-//	   <summary>…</summary> 摘要信封（adesk 渠道实证）。
+// 【保留的一半与模型无关】上游把自家客户端 / Agent 框架的内部标记当正文写出：
+// <tool_result name=read> 整块文件内容、<tool_call(s)>、<tool invoke>、｜…｜ 形式的
+// DSML 收尾标记（workbuddy 渠道实证），以及 Agent 框架上下文压缩用的
+// <summary>…</summary> 摘要信封（adesk 渠道 afreq_04b72bca01aaab19292942ab 实证：
+// 客户端把压缩结果当论文塞进请求，模型照抄格式当成本轮回答）。
 //
-// 处理规则不区分渠道和模型，全部响应共用一条：
-//   - 思考块：搬回 reasoning_content、剥掉标签，正文只留真正的回答，可以安全交付；
-//   - 协议标记：无法还原成正确的工具调用，判定为上游坏响应、不交付给客户端，
-//     交回候选循环切换或重试，避免垃圾写进客户端历史。
+// 这类内容既不能当回答交付——客户端解析失败会把垃圾存进会话历史，下一轮再原样回传，
+// 上游于是继续按坏形态输出，最终表现为对话在没有回答的情况下中断（2026-10-27 生产
+// 实证）——也还原不成正确的工具调用，所以判定为上游坏响应、不交付给客户端，交回候选
+// 循环切换或重试。
 //
-// 两类判定都只看正文开头的文本形态，且只在正文第一次出现时判断一次；判定不成立
-// 就立刻按普通正文放行，不影响正常的流式行为。
+// 判定只看正文开头的文本形态，且只在正文第一次出现时判断一次；判定不成立立刻按普通
+// 正文放行，不影响正常流式行为。
 
 const (
 	// guardProbeLimit 限制探测窗口：攒够这么多字节还认不出形态，就按普通正文放行，
@@ -35,7 +39,7 @@ const (
 	guardProbeLimit = 24
 )
 
-// markupLeakPrefixes 是上游自家客户端/Agent 框架的内部标记开头。这些标记对任何
+// markupLeakPrefixes 是上游自家客户端 / Agent 框架的内部标记开头。这些标记对任何
 // OpenAI 兼容客户端都不是合法正文，出现即说明这条响应不能直接交付。
 //
 // 其中 <summary> 来自 Agent 框架的上下文压缩格式：客户端把 checkpoint（含
@@ -52,32 +56,28 @@ var markupLeakPrefixes = []string{
 type guardDecision int
 
 const (
-	// guardUndecided 还认不出，需要继续攒字节；guardNone 判定为普通正文。
+	// guardUndecided 还认不出，需要继续攒字节；guardNone 判定为普通正文；
+	// guardMarkup 判定为协议标记。
 	guardUndecided guardDecision = iota
 	guardNone
-	guardThinking
 	guardMarkup
 )
 
 // classifyGuardPrefix 判定一段正文开头的形态。
 //
-// 先跳过前导空白再判定：生产报文里思考块收起与摘要信封之间往往隔着换行
-// （`</analysis>\n\n<summary>`），分片下发时标签也可能落在新分片的开头，
-// 不跳过空白就会把紧接着的标签当成普通正文放行。
+// 先跳过前导空白再判定：生产报文里协议标记常常落在新分片的开头，不跳过空白就会把
+// 紧接在换行之后的标记当成普通正文放行。
 func classifyGuardPrefix(raw string) guardDecision {
 	text := strings.TrimLeft(raw, " \t\r\n")
 	if text == "" {
 		return guardUndecided
-	}
-	if _, _, ok := stripLeakOpener(text); ok {
-		return guardThinking
 	}
 	for _, prefix := range markupLeakPrefixes {
 		if strings.HasPrefix(text, prefix) {
 			return guardMarkup
 		}
 	}
-	if isLeakOpenerPrefix(text) || isMarkupPrefix(text) {
+	if isMarkupPrefix(text) {
 		return guardUndecided
 	}
 	return guardNone
@@ -104,34 +104,24 @@ func isMarkupPrefix(text string) bool {
 }
 
 // streamContentGuard 是流式响应的状态机：只在正文第一次出现时判定一次，
-// 认出思考块后把后续正文改写成 reasoning_content，认出协议标记则上报拒绝。
+// 认出协议标记即上报拒绝，其余情况一律原样放行。
 type streamContentGuard struct {
-	state  guardState
+	state guardState
+	// buffer 暂存判定窗口内的正文：分片下发时标记可能被切成两半，
+	// 前面那半必须先留住，等后面的字节到齐再判，否则半截标记会被当成普通正文放行。
 	buffer strings.Builder
-	// template 保存判定所在那一行的报文，改写思考内容时以它为骨架，
+	// template 保存判定所在那一行的报文，补发缓冲正文时以它为骨架，
 	// 保留 index/role/finish_reason 等与正文无关的字段。
 	template map[string]any
-	// closer 是当前思考块的结束标签：<thinking> 与 <analysis> 各用各的，
-	// 不能混用一个常量，否则 <analysis> 块永远等不到闭合。
-	closer string
-	// tail 暂存上一分片末尾可能与结束标签重合的一小段，避免标签跨分片时丢失判定。
-	tail string
-	// held 暂存「已判定不是回答、但还没下发给客户端」的思考正文。
-	// 目的是保住重试窗口：一旦摘要信封在块收起后出现，客户端还没收到任何字节，
-	// 候选循环就能换渠道重试，而不是在流中间直接报 502。
-	held strings.Builder
-	// heldBody 是暂存思考时所在行的报文骨架，补发时用它保留 index/role/finish_reason。
-	heldBody map[string]any
 }
 
 type guardState int
 
 const (
-	// guardIdle 还没遇到正文；guardProbing 正在判断开头；
-	// guardThinkingInside 已确认是思考块；guardDone 本次响应不再处理。
+	// guardIdle 还没遇到正文；guardProbing 正在攒判定窗口；
+	// guardDone 本次响应不再处理。
 	guardIdle guardState = iota
 	guardProbing
-	guardThinkingInside
 	guardDone
 )
 
@@ -145,7 +135,7 @@ func newStreamContentGuard(endpoint string) *streamContentGuard {
 }
 
 // Observe 处理一行上游 SSE，返回应当转发的行（可能已改写）以及是否拒绝该响应。
-// 返回 nil 行表示该行已被吸收进探测缓冲，本次不向客户端写出。
+// 返回 nil 行表示该行已被吸收进判定缓冲，本次不向客户端写出。
 func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 	if g == nil || g.state == guardDone {
 		return line, false
@@ -163,142 +153,105 @@ func (g *streamContentGuard) Observe(line []byte) ([]byte, bool) {
 		return line, false
 	}
 	if hasGuardToolCalls(delta) {
-		return g.releaseToolCall(line, body, delta)
-	}
-	if hasReasoning(delta) {
-		// 上游已按标准字段分离思考，正文不需要再改写；但正文形态仍要判一次：
-		// 模型写歪时会把摘要信封、协议标记塞进 content，思考开关开着同样会污染。
-		if content, _ := delta["content"].(string); content != "" {
-			switch classifyGuardPrefix(content) {
-			case guardMarkup, guardThinking:
-				// 思考已单独交付，正文里这段仍然不能当回答留给客户端。
-				return g.reject()
-			case guardNone:
-				// 正文形态正常，后面分片不再判，避免把正常文本误判。
-				g.state = guardDone
-				if g.held.Len() > 0 {
-					return g.releaseHeld(body, content)
-				}
-			}
-		}
-		return line, false
+		// 工具调用到达即说明本轮正文已经结束，判定窗口里的字节要就地收尾。
+		return g.settleToolCall(line, body, delta)
 	}
 	content, _ := delta["content"].(string)
+	if content == "" {
+		// 首包常常只带 role、正文为空，空正文不算「已经判过」，继续等真正的正文。
+		return line, false
+	}
 	switch g.state {
 	case guardIdle:
-		// 首包常常只带 role、正文为空，空正文不算「已经判过」，
-		// 要继续等真正的第一段正文再决定。
-		if content == "" {
-			if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
-				return out, markup
-			}
-			return line, false
-		}
 		switch classifyGuardPrefix(content) {
+		case guardMarkup:
+			return g.reject()
 		case guardNone:
 			g.state = guardDone
 			return line, false
-		case guardMarkup:
-			return g.reject()
 		}
 		g.state = guardProbing
 		g.template = body
 		g.buffer.WriteString(content)
 		return g.probe()
 	case guardProbing:
-		if content == "" {
-			// 空正文（role 首包、finish_reason、结尾块）原样放行，继续等真正的正文。
-			if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
-				return out, markup
-			}
-			return line, false
-		}
 		g.buffer.WriteString(content)
-		out, markup := g.probe()
-		if out == nil && !markup && g.buffer.Len() > guardProbeLimit {
-			// 攒够探测窗口仍认不出形态（以 "<" 开头的普通文本），按普通正文放行。
-			g.state = guardDone
-			if g.held.Len() > 0 {
-				// 前面暂存的思考要跟着这段正文一起交给客户端，不能丢。
-				return g.releaseHeld(g.template, g.buffer.String())
-			}
-			return g.flushAsContent()
-		}
-		return out, markup
+		return g.probe()
 	}
-	// guardThinkingInside：正文都属于思考，直到出现结束标签为止。
-	closerTag := g.closer
-	if closerTag == "" {
-		closerTag = leakCloser
+	return line, false
+}
+
+// probe 在探测状态下判断缓冲区是否已能定论：认出协议标记就拒绝，确认是普通正文就把
+// 攒下的字节一次性补发，仍认不出且未超出窗口则继续等下一行。
+func (g *streamContentGuard) probe() ([]byte, bool) {
+	switch classifyGuardPrefix(g.buffer.String()) {
+	case guardMarkup:
+		return g.reject()
+	case guardNone:
+		return g.flushAsContent()
 	}
-	// 结束标签可能被上游拆在两个分片之间：把上一片留下的半截标签接回来再找，
-	// 否则永远等不到闭合，后面的回答会被整段当成思考吞掉（既不交付也不报错）。
-	text := g.tail + content
-	g.tail = ""
-	if text == "" {
-		if out, markup := g.rejectHeldAtEnd(body); out != nil || markup {
-			return out, markup
-		}
+	if g.buffer.Len() > guardProbeLimit {
+		// 攒够窗口仍认不出形态（以 "<" 开头的普通文本），按普通正文放行。
+		return g.flushAsContent()
+	}
+	return nil, false
+}
+
+// settleToolCall 结束正文判定：探测窗口里的字节并到工具调用这一行一起交付；
+// 若这段字节其实是协议标记，整条响应仍然不可交付。
+func (g *streamContentGuard) settleToolCall(line []byte, body, delta map[string]any) ([]byte, bool) {
+	if g.state != guardProbing {
+		g.state = guardDone
 		return line, false
 	}
-	if at := strings.Index(text, closerTag); at >= 0 {
-		thinking := text[:at]
-		rest := strings.TrimLeft(text[at+len(closerTag):], " \t\r\n")
-		// 思考块收起后紧跟的正文要重新判形态：是客户端协议标记（典型是
-		// <summary> 摘要信封）则整条响应不可交付，是普通回答就照常交付。
-		switch classifyGuardPrefix(rest) {
-		case guardMarkup:
-			return g.reject()
-		case guardNone:
-			g.state = guardDone
-			// 本片收尾的这段思考并入暂存，和正文同行交付。
-			g.heldBody = body
-			g.held.WriteString(thinking)
-			return g.releaseHeld(body, rest)
-		}
-		// 正文开头还是标签或标签的前半截：这段思考先暂存，正文等后续分片到齐。
-		delete(delta, "content")
-		g.buffer.Reset()
-		g.buffer.WriteString(rest)
-		g.state = guardProbing
-		return g.holdThinking(body, thinking)
+	buffered := g.buffer.String()
+	g.buffer.Reset()
+	if classifyGuardPrefix(buffered) == guardMarkup {
+		return g.reject()
 	}
-	// 没有结束标签：末尾可能是半个标签，先留下来等下一片，其余暂存为思考。
-	keep := closerTagSuffixLen(text, closerTag)
-	thinking := text[:len(text)-keep]
-	g.tail = text[len(text)-keep:]
-	delete(delta, "content")
-	return g.holdThinking(body, thinking)
+	g.state = guardDone
+	if buffered == "" {
+		return line, false
+	}
+	content, _ := delta["content"].(string)
+	delta["content"] = buffered + content
+	return encodeGuardLine(body), false
 }
 
-// closerTagSuffixLen 返回文本尾部与结束标签开头重合的最大字节数。
-// 结束标签是纯 ASCII，按字节截断不会切断多字节字符。
-func closerTagSuffixLen(text, closer string) int {
-	limit := len(closer) - 1
-	if limit > len(text) {
-		limit = len(text)
-	}
-	for size := limit; size > 0; size-- {
-		if strings.HasSuffix(text, closer[:size]) {
-			return size
-		}
-	}
-	return 0
-}
-
+// flushAsContent 把判定窗口里攒下的字节当成普通正文补发一行，本次响应不再处理。
 func (g *streamContentGuard) flushAsContent() ([]byte, bool) {
 	g.state = guardDone
-	if g.held.Len() > 0 {
-		// 前面暂存的思考要跟这段正文一起交给客户端，不能丢。
-		return g.releaseHeld(g.template, g.buffer.String())
-	}
 	delta, ok := chatDelta(g.template)
 	if !ok {
 		return nil, false
 	}
 	delta["content"] = g.buffer.String()
-	delete(delta, reasoningFieldStandard)
 	return encodeGuardLine(g.template), false
+}
+
+// hasGuardToolCalls 只接受非空对象数组；不要求首片的 id/name，后续参数分片也合法。
+// 空数组、null 或标量不能把只有草稿的一轮伪装成工具回合。
+func hasGuardToolCalls(delta map[string]any) bool {
+	calls, ok := delta["tool_calls"].([]any)
+	if !ok || len(calls) == 0 {
+		return false
+	}
+	for _, item := range calls {
+		call, ok := item.(map[string]any)
+		if !ok || len(call) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// reject 上报「这条响应不可交付」。关键点：判定阶段一个字节都没写给客户端，
+// 候选循环才有机会换渠道重试。
+func (g *streamContentGuard) reject() ([]byte, bool) {
+	g.state = guardDone
+	g.buffer.Reset()
+	g.template = nil
+	return nil, true
 }
 
 // chatDelta 取出 chat.completion(.chunk) 里第一个 choice 的 delta。
@@ -313,29 +266,6 @@ func chatDelta(body map[string]any) (map[string]any, bool) {
 	}
 	delta, ok := choice["delta"].(map[string]any)
 	return delta, ok
-}
-
-// mergeGuardReasoning 把先前暂存的思考放在当前 delta 的标准思考之前，
-// 按到达顺序拼接而不是覆盖，避免丢失上游标准 reasoning_content。
-func mergeGuardReasoning(delta map[string]any, thinking string) {
-	if thinking == "" {
-		return
-	}
-	if prev, ok := delta[reasoningFieldStandard].(string); ok && prev != "" {
-		delta[reasoningFieldStandard] = thinking + prev
-		return
-	}
-	delta[reasoningFieldStandard] = thinking
-}
-
-// hasReasoning 判断 message/delta 里是否已经有非空思考内容。
-func hasReasoning(container map[string]any) bool {
-	for _, field := range []string{reasoningFieldStandard, reasoningFieldCompact, "thinking"} {
-		if text, ok := container[field].(string); ok && text != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // encodeGuardLine 把改写后的报文重新拼成一行 SSE。
