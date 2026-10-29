@@ -1,20 +1,57 @@
+# AiFerry 生产编排。
+#
+# 所有可变配置一律通过 ${VAR} 从环境变量注入：本文件不含密码、密钥、主机地址，
+# 因此可以安全地提交到仓库。取值来源：
+#   - 线上：Portainer 栈环境变量（栈的 Env 列表会被写成 .env 参与替换）
+#   - 本地：工程根目录的 .env（docker compose 会自动加载）
+# 必填项见 .env.example。缺项时容器启动即报错退出，不会静默降级到默认凭据。
 services:
   aiferry:
-    image: ghcr.io/ayflying/aiferry
-    env_file:
-      - .env
+    # 固定版本标签：latest 在节点侧有缓存延迟，曾导致部署后仍跑上一版本。
+    # 发布脚本会按 VERSION 改写这一行，因此这里必须保持字面版本号。
+    image: ghcr.io/ayflying/aiferry:0.6.63
     environment:
-      TZ: Asia/Shanghai
+      TZ: ${TZ:-Asia/Shanghai}
+      # 容器内路径，不是外部配置，保持字面值。
       WEB_ROOT: /app/web
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_ADDR: ${REDIS_ADDR}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      AIFERRY_MASTER_KEY: ${AIFERRY_MASTER_KEY}
+      AIFERRY_ADMIN_ROLES: ${AIFERRY_ADMIN_ROLES:-admin}
+      CASDOOR_ENDPOINT: ${CASDOOR_ENDPOINT}
+      CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID}
+      CASDOOR_CLIENT_SECRET: ${CASDOOR_CLIENT_SECRET}
+      CHANNEL_COOLDOWN_SECONDS: ${CHANNEL_COOLDOWN_SECONDS:-60}
+      USAGE_RETENTION_DAYS: ${USAGE_RETENTION_DAYS:-0}
+      # 报文落盘：目录在 data 卷内，靠文件数与总体积两条限额收敛。只限文件数
+      # 兜不住体积（单条最大 1.2MB），2026-10-29 曾涨到 3.4GB 撑满宿主机磁盘。
+      PAYLOAD_LOG_ENABLED: ${PAYLOAD_LOG_ENABLED:-true}
+      PAYLOAD_LOG_DIR: ${PAYLOAD_LOG_DIR:-/app/data/relay-payloads}
+      PAYLOAD_LOG_MAX_FILES: ${PAYLOAD_LOG_MAX_FILES:-500}
+      PAYLOAD_LOG_MAX_BYTES: ${PAYLOAD_LOG_MAX_BYTES:-536870912}
+    ports:
+      - "${AIFERRY_PORT:-38517}:8080"
     volumes:
       - data:/app/data
-    ports:
-      - "38517:8080"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
       retries: 12
+    networks:
+      - default
 
 volumes:
   data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16

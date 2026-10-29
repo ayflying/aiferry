@@ -1,19 +1,31 @@
+# AiFerry 本地开发编排。
+#
+# 与生产 docker-compose.yml 保持一致：所有可变配置都通过 ${VAR} 注入，
+# 取值来自工程根目录的 .env（docker compose 自动加载），本文件不存任何凭据。
 services:
   toolbox:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    env_file:
-      - .env
     environment:
+      TZ: ${TZ:-Asia/Shanghai}
       MYSQL_HOST: ${MYSQL_HOST}
       MYSQL_PORT: ${MYSQL_PORT:-3306}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       REDIS_ADDR: ${REDIS_ADDR}
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
       AIFERRY_MASTER_KEY: ${AIFERRY_MASTER_KEY}
+      CASDOOR_ENDPOINT: ${CASDOOR_ENDPOINT}
+      CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID}
+      CASDOOR_CLIENT_SECRET: ${CASDOOR_CLIENT_SECRET}
+      PAYLOAD_LOG_ENABLED: ${PAYLOAD_LOG_ENABLED:-false}
+      PAYLOAD_LOG_DIR: ${PAYLOAD_LOG_DIR:-/workspace/temp/relay-payloads}
+      PAYLOAD_LOG_MAX_FILES: ${PAYLOAD_LOG_MAX_FILES:-500}
+      PAYLOAD_LOG_MAX_BYTES: ${PAYLOAD_LOG_MAX_BYTES:-536870912}
+      # 开发环境直接读前端构建产物，不是外部配置。
       WEB_ROOT: /workspace/frontend/dist
     volumes:
       - .:/workspace
