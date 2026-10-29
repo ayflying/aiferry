@@ -43,20 +43,30 @@ var payloadLogState = struct {
 	enabled  bool
 	dir      string
 	maxFiles int
+	maxBytes int64
 }{
 	enabled:  false,
 	dir:      "/app/data/relay-payloads",
 	maxFiles: 9999,
+	maxBytes: defaultPayloadMaxBytes,
 }
 
+// defaultPayloadMaxBytes 是报文目录的默认总容量上限（512MB）。文件数限额单独不够：
+// 单条报文实测最大 1.2MB，9999 个能涨到 10GB 级，撑满磁盘会让整台宿主机上的服务
+// 一起失败（2026-10-29 事故）。
+const defaultPayloadMaxBytes = 512 << 20
+
 // InitPayloadLog 注入收发报文落盘配置，必须在任何请求处理之前调用。
-func InitPayloadLog(enabled bool, dir string, maxFiles int) {
+func InitPayloadLog(enabled bool, dir string, maxFiles int, maxBytes int64) {
 	payloadLogState.enabled = enabled
 	if d := strings.TrimSpace(dir); d != "" {
 		payloadLogState.dir = d
 	}
 	if maxFiles > 0 {
 		payloadLogState.maxFiles = maxFiles
+	}
+	if maxBytes > 0 {
+		payloadLogState.maxBytes = maxBytes
 	}
 }
 
@@ -134,7 +144,7 @@ func StartPayloadCleanup(ctx context.Context) {
 	spec := schedule.Spec{
 		Key:         payloadCleanupTaskKey,
 		Name:        "请求报文文件清理",
-		Description: "每小时清理一次请求报文目录，按修改时间从旧到新删除，保证文件数不超过上限。用于保留失败请求原文供排障，默认关闭。",
+		Description: "每小时清理一次请求报文目录，按修改时间从旧到新删除，保证文件数与总体积都不超上限。用于保留失败请求原文供排障，默认关闭。",
 		Kind:        schedule.KindInterval,
 		Interval:    payloadCleanupInterval,
 		Enabled:     payloadLogState.enabled,
@@ -163,11 +173,15 @@ func StartPayloadCleanup(ctx context.Context) {
 	}()
 }
 
-// cleanupPayloads 执行一轮目录收敛：按 .json 后缀过滤、按修改时间升序删除超出配额的最旧文件。
+// cleanupPayloads 执行一轮目录收敛：按 .json 后缀过滤、按修改时间升序删除，
+// 直到同时满足「文件数」与「总体积」两条限额。两条都要满足：只有文件数限额时，
+// 大报文会把磁盘写满；只有体积限额时，小文件会堆积到 inode/目录项开销失控。
+// 无论超限多少，至少保留最新一个文件，保证刚出问题的请求原文还在。
 func cleanupPayloads(ctx context.Context) {
 	dir := payloadLogState.dir
 	maxFiles := payloadLogState.maxFiles
-	if maxFiles <= 0 {
+	maxBytes := payloadLogState.maxBytes
+	if maxFiles <= 0 && maxBytes <= 0 {
 		return
 	}
 	entries, err := os.ReadDir(dir)
@@ -180,8 +194,10 @@ func cleanupPayloads(ctx context.Context) {
 	type fileWithMod struct {
 		name string
 		mod  time.Time
+		size int64
 	}
 	files := make([]fileWithMod, 0, len(entries))
+	var totalBytes int64
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -190,20 +206,33 @@ func cleanupPayloads(ctx context.Context) {
 		if infoErr != nil {
 			continue
 		}
-		files = append(files, fileWithMod{name: entry.Name(), mod: info.ModTime()})
+		files = append(files, fileWithMod{name: entry.Name(), mod: info.ModTime(), size: info.Size()})
+		totalBytes += info.Size()
 	}
-	if len(files) <= maxFiles {
+	countOver := maxFiles > 0 && len(files) > maxFiles
+	bytesOver := maxBytes > 0 && totalBytes > maxBytes
+	if !countOver && !bytesOver {
 		return
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
-	excess := len(files) - maxFiles
-	removed := 0
-	for i := 0; i < excess; i++ {
+	removed, kept, remainingBytes := 0, len(files), totalBytes
+	for i := 0; i < len(files); i++ {
+		countOK := maxFiles <= 0 || kept <= maxFiles
+		bytesOK := maxBytes <= 0 || remainingBytes <= maxBytes
+		if countOK && bytesOK {
+			break
+		}
+		if kept <= 1 {
+			break
+		}
 		if err = os.Remove(filepath.Join(dir, files[i].name)); err == nil {
 			removed++
+			kept--
+			remainingBytes -= files[i].size
 		}
 	}
-	g.Log().Infof(ctx, "payload log cleanup removed %d files, kept %d (max %d)", removed, len(files)-removed, maxFiles)
+	g.Log().Infof(ctx, "payload log cleanup removed %d files, kept %d files / %d bytes (limits: %d files, %d bytes)",
+		removed, kept, remainingBytes, maxFiles, maxBytes)
 }
 
 // ReadPayload 按请求 ID 读取落盘报文。requestID 做严格白名单校验，杜绝路径穿越。

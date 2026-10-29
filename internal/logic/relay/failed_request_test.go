@@ -27,7 +27,7 @@ func TestFinishFailedRequestPreserves4xxAndPayloadPolicy(t *testing.T) {
 						candidate = Candidate{ChannelID: 7, ChannelName: "fixture", UpstreamName: "upstream"}
 						result    = attemptResult{status: status, body: response, headers: http.Header{"Content-Type": {"application/json"}, "X-Request-Id": {"fixture-id"}}, upstreamEndpoint: "/chat/completions"}
 					)
-					InitPayloadLog(enabled, dir, 3)
+					InitPayloadLog(enabled, dir, 3, defaultPayloadMaxBytes)
 					(&sRelay{}).finishFailedRequest(writer, "afreq_failure", candidate, "public", "/chat/completions", stream, 2, request, result, nil)
 					if writer.Code != status || !bytes.Equal(writer.Body.Bytes(), response) {
 						t.Fatalf("response changed: status=%d body=%q", writer.Code, writer.Body.Bytes())
@@ -73,7 +73,7 @@ func TestFinishFailedRequestKeepsRedactedLogAndRestoredClientResponse(t *testing
 		body        = []byte(`{"model":"public","input":"` + placeholder + `"}`)
 		response    = []byte(`{"error":{"message":"invalid ` + placeholder + `"}}`)
 	)
-	InitPayloadLog(true, dir, 3)
+	InitPayloadLog(true, dir, 3, defaultPayloadMaxBytes)
 	(&sRelay{}).finishFailedRequest(writer, "afreq_redacted", Candidate{}, "public", "/responses", false, 1, body, attemptResult{status: 400, body: response}, restorer)
 	if writer.Code != 400 || writer.Body.String() != `{"error":{"message":"invalid private@example.invalid"}}` {
 		t.Fatalf("client restoration changed: status=%d body=%s", writer.Code, writer.Body.String())
@@ -91,7 +91,7 @@ func TestFinishFailedRequestSkipsWrittenResults(t *testing.T) {
 	previous := payloadLogState
 	defer func() { payloadLogState = previous }()
 	dir := t.TempDir()
-	InitPayloadLog(true, dir, 3)
+	InitPayloadLog(true, dir, 3, defaultPayloadMaxBytes)
 	writer := httptest.NewRecorder()
 	writer.WriteHeader(202)
 	_, _ = writer.Write([]byte("existing response"))
@@ -112,7 +112,7 @@ func TestFinishFailedRequestPassesThrough5xxBody(t *testing.T) {
 	previous := payloadLogState
 	defer func() { payloadLogState = previous }()
 	dir := t.TempDir()
-	InitPayloadLog(true, dir, 3)
+	InitPayloadLog(true, dir, 3, defaultPayloadMaxBytes)
 	writer := httptest.NewRecorder()
 	response := []byte(`{"error":"gateway failure"}`)
 	(&sRelay{}).finishFailedRequest(writer, "afreq_5xx", Candidate{}, "public", "/responses", true, 1, nil, attemptResult{status: 502, body: response}, nil)

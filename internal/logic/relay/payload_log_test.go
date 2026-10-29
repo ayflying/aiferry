@@ -108,6 +108,73 @@ func TestCleanupPayloadsKeepsNewestFiles(t *testing.T) {
 	}
 }
 
+// 体积限额：文件数没超，但总体积超了也必须从最旧的开始删。
+// 这是 2026-10-29 磁盘写满事故的回归用例——当时只有文件数限额（9999），
+// 单条报文最大 1.2MB，目录涨到 3.4GB 撑爆宿主机。
+func TestCleanupPayloadsEnforcesByteBudget(t *testing.T) {
+	previous := payloadLogState
+	defer func() { payloadLogState = previous }()
+	dir := t.TempDir()
+	payloadLogState.dir = dir
+	payloadLogState.maxFiles = 100
+	payloadLogState.maxBytes = 30
+	base := time.Now().Add(-time.Hour)
+	// 5 个文件 × 10 字节 = 50 字节，超出 30 字节上限；文件数远未到 100。
+	for i := 0; i < 5; i++ {
+		name := filepath.Join(dir, "afreq_"+string(rune('a'+i))+".json")
+		if err := os.WriteFile(name, []byte("0123456789"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stamp := base.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(name, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cleanupPayloads(context.Background())
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := map[string]bool{}
+	var total int64
+	for _, e := range entries {
+		remaining[e.Name()] = true
+		if info, infoErr := e.Info(); infoErr == nil {
+			total += info.Size()
+		}
+	}
+	if total > payloadLogState.maxBytes {
+		t.Fatalf("total bytes %d still over budget %d, kept %v", total, payloadLogState.maxBytes, remaining)
+	}
+	if len(remaining) != 3 {
+		t.Fatalf("expected newest 3 files to survive, got %v", remaining)
+	}
+	for _, keep := range []string{"afreq_c.json", "afreq_d.json", "afreq_e.json"} {
+		if !remaining[keep] {
+			t.Fatalf("expected %s to survive, got %v", keep, remaining)
+		}
+	}
+}
+
+// 单个报文就超过体积预算时，仍然保留最新这一条：排障最需要的是刚出问题的原文，
+// 全删光等于把刚发生的故障现场一起丢掉。
+func TestCleanupPayloadsKeepsNewestEvenWhenSingleFileOverBudget(t *testing.T) {
+	previous := payloadLogState
+	defer func() { payloadLogState = previous }()
+	dir := t.TempDir()
+	payloadLogState.dir = dir
+	payloadLogState.maxFiles = 100
+	payloadLogState.maxBytes = 5
+	name := filepath.Join(dir, "afreq_only.json")
+	if err := os.WriteFile(name, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cleanupPayloads(context.Background())
+	if _, err := os.Stat(name); err != nil {
+		t.Fatalf("newest payload must survive, stat err=%v", err)
+	}
+}
+
 func TestReadPayloadRejectsUnsafeRequestID(t *testing.T) {
 	for _, bad := range []string{"", "../secret", "a/b", "..", "afreq_..\\x", strings.Repeat("x", 200)} {
 		if _, err := ReadPayload(bad); err == nil {

@@ -48,6 +48,11 @@ type App struct {
 	// PayloadLogMaxFiles 是目录内最多保留的报文文件数。清理任务每小时按文件修改时间
 	// 从旧到新删除超出部分（默认 9999）。
 	PayloadLogMaxFiles int
+	// PayloadLogMaxBytes 是报文目录的总容量上限（字节，默认 512MB）。只按文件数限流
+	// 不够用：单条报文含完整请求与响应，实测最大 1.2MB，9999 个文件能涨到 10GB 以上，
+	// 2026-10-29 就因为该目录涨到 3.4GB 撑满宿主机磁盘导致生产中断。清理任务同时
+	// 执行「文件数」与「总体积」两条限额，从最旧的文件开始删。
+	PayloadLogMaxBytes int64
 }
 
 func Load() (App, error) {
@@ -86,6 +91,7 @@ func Load() (App, error) {
 		PayloadLogEnabled:      envBool("PAYLOAD_LOG_ENABLED", true),
 		PayloadLogDir:          env("PAYLOAD_LOG_DIR", "/app/data/relay-payloads"),
 		PayloadLogMaxFiles:     envInt("PAYLOAD_LOG_MAX_FILES", 9999),
+		PayloadLogMaxBytes:     envInt64("PAYLOAD_LOG_MAX_BYTES", 512<<20),
 	}
 	if strings.TrimSpace(app.MySQLPassword) == "" {
 		return App{}, gerror.New("MYSQL_PASSWORD is required")
@@ -133,6 +139,14 @@ func env(key, fallback string) string {
 
 func envInt(key string, fallback int) int {
 	value, err := strconv.Atoi(env(key, strconv.Itoa(fallback)))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func envInt64(key string, fallback int64) int64 {
+	value, err := strconv.ParseInt(env(key, strconv.FormatInt(fallback, 10)), 10, 64)
 	if err != nil || value <= 0 {
 		return fallback
 	}
