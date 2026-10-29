@@ -47,7 +47,8 @@ describe('上游密钥页头汇总', () => {
   }
 
   beforeEach(() => {
-    setDisplayCurrency('USD')
+    // 展示货币保持美元：这条用例要证明计数口径不会被折算成美元、也不会带 USD 标记。
+    setDisplayCurrency({ display: 'USD', base: 'USD', rates: { USD: 1, CNY: 7.2 } })
     api.get.mockResolvedValue([])
     api.post.mockResolvedValue({ summaries: channel.costSummaries, credentials: [] })
   })
