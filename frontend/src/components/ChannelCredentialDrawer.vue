@@ -8,7 +8,7 @@ import { mergeCostSummaries } from '../lib/cost'
 import { showError, showSuccess, showWarning } from '../lib/error'
 import { copyText } from '../lib/clipboard'
 import { formatBalance, formatCost, formatTime, formatNumber, formatUsageValue, usageCurrency } from '../lib/format'
-import { channelQueryValueLabel, isCreditsQueryType, isUsageMode } from '../lib/channelTypeDisplay'
+import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
 
 const props = defineProps<{ modelValue: boolean; channel?: Channel; quotaSupported?: boolean; managementKeySupported?: boolean; managementKeyPair?: boolean; loginSupported?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; changed: []; 'query-quota': [credential: ChannelCredential] }>()
@@ -71,9 +71,13 @@ const querySupported = computed(() => {
 })
 // 各上游密钥可能挂在不同币种账户上，汇总卡片只展示折算合并后的一条，
 // 折算到同一货币再求和才是可比口径；每把密钥的原始币种仍保留在下方明细里。
-// 纯积分渠道（workbuddy_credits）另外排除金额行：它的密钥常同时带网关累计的
-// 美元费用与积分余额，混在一起会显示成「USD 积分余额 剩余 0.04 积分」。
-const mergedSummary = computed(() => mergeCostSummaries(summaries.value, { countersOnly: isCreditsQueryType(props.channel?.costQueryType) }))
+// 计数口径渠道（积分 / Token 用量）另外排除金额行：这类渠道的密钥常同时带网关
+// 累计的美元费用与计数值，两者不是同一把尺子，混在一起会出现「USD 积分余额
+// 剩余 0.04 积分」这种自相矛盾的汇总。判定用 isUsageMode 而不是
+// isCreditsQueryType：后端的 costQueryType 是渠道类型的 valueType（usage/cost），
+// 拿它比对适配器名 workbuddy_credits 永远不成立，之前因此漏掉了排除（2026-10-29
+// 生产截图里页头多出美元币种标记）。
+const mergedSummary = computed(() => mergeCostSummaries(summaries.value, { countersOnly: isUsageMode(props.channel?.costQueryType, props.channel?.costQueryMode) }))
 // 计数口径没有货币单位，汇总卡片上不能显示币种标记（XXX），只显示数值。
 const summaryCurrencyLabel = computed(() => (mergedSummary.value?.currency || '').toUpperCase() === usageCurrency ? '' : mergedSummary.value?.currency || '')
 const queryLabel = computed(() => {
@@ -537,7 +541,13 @@ function stopCodeCountdown() {
           <span v-if="mergedSummary.remainingAmount !== undefined">余额 {{ formatBalance(mergedSummary.remainingAmount, mergedSummary.currency) }}</span>
         </template>
         <template v-else>
-          <span>{{ mergedSummary.usageType || '用量' }} 剩余 {{ creditBalanceText(mergedSummary.usage ?? mergedSummary.remainingAmount ?? mergedSummary.usedAmount) }} {{ mergedSummary.usageUnit || 'kToken' }}<small v-if="mergedSummary.usageDimension"> · {{ mergedSummary.usageDimension }}</small></span>
+        <!-- 计数口径：说「剩余」就必须取余额（remainingAmount）。早期这里优先取
+             usage，而 usage 曾被后端镜像成「已用」，于是把三把密钥的已用合计
+             542.48 当成余额显示（2026-10-29 生产截图）。用量（usage）只在没有
+             余额字段时才作为兜底。 -->
+        <template v-if="mergedSummary.usage !== undefined || mergedSummary.remainingAmount !== undefined || mergedSummary.usedAmount !== undefined">
+          <span>{{ mergedSummary.usageType || '用量' }} 剩余 {{ creditBalanceText(mergedSummary.remainingAmount ?? mergedSummary.usage ?? mergedSummary.usedAmount) }} {{ mergedSummary.usageUnit || 'kToken' }}<small v-if="mergedSummary.usageDimension"> · {{ mergedSummary.usageDimension }}</small></span>
+        </template>
         </template>
       </div>
     </div>

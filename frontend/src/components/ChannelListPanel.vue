@@ -5,7 +5,7 @@ import type { Channel, CostSummary } from '../api/types'
 import { channelStatusLabel, isChannelEnabled } from '../lib/channelDisplay'
 import { mergeCostSummaries } from '../lib/cost'
 import { formatBalance, formatCost, formatLatency, formatNumber, formatTime, formatUsageValue, usageCurrency } from '../lib/format'
-import { channelQueryValueLabel, isCreditsQueryType, isUsageMode } from '../lib/channelTypeDisplay'
+import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
 import MobileRecordList from './MobileRecordList.vue'
 import ResponsiveList from './ResponsiveList.vue'
 
@@ -19,10 +19,12 @@ const props = defineProps<{
 
 // costSummary 把渠道的多币种费用汇总折算合并成一条：
 // 列表只展示一行，避免同一渠道并列出现人民币与美元两种货币。
-// 纯积分渠道（workbuddy_credits）只合并计数行：它的上游密钥常同时带着网关累计
-// 的美元费用和积分余额，两者单位不同，合并后会出现「USD … 积分」的错乱展示。
+// 计数口径渠道（积分 / Token 用量）只合并计数行：它们的上游密钥常同时带着网关
+// 累计的美元费用和计数值，两者单位不同，合并后会出现「USD … 积分」的错乱展示。
+// 判定用 isUsageMode 而不是 isCreditsQueryType：后端的 costQueryType 是渠道类型的
+// valueType（usage/cost），拿它比对适配器名 workbuddy_credits 永远不成立。
 function costSummary(row: Channel): CostSummary | undefined {
-  return mergeCostSummaries(row.costSummaries, { countersOnly: isCreditsQueryType(row.costQueryType) })
+  return mergeCostSummaries(row.costSummaries, { countersOnly: isUsageMode(row.costQueryType, row.costQueryMode) })
 }
 
 // isCounterSummary 判断这条汇总是计数口径（积分/Token 额度）而不是金额。

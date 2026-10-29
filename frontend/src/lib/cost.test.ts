@@ -113,4 +113,23 @@ describe('mergeCostSummaries', () => {
     expect(merged?.usedAmount).toBeUndefined()
     expect(merged?.remainingAmount).toBeUndefined()
   })
+
+  it('keeps credit totals when the counter rows also carry usage metadata', () => {
+    setDisplayCurrency(rate)
+    // 后端曾把「已用积分」镜像成 usage（并把 usageType/UsageUnit 补成积分），
+    // 前端「剩余」又优先取 usage，于是页头把已用合计当余额显示
+    // （2026-10-29 生产截图：337.93+152.21+52.34=542.48）。
+    // 修好后 summarizes 只有已用/余额，计数口径仍必须落在 XXX 上而不是被
+    // 金额行的 USD 带偏。
+    const summaries = [
+      { currency: 'XXX', usedAmount: 542.48, remainingAmount: 7297.52, usageType: '积分余额', usageUnit: '积分' },
+      { currency: 'USD', usedAmount: 0.038418 },
+    ]
+    const merged = mergeCostSummaries(summaries, { countersOnly: true })
+    expect(merged?.currency).toBe('XXX')
+    expect(merged?.usedAmount).toBe(542.48)
+    expect(merged?.remainingAmount).toBe(7297.52)
+    // 没有 usage 时不能凭空造一个，否则「剩余」又会拿到已用。
+    expect(merged?.usage).toBeUndefined()
+  })
 })

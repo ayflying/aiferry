@@ -154,7 +154,11 @@ func (s *sChannel) notifyChannelLowBalance(ctx context.Context, channelID uint64
 	return nil
 }
 
-func (s *sChannel) channelCostSummaries(ctx context.Context, channelID uint64, usage ...bool) ([]CostSummary, error) {
+// channelCostSummaries 按币种汇总各上游密钥的「已用 / 余额」。
+//
+// 变参沿用旧调用形状，但已不再使用：早期它会把 UsedAmount 镜像成 Usage，
+// 见下方循环里的说明。保留签名是为了避免所有调用方跟着改。
+func (s *sChannel) channelCostSummaries(ctx context.Context, channelID uint64, _ ...bool) ([]CostSummary, error) {
 	states := make([]credentialCostState, 0)
 	columns := dao.ChannelCredentials.Columns()
 	if err := dao.ChannelCredentials.Ctx(ctx).
@@ -189,11 +193,12 @@ func (s *sChannel) channelCostSummaries(ctx context.Context, channelID uint64, u
 	}
 	result := make([]CostSummary, 0, len(totals))
 	for _, summary := range totals {
-		if len(usage) > 0 && usage[0] {
-			summary.Usage = summary.UsedAmount
-			summary.UsageUnit = "kToken"
-			summary.UsageType = "用量"
-		}
+		// 计数口径渠道（积分 / Token 用量）不能把 UsedAmount 镜像成 Usage：
+		// 「已用」与「用量」是同一份数据的两种问法，镜像后前端「剩余」取
+		// usage 优先，就会把已用合计当成剩余显示（2026-10-29 生产截图：
+		// 三把密钥已用 337.93+152.21+52.34=542.48，页头写成「积分余额
+		// 剩余 542.48 积分」）。这里只保留 UsedAmount / RemainingAmount，
+		// 单位与文案由 applyUsageSummaryMetadata 按渠道类型补齐。
 		result = append(result, summary)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Currency < result[j].Currency })

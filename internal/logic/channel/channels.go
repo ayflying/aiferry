@@ -88,10 +88,11 @@ func (s *sChannel) listFromDatabase(ctx context.Context, userID uint64) ([]View,
 		view.LastCostCurrency = currentCost.Currency
 		view.LastCostAt = currentCost.At
 		if len(view.CostSummaries) == 0 && currentCost.Currency != "" {
+			// 不再把 UsedAmount 镜像成 Usage：计数口径渠道里「已用积分」与
+			// 「用量」是同一份数据，镜像后前端会把已用当成剩余展示
+			// （2026-10-29 生产截图）。渠道级的单位与文案由
+			// applyUsageSummaryMetadata 按渠道类型补齐。
 			summary := CostSummary{Currency: currentCost.Currency, UsedAmount: currentCost.Used, RemainingAmount: currentCost.Remaining}
-			if usageQuery {
-				summary.Usage = currentCost.Used
-			}
 			view.CostSummaries = []CostSummary{summary}
 			applyUsageSummaryMetadata(view.CostSummaries, costConfig)
 		}
