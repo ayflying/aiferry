@@ -19,12 +19,22 @@ import (
 // 命中逐字节原样返回。整表跑完而不是命中一条就停，因为组合命中要求所有
 // 已登记指纹同时消失。改写句与原句同义，模型读到的规则不变。
 //
-// 边界。只改 system 与 assistant 的文本（string content，以及 array content
-// 里的每个 text part）：参考实现实测上游不扫 user / tool，改用户原话会凭空
-// 改变对话，工具定义与图片 part 一律不动。改词表大小写精确匹配——宿主
-// system 是固定大小写；上游本身不区分大小写，若出现新的大小写形态需要新的
-// 实测证据再补。表是易增补的：新增指纹只需加一行，并在
-// workbuddy_fingerprint_test.go 里补一条断言。
+// 边界。只改 system、developer 与 assistant 的文本（string content，以及 array
+// content 里的每个 text part）：参考实现实测上游不扫 user / tool，改用户原话
+// 会凭空改变对话，工具定义与图片 part 一律不动。
+//
+// developer 必须一起改（2026-10-29 14:07 生产实证 afreq_ea1065d7…，
+// deepseek-flash-1017 五次上游 400）：那条请求**没有 system 消息**，身份提示写
+// 在 developer 里（58 assistant / 1 developer / 52 tool / 18 user），本层先跑、
+// 当时只看 system/assistant 便跳过了它；紧接着 ApplyWorkBuddyBody 把 developer
+// 规范化成 system 再发出，指纹就原样落进上游的扫描面。所以「改词」与「角色
+// 归一化」必须按同一个角色集合取值——凡最终会被上游当成 system/assistant 的
+// 消息，都在这里改。这也解释了为什么同一渠道上「hy3 过、另一个模型被拦」：
+// 差异在请求形态（谁发 system、谁发 developer），不在模型本身。
+//
+// 改词表大小写精确匹配——宿主 system 是固定大小写；上游本身不区分大小写，若
+// 出现新的大小写形态需要新的实测证据再补。表是易增补的：新增指纹只需加一行，
+// 并在 workbuddy_fingerprint_test.go 里补一条断言。
 
 // workBuddyFingerprintRewrite 是一句「上游登记的固定指纹 → 同义写法」。
 type workBuddyFingerprintRewrite struct {
@@ -138,10 +148,16 @@ func RewriteWorkBuddyFingerprintPhrases(body []byte) ([]byte, bool) {
 	return result, true
 }
 
-// workBuddyIsScannedRole 判断上游渠道校验会扫描的消息角色。
+// workBuddyIsScannedRole 判断哪些消息角色需要参与改词。
+//
+// 上游只扫 system 与 assistant，但本渠道会把 developer 规范化成 system 再发出
+// （ApplyWorkBuddyBody），因此 developer 同样落在上游的扫描面里，必须一起改。
 func workBuddyIsScannedRole(role string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(role))
-	return normalized == "system" || normalized == "assistant"
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "system", "assistant", "developer":
+		return true
+	}
+	return false
 }
 
 // workBuddyRewriteFingerprintText 对一段文本整表改写；无命中时原样返回。

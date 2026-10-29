@@ -120,12 +120,56 @@ func TestRewriteWorkBuddyFingerprintPhrasesNoChange(t *testing.T) {
 	for _, body := range []string{
 		`{"messages":[{"role":"system","content":"You are a helpful assistant."}]}`,
 		`{"messages":[{"role":"system","content":""}]}`,
-		`{"messages":[{"role":"developer","content":"You are an AI agent powered by DeepSeek Harness"}]}`,
 		`not-json`,
 	} {
 		got, changed := RewriteWorkBuddyFingerprintPhrases([]byte(body))
 		if changed || !bytes.Equal(got, []byte(body)) {
 			t.Fatalf("不应改动: %s", body)
+		}
+	}
+}
+
+// TestRewriteWorkBuddyFingerprintPhrasesDeveloperOnly 复现 2026-10-29 14:07 生产
+// 失败形态 afreq_ea1065d7…：整条请求没有 system，身份提示写在 developer 里。
+// 此时本层若不改 developer，紧接着 ApplyWorkBuddyBody 会把它规范化成 system，
+// 指纹就原样进了上游扫描面。
+func TestRewriteWorkBuddyFingerprintPhrasesDeveloperOnly(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"messages": []map[string]any{
+			{"role": "developer", "content": realDSHSystemHead},
+			{"role": "user", "content": "You are an AI agent powered by DeepSeek Harness"},
+			{"role": "tool", "content": "You are an AI agent powered by DeepSeek Harness"},
+		},
+	})
+	rewritten, ok := RewriteWorkBuddyFingerprintPhrases(body)
+	if !ok {
+		t.Fatal("developer 里的指纹应被改写")
+	}
+	var payload map[string][]map[string]any
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatalf("改写后不是合法 JSON: %v", err)
+	}
+	messages := payload["messages"]
+	if len(messages) != 3 {
+		t.Fatalf("消息数不得变化，得到 %d", len(messages))
+	}
+	// 角色本身不动：developer 仍由 ApplyWorkBuddyBody 负责规范化。
+	if messages[0]["role"] != "developer" {
+		t.Fatalf("改词层不应改角色，得到 %v", messages[0]["role"])
+	}
+	head, _ := messages[0]["content"].(string)
+	for _, rule := range workBuddyFingerprintRewrites {
+		if strings.Contains(head, rule.from) {
+			t.Fatalf("developer 里仍有原指纹: %q", rule.from)
+		}
+	}
+	if !strings.Contains(head, "You are an AI agent running inside DeepSeek Harness") {
+		t.Fatal("developer 里缺少同义写法")
+	}
+	// user 与 tool 是用户原话与工具输出，一律不动。
+	for _, index := range []int{1, 2} {
+		if messages[index]["content"] != "You are an AI agent powered by DeepSeek Harness" {
+			t.Fatalf("第 %d 条消息不应被改动: %v", index, messages[index]["content"])
 		}
 	}
 }

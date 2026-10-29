@@ -79,6 +79,21 @@ Tokens prefixed with @ are paths the user explicitly referenced.
 
 回归期间创建的四个临时诊断密钥均已在页面内删除（HTTP 200），全程未把密钥值带出浏览器，也未写入磁盘或日志。
 
+## 第二个形态：developer 角色（0.6.54，2026-10-29 14:07 实证）
+
+0.6.53 上线后 hy3 恢复，但同一渠道的 `deepseek-flash-1017` 仍报 11128（`afreq_ea1065d7fde559a05c5b25a0`，14:07:42，上游 `deepseek-v4.1-flash`，5 次尝试全 400）。核对报文后确认差异不在模型，在**请求形态**：
+
+| 报文 | 角色分布 | 结果 |
+|---|---|---|
+| hy3（12:30 探测） | 有 `system` 首消息 | 200 |
+| deepseek-flash-1017（14:07） | 58 assistant / **1 developer** / 52 tool / 18 user，**无 system** | 400 / 11128 ×5 |
+
+原因链：身份提示写在那条 `developer` 消息里；改词层先跑，当时只认 `system`/`assistant`，便把 `developer` 跳过；紧接着 `ApplyWorkBuddyBody` 把 `developer` 规范化成 `system` 再发出，13 条指纹原样落进上游扫描面。改词层与角色归一化用了两套角色集合，中间漏了一层。
+
+修法：`workBuddyIsScannedRole` 纳入 `developer`，凡是最终会被上游当成 `system`/`assistant` 的消息都参与改词；角色本身仍由 `ApplyWorkBuddyBody` 规范化，改词层不动 role 字段。表未变——参考实现仍是 v5.13.1，13 条逐字一致，缺的不是指纹而是覆盖的角色。
+
+验证：用该条生产失败报文走「改词 → 中性头 → 零宽扰动」全链路，129 条消息最终为 `system:1 / assistant:58 / tool:52 / user:18`，system 文本中残留原指纹 **0 条**（修复前此处残留全部 13 条）。
+
 ## 边界
 
 - 改词表是**大小写精确**匹配：宿主 system 是固定大小写；上游本身不区分大小写，若
