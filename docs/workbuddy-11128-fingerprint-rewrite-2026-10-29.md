@@ -65,6 +65,20 @@ Tokens prefixed with @ are paths the user explicitly referenced.
   数量不变，system 开头变为
   `You are an AI agent running inside DeepSeek Harness… You are a coding agent running on the hy3 model…`。
 
+## 上线后生产回归（0.6.53，2026-10-29 12:21 发布）
+
+| 检查项 | 结果 |
+|---|---|
+| healthz（连续 5 次） | `version=0.6.53`，`revision=2bb58f3b017abe446a8a65b9463d5b3f4f22bb2f`，`status=ok` |
+| 运行容器 | 镜像 `ghcr.io/ayflying/aiferry:0.6.53`，running/healthy，启动 12:21:54；容器内 `/app/VERSION`=0.6.53 |
+| 发布后 12:2x—12:9x 全部请求 | 141 条，**响应含 `code=11128` 的 0 条** |
+| 携带全部 13 条指纹的系统提示 | HTTP 200，正文「通过」，耗时 2.27s |
+| 生产失败报文原样重放（163 条消息 / 84 个工具 / 图片） | 不再出现 11128；上游返回 `code=11134 the model provider is temporarily unavailable`（`retry_after=20`），或网关 `context canceled`（客户端主动中断） |
+
+关键判断依据：修复前同一份报文在 0.5—0.9 秒内即被 400/11128 拒绝；修复后同一份报文能进入上游模型处理阶段（响应头 52—57 秒才到，说明已过渠道校验并在处理 4 万级 prompt），失败原因变成模型侧可用性（11134），与渠道门无关。11134 属上游临时状态，与本次改动无关，重试即可。
+
+回归期间创建的四个临时诊断密钥均已在页面内删除（HTTP 200），全程未把密钥值带出浏览器，也未写入磁盘或日志。
+
 ## 边界
 
 - 改词表是**大小写精确**匹配：宿主 system 是固定大小写；上游本身不区分大小写，若
