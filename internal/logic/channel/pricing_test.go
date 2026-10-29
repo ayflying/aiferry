@@ -40,8 +40,12 @@ func TestMissingPublicPriceValuesKeepsOnlyUnfilledFields(t *testing.T) {
 	}
 
 	result := missingPublicPriceValues(synced, current)
-	if result.Input != nil || result.CachedInput != nil || result.Output != nil {
+	if result.Input != nil || result.Output != nil {
 		t.Fatalf("filled prices must not be overwritten: %#v", result)
+	}
+	// 已填 0 价按「未定价」处理：它通常来自旧版本把上游 p * 0 落库的错误。
+	if result.CachedInput == nil || *result.CachedInput != 0.15 {
+		t.Fatalf("zero price must be overwritten by a real price: %#v", result)
 	}
 	if result.CacheWrite == nil || *result.CacheWrite != 3 || result.Request == nil || *result.Request != 0.01 {
 		t.Fatalf("unfilled prices must remain syncable: %#v", result)
@@ -73,7 +77,7 @@ func TestMissingPublicPriceValuesSkipsAlreadyFilledPrice(t *testing.T) {
 		},
 		PublicModelView{
 			InputPrice:       pricePointer(5),
-			CachedInputPrice: pricePointer(0),
+			CachedInputPrice: pricePointer(0.2),
 			CacheWritePrice:  pricePointer(8),
 			OutputPrice:      pricePointer(30),
 			ImageInputPrice:  pricePointer(4),
@@ -106,7 +110,7 @@ func TestModelPriceValuesFromRuleSkipsConditionalRates(t *testing.T) {
 }
 
 func TestSyncedRulesFromNewAPIRatioConvertsToUSDPerMillion(t *testing.T) {
-	rules, err := syncedRulesFromNewAPIRatio([]byte(`{
+	rules, skips, err := syncedRulesFromNewAPIRatio([]byte(`{
   "data": {
     "model_ratio": {"gpt-5": 0.625, "free-model": 0, "image-model": 1},
     "model_price": {"image-model": 0.08},
@@ -117,11 +121,14 @@ func TestSyncedRulesFromNewAPIRatioConvertsToUSDPerMillion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rules) != 3 || rules[0].Model != "free-model" || rules[1].Model != "gpt-5" || rules[2].Model != "image-model" {
+	if len(rules) != 2 || rules[0].Model != "gpt-5" || rules[1].Model != "image-model" {
 		t.Fatalf("unexpected rules: %#v", rules)
 	}
+	if len(skips) != 1 || skips[0].Model != "free-model" {
+		t.Fatalf("zero-ratio models must be reported as skipped: %#v", skips)
+	}
 	var rates map[string]float64
-	if err = json.Unmarshal(rules[1].Rates, &rates); err != nil {
+	if err = json.Unmarshal(rules[0].Rates, &rates); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]float64{"inputPerMillion": 1.25, "cachedInputPerMillion": 0.125, "outputPerMillion": 10}
@@ -129,7 +136,7 @@ func TestSyncedRulesFromNewAPIRatioConvertsToUSDPerMillion(t *testing.T) {
 		t.Fatalf("unexpected converted rates: %#v", rates)
 	}
 	rates = nil
-	if err = json.Unmarshal(rules[2].Rates, &rates); err != nil {
+	if err = json.Unmarshal(rules[1].Rates, &rates); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(rates, map[string]float64{"request": 0.08}) {
@@ -138,7 +145,26 @@ func TestSyncedRulesFromNewAPIRatioConvertsToUSDPerMillion(t *testing.T) {
 }
 
 func TestSyncedRulesFromNewAPIRatioRequiresModelRatios(t *testing.T) {
-	if _, err := syncedRulesFromNewAPIRatio([]byte(`{"data":{"completion_ratio":{"gpt-5":8}}}`)); err == nil {
+	if _, _, err := syncedRulesFromNewAPIRatio([]byte(`{"data":{"completion_ratio":{"gpt-5":8}}}`)); err == nil {
 		t.Fatal("expected missing model_ratio to fail")
+	}
+}
+
+// 0 价不算「已定价」：否则上游给出真实价格时也永远填不进去，模型会一直按 0 计费。
+func TestMissingPublicPriceValuesOverwritesZeroPrice(t *testing.T) {
+	result := missingPublicPriceValues(
+		modelPriceValues{Input: pricePointer(0.3), Output: pricePointer(1.2)},
+		PublicModelView{InputPrice: pricePointer(0), OutputPrice: pricePointer(0)},
+	)
+	if result.Input == nil || *result.Input != 0.3 || result.Output == nil || *result.Output != 1.2 {
+		t.Fatalf("real prices must replace stale zeros: %#v", result)
+	}
+	// 反向：同步值仍是 0 而当前已有真实价格时，不许把真实价格覆盖成 0。
+	result = missingPublicPriceValues(
+		modelPriceValues{Input: pricePointer(0)},
+		PublicModelView{InputPrice: pricePointer(5)},
+	)
+	if result.hasAny() {
+		t.Fatalf("zero sync value must not overwrite a real price: %#v", result)
 	}
 }

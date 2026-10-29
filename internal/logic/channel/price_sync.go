@@ -6,8 +6,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/entity"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
+	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
 func (s *sChannel) SyncAllPrices(ctx context.Context) (PriceSyncResult, error) {
@@ -20,7 +20,7 @@ func (s *sChannel) SyncAllPrices(ctx context.Context) (PriceSyncResult, error) {
 		return PriceSyncResult{}, gerror.Wrap(err, "list price sync channels")
 	}
 
-	result := PriceSyncResult{Failures: make([]PriceSyncSourceFailure, 0)}
+	result := newPriceSyncResult()
 	for _, channel := range channels {
 		_, config, err := s.types.GetByCode(ctx, channel.Type)
 		if err != nil {
@@ -32,12 +32,12 @@ func (s *sChannel) SyncAllPrices(ctx context.Context) (PriceSyncResult, error) {
 			continue
 		}
 		result.Sources++
-		count, err := s.syncPricesFromChannel(ctx, channel, config)
+		stats, err := s.syncPricesFromChannel(ctx, channel, config)
 		if err != nil {
 			result.Failures = append(result.Failures, priceSyncFailure("channel", channel.Id, channel.Name, err))
 			continue
 		}
-		result.Count += count
+		result.add(stats, channel.Name)
 		result.Succeeded++
 	}
 	return result, nil
@@ -48,7 +48,8 @@ func (s *sChannel) SyncPriceSource(ctx context.Context, channelID uint64) (Price
 	if err != nil {
 		return PriceSyncResult{}, err
 	}
-	result := PriceSyncResult{Sources: 1, Failures: make([]PriceSyncSourceFailure, 0)}
+	result := newPriceSyncResult()
+	result.Sources = 1
 	_, config, err := s.types.GetByCode(ctx, channel.Type)
 	if err != nil {
 		result.Failures = append(result.Failures, priceSyncFailure("channel", channel.Id, channel.Name, err))
@@ -58,18 +59,19 @@ func (s *sChannel) SyncPriceSource(ctx context.Context, channelID uint64) (Price
 		result.Failures = append(result.Failures, priceSyncFailure("channel", channel.Id, channel.Name, gerror.New("渠道类型没有配置价格同步接口")))
 		return result, nil
 	}
-	count, err := s.syncPricesFromChannel(ctx, channel, config)
+	stats, err := s.syncPricesFromChannel(ctx, channel, config)
 	if err != nil {
 		result.Failures = append(result.Failures, priceSyncFailure("channel", channel.Id, channel.Name, err))
 		return result, nil
 	}
-	result.Count = count
+	result.add(stats, channel.Name)
 	result.Succeeded = 1
 	return result, nil
 }
 
 func (s *sChannel) SyncExternalPriceSource(ctx context.Context, sourceID uint64, sourceName, baseURL string, config channeltype.PricingConfig) (PriceSyncResult, error) {
-	result := PriceSyncResult{Sources: 1, Failures: make([]PriceSyncSourceFailure, 0)}
+	result := newPriceSyncResult()
+	result.Sources = 1
 	endpoint, err := resolveEndpointURL(baseURL, config.Path)
 	if err == nil && config.AuthType != channeltype.AuthNone {
 		err = gerror.New("public price sources currently support only pricing.authType none")
@@ -90,10 +92,10 @@ func (s *sChannel) SyncExternalPriceSource(ctx context.Context, sourceID uint64,
 		if fetchErr != nil {
 			err = fetchErr
 		} else {
-			var count int
-			count, err = s.syncPricesFromPayload(ctx, endpoint, config, body)
+			var stats priceSyncStats
+			stats, err = s.syncPricesFromPayload(ctx, endpoint, config, body)
 			if err == nil {
-				result.Count = count
+				result.add(stats, sourceName)
 				result.Succeeded = 1
 			}
 		}
@@ -104,14 +106,14 @@ func (s *sChannel) SyncExternalPriceSource(ctx context.Context, sourceID uint64,
 	return result, nil
 }
 
-func (s *sChannel) syncPricesFromChannel(ctx context.Context, channel entity.Channels, config channeltype.Config) (int, error) {
+func (s *sChannel) syncPricesFromChannel(ctx context.Context, channel entity.Channels, config channeltype.Config) (priceSyncStats, error) {
 	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Pricing.Path)
 	if err != nil {
-		return 0, err
+		return priceSyncStats{}, err
 	}
 	credential, err := s.CredentialForTest(ctx, channel.Id, 0)
 	if err != nil && config.Pricing.AuthType != channeltype.AuthManagementKey && config.Pricing.AuthType != channeltype.AuthNone {
-		return 0, err
+		return priceSyncStats{}, err
 	}
 	body, err := s.fetchUpstreamJSON(ctx, channel, credential.APIKeyCipher, upstreamJSONRequest{
 		Method:       config.Pricing.Method,
@@ -129,7 +131,7 @@ func (s *sChannel) syncPricesFromChannel(ctx context.Context, channel entity.Cha
 		},
 	})
 	if err != nil {
-		return 0, err
+		return priceSyncStats{}, err
 	}
 	return s.syncPricesFromPayload(ctx, endpoint, config.Pricing, body)
 }

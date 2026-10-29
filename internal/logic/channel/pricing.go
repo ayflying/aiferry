@@ -2,9 +2,7 @@ package channel
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 
@@ -17,6 +15,10 @@ import (
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
+
+// 本文件负责价格规则（model_price_rules）的增删改查、同步结果结构与校验；
+// 公共模型价格（model_prices）的写入见 price_public.go，
+// 上游价格同步流程见 price_sync.go / price_rules_sync.go / price_payload.go。
 
 type PriceRuleView struct {
 	Id             uint64          `json:"id"`
@@ -35,10 +37,39 @@ type PriceRuleView struct {
 }
 
 type PriceSyncResult struct {
-	Count     int                      `json:"count"`
-	Sources   int                      `json:"sources"`
-	Succeeded int                      `json:"succeeded"`
-	Failures  []PriceSyncSourceFailure `json:"failures"`
+	Count        int                      `json:"count"`
+	Sources      int                      `json:"sources"`
+	Succeeded    int                      `json:"succeeded"`
+	SkippedCount int                      `json:"skippedCount"`
+	Skipped      []PriceSyncSkip          `json:"skipped"`
+	Failures     []PriceSyncSourceFailure `json:"failures"`
+}
+
+// PriceSyncSkip 是一个因上游数据不可用而没写入价格的模型。
+// 它不是失败：上游确实没给出可用的价格（典型是订阅制模型系数全为 0），
+// 但管理员需要看到它，否则会以为同步已经覆盖了全部模型。
+type PriceSyncSkip struct {
+	Source string `json:"source,omitempty"`
+	Model  string `json:"model"`
+	Reason string `json:"reason"`
+}
+
+func newPriceSyncResult() PriceSyncResult {
+	return PriceSyncResult{
+		Skipped:  make([]PriceSyncSkip, 0),
+		Failures: make([]PriceSyncSourceFailure, 0),
+	}
+}
+
+// add 把单个价格源的同步结果并进总结果，并给跳过记录补上来源名，
+// 让管理端能看出是哪个价格源跳过了哪些模型。
+func (result *PriceSyncResult) add(stats priceSyncStats, sourceName string) {
+	result.Count += stats.Count
+	for _, skip := range stats.Skipped {
+		skip.Source = sourceName
+		result.Skipped = append(result.Skipped, skip)
+	}
+	result.SkippedCount = len(result.Skipped)
 }
 
 type PriceSyncSourceFailure struct {
@@ -154,172 +185,6 @@ func (s *sChannel) publicModelName(ctx context.Context, modelID uint64) (string,
 		return "", gerror.New("model not found")
 	}
 	return model.PublicName, nil
-}
-
-func (s *sChannel) replacePublicPrice(ctx context.Context, modelName string, values modelPriceValues) error {
-	return s.savePublicPrice(ctx, modelName, values, true, false, BillingModeToken)
-}
-
-func isMissingPublicPriceError(err error) bool {
-	return errors.Is(err, sql.ErrNoRows)
-}
-
-func (s *sChannel) mergePublicPrice(ctx context.Context, modelName string, values modelPriceValues) error {
-	var current PublicModelView
-	if err := dao.ModelPrices.Ctx(ctx).
-		Where(dao.ModelPrices.Columns().PublicName, modelName).
-		Scan(&current); err != nil && !isMissingPublicPriceError(err) {
-		return gerror.Wrap(err, "load current public model price")
-	}
-	values = missingPublicPriceValues(values, current)
-	if !values.hasAny() {
-		return nil
-	}
-	return s.savePublicPrice(ctx, modelName, values, false, false, "")
-}
-
-// missingPublicPriceValues retains only fields that have not been set.
-func missingPublicPriceValues(values modelPriceValues, current PublicModelView) modelPriceValues {
-	if current.InputPrice != nil {
-		values.Input = nil
-	}
-	if current.CachedInputPrice != nil {
-		values.CachedInput = nil
-	}
-	if current.CacheWritePrice != nil {
-		values.CacheWrite = nil
-	}
-	if current.OutputPrice != nil {
-		values.Output = nil
-	}
-	if current.ImageInputPrice != nil {
-		values.ImageInput = nil
-	}
-	if current.AudioInputPrice != nil {
-		values.AudioInput = nil
-	}
-	if current.AudioOutputPrice != nil {
-		values.AudioOutput = nil
-	}
-	if current.RequestPrice != nil {
-		values.Request = nil
-	}
-	return values
-}
-
-func (values modelPriceValues) hasAny() bool {
-	return values.Input != nil ||
-		values.CachedInput != nil ||
-		values.CacheWrite != nil ||
-		values.Output != nil ||
-		values.ImageInput != nil ||
-		values.AudioInput != nil ||
-		values.AudioOutput != nil ||
-		values.Request != nil
-}
-
-func (s *sChannel) savePublicPrice(ctx context.Context, modelName string, values modelPriceValues, replaceToken, replaceRequest bool, billingMode string) error {
-	data := do.ModelPrices{PublicName: modelName}
-	if billingMode != "" {
-		data.BillingMode = billingMode
-	}
-	if replaceToken || values.Input != nil {
-		data.InputPrice = nullableNumber(values.Input)
-	}
-	if replaceToken || values.CachedInput != nil {
-		data.CachedInputPrice = nullableNumber(values.CachedInput)
-	}
-	if replaceToken || values.CacheWrite != nil {
-		data.CacheWritePrice = nullableNumber(values.CacheWrite)
-	}
-	if replaceToken || values.Output != nil {
-		data.OutputPrice = nullableNumber(values.Output)
-	}
-	if replaceToken || values.ImageInput != nil {
-		data.ImageInputPrice = nullableNumber(values.ImageInput)
-	}
-	if replaceToken || values.AudioInput != nil {
-		data.AudioInputPrice = nullableNumber(values.AudioInput)
-	}
-	if replaceToken || values.AudioOutput != nil {
-		data.AudioOutputPrice = nullableNumber(values.AudioOutput)
-	}
-	if replaceRequest || values.Request != nil {
-		data.RequestPrice = nullableNumber(values.Request)
-	}
-	result, err := dao.ModelPrices.Ctx(ctx).Where(dao.ModelPrices.Columns().PublicName, modelName).Data(data).Update()
-	if err != nil {
-		return gerror.Wrap(err, "update public model price")
-	}
-	if affected, _ := result.RowsAffected(); affected > 0 {
-		return nil
-	}
-	if _, err = dao.ModelPrices.Ctx(ctx).Data(data).Insert(); err != nil {
-		return gerror.Wrap(err, "create public model price")
-	}
-	return nil
-}
-
-func (s *sChannel) updatePublicModelPrice(ctx context.Context, modelName string, input adminapi.ModelPriceInput) error {
-	mode, err := normalizeBillingMode(input.BillingMode)
-	if err != nil {
-		return err
-	}
-	values := modelPriceValues{
-		Input:       input.InputPrice,
-		CachedInput: input.CachedInputPrice,
-		CacheWrite:  input.CacheWritePrice,
-		Output:      input.OutputPrice,
-		ImageInput:  input.ImageInputPrice,
-		AudioInput:  input.AudioInputPrice,
-		AudioOutput: input.AudioOutputPrice,
-		Request:     input.RequestPrice,
-	}
-	switch mode {
-	case BillingModeToken:
-		return s.savePublicPrice(ctx, modelName, values, true, false, mode)
-	case BillingModeRequest:
-		return s.savePublicPrice(ctx, modelName, values, false, true, mode)
-	default:
-		return s.savePublicPrice(ctx, modelName, values, false, false, mode)
-	}
-}
-
-func normalizeBillingMode(value string) (string, error) {
-	switch value = strings.TrimSpace(value); value {
-	case "", BillingModeToken:
-		return BillingModeToken, nil
-	case BillingModeRequest, BillingModeRules:
-		return value, nil
-	default:
-		return "", gerror.New("unsupported model billing mode")
-	}
-}
-
-func modelPriceValuesFromRule(rule syncedRule) (modelPriceValues, bool) {
-	if conditions := strings.TrimSpace(string(rule.Conditions)); conditions != "" && conditions != "{}" {
-		return modelPriceValues{}, false
-	}
-	rates := gjson.ParseBytes(rule.Rates)
-	values := modelPriceValues{
-		Input:       jsonPriceValue(rates.Get("inputPerMillion")),
-		CachedInput: jsonPriceValue(rates.Get("cachedInputPerMillion")),
-		CacheWrite:  jsonPriceValue(rates.Get("cacheWritePerMillion")),
-		Output:      jsonPriceValue(rates.Get("outputPerMillion")),
-		ImageInput:  jsonPriceValue(rates.Get("imageInputPerMillion")),
-		AudioInput:  jsonPriceValue(rates.Get("audioInputPerMillion")),
-		AudioOutput: jsonPriceValue(rates.Get("audioOutputPerMillion")),
-		Request:     jsonPriceValue(rates.Get("request")),
-	}
-	return values, values.Input != nil || values.CachedInput != nil || values.CacheWrite != nil || values.Output != nil || values.ImageInput != nil || values.AudioInput != nil || values.AudioOutput != nil || values.Request != nil
-}
-
-func jsonPriceValue(value gjson.Result) *float64 {
-	if !value.Exists() {
-		return nil
-	}
-	result := value.Float()
-	return &result
 }
 
 func priceRuleView(row entity.ModelPriceRules) (PriceRuleView, error) {

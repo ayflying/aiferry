@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Braces, Coins, Pencil, Plus, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
-import type { APIKey, ModelBillingMode, ModelMetadata, ModelMetadataResponse, PriceRule, PriceSource, PublicModel } from '../api/types'
+import type { APIKey, ModelBillingMode, ModelMetadata, ModelMetadataResponse, PriceRule, PriceSource, PriceSyncResult, PublicModel } from '../api/types'
 import { showError, showSuccess } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
@@ -233,18 +233,26 @@ async function syncPrices() {
   loading.value = true
   try {
     const payload = kind === 'source' ? { priceSourceId: Number(rawID) } : { channelId: Number(rawID) }
-    const result = await apiPost<{ count: number; sources: number; succeeded: number; failures: Array<{ sourceName?: string; channelName?: string; message: string }> }>('/prices/sync', payload)
+    const result = await apiPost<PriceSyncResult>('/prices/sync', payload)
     if (!result.succeeded) showError(formatSyncFailures(result.failures), '价格同步失败')
-    else if (result.failures.length) showError(`已同步 ${result.count} 条公共价格规则，但以下来源未完成：${formatSyncFailures(result.failures)}`, '价格同步未完全完成')
-    else showSuccess(result.count ? `已同步 ${result.count} 条公共价格规则` : '所选来源没有返回已匹配的公开模型价格')
+    else if (result.failures.length) showError(`已同步 ${result.count} 条公共价格规则，但以下来源未完成：${formatSyncFailures(result.failures)}${formatSkipped(result)}`, '价格同步未完全完成')
+    else showSuccess(`已同步 ${result.count} 条公共价格规则${formatSkipped(result)}`)
     if (current.value) await loadRules(current.value.id)
     await load()
   } catch (error) { showError(error, '价格同步失败') } finally { loading.value = false }
 }
-function formatSyncFailures(failures: Array<{ sourceName?: string; channelName?: string; message: string }>) {
+function formatSyncFailures(failures: PriceSyncResult['failures']) {
   const visible = failures.slice(0, 2).map((item) => `${item.sourceName || item.channelName || '价格源'}：${item.message}`)
   const remaining = failures.length - visible.length
   return `${visible.join('；')}${remaining > 0 ? `；另有 ${remaining} 个价格源失败` : ''}`
+}
+// 跳过的模型不是失败，但必须让管理员看见：上游确实没给这些模型可用的价格
+// （订阅制/免费额度），静默跳过会让人以为同步已经覆盖全部模型。
+function formatSkipped(result: PriceSyncResult) {
+  if (!result.skippedCount) return ''
+  const first = result.skipped[0]
+  const reason = first ? `（如 ${first.model}：${first.reason}）` : ''
+  return `；另有 ${result.skippedCount} 个模型因上游未提供按量价格而跳过${reason}`
 }
 watch([keyword, models], () => { page.value = 1 })
 // 弹框被 teleport 到 body，抽屉关掉不会连带隐藏它，必须显式收起，否则会浮在列表上方。

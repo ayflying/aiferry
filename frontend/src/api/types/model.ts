@@ -97,6 +97,24 @@ export interface PublicModel {
   billingMode: ModelBillingMode
 }
 
+/** 价格同步时被跳过的模型：上游确实没给出可用的按量价格（订阅制 / 免费额度）。 */
+export interface PriceSyncSkip {
+  /** 触发跳过的价格源名称 */
+  source?: string
+  model: string
+  reason: string
+}
+
+/** 价格同步结果。skipped 不是失败，但需要展示，避免误以为已覆盖全部模型。 */
+export interface PriceSyncResult {
+  count: number
+  sources: number
+  succeeded: number
+  skippedCount: number
+  skipped: PriceSyncSkip[]
+  failures: Array<{ sourceName?: string; channelName?: string; message: string }>
+}
+
 export interface DiscoveredModel {
   name: string
   publicName: string

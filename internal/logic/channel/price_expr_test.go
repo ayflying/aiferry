@@ -2,6 +2,7 @@ package channel
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -50,6 +51,39 @@ func TestParseBillingExpressionUsesOneHourCachePriceAsFallback(t *testing.T) {
 	}
 }
 
+// cc12h 是上游 2026-10 新增的 12 小时缓存写入价变量，OpenAI 新一代模型
+// （gpt-5.6 / gpt-6 / gpt-daybreak）的表达式全都引用它。不认识它的后果是
+// 这些模型整条被丢弃、完全没有价格。
+func TestParseBillingExpressionMapsTwelveHourCacheWrite(t *testing.T) {
+	breakdowns, err := parseBillingExpression(`tier("standard", p * 4 + cr * 0.4 + cc * 5 + cc12h * 10 + c * 20)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rates := breakdowns[0].Rates
+	if rates["cacheWritePerMillion"] != 5 {
+		t.Fatalf("short TTL cache write price must win over 12h: %#v", rates)
+	}
+	if rates["inputPerMillion"] != 4 || rates["outputPerMillion"] != 20 {
+		t.Fatalf("unexpected rates: %#v", rates)
+	}
+
+	// cc 缺席时按 TTL 从短到长兜底：cc1h 优先于 cc12h，避免高 TTL 价覆盖低 TTL 档。
+	breakdowns, err = parseBillingExpression(`tier("standard", p * 1 + cc1h * 2 + cc12h * 4 + c * 2)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := breakdowns[0].Rates["cacheWritePerMillion"]; got != 2 {
+		t.Fatalf("expected 1h cache write price to win over 12h, got %v", got)
+	}
+	breakdowns, err = parseBillingExpression(`tier("standard", p * 1 + cc12h * 4 + c * 2)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := breakdowns[0].Rates["cacheWritePerMillion"]; got != 4 {
+		t.Fatalf("expected 12h cache write price as the last fallback, got %v", got)
+	}
+}
+
 func TestParseBillingExpressionMapsAudioAndFixedRates(t *testing.T) {
 	breakdowns, err := parseBillingExpression(`tier("standard", p * 1 + ai * 2 + ao * 6 + fixed(0.04))`)
 	if err != nil {
@@ -58,6 +92,55 @@ func TestParseBillingExpressionMapsAudioAndFixedRates(t *testing.T) {
 	rates := breakdowns[0].Rates
 	if rates["audioInputPerMillion"] != 2 || rates["audioOutputPerMillion"] != 6 || rates["request"] != 0.04 {
 		t.Fatalf("unexpected rates: %#v", rates)
+	}
+}
+
+// fixed(x) * image_count 是「每张图 x 美元」。图像生成端点不返回 usage，
+// 折算成图像 tokens 会让规则永远算不出金额（请求直接报「用量不可计费」），
+// 因此按次计价落库，与上游 model_price 的既有口径一致。
+func TestParseBillingExpressionMapsPerImagePriceToRequestPrice(t *testing.T) {
+	breakdowns, err := parseBillingExpression(`tier("image", fixed(0.0035)) * image_count`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rates := breakdowns[0].Rates
+	if rates["request"] != 0.0035 {
+		t.Fatalf("per-image price must become a per-request rate: %#v", rates)
+	}
+	if _, hasImageRate := rates["imageInputPerMillion"]; hasImageRate {
+		t.Fatalf("image tokens must not be used, the endpoint reports no usage: %#v", rates)
+	}
+}
+
+// 系数为 0 的项不构成价格：上游用 p * 0 表示该维度不计费，不能落成 0 价费率。
+func TestParseBillingExpressionDropsZeroCoefficients(t *testing.T) {
+	breakdowns, err := parseBillingExpression(`tier("standard", p * 3 + cr * 0 + cc * 0 + c * 15)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rates := breakdowns[0].Rates
+	if _, exists := rates["cachedInputPerMillion"]; exists {
+		t.Fatalf("zero cached input rate must be dropped: %#v", rates)
+	}
+	if _, exists := rates["cacheWritePerMillion"]; exists {
+		t.Fatalf("zero cache write rate must be dropped: %#v", rates)
+	}
+	if rates["inputPerMillion"] != 3 || rates["outputPerMillion"] != 15 {
+		t.Fatalf("unexpected rates: %#v", rates)
+	}
+}
+
+// 系数全为 0 的表达式表示订阅制或免费额度，必须判为「没有价格」。
+// 若当成 0 价规则落库，模型会被判成已定价却永远按 0 计费，等于对所有人免费。
+func TestParseBillingExpressionRejectsZeroPricedExpression(t *testing.T) {
+	for _, expression := range []string{
+		`tier("standard", p * 0 + cr * 0 + cc * 0 + c * 0)`,
+		`tier("standard", p * 0 + c * 0)`,
+		`tier("image", fixed(0)) * image_count`,
+	} {
+		if _, err := parseBillingExpression(expression); !errors.Is(err, errBillingExprNoPrice) {
+			t.Fatalf("%q must be reported as unpriced, got %v", expression, err)
+		}
 	}
 }
 
@@ -198,7 +281,6 @@ func TestParseBillingExpressionThinkingToggleKeepsDefaultBranch(t *testing.T) {
 
 func TestParseBillingExpressionRejectsUnsupportedShapes(t *testing.T) {
 	for _, expression := range []string{
-		`tier("image", fixed(0.04)) * image_count`,
 		`tier("standard", p * 1 * len)`,
 		`tier("standard", tokens * 3)`,
 		`param("x") == true ? tier("a", p * 1) : tier("b", p * 2) ? tier("c", p * 3)`,
@@ -211,7 +293,7 @@ func TestParseBillingExpressionRejectsUnsupportedShapes(t *testing.T) {
 }
 
 func TestSyncedRulesFromBillingExpressionsSkipsUnknownModes(t *testing.T) {
-	rules, err := syncedRulesFromBillingExpressions(
+	rules, skips, err := syncedRulesFromBillingExpressions(
 		gjson.Parse(`{
 			"gpt-5": "tier(\"standard\", p * 3 + c * 15)",
 			"flat-image": "tier(\"standard\", fixed(1))"
@@ -230,10 +312,36 @@ func TestSyncedRulesFromBillingExpressionsSkipsUnknownModes(t *testing.T) {
 	if string(rules[0].Conditions) != "{}" {
 		t.Fatalf("unexpected conditions: %s", rules[0].Conditions)
 	}
+	if len(skips) != 1 || skips[0].Model != "flat-image" || skips[0].Reason == "" {
+		t.Fatalf("unexpected skips: %#v", skips)
+	}
+}
+
+// 订阅制模型（系数全为 0）要作为跳过记录返回并说明原因，而不是静默消失。
+func TestSyncedRulesFromBillingExpressionsReportsZeroPricedModels(t *testing.T) {
+	rules, skips, err := syncedRulesFromBillingExpressions(
+		gjson.Parse(`{
+			"gpt-5": "tier(\"standard\", p * 3 + c * 15)",
+			"glm-4.7-flash": "tier(\"standard\", p * 0 + cr * 0 + cc * 0 + c * 0)"
+		}`),
+		gjson.Parse(`{"gpt-5": "tiered_expr", "glm-4.7-flash": "tiered_expr"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 1 || rules[0].Model != "gpt-5" {
+		t.Fatalf("zero priced models must not become rules: %#v", rules)
+	}
+	if len(skips) != 1 || skips[0].Model != "glm-4.7-flash" {
+		t.Fatalf("unexpected skips: %#v", skips)
+	}
+	if !strings.Contains(skips[0].Reason, "未按量计费") {
+		t.Fatalf("skip reason must explain the zero price: %q", skips[0].Reason)
+	}
 }
 
 func TestSyncedRulesFromNewAPIRatioSupportsBillingExpressions(t *testing.T) {
-	rules, err := syncedRulesFromNewAPIRatio([]byte(`{
+	rules, _, err := syncedRulesFromNewAPIRatio([]byte(`{
   "data": {
     "billing_mode": {"gpt-5": "tiered_expr", "gemini-2.5-pro": "tiered_expr"},
     "billing_expr": {
@@ -248,31 +356,31 @@ func TestSyncedRulesFromNewAPIRatioSupportsBillingExpressions(t *testing.T) {
 	if len(rules) != 3 {
 		t.Fatalf("expected three rules, got %#v", rules)
 	}
-	if rules[0].Model != "gpt-5" || rules[1].Model != "gemini-2.5-pro" || rules[2].Model != "gemini-2.5-pro" {
+	if rules[0].Model != "gemini-2.5-pro" || rules[1].Model != "gemini-2.5-pro" || rules[2].Model != "gpt-5" {
 		t.Fatalf("unexpected rule order: %#v", rules)
 	}
-	tierConditions := decodeJSONObject(t, rules[1].Conditions)
+	tierConditions := decodeJSONObject(t, rules[0].Conditions)
 	if value, ok := tierConditions["inputTokensAtMost"]; !ok || value != float64(200000) {
 		t.Fatalf("unexpected short-context conditions: %#v", tierConditions)
 	}
-	longConditions := decodeJSONObject(t, rules[2].Conditions)
+	longConditions := decodeJSONObject(t, rules[1].Conditions)
 	if value, ok := longConditions["inputTokensAtLeast"]; !ok || value != float64(200001) {
 		t.Fatalf("unexpected long-context conditions: %#v", longConditions)
 	}
-	rates := decodeJSONObject(t, rules[0].Rates)
+	rates := decodeJSONObject(t, rules[2].Rates)
 	if rates["inputPerMillion"] != 1.25 || rates["cachedInputPerMillion"] != 0.125 || rates["outputPerMillion"] != float64(10) {
 		t.Fatalf("unexpected flat rates: %#v", rates)
 	}
 }
 
 func TestSyncedRulesFromBillingExpressionsNeedsUsableModel(t *testing.T) {
-	if _, err := syncedRulesFromBillingExpressions(
+	if _, _, err := syncedRulesFromBillingExpressions(
 		gjson.Parse(`{"weird":"tier(\"standard\", p * 1 * len)"}`),
 		gjson.Parse(`{"weird":"tiered_expr"}`),
 	); err == nil {
 		t.Fatal("expected an unparsable source to fail")
 	}
-	if _, err := syncedRulesFromNewAPIRatio([]byte(`{"data":{"billing_mode":{"gpt-5":"tiered_expr"}}}`)); err == nil {
+	if _, _, err := syncedRulesFromNewAPIRatio([]byte(`{"data":{"billing_mode":{"gpt-5":"tiered_expr"}}}`)); err == nil {
 		t.Fatal("expected a payload without priced fields to fail")
 	}
 }
@@ -299,5 +407,21 @@ func TestRuleHasConditionsIgnoresEmptyObjects(t *testing.T) {
 	}
 	if !ruleHasConditions(syncedRule{Conditions: json.RawMessage(`{"inputTokensAtMost":1}`)}) {
 		t.Fatal("token range conditions must be detected")
+	}
+}
+
+// 全 0 费率规则在任何价格源里都不能落库，否则模型会被判成已定价却永远按 0 计费。
+func TestSplitZeroPricedRulesDropsUnpricedRows(t *testing.T) {
+	rules := []syncedRule{
+		{Model: "free", Rates: json.RawMessage(`{"inputPerMillion":0,"outputPerMillion":0}`)},
+		{Model: "empty", Rates: json.RawMessage(`{}`)},
+		{Model: "paid", Rates: json.RawMessage(`{"inputPerMillion":0,"outputPerMillion":2.5}`)},
+	}
+	usable, skips := splitZeroPricedRules(rules)
+	if len(usable) != 1 || usable[0].Model != "paid" {
+		t.Fatalf("only priced rules may be saved: %#v", usable)
+	}
+	if len(skips) != 2 || skips[0].Model != "free" || skips[1].Model != "empty" {
+		t.Fatalf("unexpected skips: %#v", skips)
 	}
 }

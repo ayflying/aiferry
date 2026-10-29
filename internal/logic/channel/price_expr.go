@@ -3,8 +3,7 @@ package channel
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strconv"
+	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -19,43 +18,32 @@ import (
 // tier("<档名>", <线性表达式>)，变量含义：
 //
 //	p  输入 tokens 价      c  输出 tokens 价
-//	cr 缓存读取价          cc 缓存写入价        cc1h 1 小时缓存写入价
-//	ai 音频输入价          ao 音频输出价        fixed(x) 每次请求固定价
+//	cr 缓存读取价          cc 缓存写入价（5 分钟档）
+//	cc1h 1 小时缓存写入价  cc12h 12 小时缓存写入价
+//	ai 音频输入价          ao 音频输出价
+//	fixed(x) 每次请求固定价，或在末尾 * image_count 时表示每张图 x 美元
+//	image_count 图片张数（AiFerry 无该维度，按次计价）
 //
 // 这里把它翻译成 AiFerry 的价格规则：时段映射到 conditions.time（上游用
 // UTC），上下文长度映射到 inputTokensAtMost / inputTokensAtLeast。思考模式
 // 依赖请求体参数（param("enable_thinking")），网关没有对应的规则条件，
 // 只能取 else 分支（未开启思考）计价，并在规则名里标注。
+//
+// 三个容易踩的坑：
+//   - AiFerry 只有一个缓存写入费率字段，cc1h / cc12h 按 TTL 从短到长兜底，
+//     不能被高 TTL 价覆盖低 TTL 档。
+//   - 系数全为 0 的表达式表示订阅制 / 免费额度，必须判为无价格跳过：写成
+//     0 价规则会让模型显得「已定价」却永远按 0 计费（见 errBillingExprNoPrice）。
+//   - 按张计费的 fixed(x) * image_count 不能丢：丢掉会让图像模型变成免费；
+//     但它必须落成按次费率而非图像 tokens，因为 /images/* 不返回 usage。
+//
+// 代码按职责拆在同包三个文件里：本文件负责「上游载荷 → 同步规则」的入口与
+// 表达式递归展开，price_expr_rates.go 负责费率项解析，price_expr_condition.go
+// 负责条件（时段 / 长度 / 参数）解析。
 
 const (
 	billingExprTieredMode = "tiered_expr"
 	billingExprRuleName   = "BaseLLM 官方模型价格"
-	// billingExprFixedVariable 是 fixed(x) 项在中间结果里的占位变量名。
-	billingExprFixedVariable = "fixed"
-)
-
-// billingExprRateKeys 把表达式变量映射到价格规则的费率字段。
-// cc1h（1 小时 TTL 缓存写入价）在 AiFerry 没有独立字段，仅在缺少 cc 时
-// 回退成缓存写入价。
-var billingExprRateKeys = map[string]string{
-	"p":  "inputPerMillion",
-	"c":  "outputPerMillion",
-	"cr": "cachedInputPerMillion",
-	"cc": "cacheWritePerMillion",
-	"ai": "audioInputPerMillion",
-	"ao": "audioOutputPerMillion",
-}
-
-var (
-	billingExprLeafPattern      = regexp.MustCompile(`^tier\("([^"]*)"\s*,\s*(.+)\)$`)
-	billingExprVariableTerm     = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_]*)\s*\*\s*([0-9]*\.?[0-9]+)$`)
-	billingExprNumberTerm       = regexp.MustCompile(`^([0-9]*\.?[0-9]+)\s*\*\s*([A-Za-z][A-Za-z0-9_]*)$`)
-	billingExprFixedTerm        = regexp.MustCompile(`^fixed\(([0-9]*\.?[0-9]+)\)$`)
-	billingExprLengthCondition  = regexp.MustCompile(`^len\s*(<=|<|>=|>)\s*([0-9]+)$`)
-	billingExprParamCondition   = regexp.MustCompile(`^param\("([^"]*)"\)\s*==\s*(.+)$`)
-	billingExprTimezonePattern  = regexp.MustCompile(`(?:weekday|hour)\("([^"]+)"\)`)
-	billingExprWeekdayCondition = regexp.MustCompile(`weekday\("[^"]*"\)\s*(>=|<=|==)\s*([0-9]+)`)
-	billingExprHourCondition    = regexp.MustCompile(`hour\("[^"]*"\)\s*(>=|>)\s*([0-9]+)\s*&&\s*hour\("[^"]*"\)\s*(<=|<)\s*([0-9]+)`)
 )
 
 // billingExprBreakdown 是表达式递归展开后的一条价格分支：
@@ -74,24 +62,27 @@ type billingExprBreakdown struct {
 // syncedRulesFromBillingExpressions 把 billing_expr 映射转换成同步规则。
 // 单个模型解析失败只跳过该模型（不阻断整个价格源），全部失败时返回错误，
 // 以便管理员看到上游格式再次变化的信号。
-func syncedRulesFromBillingExpressions(expressions, modes gjson.Result) ([]syncedRule, error) {
+//
+// 被跳过的条目连同中文原因一起返回：上游有几十个订阅制/免费额度模型的价格
+// 表达式系数全为 0，静默跳过会让管理员误以为同步正常，实际那些模型没有价格。
+func syncedRulesFromBillingExpressions(expressions, modes gjson.Result) ([]syncedRule, []PriceSyncSkip, error) {
 	if !expressions.IsObject() {
-		return nil, gerror.New("NewAPI billing expression source did not return an object")
+		return nil, nil, gerror.New("NewAPI billing expression source did not return an object")
 	}
 	rules := make([]syncedRule, 0, len(expressions.Map())+8)
-	skipped := 0
+	skips := make([]PriceSyncSkip, 0)
 	expressions.ForEach(func(model, expression gjson.Result) bool {
 		name := strings.TrimSpace(model.String())
 		if name == "" {
 			return true
 		}
 		if mode := strings.TrimSpace(modes.Get(name).String()); mode != "" && mode != billingExprTieredMode {
-			skipped++
+			skips = append(skips, PriceSyncSkip{Model: name, Reason: fmt.Sprintf("计费模式不是 %s（%s），暂不支持", billingExprTieredMode, mode)})
 			return true
 		}
 		breakdowns, err := parseBillingExpression(expression.String())
 		if err != nil {
-			skipped++
+			skips = append(skips, PriceSyncSkip{Model: name, Reason: billingExprSkipReason(err)})
 			return true
 		}
 		for _, breakdown := range breakdowns {
@@ -100,9 +91,20 @@ func syncedRulesFromBillingExpressions(expressions, modes gjson.Result) ([]synce
 		return true
 	})
 	if len(rules) == 0 {
-		return nil, gerror.Newf("NewAPI billing expression source had no usable priced model (%d skipped)", skipped)
+		return nil, skips, gerror.Newf("NewAPI billing expression source had no usable priced model (%d skipped)", len(skips))
 	}
-	return rules, nil
+	// 只按模型名稳定排序，保持同一模型内各档位的原始顺序：入库顺序决定计费
+	// 时的规则优先级（见 orderSyncedRules），同档位被打乱会让阶梯价错位。
+	sort.SliceStable(rules, func(i, j int) bool { return rules[i].Model < rules[j].Model })
+	return rules, skips, nil
+}
+
+// billingExprSkipReason 把解析错误翻译成管理端可读的跳过原因。
+func billingExprSkipReason(err error) string {
+	if isBillingExprNoPriceError(err) {
+		return "上游未按量计费（系数全为 0，多为订阅制或免费额度），跳过以免按 0 计费"
+	}
+	return "无法解析上游计费表达式（格式可能已变更）：" + err.Error()
 }
 
 func parseBillingExpression(expression string) ([]billingExprBreakdown, error) {
@@ -188,304 +190,6 @@ func walkBillingExpression(expression string, context billingExprBreakdown, outp
 	}
 }
 
-type billingExprConditionKind int
-
-const (
-	billingExprConditionUnknown billingExprConditionKind = iota
-	billingExprConditionSchedule
-	billingExprConditionLength
-	billingExprConditionParam
-)
-
-func classifyBillingCondition(condition string) billingExprConditionKind {
-	condition = strings.TrimSpace(condition)
-	switch {
-	case strings.Contains(condition, "weekday(") || strings.Contains(condition, "hour("):
-		return billingExprConditionSchedule
-	case strings.HasPrefix(condition, "len"):
-		return billingExprConditionLength
-	case strings.HasPrefix(condition, "param("):
-		return billingExprConditionParam
-	default:
-		return billingExprConditionUnknown
-	}
-}
-
-// splitBillingTernary 按顶层（括号外、字符串外）的 ? 与 : 切开三元表达式。
-func splitBillingTernary(expression string) (condition, whenTrue, whenFalse string, ok bool) {
-	depth, question := 0, -1
-	inString := false
-	for index := 0; index < len(expression); index++ {
-		character := expression[index]
-		if inString {
-			if character == '\\' {
-				index++
-				continue
-			}
-			if character == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch character {
-		case '"':
-			inString = true
-		case '(':
-			depth++
-		case ')':
-			depth--
-		case '?':
-			if depth == 0 && question < 0 {
-				question = index
-			}
-		case ':':
-			if depth == 0 && question >= 0 {
-				return strings.TrimSpace(expression[:question]),
-					strings.TrimSpace(expression[question+1 : index]),
-					strings.TrimSpace(expression[index+1:]), true
-			}
-		}
-	}
-	return "", "", "", false
-}
-
-// unwrapBillingParens 去掉整体包裹的一层或多层括号，便于按顶层切分。
-func unwrapBillingParens(expression string) string {
-	for len(expression) >= 2 && expression[0] == '(' && expression[len(expression)-1] == ')' {
-		if !billingExprOuterParensWrap(expression) {
-			break
-		}
-		expression = strings.TrimSpace(expression[1 : len(expression)-1])
-	}
-	return expression
-}
-
-func billingExprOuterParensWrap(expression string) bool {
-	depth := 0
-	for index := 0; index < len(expression); index++ {
-		switch expression[index] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 && index != len(expression)-1 {
-				return false
-			}
-		}
-	}
-	return depth == 0
-}
-
-// parseBillingLeaf 解析 tier("<档名>", <线性表达式>) 叶子。
-func parseBillingLeaf(expression string) (billingExprBreakdown, error) {
-	match := billingExprLeafPattern.FindStringSubmatch(strings.TrimSpace(expression))
-	if match == nil {
-		return billingExprBreakdown{}, gerror.Newf("unsupported billing expression leaf %q", truncateBillingExpr(expression, 80))
-	}
-	rates, err := parseBillingLinearRates(match[2])
-	if err != nil {
-		return billingExprBreakdown{}, err
-	}
-	return billingExprBreakdown{Tier: match[1], Rates: rates}, nil
-}
-
-// parseBillingLinearRates 解析形如 p * 3 + cr * 0.3 + cc1h * 6 + fixed(0.04)
-// 的线性表达式：逐项累加同一变量的系数，出现未知变量即失败。
-func parseBillingLinearRates(expression string) (map[string]float64, error) {
-	terms := make(map[string]float64)
-	for _, raw := range strings.Split(expression, "+") {
-		term := strings.TrimSpace(raw)
-		if term == "" {
-			continue
-		}
-		if match := billingExprVariableTerm.FindStringSubmatch(term); match != nil {
-			value, err := parseBillingCoefficient(match[2], term)
-			if err != nil {
-				return nil, err
-			}
-			terms[match[1]] += value
-			continue
-		}
-		if match := billingExprNumberTerm.FindStringSubmatch(term); match != nil {
-			value, err := parseBillingCoefficient(match[1], term)
-			if err != nil {
-				return nil, err
-			}
-			terms[match[2]] += value
-			continue
-		}
-		if match := billingExprFixedTerm.FindStringSubmatch(term); match != nil {
-			value, err := parseBillingCoefficient(match[1], term)
-			if err != nil {
-				return nil, err
-			}
-			terms[billingExprFixedVariable] += value
-			continue
-		}
-		return nil, gerror.Newf("unsupported billing expression term %q", term)
-	}
-	if len(terms) == 0 {
-		return nil, gerror.New("billing expression has no priced term")
-	}
-	rates := make(map[string]float64, len(terms))
-	for variable, value := range terms {
-		if key, exists := billingExprRateKeys[variable]; exists {
-			rates[key] += value
-			continue
-		}
-		switch variable {
-		case "cc1h":
-			// 1 小时缓存写入价只在没有缓存写入价时兜底，避免覆盖 5 分钟档。
-			if _, hasCacheWrite := terms["cc"]; !hasCacheWrite {
-				rates["cacheWritePerMillion"] += value
-			}
-		case billingExprFixedVariable:
-			rates["request"] += value
-		default:
-			return nil, gerror.Newf("unsupported billing expression variable %q", variable)
-		}
-	}
-	return rates, nil
-}
-
-func parseBillingCoefficient(raw, term string) (float64, error) {
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return 0, gerror.Newf("billing expression term %q has an invalid coefficient", term)
-	}
-	return value, nil
-}
-
-// billingExprLengthBounds 表示 len 比较命中分支与补集分支各自的输入长度区间。
-type billingExprLengthBounds struct {
-	WhenTrueMin  *uint64
-	WhenTrueMax  *uint64
-	WhenFalseMin *uint64
-	WhenFalseMax *uint64
-}
-
-func parseBillingLengthCondition(condition string) (billingExprLengthBounds, error) {
-	match := billingExprLengthCondition.FindStringSubmatch(strings.TrimSpace(condition))
-	if match == nil {
-		return billingExprLengthBounds{}, gerror.Newf("unsupported billing expression length condition %q", truncateBillingExpr(condition, 80))
-	}
-	bound, err := strconv.ParseUint(match[2], 10, 64)
-	if err != nil || bound == 0 {
-		return billingExprLengthBounds{}, gerror.Newf("billing expression length condition %q is out of range", condition)
-	}
-	switch match[1] {
-	case "<=":
-		return billingExprLengthBounds{WhenTrueMax: uint64Pointer(bound), WhenFalseMin: uint64Pointer(bound + 1)}, nil
-	case "<":
-		return billingExprLengthBounds{WhenTrueMax: uint64Pointer(bound - 1), WhenFalseMin: uint64Pointer(bound)}, nil
-	case ">=":
-		return billingExprLengthBounds{WhenTrueMin: uint64Pointer(bound), WhenFalseMax: uint64Pointer(bound - 1)}, nil
-	default: // ">"
-		return billingExprLengthBounds{WhenTrueMin: uint64Pointer(bound + 1), WhenFalseMax: uint64Pointer(bound)}, nil
-	}
-}
-
-// mergeBillingInputBounds 叠加多层长度区间：下界取更大值，上界取更小值。
-func mergeBillingInputBounds(minimum, maximum, lower, upper *uint64) (*uint64, *uint64) {
-	resultMin, resultMax := minimum, maximum
-	if lower != nil && (resultMin == nil || *lower > *resultMin) {
-		resultMin = lower
-	}
-	if upper != nil && (resultMax == nil || *upper < *resultMax) {
-		resultMax = upper
-	}
-	return resultMin, resultMax
-}
-
-func parseBillingScheduleCondition(condition string) (billingExprBreakdown, error) {
-	match := billingExprTimezonePattern.FindStringSubmatch(condition)
-	if match == nil {
-		return billingExprBreakdown{}, gerror.Newf("billing expression schedule condition %q has no timezone", truncateBillingExpr(condition, 80))
-	}
-	ranges, err := parseBillingHourRanges(condition)
-	if err != nil {
-		return billingExprBreakdown{}, err
-	}
-	return billingExprBreakdown{Timezone: match[1], Weekdays: parseBillingWeekdays(condition), HourRanges: ranges}, nil
-}
-
-// parseBillingWeekdays 把 weekday(tz) >= a && weekday(tz) <= b 折算成 ISO 编号列表。
-func parseBillingWeekdays(condition string) []int {
-	matches := billingExprWeekdayCondition.FindAllStringSubmatch(condition, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	lower, upper, exact := 0, 0, 0
-	for _, match := range matches {
-		value, err := strconv.Atoi(match[2])
-		if err != nil || value < 0 || value > 7 {
-			continue
-		}
-		switch match[1] {
-		case ">=":
-			lower = value
-		case "<=":
-			upper = value
-		case "==":
-			exact = value
-		}
-	}
-	if exact > 0 {
-		return []int{exact}
-	}
-	if lower == 0 && upper == 0 {
-		return nil
-	}
-	if lower == 0 {
-		lower = 1
-	}
-	if upper == 0 {
-		upper = 7
-	}
-	if lower > upper {
-		return nil
-	}
-	weekdays := make([]int, 0, upper-lower+1)
-	for day := lower; day <= upper; day++ {
-		weekdays = append(weekdays, day)
-	}
-	return weekdays
-}
-
-// parseBillingHourRanges 把 hour(tz) >= a && hour(tz) < b 的每个子句折算成
-// "<HH:00>"-"<HH:00>" 区间（结束不含，24:00 表示一天结束）。
-func parseBillingHourRanges(condition string) ([][2]string, error) {
-	if !strings.Contains(condition, "hour(") {
-		return nil, nil
-	}
-	matches := billingExprHourCondition.FindAllStringSubmatch(condition, -1)
-	if len(matches) == 0 {
-		return nil, gerror.Newf("unsupported billing expression hour condition %q", truncateBillingExpr(condition, 80))
-	}
-	ranges := make([][2]string, 0, len(matches))
-	for _, match := range matches {
-		start, startErr := strconv.Atoi(match[2])
-		end, endErr := strconv.Atoi(match[4])
-		if startErr != nil || endErr != nil || start < 0 || start > 24 || end < 0 || end > 24 {
-			return nil, gerror.Newf("billing expression hour condition %q is out of range", condition)
-		}
-		if match[3] == "<=" {
-			end++
-		}
-		if end > 24 {
-			end = 24
-		}
-		if start >= end {
-			continue
-		}
-		ranges = append(ranges, [2]string{fmt.Sprintf("%02d:00", start), fmt.Sprintf("%02d:00", end)})
-	}
-	if len(ranges) == 0 {
-		return nil, gerror.Newf("billing expression hour condition %q covers no hour", truncateBillingExpr(condition, 80))
-	}
-	return ranges, nil
-}
-
 func billingExprSyncedRule(model string, breakdown billingExprBreakdown) syncedRule {
 	conditions := make(map[string]any, 2)
 	if breakdown.Timezone != "" {
@@ -530,10 +234,6 @@ func billingExprRuleNameFor(breakdown billingExprBreakdown) string {
 		return billingExprRuleName
 	}
 	return fmt.Sprintf("%s（%s）", billingExprRuleName, suffix)
-}
-
-func uint64Pointer(value uint64) *uint64 {
-	return &value
 }
 
 func truncateBillingExpr(value string, limit int) string {
