@@ -1,0 +1,55 @@
+# AiFerry 子节点编排示例。
+#
+# 子节点只跑 /v1 转发：不连 MySQL、不连 Redis、不需要 Casdoor，唯一的持久化是
+# 本地 SQLite（配置镜像 + 待回传用量）。管理端页面与 /api/* 在子节点上不注册。
+#
+# 必填：
+#   AIFERRY_CLUSTER_SECRET  与主节点一致，至少 32 字节随机串
+#   AIFERRY_MASTER_URL      主节点地址，例如 http://aiferry:8080（同一 Docker 网络）
+#   AIFERRY_MASTER_KEY      必须与主节点相同：渠道密钥由它解密，不一致会直接启动失败
+#
+# 启动顺序：主节点必须先就绪。AIFERRY_BOOTSTRAP_REQUIRED 默认为 true，
+# 主节点不可达时子节点会拒绝启动而不是带着空配置对外服务。
+services:
+  aiferry-worker:
+    image: ghcr.io/ayflying/aiferry:0.6.66
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      WEB_ROOT: /app/web
+      AIFERRY_ROLE: worker
+      AIFERRY_CLUSTER_SECRET: ${AIFERRY_CLUSTER_SECRET}
+      AIFERRY_MASTER_URL: ${AIFERRY_MASTER_URL}
+      AIFERRY_NODE_NAME: ${AIFERRY_NODE_NAME:-worker-1}
+      AIFERRY_MASTER_KEY: ${AIFERRY_MASTER_KEY}
+      AIFERRY_DATA_DIR: /app/data
+      AIFERRY_SYNC_INTERVAL: ${AIFERRY_SYNC_INTERVAL:-60}
+      AIFERRY_FLUSH_INTERVAL: ${AIFERRY_FLUSH_INTERVAL:-30}
+      AIFERRY_FLUSH_BATCH_SIZE: ${AIFERRY_FLUSH_BATCH_SIZE:-500}
+      CHANNEL_COOLDOWN_SECONDS: ${CHANNEL_COOLDOWN_SECONDS:-60}
+      PAYLOAD_LOG_ENABLED: ${PAYLOAD_LOG_ENABLED:-true}
+      PAYLOAD_LOG_DIR: ${PAYLOAD_LOG_DIR:-/app/data/relay-payloads}
+      PAYLOAD_LOG_MAX_FILES: ${PAYLOAD_LOG_MAX_FILES:-500}
+      PAYLOAD_LOG_MAX_BYTES: ${PAYLOAD_LOG_MAX_BYTES:-536870912}
+    ports:
+      - "${AIFERRY_WORKER_PORT:-38518}:8080"
+    volumes:
+      # 必须挂持久卷，否则重启后要重新全量同步，且会丢掉未回传的用量明细。
+      - worker-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks:
+      - aiferry
+
+volumes:
+  worker-data:
+
+networks:
+  # 复用主节点编排创建的网络，让子节点能直接解析主节点的容器名。
+  # 用 `docker network ls` 确认实际名称（通常是 <目录名>_default）。
+  aiferry:
+    external: true
+    name: ${AIFERRY_NETWORK:-aiferry_default}

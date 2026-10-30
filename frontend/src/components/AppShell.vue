@@ -13,6 +13,7 @@ import {
   KeyRound,
   LogOut,
   Menu,
+  Server,
   Settings,
   Ticket,
   UserRound,
@@ -56,6 +57,7 @@ const adminItems: NavigationItem[] = [
   { path: '/scheduled-tasks', label: '计划任务', icon: AlarmClock },
   { path: '/users', label: '用户管理', icon: UsersRound },
   { path: '/redemption-codes', label: '兑换码', icon: Ticket },
+  { path: '/cluster', label: '集群节点', icon: Server },
   {
     path: '/settings',
     label: '系统设置',

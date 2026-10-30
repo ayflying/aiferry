@@ -35,6 +35,11 @@ services:
       PAYLOAD_LOG_DIR: ${PAYLOAD_LOG_DIR:-/app/data/relay-payloads}
       PAYLOAD_LOG_MAX_FILES: ${PAYLOAD_LOG_MAX_FILES:-500}
       PAYLOAD_LOG_MAX_BYTES: ${PAYLOAD_LOG_MAX_BYTES:-536870912}
+      # 集群（可选）：本文件用于主节点，AIFERRY_ROLE 保持 master。
+      # AIFERRY_CLUSTER_SECRET 留空即完全不启用集群，单机行为与之前一致。
+      AIFERRY_ROLE: ${AIFERRY_ROLE:-master}
+      AIFERRY_CLUSTER_SECRET: ${AIFERRY_CLUSTER_SECRET:-}
+      AIFERRY_NODE_NAME: ${AIFERRY_NODE_NAME:-}
     ports:
       - "${AIFERRY_PORT:-38517}:8080"
     volumes:

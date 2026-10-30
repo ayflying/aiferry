@@ -29,6 +29,7 @@ const router = createRouter({
     { path: '/users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: '用户管理', admin: true } },
     { path: '/users/:id', name: 'user-detail', component: () => import('../views/UserDetailView.vue'), meta: { title: '用户详情', admin: true } },
     { path: '/redemption-codes', name: 'redemption-codes', component: () => import('../views/RedemptionCodesView.vue'), meta: { title: '兑换码', admin: true } },
+  { path: '/cluster', name: 'cluster-nodes', component: () => import('../views/ClusterNodesView.vue'), meta: { title: '集群节点', admin: true } },
     { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: '个人中心' } },
   ],
 })

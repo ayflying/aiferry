@@ -1,5 +1,6 @@
 export * from './types/auth'
 export * from './types/channel'
+export * from './types/cluster'
 export * from './types/key'
 export * from './types/model'
 export * from './types/redemption'

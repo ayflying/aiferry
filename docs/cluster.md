@@ -18,6 +18,7 @@
 | 变量 | 适用 | 说明 |
 | --- | --- | --- |
 | `AIFERRY_CLUSTER_SECRET` | 双方 | 至少 32 字节的随机串，用于 HMAC 签名，必须一致 |
+| `AIFERRY_MASTER_KEY` | 双方 | **必须一致**：渠道密钥由它解密，不一致子节点启动即失败 |
 | `AIFERRY_MASTER_URL` | 子节点 | 主节点地址，例如 `http://aiferry:8080` |
 | `AIFERRY_NODE_NAME` | 子节点 | 节点唯一标识，留空则用主机名 |
 | `AIFERRY_DATA_DIR` | 子节点 | 内置 SQLite 目录，默认 `/app/data` |
@@ -26,6 +27,10 @@
 | `AIFERRY_FLUSH_BATCH_SIZE` | 子节点 | 单批回传行数，默认 500 |
 | `AIFERRY_OUTBOX_MAX_ROWS` | 子节点 | 待回传堆积告警阈值，默认 50000 |
 | `AIFERRY_BOOTSTRAP_REQUIRED` | 子节点 | 启动时主节点不可达是否拒绝启动，默认 true |
+
+编排示例：主节点仍用 `docker-compose.yml`（`AIFERRY_ROLE` 默认 `master`），
+子节点用 [`docker-compose.worker.yml`](../docker-compose.worker.yml)，只需注入
+`AIFERRY_CLUSTER_SECRET`、`AIFERRY_MASTER_URL`、`AIFERRY_MASTER_KEY` 三个值。
 
 ## 协议
 
