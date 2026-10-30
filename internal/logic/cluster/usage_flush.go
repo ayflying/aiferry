@@ -34,7 +34,7 @@ func (s *Service) FlushUsage(ctx context.Context) error {
 	if err != nil {
 		return gerror.Wrap(err, "encode usage batch")
 	}
-	response, err := s.call(ctx, s.config.Cluster.MasterURL, workerPathPrefix+"/usage", body, contentTypeJSON)
+	response, err := s.call(ctx, s.config.Cluster.MasterURL, "/usage", body, contentTypeJSON)
 	if err != nil {
 		return gerror.Wrap(err, "post usage batch")
 	}

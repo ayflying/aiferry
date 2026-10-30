@@ -96,9 +96,13 @@ func (s *Service) notifyNode(ctx context.Context, node Node, version int64) erro
 	return lastErr
 }
 
-// call 发起一次带签名的集群内部请求。path 必须已包含查询串（签名只覆盖 URL.Path）。
+// call 发起一次带签名的集群内部请求。
+//
+// 约定：path 是相对内部前缀的路径（如 "/config?version=3"），前缀由这里统一补齐，
+// 因此调用方不要自己再拼 workerPathPrefix。签名必须覆盖「对端看到的完整路径」
+// （含前缀）：接收侧按 r.URL.Path 校验，用相对路径签名会让请求全被判为不匹配。
 func (s *Service) call(ctx context.Context, baseURL, path string, body []byte, contentType string) (*http.Response, error) {
-	signPath, err := signPathOf(path)
+	signPath, err := signPathOf(workerPathPrefix + path)
 	if err != nil {
 		return nil, err
 	}

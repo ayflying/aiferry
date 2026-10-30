@@ -84,11 +84,9 @@ func (s *Service) EnsureRegistered(ctx context.Context) error {
 	if err = s.setLocalState(ctx, stateKeyNodeID, reply.NodeId); err != nil {
 		return err
 	}
-	if reply.ConfigVersion > 0 {
-		if err = s.setLocalState(ctx, stateKeyConfigVersion, reply.ConfigVersion); err != nil {
-			return err
-		}
-	}
+	// 这里刻意不写入 reply.ConfigVersion：本地版本号必须由「真正应用到镜像的快照」
+	// 产生。若在注册时就把主节点版本号当成基线，空数据目录的子节点首次同步会拿到
+	// 304，镜像永远是空的。
 	return nil
 }
 
