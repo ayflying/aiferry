@@ -40,6 +40,22 @@ function lastEmittedConfig(wrapper: VueWrapper): Record<string, any> {
 }
 
 describe('channel type config editor', () => {
+  it('Rerank 模型名单可编辑并保留自定义端点配置', async () => {
+    const wrapper = mountWithModel(JSON.stringify({
+      ...BASE_CONFIG,
+      protocol: { rerankModels: ['custom-ranker'] },
+      endpoints: { rerank: { method: 'POST', path: '/v2/rerank', requestBody: 'json', supportsStream: false, authType: 'channel_key' } },
+    }))
+    const input = wrapper.get('input[placeholder="bge-reranker-*, custom-ranker（逗号分隔）"]')
+    expect(input.element).toHaveProperty('value', 'custom-ranker')
+    await input.setValue('bge-reranker-*， custom-ranker')
+    await nextTick()
+    const config = lastEmittedConfig(wrapper)
+    expect(config.protocol.rerankModels).toEqual(['bge-reranker-*', 'custom-ranker'])
+    expect(config.endpoints.rerank.path).toBe('/v2/rerank')
+    expect(config.endpoints.rerank.supportsStream).toBe(false)
+  })
+
   it('第一次渲染不写回文本，避免打开抽屉就改动用户的配置', () => {
     const wrapper = mountWithModel(BASE_TEXT)
     expect(wrapper.emitted('update:configText')).toBeUndefined()

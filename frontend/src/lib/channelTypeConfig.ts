@@ -105,7 +105,7 @@ export const PRICING_PATH_FIELDS: Array<{ key: string; label: string; hint?: str
 
 /** 常用端点名，仅作为新增端点时的输入建议。 */
 export const ENDPOINT_NAME_SUGGESTIONS = [
-  'chatCompletions', 'responses', 'embeddings', 'imagesGenerations', 'imagesEdits',
+  'chatCompletions', 'responses', 'embeddings', 'rerank', 'imagesGenerations', 'imagesEdits',
   'audioSpeech', 'audioTranscriptions', 'audioTranslations', 'videoGenerations',
   'videoRetrieve', 'videoContent', 'videoRemix', 'moderations', 'files', 'batches',
   'fineTuningJobs', 'realtimeSessions', 'realtimeClientSecrets',

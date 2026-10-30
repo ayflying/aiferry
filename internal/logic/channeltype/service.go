@@ -137,6 +137,9 @@ type ProtocolConfig struct {
 	// 非流式 JSON。WorkBuddy 系（copilot.tencent.com）的非流式请求会被网关直接
 	// 400 且不返回响应体，属于硬性要求，不是可选优化。
 	ForceUpstreamStream bool `json:"forceUpstreamStream"`
+	// RerankModels 声明使用标准 /rerank 端点的模型名单，支持 `前缀-*` 通配或精确名。
+	// auto 测试模式命中时优先选择 rerank；同时按模型名中的 rerank 关键字识别。
+	RerankModels []string `json:"rerankModels"`
 }
 
 type Config struct {
@@ -258,6 +261,7 @@ func DefaultConfig() Config {
 			"chatCompletions":       defaultEndpoint("POST", "/chat/completions", "json", true),
 			"responses":             defaultEndpoint("POST", "/responses", "json", true),
 			"embeddings":            defaultEndpoint("POST", "/embeddings", "json", false),
+			"rerank":                defaultEndpoint("POST", "/rerank", "json", false),
 			"imagesGenerations":     defaultEndpoint("POST", "/images/generations", "json", false),
 			"imagesEdits":           defaultEndpoint("POST", "/images/edits", "multipart", false),
 			"audioSpeech":           defaultEndpoint("POST", "/audio/speech", "json", false),

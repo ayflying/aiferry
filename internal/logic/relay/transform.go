@@ -18,6 +18,10 @@ func prepareRequestBody(endpoint string, originalBody []byte, upstreamModel stri
 	if !config.PassthroughRequestBody {
 		payload = supportedRequestFields(endpoint, payload, config)
 	}
+	// rerank 是非流式检索协议，不向严格校验的上游注入聊天专属参数。
+	if endpoint == "/rerank" {
+		delete(payload, "stream")
+	}
 	applyRestrictedFields(payload, config)
 	applyDefaultSystemPrompt(endpoint, payload, config)
 	payload["model"] = upstreamModel
@@ -49,6 +53,10 @@ func supportedRequestFields(endpoint string, payload map[string]any, config chan
 		}
 	case "/embeddings":
 		for _, field := range []string{"input", "dimensions", "encoding_format"} {
+			fields[field] = struct{}{}
+		}
+	case "/rerank":
+		for _, field := range []string{"query", "documents", "top_n", "return_documents", "max_chunks_per_doc", "rank_fields", "max_tokens_per_doc", "truncate_input", "truncation", "overlap_tokens"} {
 			fields[field] = struct{}{}
 		}
 	case "/images/generations":
@@ -145,7 +153,7 @@ func joinSystemPrompt(channelPrompt, userPrompt string) string {
 // 对 choices 里的正文、思考与工具字段一律原样保留：所有模型共用这一条
 // 透传路径，网关不搬移、不包裹、不删除任何响应内容字段。
 func normalizeResponseBody(endpoint string, body []byte, upstreamModel string, config channel.AdvancedConfig) []byte {
-	if !config.ForceOpenAIFormat {
+	if !config.ForceOpenAIFormat || endpoint == "/rerank" {
 		return body
 	}
 	var payload map[string]any

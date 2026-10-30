@@ -15,10 +15,22 @@ import (
 // "管理端测试通过、正式转发 401" 的两套行为。
 // 渠道类型解析失败时回退为标准 Bearer 规则，保证转发不因此中断。
 func (s *sRelay) applyUpstreamAuthHeaders(ctx context.Context, req *http.Request, candidate Candidate) error {
+	return s.applyEndpointAuthHeaders(ctx, req, candidate, "")
+}
+
+func (s *sRelay) applyEndpointAuthHeaders(ctx context.Context, req *http.Request, candidate Candidate, endpointName string) error {
 	spec, err := s.channels.UpstreamAuthSpecForChannelType(ctx, candidate.ChannelType)
 	if err != nil {
 		g.Log().Warningf(ctx, "resolve upstream auth for channel type %s: %v", candidate.ChannelType, err)
 		spec = channel.DefaultUpstreamAuthSpec()
+	}
+	// 独立端点鉴权与模型测试保持一致，其他请求仍沿用原有规则。
+	if endpointName != "" {
+		if config, ok := s.protocolTypeConfig(ctx, candidate); ok {
+			if endpoint, exists := config.Endpoints[endpointName]; exists {
+				spec = channel.UpstreamAuthSpec{AuthType: endpoint.AuthType, HeaderName: endpoint.HeaderName, HeaderPrefix: endpoint.HeaderPrefix}
+			}
+		}
 	}
 	return s.channels.ApplyUpstreamAuthHeaders(req, channel.UpstreamAuthInput{
 		Spec:                spec,

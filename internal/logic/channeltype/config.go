@@ -263,6 +263,9 @@ func normalizeEndpointConfigs(configs map[string]EndpointConfig) error {
 		if !validAuth(config.AuthType) {
 			return gerror.Newf("unsupported endpoint authType for %s", name)
 		}
+		if name == "rerank" && (config.Method != httpMethodPost || config.RequestBody != "json" || config.SupportsStream) {
+			return gerror.New("rerank endpoint requires POST JSON and does not support streaming")
+		}
 		configs[name] = config
 	}
 	return nil

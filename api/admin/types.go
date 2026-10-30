@@ -165,7 +165,7 @@ type ModelClosedWindowInput struct {
 type ModelTestInput struct {
 	ModelID             uint64 `json:"modelId" v:"required|min:1"`
 	ChannelCredentialID uint64 `json:"channelCredentialId"`
-	Endpoint            string `json:"endpoint" v:"required|in:auto,chat,responses,embeddings,images,tts,asr"`
+	Endpoint            string `json:"endpoint" v:"required|in:auto,chat,responses,embeddings,rerank,images,tts,asr"`
 	Stream              bool   `json:"stream"`
 }
 

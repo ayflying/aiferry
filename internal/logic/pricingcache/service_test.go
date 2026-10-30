@@ -13,6 +13,88 @@ import (
 // 取任意时刻结果都一样，固定下来只为让用例可复现。
 var estimateTestAt = time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 
+func TestEstimateRerankTotalOnlyUsageIsBillable(t *testing.T) {
+	rateIn := 2.0
+	service := New()
+	service.snapshot.Store(snapshot{
+		"jina-rerank": {
+			BillingMode: billingModeToken,
+			Rates:       usage.PriceRates{Input: &rateIn},
+		},
+	})
+
+	tokens := usage.ParseRerankUsage([]byte(`{"usage":{"total_tokens":123}}`))
+	cost := service.Estimate("jina-rerank", "/rerank", tokens, estimateTestAt)
+	if cost == nil || !cost.Equal(decimal.RequireFromString("0.000246")) {
+		t.Fatalf("total-only rerank usage should be billable, cost = %v", cost)
+	}
+	if empty := service.Estimate("jina-rerank", "/rerank", usage.TokenUsage{}, estimateTestAt); empty != nil {
+		t.Fatalf("missing token usage must not produce token cost: %v", empty)
+	}
+}
+
+func TestEstimateCohereRerankMetaTokens(t *testing.T) {
+	var (
+		inputRate  = 2.0
+		outputRate = 4.0
+		service    = New()
+		tokens     = usage.ParseRerankUsage([]byte(`{"meta":{"tokens":{"input_tokens":100,"output_tokens":20},"billed_units":{"search_units":999}}}`))
+	)
+	service.snapshot.Store(snapshot{
+		"cohere-rerank": {
+			BillingMode: billingModeToken,
+			Rates:       usage.PriceRates{Input: &inputRate, Output: &outputRate},
+		},
+	})
+	got := service.Estimate("cohere-rerank", "/rerank", tokens, estimateTestAt)
+	if got == nil || !got.Equal(decimal.RequireFromString("0.00028")) {
+		t.Fatalf("cohere meta tokens cost = %v, want 0.00028", got)
+	}
+}
+
+func TestEstimateCohereRerankSearchUnitsUseRequestPricing(t *testing.T) {
+	var (
+		requestRate = 0.002
+		inputRate   = 2.0
+		service     = New()
+		tokens      = usage.ParseRerankUsage([]byte(`{"meta":{"billed_units":{"search_units":37}}}`))
+	)
+	service.snapshot.Store(snapshot{
+		"cohere-request": {
+			BillingMode: billingModeRequest,
+			Rates:       usage.PriceRates{Request: &requestRate},
+		},
+		"cohere-token": {
+			BillingMode: billingModeToken,
+			Rates:       usage.PriceRates{Input: &inputRate},
+		},
+		"cohere-rule": {
+			BillingMode: billingModeRules,
+			Rules: []priceRule{{
+				Conditions: `{"endpoint":"/rerank"}`,
+				Rates:      `{"request":0.003}`,
+			}},
+		},
+	})
+	if got := service.Estimate("cohere-token", "/rerank", tokens, estimateTestAt); got != nil {
+		t.Fatalf("search units must not be charged as tokens: %v", got)
+	}
+	for _, test := range []struct{ model, want string }{
+		{"cohere-request", "0.002"},
+		{"cohere-rule", "0.003"},
+	} {
+		t.Run(test.model, func(t *testing.T) {
+			got := service.EstimateBreakdown(test.model, "/rerank", tokens, estimateTestAt)
+			if got == nil || !got.Cost().Equal(decimal.RequireFromString(test.want)) {
+				t.Fatalf("request pricing cost = %+v, want %s", got, test.want)
+			}
+			if len(got.Items) != 1 || got.Items[0].Type != "request" || got.Items[0].Quantity != 1 {
+				t.Fatalf("must charge one request, not 37 search units: %+v", got.Items)
+			}
+		})
+	}
+}
+
 func TestEstimateUsesCachedTokenPrice(t *testing.T) {
 	var (
 		input   uint64 = 1_000_000

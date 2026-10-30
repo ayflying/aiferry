@@ -163,12 +163,15 @@ func buildTestRequest(ctx context.Context, url string, channelType string, paylo
 	if err != nil {
 		return nil, false, err
 	}
-	body, err = ApplyPromptCachePolicy(body, config, identity)
-	if err != nil {
-		return nil, false, err
+	_, rerank := payload.(rerankTestRequest)
+	if !rerank {
+		body, err = ApplyPromptCachePolicy(body, config, identity)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	forcedStream := false
-	if IsOpenCodeFreeLane(channelType, url) {
+	if !rerank && IsOpenCodeFreeLane(channelType, url) {
 		body, forcedStream, err = ApplyOpenCodeFreeBody(body)
 		if err != nil {
 			return nil, false, err
@@ -184,7 +187,7 @@ func buildTestRequest(ctx context.Context, url string, channelType string, paylo
 
 func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, settings adminapi.SystemResilienceSettingsInput, model entity.ChannelModels, config AdvancedConfig, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
 	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream, typeConfig, settings)
-	if typeConfig.Audio.Adapter == channeltype.AudioAdapterChat {
+	if typeConfig.Audio.Adapter == channeltype.AudioAdapterChat && (endpoint == "tts" || endpoint == "asr") {
 		path, payload = chatAdapterPayload(endpoint, model.UpstreamName, payload)
 	}
 	// 模型测试复用转发链路的缓存字段处置，避免「测试通过、正式被上游拒绝」：
@@ -200,12 +203,16 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "create model test request")
 	}
+	authSpec := UpstreamAuthSpec{
+		AuthType: typeConfig.Models.AuthType, HeaderName: typeConfig.Models.HeaderName, HeaderPrefix: typeConfig.Models.HeaderPrefix,
+	}
+	if endpoint == "rerank" {
+		if configured, ok := typeConfig.Endpoints["rerank"]; ok {
+			authSpec = UpstreamAuthSpec{AuthType: configured.AuthType, HeaderName: configured.HeaderName, HeaderPrefix: configured.HeaderPrefix}
+		}
+	}
 	if err = s.ApplyUpstreamAuthHeaders(req, UpstreamAuthInput{
-		Spec: UpstreamAuthSpec{
-			AuthType:     typeConfig.Models.AuthType,
-			HeaderName:   typeConfig.Models.HeaderName,
-			HeaderPrefix: typeConfig.Models.HeaderPrefix,
-		},
+		Spec:                authSpec,
 		CredentialCipher:    credential.APIKeyCipher,
 		ManagementKeyCipher: channel.ManagementKeyCipher,
 		OrganizationID:      channel.OrganizationId,
@@ -246,6 +253,11 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	result.Success = resp.StatusCode >= 200 && resp.StatusCode < 300
 	// 免费层强制流式后回包是 SSE，即使用例选了非流式也要按流式解析 usage。
 	tokens := parseTestUsage(responseBody, streamed || forcedStream)
+	if endpoint == "rerank" {
+		tokens = usage.ParseRerankUsage(responseBody)
+		// 定价规则按标准端点匹配，不因供应商自定义 URL 而失效。
+		path = "/rerank"
+	}
 	result.InputTokens = int64(testTokenValue(tokens.Input))
 	result.OutputTokens = int64(testTokenValue(tokens.Output))
 	if result.Success {
@@ -274,6 +286,9 @@ func testAttemptFlowStep(channelName, endpoint string, result TestResult) usage.
 func testEndpoints(endpoint, model string, typeConfig channeltype.Config, settings adminapi.SystemResilienceSettingsInput) []string {
 	if endpoint != "auto" {
 		return []string{endpoint}
+	}
+	if channeltype.MatchesRerankModel(typeConfig, model) {
+		return []string{"rerank"}
 	}
 	if typeConfig.Protocol.ChatCompletionsOnly {
 		return []string{"chat"}
@@ -371,6 +386,16 @@ func testPayload(endpoint, model string, stream bool, typeConfig channeltype.Con
 			payload["stream"] = true
 		}
 		return "/responses", payload, stream
+	case "rerank":
+		path := "/rerank"
+		if configured := typeConfig.Endpoints["rerank"].Path; configured != "" {
+			path = configured
+		}
+		return path, rerankTestRequest{
+			Model: model, Query: "What is AiFerry?",
+			Documents: []string{"AiFerry is an AI API gateway.", "The weather is sunny today."},
+			TopN:      1, ReturnDocuments: true,
+		}, false
 	case "embeddings":
 		return "/embeddings", map[string]any{"model": model, "input": "AiFerry model check"}, false
 	case "images":

@@ -29,6 +29,7 @@ func (c *Controller) Register(group *ghttp.RouterGroup) {
 	group.POST("/chat/completions", c.proxy("/chat/completions"))
 	group.POST("/responses", c.proxy("/responses"))
 	group.POST("/embeddings", c.proxy("/embeddings"))
+	group.POST("/rerank", c.proxy("/rerank"))
 	group.POST("/images/generations", c.proxy("/images/generations"))
 	group.POST("/images/edits", c.imagesEdits)
 	group.POST("/audio/speech", c.audioProxy("/audio/speech"))

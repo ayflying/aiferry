@@ -14,6 +14,15 @@ func MatchesMessagesModel(config Config, model string) bool {
 	return matchMessagePatterns(config.Protocol.MessagesModels, model)
 }
 
+// MatchesRerankModel reports whether a model is declared for the standard rerank API.
+func MatchesRerankModel(config Config, model string) bool {
+	if matchMessagePatterns(config.Protocol.RerankModels, model) {
+		return true
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(model, "rerank")
+}
+
 // ResolveMessagesEndpoint 判定该上游模型应使用的 Messages 端点：渠道类型
 // 声明的名单优先（类型专属知识），类型级未配置时退回全局名单（系统设置）。
 // 命中返回端点 URL（完整 URL 原样、相对路径由调用方拼接、空回退协议缺省值），

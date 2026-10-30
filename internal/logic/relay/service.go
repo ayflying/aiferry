@@ -138,6 +138,11 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 	if !gjson.ValidBytes(body) {
 		return gerror.New("request body must be valid JSON")
 	}
+	if endpoint == "/rerank" {
+		if err := validateRerankRequest(body); err != nil {
+			return err
+		}
+	}
 	securitySettings, err := s.resilience.GetSensitiveWordSettings(ctx)
 	if err != nil {
 		return err

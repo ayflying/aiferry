@@ -38,6 +38,7 @@ const endpointOptions = [
   { label: 'Chat Completions', value: 'chat' },
   { label: 'Responses', value: 'responses' },
   { label: 'Embeddings', value: 'embeddings' },
+  { label: '重排序 (Rerank，非流式)', value: 'rerank' },
   { label: '图像生成', value: 'images' },
   { label: '语音合成 (TTS)', value: 'tts' },
   { label: '语音识别 (ASR)', value: 'asr' },
@@ -168,7 +169,7 @@ async function runTest(model: ChannelModel, quiet = false) {
     const result = await apiPost<ModelTestResult>('/models/test', {
       modelId: model.id,
       endpoint: endpoint.value,
-      stream: stream.value,
+      stream: endpoint.value !== 'rerank' && stream.value,
     }, { timeout: modelTestTimeout })
     latestResults.value = { ...latestResults.value, [model.id]: result }
     models.value = models.value.map((item) => item.id === model.id ? {
@@ -289,8 +290,8 @@ async function deleteFailedModels() {
       </div>
       <div class="setting-field">
         <label>流式模式</label>
-        <el-switch v-model="stream" :disabled="running" active-text="已启用" inactive-text="已禁用" />
-        <small>为支持流式响应的测试端点启用 stream。</small>
+        <el-switch v-model="stream" :disabled="running || endpoint === 'rerank'" active-text="已启用" inactive-text="已禁用" />
+        <small>为支持流式响应的测试端点启用 stream；Rerank 始终为非流式。</small>
       </div>
     </div>
 

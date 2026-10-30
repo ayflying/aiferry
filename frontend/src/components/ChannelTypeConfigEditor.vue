@@ -63,6 +63,13 @@ const messagesModelsText = computed({
   },
 })
 
+const rerankModelsText = computed({
+  get: () => (Array.isArray(form.value.protocol?.rerankModels) ? form.value.protocol.rerankModels.join(', ') : ''),
+  set: (value: string) => {
+    form.value.protocol.rerankModels = value.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean)
+  },
+})
+
 function setMode(next: 'form' | 'json') {
   if (next === mode.value) return
   if (next === 'form') form.value = configForForm(parseTypeConfigText(text.value).config)
@@ -145,6 +152,10 @@ function useBuiltinEndpoints() {
             <el-form-item class="span-all" label="Messages 协议模型名单">
               <el-input v-model="messagesModelsText" placeholder="union-*, claude-*, qwen3.7-max（前缀-* 通配或精确名，逗号分隔）" spellcheck="false" />
               <span class="field-hint">命中名单的模型自动以 Anthropic Messages 协议转发与测试；名单为空时全部模型不受影响。</span>
+            </el-form-item>
+            <el-form-item class="span-all" label="Rerank 重排序模型名单">
+              <el-input v-model="rerankModelsText" placeholder="bge-reranker-*, custom-ranker（逗号分隔）" spellcheck="false" />
+              <span class="field-hint">自动测试命中名单或名称含 rerank 的模型时使用 /rerank JSON 非流式请求；可在上游端点中配置 rerank 的路径和鉴权。</span>
             </el-form-item>
           </div>
         </el-collapse-item>

@@ -60,7 +60,8 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 // preferredProtocolPlan 决定这次转发用哪个上游端点。allowConversion 为 false 时
 // 锁定直连，不再把 gpt-* 请求转投 /responses，但也不阻断转发。
 func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, candidate Candidate, allowConversion bool, settings adminapi.SystemResilienceSettingsInput) protocol.Plan {
-	if !allowConversion {
+	// 模型名名单只用于聊天协议，rerank/embeddings 等端点不得转成 Messages。
+	if !allowConversion || (endpoint != protocol.ChatCompletionsEndpoint && endpoint != protocol.ResponsesEndpoint) {
 		return protocol.DirectPlan(endpoint)
 	}
 	// 渠道类型声明的协议偏好先于模型名推断判定：转投必然失败的端点
@@ -155,14 +156,19 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			body = perturbed
 		}
 	}
-	body, err = applyPromptCachePolicy(body, candidate, userID, advancedConfig)
-	if err != nil {
-		return attemptResult{}, false, err
+	if plan.ClientEndpoint() != "/rerank" {
+		body, err = applyPromptCachePolicy(body, candidate, userID, advancedConfig)
+		if err != nil {
+			return attemptResult{}, false, err
+		}
 	}
 	// OpenCode Zen 免费层指纹校验只认 chat completions 形态：注入官方工具
 	// 定义与流式改写（详见 channel.ApplyOpenCodeFreeBody）。协议转换到
 	// responses/messages 的请求不注入，避免破坏非 chat 结构。
 	upstreamURL := resolveUpstreamURL(candidate.BaseURL, plan.UpstreamEndpoint())
+	if plan.ClientEndpoint() == "/rerank" {
+		upstreamURL = s.rerankUpstreamURL(ctx, candidate)
+	}
 	forcedStream := false
 	if channel.IsOpenCodeFreeLane(candidate.ChannelType, candidate.BaseURL) && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		var forced bool
@@ -198,7 +204,11 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	}
 	copyRequestHeaders(req.Header, incomingHeaders)
 	// 鉴权头与组织/项目头由渠道类型声明统一决定，与模型测试共用同一实现。
-	if err = s.applyUpstreamAuthHeaders(ctx, req, candidate); err != nil {
+	endpointName := ""
+	if plan.ClientEndpoint() == "/rerank" {
+		endpointName = "rerank"
+	}
+	if err = s.applyEndpointAuthHeaders(ctx, req, candidate, endpointName); err != nil {
 		return attemptResult{}, false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -263,7 +273,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 			}, false, nil
 		}
 		converted := plan.ConvertResponse(responseBody)
-		result := attemptResult{status: resp.StatusCode, body: converted, tokens: parseJSONUsage(responseBody), headers: responseHeaders(resp.Header, plan)}
+		result := attemptResult{status: resp.StatusCode, body: converted, tokens: parseResponseUsage(plan.ClientEndpoint(), responseBody), headers: responseHeaders(resp.Header, plan)}
 		if forcedStreamAggregate {
 			// 上游按流式回了 text/event-stream，聚合后给客户端的是 JSON，必须改写
 			// Content-Type，否则客户端按 SSE 解析 JSON 会直接报错。

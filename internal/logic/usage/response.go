@@ -6,6 +6,31 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// ParseRerankUsage 解析重排接口的供应商专用用量字段。
+// 重排响应不应复用聊天用量解析：Jina 只返回 total_tokens，按输入侧计费；
+// Cohere 的 meta.tokens 才是 token 用量，meta.billed_units.search_units 不是 token。
+func ParseRerankUsage(body []byte) TokenUsage {
+	tokens := ParseJSONUsage(body)
+	// 已有显式 token 明细优先，不能用 total 或供应商扩展字段覆盖。
+	if hasTokenUsage(tokens) {
+		return tokens
+	}
+	var (
+		input  = optionalUint(body, "meta.tokens.input_tokens")
+		output = optionalUint(body, "meta.tokens.output_tokens")
+	)
+	if input != nil || output != nil {
+		total := tokenValue(input) + tokenValue(output)
+		return TokenUsage{Input: input, Output: output, Total: &total}
+	}
+	if tokens.Total != nil {
+		output := uint64(0)
+		tokens.Input = tokens.Total
+		tokens.Output = &output
+	}
+	return tokens
+}
+
 func ParseJSONUsage(body []byte) TokenUsage {
 	input := optionalUint(body, "usage.input_tokens", "usage.prompt_tokens", "response.usage.input_tokens")
 	cached := optionalUint(body,
