@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/redis/go-redis/v9"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/config"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/cache"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -224,11 +224,11 @@ type View struct {
 
 type sChannelType struct {
 	builtins *config.BuiltinRegistry
-	redis    *redis.Client
+	redis    cache.Cache
 }
 
-func New(builtins *config.BuiltinRegistry, redisClient *redis.Client) *sChannelType {
-	return &sChannelType{builtins: builtins, redis: redisClient}
+func New(builtins *config.BuiltinRegistry, store cache.Cache) *sChannelType {
+	return &sChannelType{builtins: builtins, redis: store}
 }
 
 func ValidateBuiltins(builtins *config.BuiltinRegistry) error {
