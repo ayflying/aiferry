@@ -2,6 +2,7 @@ package apikey
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/logic/auth"
+	"github.com/yunloli/aiferry/internal/logic/cluster"
 	"github.com/yunloli/aiferry/internal/logic/secret"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -167,6 +169,8 @@ func (s *sAPIKey) Create(ctx context.Context, input adminapi.APIKeyInput) (Creat
 		available := *input.DailySpendLimit
 		view.DailyAvailableAmount = &available
 	}
+	// 访问密钥的模型与分组授权会参与转发决策，新增后必须同步给子节点。
+	cluster.NotifyConfigChanged(ctx, "api_key", strconv.FormatUint(id, 10))
 	return Created{
 		View: view,
 		Key:  plainText,
@@ -235,6 +239,7 @@ func (s *sAPIKey) Update(ctx context.Context, id uint64, input adminapi.APIKeyUp
 	}); err != nil {
 		return err
 	}
+	cluster.NotifyConfigChanged(ctx, "api_key", strconv.FormatUint(id, 10))
 	return s.app.Redis.Del(ctx, cacheKey(current.KeyHash)).Err()
 }
 
@@ -263,6 +268,7 @@ func (s *sAPIKey) Delete(ctx context.Context, id uint64) error {
 	}); err != nil {
 		return err
 	}
+	cluster.NotifyConfigChanged(ctx, "api_key", strconv.FormatUint(id, 10))
 	return s.app.Redis.Del(ctx, cacheKey(current.KeyHash)).Err()
 }
 

@@ -2,49 +2,45 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"net"
 	"net/http"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/pressly/goose/v3"
-	"github.com/redis/go-redis/v9"
-
 	"github.com/yunloli/aiferry/internal/config"
+	"github.com/yunloli/aiferry/internal/logic/cache"
 	"github.com/yunloli/aiferry/internal/logic/secret"
 )
 
 type sApp struct {
-	Config     config.App
-	Redis      *redis.Client
-	Secrets    *secret.Service
-	HTTP       *http.Client
+	Config  config.App
+	Redis   cache.Cache
+	Secrets *secret.Service
+	HTTP    *http.Client
+	// HTTPDirect 是不走环境代理的客户端，用于上游直连场景。
 	HTTPDirect *http.Client
 }
 
+// New 按角色装配进程依赖：主节点连 MySQL/Redis，子节点只开内置 SQLite。
 func New(ctx context.Context, cfg config.App) (*sApp, error) {
-	if err := migrate(cfg); err != nil {
-		return nil, err
-	}
-	if err := gdb.AddConfigNode("default", gdb.ConfigNode{Type: "mysql", Link: cfg.GoFrameMySQLLink()}); err != nil {
-		return nil, gerror.Wrap(err, "configure GoFrame database")
-	}
 	secrets, err := secret.New(cfg.MasterKey)
 	if err != nil {
 		return nil, err
 	}
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.RedisAddr,
-		Password: cfg.RedisPassword,
-		DB:       cfg.RedisDB,
-	})
-	if err = redisClient.Ping(ctx).Err(); err != nil {
-		return nil, gerror.Wrap(err, "connect Redis")
+	shared, direct := newHTTPClients()
+	service := &sApp{Config: cfg, Secrets: secrets, HTTP: shared, HTTPDirect: direct}
+	if cfg.IsWorker() {
+		err = service.openWorker(ctx)
+	} else {
+		err = service.openMaster(ctx)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return service, nil
+}
+
+// newHTTPClients 构造上游转发与直连两个客户端，二者共享连接池配置。
+func newHTTPClients() (*http.Client, *http.Client) {
 	transport := &http.Transport{
 		Proxy:               http.ProxyFromEnvironment,
 		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -60,27 +56,5 @@ func New(ctx context.Context, cfg config.App) (*sApp, error) {
 	}
 	directTransport := transport.Clone()
 	directTransport.Proxy = nil
-	return &sApp{
-		Config:     cfg,
-		Redis:      redisClient,
-		Secrets:    secrets,
-		HTTP:       &http.Client{Transport: transport},
-		HTTPDirect: &http.Client{Transport: directTransport},
-	}, nil
-}
-
-func migrate(cfg config.App) error {
-	db, err := sql.Open("mysql", cfg.MySQLDSN())
-	if err != nil {
-		return gerror.Wrap(err, "open migration database")
-	}
-	defer db.Close()
-	if err = db.Ping(); err != nil {
-		return gerror.Wrap(err, "connect migration database")
-	}
-	goose.SetDialect("mysql")
-	if err = goose.Up(db, cfg.MigrationsDir); err != nil {
-		return gerror.Wrap(err, "apply database migrations")
-	}
-	return nil
+	return &http.Client{Transport: transport}, &http.Client{Transport: directTransport}
 }

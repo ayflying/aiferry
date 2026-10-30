@@ -10,6 +10,7 @@ import (
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/cluster"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -90,6 +91,8 @@ func (s *sSystem) UpdateBase(ctx context.Context, input adminapi.BaseSettingsInp
 	}
 	_ = s.app.Redis.Del(ctx, baseCacheKey).Err()
 	_ = s.cacheBase(ctx, settings)
+	// 系统参数（如默认价格倍率、限额）会参与转发决策，变更后必须同步给子节点。
+	cluster.NotifyConfigChanged(ctx, "system_settings", baseSettingsKey)
 	return settings, nil
 }
 

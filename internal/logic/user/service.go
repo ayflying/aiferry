@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/app"
+	"github.com/yunloli/aiferry/internal/logic/cluster"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -235,6 +237,9 @@ func (s *sUser) UpdateBalance(ctx context.Context, id uint64, balance float64) (
 	if _, err := dao.Users.Ctx(ctx).Where(dao.Users.Columns().Id, id).Data(do.Users{Balance: balance}).Update(); err != nil {
 		return Profile{}, gerror.Wrap(err, "update user balance")
 	}
+	// 余额以主节点为权威值，充值或人工调整后需要立刻推给子节点，
+	// 否则子节点要等下一次快照才放行。
+	cluster.NotifyConfigChanged(ctx, "user_balance", strconv.FormatUint(id, 10))
 	return s.Profile(ctx, id)
 }
 

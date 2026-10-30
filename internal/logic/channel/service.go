@@ -14,6 +14,7 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/app"
 	"github.com/yunloli/aiferry/internal/logic/channelgroup"
 	"github.com/yunloli/aiferry/internal/logic/channeltype"
+	"github.com/yunloli/aiferry/internal/logic/cluster"
 	mailservice "github.com/yunloli/aiferry/internal/logic/mail"
 	"github.com/yunloli/aiferry/internal/logic/modelmetadata"
 	"github.com/yunloli/aiferry/internal/logic/pricingcache"
@@ -219,6 +220,9 @@ func nullableNumber(value *float64) any {
 }
 
 func (s *sChannel) invalidateRoutes(ctx context.Context) error {
+	// 渠道、凭据、模型、价格规则的所有写操作最终都会走到这里，因此在这里
+	// 顺带通知集群同步：主节点会递增配置版本并推送给子节点。
+	cluster.NotifyConfigChanged(ctx, "channel", "")
 	return s.app.Redis.Incr(ctx, "aiferry:routes:version").Err()
 }
 

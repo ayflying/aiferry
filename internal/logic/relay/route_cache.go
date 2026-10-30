@@ -40,6 +40,14 @@ func routeCacheKey(model string, version int64) string {
 
 // routeCacheVersion 读取当前路由版本号；读取失败视为 0，让请求走数据库
 // 路径并在下次写入时恢复缓存，不因 Redis 异常阻断转发。
+// InvalidateRouteCache 递增路由缓存版本号，让本节点已缓存的候选路由立即失效。
+//
+// 版本号方案保证旧键自然不可达，不需要遍历删除；TTL 只是兜底清理。
+func (s *sRelay) InvalidateRouteCache(ctx context.Context) error {
+	_, err := s.app.Redis.Incr(ctx, routeCacheVersionKey).Result()
+	return err
+}
+
 func (s *sRelay) routeCacheVersion(ctx context.Context) int64 {
 	version, err := s.app.Redis.Get(ctx, routeCacheVersionKey).Int64()
 	if err != nil {

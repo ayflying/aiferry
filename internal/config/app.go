@@ -53,6 +53,9 @@ type App struct {
 	// 2026-10-29 就因为该目录涨到 3.4GB 撑满宿主机磁盘导致生产中断。清理任务同时
 	// 执行「文件数」与「总体积」两条限额，从最旧的文件开始删。
 	PayloadLogMaxBytes int64
+	// Cluster 汇总角色与节点间通信参数。未设置任何集群变量时 Role 为 master，
+	// 行为与旧版单机形态一致。
+	Cluster Cluster
 }
 
 func Load() (App, error) {
@@ -69,6 +72,10 @@ func Load() (App, error) {
 	}
 	if errKey != nil || len(masterKey) != 32 {
 		return App{}, gerror.New("AIFERRY_MASTER_KEY must be a base64-encoded 32-byte key")
+	}
+	cluster, role, errCluster := LoadCluster()
+	if errCluster != nil {
+		return App{}, errCluster
 	}
 	app := App{
 		MySQLHost:              env("MYSQL_HOST", "127.0.0.1"),
@@ -92,14 +99,28 @@ func Load() (App, error) {
 		PayloadLogDir:          env("PAYLOAD_LOG_DIR", "/app/data/relay-payloads"),
 		PayloadLogMaxFiles:     envInt("PAYLOAD_LOG_MAX_FILES", 9999),
 		PayloadLogMaxBytes:     envInt64("PAYLOAD_LOG_MAX_BYTES", 512<<20),
+		Cluster:                cluster,
 	}
-	if strings.TrimSpace(app.MySQLPassword) == "" {
-		return App{}, gerror.New("MYSQL_PASSWORD is required")
-	}
-	if app.CasdoorEndpoint == "" || app.CasdoorClientID == "" || app.CasdoorClientSecret == "" {
-		return App{}, gerror.New("CASDOOR_ENDPOINT, CASDOOR_CLIENT_ID and CASDOOR_CLIENT_SECRET are required")
+	// 子节点不连 MySQL 与 Casdoor，这两组变量只对主节点强制。
+	if role == RoleMaster {
+		if strings.TrimSpace(app.MySQLPassword) == "" {
+			return App{}, gerror.New("MYSQL_PASSWORD is required")
+		}
+		if app.CasdoorEndpoint == "" || app.CasdoorClientID == "" || app.CasdoorClientSecret == "" {
+			return App{}, gerror.New("CASDOOR_ENDPOINT, CASDOOR_CLIENT_ID and CASDOOR_CLIENT_SECRET are required")
+		}
 	}
 	return app, nil
+}
+
+// IsWorker 判断当前进程是否为纯数据面子节点。
+func (c App) IsWorker() bool {
+	return c.Cluster.Role == RoleWorker
+}
+
+// IsMaster 判断当前进程是否为主节点（未设置角色时的缺省形态）。
+func (c App) IsMaster() bool {
+	return c.Cluster.Role != RoleWorker
 }
 
 func setStorageTimezone() error {

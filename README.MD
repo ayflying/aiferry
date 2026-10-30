@@ -56,6 +56,21 @@ AIFERRY_ADMIN_ROLES
 
 启用 `PAYLOAD_LOG_ENABLED` 时，relay 已尝试上游且所有候选失败的请求同样保存收发报文，包括最终尚未写出响应的 4xx 透传分支；关闭时不保存。保存沿用既有请求脱敏、原始上游错误响应与文件保留策略，不改写透传的状态、正文或协议，也不代表修复上游错误码（如 `11128`）。
 
+## 分布式集群
+
+一份 MySQL、一次配置多处生效：主节点持有数据库与管理端，子节点只跑 `/v1` 转发，
+用内置 SQLite 存配置镜像，按周期把用量回传给主节点。默认不启用——不设 `AIFERRY_ROLE`
+且不配 `AIFERRY_CLUSTER_SECRET` 时行为与单机部署完全一致。
+
+```text
+AIFERRY_CLUSTER_SECRET   # 双方一致，至少 32 字节
+AIFERRY_ROLE=worker      # 子节点设为 worker，主节点不设
+AIFERRY_MASTER_URL       # 子节点指向主节点
+AIFERRY_NODE_NAME        # 子节点唯一名
+```
+
+协议、同步策略、账务幂等与已知限制见 [docs/cluster.md](docs/cluster.md)。
+
 报文文件落在 `PAYLOAD_LOG_DIR`（默认 `/app/data/relay-payloads`，位于 `aiferry_data` 卷内），由每小时一次的清理任务从最旧的文件开始删除，同时受两条限额约束：`PAYLOAD_LOG_MAX_FILES`（默认 9999 个文件）与 `PAYLOAD_LOG_MAX_BYTES`（默认 512MB 总量）。两条都要配，只限文件数兜不住体积——单条报文含完整请求与响应，实测最大 1.2MB，9999 个文件能涨到 10GB 级；2026-10-29 该目录涨到 3.4GB 撑满宿主机磁盘，导致 `docker compose up` 失败、服务整站不可用。无论超限多少，清理都会保留最新一个文件，避免丢掉刚发生的故障现场。
 
 ## 本机基础检查

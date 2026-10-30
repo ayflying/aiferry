@@ -9,10 +9,11 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/redis/go-redis/v9"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/cache"
+	"github.com/yunloli/aiferry/internal/logic/cluster"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -31,10 +32,10 @@ type View struct {
 }
 
 type sChannelGroup struct {
-	redis *redis.Client
+	redis cache.Cache
 }
 
-func New(redisClient *redis.Client) *sChannelGroup { return &sChannelGroup{redis: redisClient} }
+func New(store cache.Cache) *sChannelGroup { return &sChannelGroup{redis: store} }
 
 // invalidateRoutes 递增路由缓存版本号。路由候选缓存中包含渠道分组 ID 与
 // 分组状态（channelGroupIDs），分组创建/更新/删除/成员变更后必须失效，
@@ -44,6 +45,7 @@ func (s *sChannelGroup) invalidateRoutes(ctx context.Context) {
 		return
 	}
 	_ = s.redis.Incr(ctx, "aiferry:routes:version").Err()
+	cluster.NotifyConfigChanged(ctx, "channel_group", "")
 }
 
 func (s *sChannelGroup) List(ctx context.Context) ([]View, error) {
