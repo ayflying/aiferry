@@ -29,14 +29,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('顶部菜单折叠入口', () => {
+describe('侧栏底部折叠入口', () => {
   it('收起、展开与底部入口共用状态，并记忆选择', async () => {
     const wrapper = mountShell()
-    const toggle = wrapper.get('.topbar button[aria-label="收起菜单"]')
+    const toggle = wrapper.get('.sidebar-toggle[aria-label="收起侧栏"]')
     await toggle.trigger('click')
     expect(wrapper.get('.sidebar').classes()).toContain('collapsed')
     expect(localStorage.getItem('aiferry-sidebar')).toBe('collapsed')
-    expect(wrapper.get('.topbar button[aria-label="展开菜单"]').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('.sidebar-toggle[aria-label="展开侧栏"]').attributes('aria-expanded')).toBe('false')
     await wrapper.get('.sidebar-toggle').trigger('click')
     expect(wrapper.get('.sidebar').classes()).not.toContain('collapsed')
     expect(localStorage.getItem('aiferry-sidebar')).toBe('expanded')
@@ -47,7 +47,7 @@ describe('顶部菜单折叠入口', () => {
     localStorage.setItem('aiferry-sidebar', 'collapsed')
     const wrapper = mountShell()
     expect(wrapper.get('.sidebar').classes()).toContain('collapsed')
-    expect(wrapper.find('.topbar button[aria-label="展开菜单"]').exists()).toBe(true)
+    expect(wrapper.find('.sidebar-toggle[aria-label="展开侧栏"]').exists()).toBe(true)
     wrapper.unmount()
   })
 

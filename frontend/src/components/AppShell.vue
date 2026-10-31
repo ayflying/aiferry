@@ -181,7 +181,7 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
         </template>
       </nav>
 
-      <button class="sidebar-toggle" type="button" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar">
+      <button class="sidebar-toggle" type="button" :aria-expanded="!collapsed" :title="collapsed ? '展开菜单' : '收起菜单'" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar">
         <ChevronRight v-if="collapsed" :size="18" />
         <ChevronLeft v-else :size="18" />
       </button>
@@ -215,10 +215,6 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
     <main class="main-area">
       <header class="topbar">
         <button v-if="mobile" class="icon-button" type="button" aria-label="打开导航" @click="mobileOpen = true">
-          <Menu :size="20" />
-        </button>
-        <!-- 桌面折叠入口放到顶部，避免底部按钮在矮屏或页面缩放后难以发现；复用同一状态。 -->
-        <button v-else class="icon-button" type="button" :aria-label="collapsed ? '展开菜单' : '收起菜单'" :title="collapsed ? '展开菜单' : '收起菜单'" :aria-expanded="!collapsed" @click="toggleSidebar">
           <Menu :size="20" />
         </button>
         <h1>{{ pageTitle }}</h1>
