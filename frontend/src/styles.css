@@ -122,11 +122,12 @@ button { color: inherit; }
 .login-foot { align-self: end; text-align: center; }
 @keyframes ferry-route { from { transform: translateX(0); } to { transform: translateX(138%); } }
 
-.page-stack { display: flex; flex-direction: column; gap: 18px; }
+.page-stack { display: flex; min-width: 0; flex-direction: column; gap: 18px; }
 .sticky-page-tabs > .el-tabs__header { position: sticky; top: 64px; z-index: 12; padding: 12px 0 10px; background: var(--canvas); }
-.page-toolbar { display: flex; min-height: 36px; align-items: center; gap: 10px; }
+/* 工具栏始终允许换行：筛选项再多也不能把「查询/刷新」挤出视口造成右侧超框 */
+.page-toolbar { display: flex; min-width: 0; min-height: 36px; align-items: center; flex-wrap: wrap; gap: 10px; }
 .page-toolbar .spacer { flex: 1; }
-.toolbar-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.toolbar-group { display: flex; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; gap: 8px; }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .section-heading h2 { margin: 0; font-size: 14px; font-weight: 680; }
 .section-heading span { color: var(--muted); font-size: 12px; }
@@ -138,7 +139,7 @@ button { color: inherit; }
 .metric-card .detail { margin-top: 9px; color: var(--muted); font-size: 11px; }
 
 .panel { border-top: 1px solid var(--line); padding-top: 16px; }
-.table-panel { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.table-panel { overflow: hidden; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
 .table-panel .el-table { --el-table-border-color: #e4e9ed; --el-table-header-bg-color: #f7f9fa; }
 .empty-state { display: grid; min-height: 220px; place-items: center; color: var(--muted); }
 .empty-state strong { display: block; margin-bottom: 5px; color: var(--ink); font-size: 14px; }
@@ -189,7 +190,7 @@ button { color: inherit; }
   .sticky-page-tabs > .el-tabs__header { top: 58px; }
   .page-content { padding: 16px 12px 30px; }
   .user-copy { display: none; }
-  .page-toolbar { align-items: flex-start; flex-wrap: wrap; }
+  .page-toolbar { align-items: flex-start; }
   .page-toolbar .spacer { display: none; }
   .toolbar-group { width: 100%; }
 }
