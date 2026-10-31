@@ -217,6 +217,10 @@ onUnmounted(() => window.removeEventListener('resize', updateViewport))
         <button v-if="mobile" class="icon-button" type="button" aria-label="打开导航" @click="mobileOpen = true">
           <Menu :size="20" />
         </button>
+        <!-- 桌面折叠入口放到顶部，避免底部按钮在矮屏或页面缩放后难以发现；复用同一状态。 -->
+        <button v-else class="icon-button" type="button" :aria-label="collapsed ? '展开菜单' : '收起菜单'" :title="collapsed ? '展开菜单' : '收起菜单'" :aria-expanded="!collapsed" @click="toggleSidebar">
+          <Menu :size="20" />
+        </button>
         <h1>{{ pageTitle }}</h1>
         <div class="topbar-spacer" />
         <el-dropdown trigger="click" @command="handleUserCommand">

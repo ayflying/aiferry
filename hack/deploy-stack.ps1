@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 # AiFerry 生产栈安全发布脚本。
 #
 # 背景（2026-10-29 事故复盘）：直接 PUT 栈更新时，Portainer 会先删除旧容器再创建新容器；
@@ -22,6 +22,8 @@ param(
   [string]$EndpointId = '10',
   [string]$HealthUrl = 'https://aiferry.yunloli.cn/healthz',
   [string]$ImageRepo = 'ghcr.io/ayflying/aiferry',
+  # 前端独立镜像保留稳定后端的 healthz 版本，必须额外校验运行容器镜像。
+  [string]$ExpectedBackendVersion = '',
   [string]$BackupDir = '',
   [int]$VerifyTimeoutSeconds = 600,
   [switch]$DryRun
@@ -32,6 +34,8 @@ Set-StrictMode -Version Latest
 
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "目标版本格式无效：$Version" }
 if ($BaselineVersion -notmatch '^\d+\.\d+\.\d+$') { throw "基线版本格式无效：$BaselineVersion" }
+if (-not $ExpectedBackendVersion) { $ExpectedBackendVersion = $Version }
+if ($ExpectedBackendVersion -notmatch '^\d+\.\d+\.\d+$') { throw '后端版本格式无效。' }
 
 $apiKey = [Environment]::GetEnvironmentVariable('PORTAINER_API_KEY', 'User')
 $apiBase = [Environment]::GetEnvironmentVariable('PORTAINER_URL', 'User')
@@ -130,6 +134,18 @@ function Write-DeploymentDetail {
   }
 }
 
+# 前端独立发布时 healthz 不变，不能仅凭旧进程仍返回 200 就误判发布成功。
+function Test-RunningTargetImage {
+  $response = Invoke-Portainer -Method GET -Path "/api/endpoints/$EndpointId/docker/containers/json" -TimeoutSeconds 60
+  if ($response.StatusCode -ne 200) { return $false }
+  $containers = @($response.Body | ConvertFrom-Json)
+  return @($containers | Where-Object {
+    $_.Image -eq "${ImageRepo}:$Version" -and $_.State -eq 'running' -and
+    $_.Labels.'com.docker.compose.service' -eq 'aiferry' -and
+    $_.Status -notmatch 'unhealthy|health: starting'
+  }).Count -gt 0
+}
+
 $live = Read-Health
 if (-not $live) { throw "无法读取线上健康状态（$HealthUrl），发布前必须先确认可用性。" }
 Write-Host "线上基线：version=$($live.version) revision=$($live.revision)"
@@ -189,7 +205,7 @@ $healthy = $false
 $seen = $null
 while ((Get-Date) -lt $deadline) {
   $seen = Read-Health
-  if ($seen -and $seen.status -eq 'ok' -and $seen.version -eq $Version) { $healthy = $true; break }
+  if ($seen -and $seen.status -eq 'ok' -and $seen.version -eq $ExpectedBackendVersion -and (Test-RunningTargetImage)) { $healthy = $true; break }
   $probe = Invoke-Portainer -Method GET -Path "/api/stacks/$StackId" -TimeoutSeconds 90
   if ($probe.StatusCode -eq 200) {
     $state = $probe.Body | ConvertFrom-Json
@@ -199,7 +215,7 @@ while ((Get-Date) -lt $deadline) {
 }
 
 if ($healthy) {
-  Write-Host "发布成功：version=$($seen.version) revision=$($seen.revision)"
+  Write-Host "发布成功：image=${ImageRepo}:$Version backend=$($seen.version) revision=$($seen.revision)"
   exit 0
 }
 
