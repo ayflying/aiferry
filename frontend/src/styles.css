@@ -32,17 +32,18 @@ button { color: inherit; }
 .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 
 /* 视口只分配一次宽度；长表格不能反向撑大主区域，页面滚动由右侧独立承担。 */
-.app-shell { display: flex; width: 100%; height: 100vh; height: 100dvh; overflow: hidden; }
+/* 用视口四边定位而非 vh：浏览器/宿主 CSS 缩放时，vh 可能把底部推出可见区域。 */
+.app-shell { position: fixed; inset: 0; display: flex; overflow: hidden; }
 .sidebar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 20;
   display: flex;
   flex: 0 0 224px;
   width: 224px;
-  height: 100%;
+  align-self: stretch;
   min-height: 0;
   overflow: hidden;
+  padding-bottom: 48px;
   flex-direction: column;
   color: #fff;
   background: var(--sidebar);
@@ -81,7 +82,8 @@ button { color: inherit; }
 .nav-subitem.active { color: #fff; background: #245f96; box-shadow: inset 0 0 0 1px rgb(159 195 238 / 24%), 0 1px 2px rgb(0 0 0 / 16%); }
 .nav-subitem.active::before { background: #d9efff; box-shadow: 0 0 0 3px var(--sidebar), 0 0 0 5px rgb(120 182 237 / 26%); }
 .collapsed .nav-item { justify-content: center; padding-inline: 8px; }
-.sidebar-toggle { display: grid; flex: 0 0 48px; width: 100%; height: 48px; place-items: center; border: 0; border-top: 1px solid rgb(255 255 255 / 10%); color: #b7c2cd; background: transparent; cursor: pointer; }
+/* 在侧栏内明确锚定底部，并为列表预留空间；不依赖 flex 内容高度挤出按钮。 */
+.sidebar-toggle { position: absolute; inset: auto 0 0; z-index: 1; display: grid; width: 100%; height: 48px; place-items: center; border: 0; border-top: 1px solid rgb(255 255 255 / 10%); color: #d8e2ed; background: var(--sidebar); cursor: pointer; }
 .sidebar-toggle:hover { color: #fff; background: rgb(255 255 255 / 6%); }
 
 @media (prefers-reduced-motion: reduce) {
