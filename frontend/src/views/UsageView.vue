@@ -13,7 +13,7 @@ import { useAuthStore } from '../stores/auth'
 import { currentTimeInDisplayZone, formatCost, formatNumber, formatPreciseCost, formatReasoningEffort, formatTokenSpeed, formatTime, formatUsageDuration } from '../lib/format'
 import { formatIPLocation } from '../lib/ip-location'
 import { streamLabel } from '../lib/usage'
-import { USAGE_COLUMN_WIDTHS, usageDetailHint, visibleUsageColumns, type UsageColumnKey } from '../lib/usage-columns'
+import { USAGE_COLUMN_WIDTHS, usageColumnLayout, usageDetailHint, type UsageColumnKey } from '../lib/usage-columns'
 import { useElementWidth } from '../composables/useElementWidth'
 
 const props = defineProps<{ userId?: number }>()
@@ -32,17 +32,21 @@ const usageItems = computed(() => page.value.items ?? [])
 const selectedUsage = ref<UsageLog>()
 const detailOpen = ref(false)
 // 表格可用宽度按面板实测：1280/1366 这类笔记本屏幕放不下全部列，
-// 由 visibleUsageColumns 决定加不加「用户」「流式」列，避免整页右侧超框。
+// 由 usageColumnLayout 决定「加不加可选列」和「必显列压到多宽」，
+// 压缩后总宽正好等于容器宽度，表格不会再产生横向溢出。
 const tablePanel = ref<HTMLElement>()
 const tablePanelWidth = useElementWidth(tablePanel)
-const visibleColumns = computed(() => visibleUsageColumns(Math.max(tablePanelWidth.value - 2, 0), { isAdmin: isAdmin.value }))
-// 列集合变化时重建表格，避免 ElTable 复用旧的固定列 DOM 导致列宽错位。
-const columnSignature = computed(() => [...visibleColumns.value].sort().join('-'))
-// 必显列都放不下时表格需要内部横向滚动：此时常驻显示横向滚动条，用户才知道右边还有内容。
-const columnsOverflow = computed(() => tablePanelWidth.value > 0
-  && [...visibleColumns.value].reduce((sum, key) => sum + USAGE_COLUMN_WIDTHS[key], 0) > tablePanelWidth.value - 2)
+const columnLayout = computed(() => usageColumnLayout(tablePanelWidth.value - 2, { isAdmin: isAdmin.value }))
+// 列宽变化时重建表格：ElTable 只在初始化时读取 min-width，复用旧 DOM 会导致列宽错位。
+const columnSignature = computed(() => columnLayout.value.columns
+  .map((key) => `${key}:${columnLayout.value.widths[key]}`)
+  .sort()
+  .join('-'))
+const visibleColumns = computed(() => new Set(columnLayout.value.columns))
+// 只有容器窄到连压缩下限都放不下时才需要表格内部横向滚动。
+const columnsOverflow = computed(() => columnLayout.value.overflow)
 function hasColumn(key: UsageColumnKey) { return visibleColumns.value.has(key) }
-function columnMinWidth(key: UsageColumnKey) { return USAGE_COLUMN_WIDTHS[key] }
+function columnMinWidth(key: UsageColumnKey) { return columnLayout.value.widths[key] ?? USAGE_COLUMN_WIDTHS[key] }
 
 async function load() {
   loading.value = true
