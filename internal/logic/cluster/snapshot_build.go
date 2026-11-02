@@ -78,6 +78,15 @@ func entityRow(item any, drop map[string]struct{}) map[string]any {
 			continue
 		}
 		field := value.Field(index)
+		// 指针数字的 nil 必须显式写 NULL，不能被 ORM 当作未提供字段过滤掉。
+		if field.Kind() == reflect.Pointer {
+			if field.IsNil() {
+				row[column] = gdb.Raw("NULL")
+			} else {
+				row[column] = field.Elem().Interface()
+			}
+			continue
+		}
 		// 零值时间必须是 SQL NULL，否则镜像会被 ORM 误判为软删除。
 		if field.Type() == reflect.TypeOf(time.Time{}) {
 			if field.Interface().(time.Time).IsZero() {

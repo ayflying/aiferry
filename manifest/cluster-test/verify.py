@@ -55,6 +55,89 @@ def check(cluster):
     print("PASS: master/worker ordinary + SSE; exact tokens, source attribution, usage flush, balance/API spend, no duplicate debit.")
 
 
+def policy(cluster):
+    """Prove snapshot-driven local authorization without generating chat usage."""
+    import urllib.error
+    import urllib.request
+    from cluster_test import HTTP, endpoint, wait_http
+
+    wait_http("master")
+    wait_http("worker")
+    key = json.loads(cluster.credentials.read_text(encoding="utf-8"))["api_key"]
+    original = cluster.sql("SELECT status,COALESCE(CAST(daily_spend_limit AS CHAR),'NULL') FROM api_keys WHERE id=990001").split("\t")
+    assert len(original) == 2 and original[0] in ("0", "1"), "Missing fixture API key"
+    original_limit = "NULL" if original[1] == "NULL" else str(Decimal(original[1]))
+    before = snapshot(cluster)
+
+    def models_status():
+        request = urllib.request.Request(endpoint("worker") + "/v1/models",
+            headers={"Authorization": "Bearer " + key})
+        try:
+            with HTTP.open(request, timeout=2) as response:
+                body = json.loads(response.read())
+                assert isinstance(body.get("data"), list), "Invalid worker model response"
+                return response.status
+        except urllib.error.HTTPError as error:
+            error.close()
+            return error.code
+
+    def expect_status(expected):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            status = models_status()
+            if status == expected:
+                return
+            time.sleep(0.25)
+        raise AssertionError(f"Worker local policy did not become HTTP {expected} within 15 seconds")
+
+    def update(status, limit):
+        cluster.sql(f"START TRANSACTION; UPDATE api_keys SET status={status},daily_spend_limit={limit} WHERE id=990001; "
+                    "UPDATE cluster_state SET config_version=config_version+1 WHERE id=1; COMMIT;")
+
+    def offline_expect(expected):
+        # A master outage after convergence rules out request-time master auth.
+        cluster.compose("stop", "master")
+        try:
+            assert models_status() == expected, "Worker authorization depends on live master"
+        finally:
+            cluster.compose("start", "master")
+            wait_http("master")
+
+    def mirrored_billing():
+        script = ("import sqlite3,json; c=sqlite3.connect('file:/worker/worker.db?mode=ro',uri=True); "
+                  "print(json.dumps([c.execute('SELECT balance FROM users WHERE id=990001').fetchone()[0],"
+                  "c.execute('SELECT spent_amount FROM api_keys WHERE id=990001').fetchone()[0]]))")
+        result = cluster.compose("run", "--rm", "--no-deps", "--volume",
+            "aiferry-cluster-test_worker-data:/worker:ro", "mock", "python", "-c", script)
+        return tuple(Decimal(str(value)).quantize(Decimal("0.00000001")) for value in json.loads(result))
+
+    try:
+        update(1, "NULL")
+        expect_status(200)
+        offline_expect(200)
+        update(0, "NULL")
+        expect_status(401)
+        offline_expect(401)
+        update(1, "NULL")
+        expect_status(200)
+        # NULL means unlimited; zero means reached even with no daily spend.
+        update(1, "0")
+        expect_status(429)
+        offline_expect(429)
+        update(1, "NULL")
+        expect_status(200)
+        deadline = time.monotonic() + 15
+        expected = snapshot(cluster)[1:3]
+        while mirrored_billing() != expected:
+            if time.monotonic() >= deadline:
+                raise AssertionError("Worker mirrored balance/spend mismatch")
+            time.sleep(0.5)
+        assert snapshot(cluster) == before, "Models-only policy test changed usage or billing"
+    finally:
+        update(original[0], original_limit)
+    print("PASS: worker snapshot status disable/restore, daily limit NULL/zero, local auth during master outage, mirrored balances; no chat usage.")
+
+
 def pending(cluster):
     script = "import sqlite3; c=sqlite3.connect('file:/worker/worker.db?mode=ro',uri=True); print(c.execute('SELECT COUNT(*) FROM usage_logs').fetchone()[0])"
     # Read-only mount of this project's worker volume; no host or production mounts.

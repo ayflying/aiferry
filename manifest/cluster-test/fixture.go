@@ -15,6 +15,18 @@ import (
 	"strings"
 )
 
+// Shared by initial seed and credential-free runtime policy repair. Neither path
+// resets user balances, API spend, usage history or existing credential material.
+const policySQL = `INSERT INTO users (id,name,email,role,status,balance) VALUES (990002,'Cluster fixture owner','cluster-owner@example.invalid','admin',1,0)
+ ON DUPLICATE KEY UPDATE role='admin',status=1,deleted_at=NULL;
+UPDATE channels SET created_by_user_id=990002 WHERE id=990001;
+INSERT INTO channel_groups (id,name,code,status) VALUES (990001,'Cluster billable fixture','cluster-test-billable',1)
+ ON DUPLICATE KEY UPDATE status=1,deleted_at=NULL;
+INSERT IGNORE INTO channel_group_members (channel_group_id,channel_id) VALUES (990001,990001);
+INSERT IGNORE INTO user_channel_groups (user_id,channel_group_id) VALUES (990001,990001);
+INSERT IGNORE INTO api_key_channel_groups (api_key_id,channel_group_id) VALUES (990001,990001);
+`
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cluster-test fixture:", err)
@@ -25,6 +37,10 @@ func main() {
 func run() error {
 	if os.Getenv("AIFERRY_ROLE") != "master" || os.Getenv("MYSQL_DATABASE") != "aiferry_cluster_test" {
 		return fmt.Errorf("refusing non-test database or non-master role")
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--repair-policy" {
+		fmt.Print("START TRANSACTION;\n", policySQL, "UPDATE cluster_state SET config_version=config_version+1 WHERE id=1;\nCOMMIT;\n")
+		return nil
 	}
 	var input struct {
 		APIKey      string `json:"api_key"`
@@ -74,8 +90,8 @@ INSERT INTO users (id,name,email,role,status,balance) VALUES (990001,'Cluster te
  ON DUPLICATE KEY UPDATE status=1,deleted_at=NULL;
 INSERT INTO api_keys (id,user_id,name,key_prefix,key_hash,key_cipher,status,spend_limit) VALUES (990001,990001,'Cluster test',%s,%s,%s,1,100)
  ON DUPLICATE KEY UPDATE key_hash=VALUES(key_hash),key_cipher=VALUES(key_cipher),status=1,deleted_at=NULL;
-INSERT INTO channels (id,created_by_user_id,name,type,base_url,api_key_cipher,status,priority,weight,auto_disable_enabled) VALUES (990001,990001,'Cluster mock','openai','http://mock:8090',%s,1,100,1,0)
- ON DUPLICATE KEY UPDATE created_by_user_id=990001,api_key_cipher=VALUES(api_key_cipher),base_url=VALUES(base_url),status=1,deleted_at=NULL;
+INSERT INTO channels (id,created_by_user_id,name,type,base_url,api_key_cipher,status,priority,weight,auto_disable_enabled) VALUES (990001,990002,'Cluster mock','openai','http://mock:8090',%s,1,100,1,0)
+ ON DUPLICATE KEY UPDATE created_by_user_id=990002,api_key_cipher=VALUES(api_key_cipher),base_url=VALUES(base_url),status=1,deleted_at=NULL;
 INSERT INTO channel_credentials (id,channel_id,key_prefix,key_hash,api_key_cipher,status) VALUES (990001,990001,'cluster-test',%s,%s,1)
  ON DUPLICATE KEY UPDATE key_hash=VALUES(key_hash),api_key_cipher=VALUES(api_key_cipher),status=1,deleted_at=NULL;
 INSERT INTO channel_models (id,channel_id,public_name,upstream_name,discovered,enabled,input_price,cached_input_price,output_price) VALUES (990001,990001,'cluster-test-model','mock-gpt',0,1,1,0.5,2)
@@ -83,8 +99,8 @@ INSERT INTO channel_models (id,channel_id,public_name,upstream_name,discovered,e
 INSERT INTO model_prices (public_name,billing_mode,input_price,cached_input_price,output_price) VALUES ('cluster-test-model','token',1,0.5,2)
  ON DUPLICATE KEY UPDATE billing_mode='token',input_price=1,cached_input_price=0.5,output_price=2,deleted_at=NULL;
 INSERT IGNORE INTO api_key_models (api_key_id,model_name) VALUES (990001,'cluster-test-model');
-UPDATE cluster_state SET config_version=config_version+1 WHERE id=1;
+%sUPDATE cluster_state SET config_version=config_version+1 WHERE id=1;
 COMMIT;
-`, quote(input.APIKey[:12]), quote(hash(input.APIKey)), quote(apiCipher), quote(upstream), quote(hash(input.UpstreamKey)), quote(upstream))
+`, quote(input.APIKey[:12]), quote(hash(input.APIKey)), quote(apiCipher), quote(upstream), quote(hash(input.UpstreamKey)), quote(upstream), policySQL)
 	return nil
 }

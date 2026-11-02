@@ -43,7 +43,7 @@ var snapshotTables = []tableSpec{
 		func(s *Snapshot) []entity.ChannelCredentials { return s.ChannelCredentials }),
 	table("channel_models", []string{"id"},
 		[]string{"health_score", "auto_disabled_at", "auto_disabled_reason", "auto_disabled_source"}, false,
-		func(s *Snapshot) []entity.ChannelModels { return s.ChannelModels }),
+		func(s *Snapshot) []SnapshotChannelModel { return s.ChannelModels }),
 	table("channel_model_credentials", []string{"id"},
 		[]string{"health_score", "cooldown_until", "last_error"}, false,
 		func(s *Snapshot) []entity.ChannelModelCredentials { return s.ChannelModelCredentials }),
@@ -54,7 +54,7 @@ var snapshotTables = []tableSpec{
 	table("channel_types", []string{"id"}, nil, true,
 		func(s *Snapshot) []entity.ChannelTypes { return s.ChannelTypes }),
 	table("model_prices", []string{"public_name"}, nil, true,
-		func(s *Snapshot) []entity.ModelPrices { return s.ModelPrices }),
+		func(s *Snapshot) []SnapshotModelPrice { return s.ModelPrices }),
 	table("model_price_rules", []string{"id"}, nil, true,
 		func(s *Snapshot) []entity.ModelPriceRules { return s.ModelPriceRules }),
 	table("price_sources", []string{"id"}, nil, true,
@@ -65,7 +65,7 @@ var snapshotTables = []tableSpec{
 	// 子节点在两次同步之间各自记账，最多滞后一个同步周期，这正是「允许一个
 	// 周期超支」的取舍；若把账务留在本地，主节点充值和管理端调整就永远传不下去。
 	table("api_keys", []string{"id"}, nil, false,
-		func(s *Snapshot) []entity.ApiKeys { return s.ApiKeys }),
+		func(s *Snapshot) []SnapshotAPIKey { return s.ApiKeys }),
 	table("api_key_models", []string{"api_key_id", "model_name"}, nil, true,
 		func(s *Snapshot) []entity.ApiKeyModels { return s.ApiKeyModels }),
 	table("api_key_channel_groups", []string{"api_key_id", "channel_group_id"}, nil, true,

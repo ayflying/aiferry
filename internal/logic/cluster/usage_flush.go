@@ -58,6 +58,9 @@ func (s *Service) flushUsage(ctx context.Context) error {
 	if err = decodeGzipJSON(response, &ack); err != nil {
 		return gerror.Wrap(err, "decode usage ack")
 	}
+	if ack.Accepted < 0 || ack.Accepted > len(rows) {
+		return gerror.New("cluster: invalid usage acknowledgment row count")
+	}
 	// 主节点已确认收下，这里才删本地行：宁可重复回传（主节点按批次号幂等），
 	// 也不能在未确认前删掉唯一的账务凭据。
 	if err = s.deleteUsageRows(ctx, ids); err != nil {

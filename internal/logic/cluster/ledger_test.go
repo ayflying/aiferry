@@ -92,6 +92,32 @@ func TestLedgerSyncFlushFailurePreservesLocalSnapshot(t *testing.T) {
 	}
 }
 
+func TestLedgerSyncPendingCountFailurePreservesLocalSnapshot(t *testing.T) {
+	var requests atomic.Int32
+	s := newLedgerWorker(t, func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		writeGzip(t, w, sampleSnapshot(6))
+	})
+	ctx := context.Background()
+	if _, err := s.database.Exec(ctx, "UPDATE users SET balance=-0.75 WHERE id=7"); err != nil {
+		t.Fatal(err)
+	}
+	// 只破坏临时 SQLite 的待回传表，模拟 COUNT 查询失败；不能当作空队列。
+	if _, err := s.database.Exec(ctx, "DROP TABLE usage_logs"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncOnce(ctx); err == nil {
+		t.Fatal("pending count failure must stop SyncOnce")
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("pending count failure made %d HTTP requests, want 0", got)
+	}
+	assertLedgerBalance(t, s, -0.75)
+	if version, err := s.localConfigVersion(ctx); err != nil || version != 5 {
+		t.Fatalf("failed pending count changed version=%d err=%v", version, err)
+	}
+}
+
 func TestLedgerSyncDrainsEveryBatchBeforeSignedRefresh(t *testing.T) {
 	var events []string
 	s := newLedgerWorker(t, func(w http.ResponseWriter, r *http.Request) {

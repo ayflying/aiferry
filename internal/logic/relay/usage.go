@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/shopspring/decimal"
@@ -14,6 +15,7 @@ import (
 	"github.com/yunloli/aiferry/internal/logic/apikey"
 	"github.com/yunloli/aiferry/internal/logic/cluster"
 	"github.com/yunloli/aiferry/internal/logic/usage"
+	"github.com/yunloli/aiferry/internal/logic/user"
 )
 
 var ErrUpstreamUsageNotBillable = gerror.New("上游响应未返回可计费的用量信息")
@@ -43,64 +45,87 @@ func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.A
 			recordError = streamTruncatedReason
 		}
 	}
+	// 只在需要扣款时开启跨表事务；纯日志路径仅有单条 INSERT，本身已原子。
+	// 元数据查询留在事务外，避免 SQLite 延迟事务先读后写升级锁。
+	ownChannel := candidate.CreatedByUserID != 0 && candidate.CreatedByUserID == key.UserId
+	location := s.location(clientIP)
+	healthScore := s.modelHealthScoreAtRequest(ctx, candidate)
 	var chargeErr error
-	if billable {
-		if cost == nil {
-			chargeErr = ErrUpstreamUsageNotBillable
-		} else if chargeable {
-			if s.channels != nil {
-				if err := s.channels.ApplyCredentialUsageCost(ctx, candidate.ChannelID, candidate.ChannelCredentialID, *cost); err != nil {
-					g.Log().Warningf(ctx, "apply channel %d usage cost: %v", candidate.ChannelID, err)
+	charged := false
+	persist := func(ctx context.Context) error {
+		if billable {
+			if cost == nil {
+				chargeErr = ErrUpstreamUsageNotBillable
+			} else if chargeable && !ownChannel {
+				if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
+					if !user.IsInsufficientBalance(err) {
+						return gerror.Wrap(err, "debit relay usage")
+					}
+					// 余额不足是业务拒绝，仍提交对应的 402 用量日志。
+					chargeErr = err
+				} else {
+					if err := apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64()); err != nil {
+						return gerror.Wrap(err, "add relay API key spend")
+					}
+					billingDetails.Charged = true
+					charged = true
 				}
 			}
-			// 自有渠道（创建者=当前密钥用户）：usage_logs 仍记 estimated_cost 供统计，
-			// 但不扣用户余额、不累计密钥消耗，billingDetails.Charged 保持 false。
-			ownChannel := candidate.CreatedByUserID != 0 && candidate.CreatedByUserID == key.UserId
-			if ownChannel {
-				g.Log().Debugf(ctx, "own channel %d usage %s: stats-only, cost=%s", candidate.ChannelID, requestID, cost)
-			} else if err := s.users.Debit(ctx, key.UserId, *cost); err != nil {
-				chargeErr = err
-			} else {
-				billingDetails.Charged = true
-				_ = apikey.New(s.app).AddSpend(ctx, key, cost.InexactFloat64())
-				if s.mail != nil {
-					s.mail.NotifyLowBalance(ctx, key.UserId)
-				}
+			if chargeErr != nil {
+				recordStatus = http.StatusPaymentRequired
+				recordError = chargeErr.Error()
 			}
 		}
-		if chargeErr != nil {
-			recordStatus = 402
-			recordError = chargeErr.Error()
+		recordError = detailedFailureLog(result, recordStatus, recordError, stream, attempts, time.Since(startedAt).Milliseconds())
+		if err := s.usage.Record(ctx, usage.RecordInput{
+			RequestID:            requestID,
+			UserID:               key.UserId,
+			APIKeyID:             key.Id,
+			ChannelID:            candidate.ChannelID,
+			ChannelCredentialID:  candidate.ChannelCredentialID,
+			Endpoint:             endpoint,
+			UpstreamEndpoint:     upstreamEndpoint,
+			ProtocolConversion:   result.protocolConversion,
+			ClientIP:             clientIP,
+			IPLocation:           location,
+			RequestedModel:       requestedModel,
+			UpstreamModel:        candidate.UpstreamName,
+			ReasoningEffort:      candidate.ReasoningEffort,
+			HealthScoreAtRequest: healthScore,
+			HTTPStatus:           recordStatus,
+			Stream:               stream,
+			Tokens:               result.tokens,
+			EstimatedCost:        cost,
+			BillingDetails:       billingDetails,
+			DurationMs:           time.Since(startedAt).Milliseconds(),
+			FirstTokenMs:         result.firstTokenMs,
+			Attempts:             attempts,
+			AttemptFlow:          result.attemptFlow,
+			ErrorMessage:         recordError,
+		}); err != nil {
+			return gerror.Wrap(err, "persist relay usage")
+		}
+		return nil
+	}
+	var err error
+	if billable && chargeable && !ownChannel && cost != nil && cost.IsPositive() {
+		err = dao.UsageLogs.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
+			return persist(txCtx)
+		})
+	} else {
+		err = persist(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	// 通知和渠道统计不是核心账本；提交之后才触发，不携带已结束的 txCtx。
+	if billable && chargeable && cost != nil && s.channels != nil {
+		if err := s.channels.ApplyCredentialUsageCost(ctx, candidate.ChannelID, candidate.ChannelCredentialID, *cost); err != nil {
+			g.Log().Warningf(ctx, "apply channel %d usage cost: %v", candidate.ChannelID, err)
 		}
 	}
-	recordError = detailedFailureLog(result, recordStatus, recordError, stream, attempts, time.Since(startedAt).Milliseconds())
-	if err := s.usage.Record(ctx, usage.RecordInput{
-		RequestID:            requestID,
-		UserID:               key.UserId,
-		APIKeyID:             key.Id,
-		ChannelID:            candidate.ChannelID,
-		ChannelCredentialID:  candidate.ChannelCredentialID,
-		Endpoint:             endpoint,
-		UpstreamEndpoint:     upstreamEndpoint,
-		ProtocolConversion:   result.protocolConversion,
-		ClientIP:             clientIP,
-		IPLocation:           s.location(clientIP),
-		RequestedModel:       requestedModel,
-		UpstreamModel:        candidate.UpstreamName,
-		ReasoningEffort:      candidate.ReasoningEffort,
-		HealthScoreAtRequest: s.modelHealthScoreAtRequest(ctx, candidate),
-		HTTPStatus:           recordStatus,
-		Stream:               stream,
-		Tokens:               result.tokens,
-		EstimatedCost:        cost,
-		BillingDetails:       billingDetails,
-		DurationMs:           time.Since(startedAt).Milliseconds(),
-		FirstTokenMs:         result.firstTokenMs,
-		Attempts:             attempts,
-		AttemptFlow:          result.attemptFlow,
-		ErrorMessage:         recordError,
-	}); err != nil {
-		g.Log().Errorf(ctx, "record usage %s: %v", requestID, err)
+	if charged && s.mail != nil {
+		s.mail.NotifyLowBalance(ctx, key.UserId)
 	}
 	return chargeErr
 }

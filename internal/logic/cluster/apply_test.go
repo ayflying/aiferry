@@ -54,13 +54,13 @@ func sampleSnapshot(version int64) *Snapshot {
 		ChannelCredentials: []entity.ChannelCredentials{
 			{Id: 10, ChannelId: 1, ApiKeyCipher: "cipher", Status: 1, CreatedAt: now, UpdatedAt: now},
 		},
-		ModelPrices: []entity.ModelPrices{
-			{PublicName: "gpt-4o", BillingMode: "token", InputPrice: 1, OutputPrice: 2, CreatedAt: now, UpdatedAt: now},
+		ModelPrices: []SnapshotModelPrice{
+			{PublicName: "gpt-4o", BillingMode: "token", InputPrice: floatPointer(1), OutputPrice: floatPointer(2), CreatedAt: now, UpdatedAt: now},
 		},
 		Users: []entity.Users{
 			{Id: 7, Name: "alice", Balance: 100, Status: 1, CreatedAt: now, UpdatedAt: now},
 		},
-		ApiKeys: []entity.ApiKeys{
+		ApiKeys: []SnapshotAPIKey{
 			{Id: 21, UserId: 7, Name: "默认", KeyHash: "hash", KeyPrefix: "sk-", Status: 1, CreatedAt: now, UpdatedAt: now},
 		},
 	}
@@ -99,9 +99,9 @@ func TestApplySnapshotWritesMirrorRows(t *testing.T) {
 func TestApplySnapshotPreservesLocalColumns(t *testing.T) {
 	database := openWorkerDatabase(t)
 	ctx := context.Background()
-	model := entity.ChannelModels{Id: 31, ChannelId: 1, PublicName: "gpt-4o", UpstreamName: "gpt-4o", Enabled: 1, CreatedAt: time.Now().Truncate(time.Millisecond)}
+	model := SnapshotChannelModel{Id: 31, ChannelId: 1, PublicName: "gpt-4o", UpstreamName: "gpt-4o", Enabled: 1, CreatedAt: time.Now().Truncate(time.Millisecond)}
 	snapshot := sampleSnapshot(3)
-	snapshot.ChannelModels = []entity.ChannelModels{model}
+	snapshot.ChannelModels = []SnapshotChannelModel{model}
 	if err := applySnapshot(ctx, database, snapshot); err != nil {
 		t.Fatalf("apply snapshot: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestApplySnapshotPreservesLocalColumns(t *testing.T) {
 		t.Fatalf("set local health score: %v", err)
 	}
 	next := sampleSnapshot(4)
-	next.ChannelModels = []entity.ChannelModels{model}
+	next.ChannelModels = []SnapshotChannelModel{model}
 	if err := applySnapshot(ctx, database, next); err != nil {
 		t.Fatalf("apply second snapshot: %v", err)
 	}

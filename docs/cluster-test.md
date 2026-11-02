@@ -3,10 +3,10 @@
 ## 边界与前提
 
 - 本方案不 SSH、不调用任何现有生产部署脚本、不连接线上，不改根 Dockerfile / VERSION。由 lead 在 dev-server 执行。
-- Compose project 固定 `aiferry-cluster-test`；自有 internal 网络、自有 MySQL 8.4 / Redis 7.4 / master / worker 数据卷。MySQL、Redis、Python mock 不发布端口；唯一 HTTP 入口为宿主 `127.0.0.1:39517`（master）、`127.0.0.1:39518`（worker）。不得改成 `0.0.0.0`，也不使用生产 `38517`。
+- Compose project 固定 `aiferry-cluster-test`；自有 internal 网络、自有 MySQL 8.4 / Redis 7.4 / master / worker 数据卷。MySQL、Redis、Python mock 不发布端口；声明的宿主 HTTP 入口仅为 `127.0.0.1:39517`（master）、`127.0.0.1:39518`（worker）。部分 Docker Engine 的 internal bridge 不生成宿主端口绑定：脚本会只读 inspect 本 project 的 master/worker 容器内部 IP，以宿主到该独立 bridge 的直连 HTTP 兼容；不改网络、不向外发布端口。不得改成 `0.0.0.0`，也不使用生产 `38517`。
 - master 与 worker 使用完全相同的完整后端验收镜像，不是根 Dockerfile 的 frontend-only 镜像。Casdoor 只填 `127.0.0.1:1` 测试占位，满足配置验证；不启动 Casdoor、不测试管理端登录。
 - 需要 Docker Engine / Compose v2（支持 `up --wait`）、Python 3.10+；脚本仅使用 Python 标准库。不用 pip、不安装宿主 MySQL/Redis。
-- 数据库由后端正常执行仓库 migrations 建立。种数 helper 仅生成独立测试 fixture：用户/APIKey/渠道/凭据/公开模型/价格，ID `990001`，模型 `cluster-test-model`，上游仅 `http://mock:8090`，初始余额 100。不导入生产数据。
+- 数据库由后端正常执行仓库 migrations 建立。种数 helper 仅生成独立测试 fixture：用户/APIKey/渠道/凭据/公开模型/价格，ID `990001`，模型 `cluster-test-model`，上游仅 `http://mock:8090`，初始余额 100。渠道所有者使用独立管理员 fixture 用户 `990002`；用户 `990001` 通过测试渠道分组授权消费非自有渠道，避免命中自有渠道免扣费策略。种数不修改生产鉴权或计费策略，不导入生产数据。
 
 ## CI 镜像协调（lead）
 
@@ -41,6 +41,17 @@ python3 manifest/cluster-test/cluster_test.py recovery
 Windows 本机可用 `python` 替换 `python3`。凭据默认保存到用户主目录 `.aiferry-cluster-test`（外部运行态，不是仓库 `.env`）；可在子命令前加 `--state-dir /专用外部路径`。脚本拒绝仓库内路径，防止 `Dockerfile.full` 的 `COPY . .` 意外带入运行态测试密钥；不读仓库 `.env`，屏蔽 Compose 隐式 `.env` 与 shell TEST/COMPOSE 插值覆盖。Unix 新文件权限 0600、目录 0700；Windows 由 lead 另核查 NTFS ACL，不共享该目录。
 
 `init` 不覆盖既有状态，避免旧 MySQL 卷与新密码不匹配。再次 `up` 可复用 fixture，保留余额与历史；`seed` 可单独重做，SQL 不重置余额或消费。SQL 直写后会重启 master 清缓存；worker 首次 bootstrap 前已完成种数。若对运行中的旧 worker 重新种数，等待配置同步后再验收。
+
+### 旧测试镜像的独立分组修复
+
+若旧 fixture 把消费用户设为渠道创建者，会产生有成本用量但免扣余额的正常业务行为。可先用更新后的 Go helper 输出**无密钥**策略修复 SQL，放到 `.git` 临时文件，由 lead 通过现有测试脚本的 `Cluster.sql()` 送入隔离 MySQL，再重启 master 并等待 worker 同步；不需要重建整镜像或读取主密钥。下一次 CI 会将 helper 正式打包。
+
+```sh
+AIFERRY_ROLE=master MYSQL_DATABASE=aiferry_cluster_test \
+  go run ./manifest/cluster-test/fixture.go --repair-policy > .git/cluster-test-repair.sql
+```
+
+此模式仅校验 role 和测试数据库名，不读取 stdin、MasterKey 或运行态凭据。SQL 幂等建立 owner `990002`、测试分组及用户/APIKey 关联，更新渠道创建者与配置版本；不清除历史、不重置余额、不改 APIKey 或上游密钥。脚本用 before 增量检查，不要求删除既有失败用量。
 
 ## 自动断言覆盖
 

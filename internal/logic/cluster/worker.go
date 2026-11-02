@@ -103,7 +103,14 @@ func (s *Service) SyncOnce(ctx context.Context) error {
 	defer s.ledgerMu.Unlock()
 	// 先结清全部本地明细，再替换权威余额；任何回传失败都保留旧镜像，
 	// 避免把尚未入主账的消费覆盖回去。记账路径共用ledgerMu，期间不会产生新明细。
-	for s.pendingRows(ctx) > 0 {
+	for {
+		pending, err := s.database.GetCount(ctx, "SELECT COUNT(*) FROM usage_logs")
+		if err != nil {
+			return gerror.Wrap(err, "count pending usage before snapshot")
+		}
+		if pending == 0 {
+			break
+		}
 		if err := s.flushUsage(ctx); err != nil {
 			return err
 		}

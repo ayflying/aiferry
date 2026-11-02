@@ -17,6 +17,18 @@ URLS = {"master": "http://127.0.0.1:39517", "worker": "http://127.0.0.1:39518"}
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+def endpoint(role):
+    # 新版Docker的internal网络可能不发布端口；宿主直接访问独立bridge容器IP，
+    # 不为测试放开出网，也不挂接现有网络。只读取IP，不读取容器环境变量。
+    result = subprocess.run(["docker", "inspect", "--format",
+        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+        f"{PROJECT}-{role}-1"], capture_output=True, check=True, text=True)
+    address = result.stdout.strip()
+    if not address or any(c not in "0123456789." for c in address):
+        raise RuntimeError("Invalid isolated container address")
+    return f"http://{address}:8080"
+
+
 class Cluster:
     def __init__(self, state_dir):
         self.state = Path(state_dir).expanduser().resolve()
@@ -84,7 +96,7 @@ class Cluster:
         self.seed()
         self.compose("up", "-d", "--wait", "worker")
         wait_http("worker")
-        print("Isolated cluster ready on loopback ports 39517 / 39518.")
+        print("Isolated cluster ready; verifier uses private bridge IPs (loopback publishing is Docker-version dependent).")
 
     def request(self, role, stream=False):
         key = json.loads(self.credentials.read_text(encoding="utf-8"))["api_key"]
@@ -92,9 +104,15 @@ class Cluster:
                 "stream": stream}
         if stream:
             body["stream_options"] = {"include_usage": True}
-        req = urllib.request.Request(URLS[role] + "/v1/chat/completions", json.dumps(body).encode(),
+        req = urllib.request.Request(endpoint(role) + "/v1/chat/completions", json.dumps(body).encode(),
             {"Authorization": "Bearer " + key, "Content-Type": "application/json"})
-        with HTTP.open(req, timeout=30) as response:
+        try:
+            response = HTTP.open(req, timeout=30)
+        except urllib.error.HTTPError as error:
+            # 仅独立fixture请求，无真实用户输入或上游密钥。
+            detail = error.read(2048).decode(errors="replace")
+            raise RuntimeError(f"{role} fixture HTTP {error.code}: {detail}") from None
+        with response:
             text = response.read().decode()
             assert response.status == 200
             if stream:
@@ -113,7 +131,7 @@ def wait_http(role, timeout=120):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with HTTP.open(URLS[role] + "/healthz", timeout=2) as response:
+            with HTTP.open(endpoint(role) + "/healthz", timeout=2) as response:
                 if response.status == 200:
                     return
         except (OSError, urllib.error.URLError):
@@ -128,7 +146,7 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init")
     init.add_argument("--image", required=True)
-    for command in ("up", "seed", "check", "recovery", "down", "destroy", "validate"):
+    for command in ("up", "seed", "check", "recovery", "policy", "down", "destroy", "validate"):
         sub.add_parser(command)
     args = parser.parse_args()
     cluster = Cluster(args.state_dir)
@@ -138,9 +156,9 @@ def main():
         cluster.up()
     elif args.command == "seed":
         cluster.seed()
-    elif args.command in ("check", "recovery"):
-        from verify import check, recovery
-        (check if args.command == "check" else recovery)(cluster)
+    elif args.command in ("check", "recovery", "policy"):
+        from verify import check, recovery, policy
+        {"check": check, "recovery": recovery, "policy": policy}[args.command](cluster)
     elif args.command == "validate":
         cluster.compose("config", "--quiet")
         print("Compose syntax/interpolation valid (no secrets printed).")

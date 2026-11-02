@@ -24,7 +24,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(404, {"error": {"message": "Not found"}})
 
     def do_POST(self):
-        if self.path != "/v1/chat/completions":
+        if self.path not in ("/v1/chat/completions", "/chat/completions"):
             return self.send_json(404, {"error": {"message": "Not found"}})
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         usage = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12,

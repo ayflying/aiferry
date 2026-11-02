@@ -2,12 +2,35 @@ package cluster
 
 import (
 	"github.com/yunloli/aiferry/internal/model/entity"
+	"time"
 )
 
 // UserChannelGroup 是快照协议中的用户分组授权关系（非生成数据库实体）。
 type UserChannelGroup struct {
 	UserId         uint64 `json:"userId" orm:"user_id"`
 	ChannelGroupId uint64 `json:"channelGroupId" orm:"channel_group_id"`
+}
+
+// SnapshotAPIKey 保留限额的 SQL NULL 语义；nil 表示不限额，显式 0 表示零限额。
+// 使用平铺 DTO 而非生成 entity，避免 ORM/JSON 和镜像字段反射忽略嵌入字段。
+type SnapshotAPIKey struct {
+	Id               uint64    `json:"id" orm:"id"`
+	UserId           uint64    `json:"userId" orm:"user_id"`
+	Name             string    `json:"name" orm:"name"`
+	KeyPrefix        string    `json:"keyPrefix" orm:"key_prefix"`
+	KeyHash          string    `json:"keyHash" orm:"key_hash"`
+	KeyCipher        string    `json:"keyCipher" orm:"key_cipher"`
+	Status           int       `json:"status" orm:"status"`
+	SpendLimit       *float64  `json:"spendLimit" orm:"spend_limit"`
+	DailySpendLimit  *float64  `json:"dailySpendLimit" orm:"daily_spend_limit"`
+	SpentAmount      float64   `json:"spentAmount" orm:"spent_amount"`
+	DailySpentAmount float64   `json:"dailySpentAmount" orm:"daily_spent_amount"`
+	DailySpendDate   time.Time `json:"dailySpendDate" orm:"daily_spend_date"`
+	ExpiresAt        time.Time `json:"expiresAt" orm:"expires_at"`
+	LastUsedAt       time.Time `json:"lastUsedAt" orm:"last_used_at"`
+	CreatedAt        time.Time `json:"createdAt" orm:"created_at"`
+	UpdatedAt        time.Time `json:"updatedAt" orm:"updated_at"`
+	DeletedAt        time.Time `json:"deletedAt" orm:"deleted_at"`
 }
 
 // Snapshot 是主节点下发给子节点的全量配置快照。
@@ -23,16 +46,16 @@ type Snapshot struct {
 
 	Channels                 []entity.Channels                 `json:"channels"`
 	ChannelCredentials       []entity.ChannelCredentials       `json:"channelCredentials"`
-	ChannelModels            []entity.ChannelModels            `json:"channelModels"`
+	ChannelModels            []SnapshotChannelModel            `json:"channelModels"`
 	ChannelModelCredentials  []entity.ChannelModelCredentials  `json:"channelModelCredentials"`
 	ChannelGroups            []entity.ChannelGroups            `json:"channelGroups"`
 	ChannelGroupMembers      []entity.ChannelGroupMembers      `json:"channelGroupMembers"`
 	ChannelTypes             []entity.ChannelTypes             `json:"channelTypes"`
-	ModelPrices              []entity.ModelPrices              `json:"modelPrices"`
+	ModelPrices              []SnapshotModelPrice              `json:"modelPrices"`
 	ModelPriceRules          []entity.ModelPriceRules          `json:"modelPriceRules"`
 	PriceSources             []entity.PriceSources             `json:"priceSources"`
 	SystemSettings           []entity.SystemSettings           `json:"systemSettings"`
-	ApiKeys                  []entity.ApiKeys                  `json:"apiKeys"`
+	ApiKeys                  []SnapshotAPIKey                  `json:"apiKeys"`
 	ApiKeyModels             []entity.ApiKeyModels             `json:"apiKeyModels"`
 	ApiKeyChannelGroups      []entity.ApiKeyChannelGroups      `json:"apiKeyChannelGroups"`
 	ApiKeyChannelCredentials []entity.ApiKeyChannelCredentials `json:"apiKeyChannelCredentials"`

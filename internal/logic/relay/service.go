@@ -279,7 +279,11 @@ func (s *sRelay) Handle(ctx context.Context, writer http.ResponseWriter, incomin
 						continue
 					}
 					if !isStream {
-						s.writeBufferedResponse(writer, http.StatusPaymentRequired, openAIError("insufficient_balance", recordErr.Error()), http.Header{"Content-Type": []string{"application/json"}})
+						status, code, message := http.StatusInternalServerError, "accounting_error", "用量记账失败"
+						if user.IsInsufficientBalance(recordErr) {
+							status, code, message = http.StatusPaymentRequired, "insufficient_balance", recordErr.Error()
+						}
+						s.writeBufferedResponse(writer, status, openAIError(code, message), http.Header{"Content-Type": []string{"application/json"}})
 					}
 					return nil
 				}

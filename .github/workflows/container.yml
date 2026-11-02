@@ -18,7 +18,8 @@ env:
 
 jobs:
   container:
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    # 隔离验收分支仅由cluster-test.yml构建，绝不覆盖正式版本/latest。
+    if: "!startsWith(github.ref, 'refs/heads/cluster-test/') && !contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
     environment: pro
     steps:
