@@ -39,6 +39,12 @@ func (s *Service) HandleUsage(ctx context.Context, node *Node, input usageBatch)
 	if err != nil {
 		return nil, err
 	}
+	// SQLite仅用于离线验收，其驱动的连接池不能提供MySQL的行级锁。
+	// 同服务串行写入，避免并发批次在BEGIN/COMMIT边界触发SQLITE_BUSY。
+	if s.database.GetConfig().Type == "sqlite" {
+		s.ledgerMu.Lock()
+		defer s.ledgerMu.Unlock()
+	}
 	ack := &usageAck{}
 	err = s.database.Transaction(ctx, func(txCtx context.Context, tx gdb.TX) error {
 		// 先通过唯一约束争抢批次。不能先做快照 SELECT：MySQL RR 下另一
