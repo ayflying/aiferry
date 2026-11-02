@@ -7,83 +7,52 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-
-	"github.com/yunloli/aiferry/internal/dao"
 )
 
-// buildSnapshot 从主库读取全量配置。查询故意使用 Unscoped：
-// 软删除行也要带上，子节点镜像据此才能感知「主节点删掉了这一行」。
-func buildSnapshot(ctx context.Context, version int64) (*Snapshot, error) {
-	snapshot := &Snapshot{
-		Version:     version,
-		GeneratedAt: time.Now().Format(time.RFC3339),
-	}
+// buildSnapshot 读取当前服务数据库的完整配置，包括软删除记录。
+// 显式绑定数据库防止生成 DAO 的默认连接与当前服务连接不一致。
+func buildSnapshot(ctx context.Context, database gdb.DB, version int64) (*Snapshot, error) {
+	snapshot := &Snapshot{Version: version, GeneratedAt: time.Now().Format(time.RFC3339)}
 	loaders := []struct {
-		name string
-		load func() error
+		name   string
+		order  string
+		target any
 	}{
-		{"channels", func() error { return dao.Channels.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.Channels) }},
-		{"channel_credentials", func() error {
-			return dao.ChannelCredentials.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.ChannelCredentials)
-		}},
-		{"channel_models", func() error {
-			return dao.ChannelModels.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.ChannelModels)
-		}},
-		{"channel_model_credentials", func() error {
-			return dao.ChannelModelCredentials.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.ChannelModelCredentials)
-		}},
-		{"channel_groups", func() error {
-			return dao.ChannelGroups.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.ChannelGroups)
-		}},
-		{"channel_group_members", func() error {
-			return dao.ChannelGroupMembers.Ctx(ctx).Order("channel_group_id", "channel_id").
-				Scan(&snapshot.ChannelGroupMembers)
-		}},
-		{"channel_types", func() error {
-			return dao.ChannelTypes.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.ChannelTypes)
-		}},
-		{"model_prices", func() error {
-			return dao.ModelPrices.Ctx(ctx).Unscoped().Order("public_name").Scan(&snapshot.ModelPrices)
-		}},
-		{"model_price_rules", func() error {
-			return dao.ModelPriceRules.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.ModelPriceRules)
-		}},
-		{"price_sources", func() error {
-			return dao.PriceSources.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.PriceSources)
-		}},
-		{"system_settings", func() error {
-			return dao.SystemSettings.Ctx(ctx).Order("setting_key").Scan(&snapshot.SystemSettings)
-		}},
-		{"api_keys", func() error {
-			return dao.ApiKeys.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.ApiKeys)
-		}},
-		{"api_key_models", func() error {
-			return dao.ApiKeyModels.Ctx(ctx).Order("api_key_id", "model_name").Scan(&snapshot.ApiKeyModels)
-		}},
-		{"api_key_channel_groups", func() error {
-			return dao.ApiKeyChannelGroups.Ctx(ctx).Order("api_key_id", "channel_group_id").
-				Scan(&snapshot.ApiKeyChannelGroups)
-		}},
-		{"api_key_channel_credentials", func() error {
-			return dao.ApiKeyChannelCredentials.Ctx(ctx).Order("api_key_id", "channel_id").
-				Scan(&snapshot.ApiKeyChannelCredentials)
-		}},
-		{"users", func() error {
-			return dao.Users.Ctx(ctx).Unscoped().Order("id").Scan(&snapshot.Users)
-		}},
+		{"channels", "id", &snapshot.Channels},
+		{"channel_credentials", "id", &snapshot.ChannelCredentials},
+		{"channel_models", "id", &snapshot.ChannelModels},
+		{"channel_model_credentials", "id", &snapshot.ChannelModelCredentials},
+		{"channel_groups", "id", &snapshot.ChannelGroups},
+		{"channel_group_members", "channel_group_id, channel_id", &snapshot.ChannelGroupMembers},
+		{"channel_types", "id", &snapshot.ChannelTypes},
+		{"model_prices", "public_name", &snapshot.ModelPrices},
+		{"model_price_rules", "id", &snapshot.ModelPriceRules},
+		{"price_sources", "id", &snapshot.PriceSources},
+		{"system_settings", "setting_key", &snapshot.SystemSettings},
+		{"api_keys", "id", &snapshot.ApiKeys},
+		{"api_key_models", "api_key_id, model_name", &snapshot.ApiKeyModels},
+		{"api_key_channel_groups", "api_key_id, channel_group_id", &snapshot.ApiKeyChannelGroups},
+		{"api_key_channel_credentials", "api_key_id, channel_id", &snapshot.ApiKeyChannelCredentials},
+		{"users", "id", &snapshot.Users},
+		{"user_channel_groups", "user_id, channel_group_id", &snapshot.UserChannelGroups},
 	}
-	for _, loader := range loaders {
-		if err := loader.load(); err != nil {
-			return nil, gerror.Wrapf(err, "load %s for cluster snapshot", loader.name)
+	// 全部配置读取共享一个事务视图；MySQL 默认 REPEATABLE READ 下，
+	// 用户余额与密钥消耗不会跨越并发账务提交读出不同批次的数据。
+	err := database.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
+		for _, loader := range loaders {
+			if err := tx.Model(loader.name).Ctx(ctx).Unscoped().Order(loader.order).Scan(loader.target); err != nil {
+				return gerror.Wrapf(err, "load %s for cluster snapshot", loader.name)
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, gerror.Wrap(err, "read consistent cluster snapshot")
 	}
 	return snapshot, nil
 }
 
-// entityRows 把实体切片转换成「列名 -> 值」的行集合，并剔除节点本地列。
-//
-// 为什么不直接用 gconv.Map：entity 上的 json tag 是驼峰命名，与数据库列名不一致；
-// 这里以 orm tag 为准，避免依赖 gconv 的 tag 优先级配置。
+// entityRows 用 orm tag 转换数据库字段，过滤节点本地维护列。
 func entityRows[T any](items []T, local []string) []map[string]any {
 	drop := make(map[string]struct{}, len(local))
 	for _, column := range local {
@@ -109,9 +78,7 @@ func entityRow(item any, drop map[string]struct{}) map[string]any {
 			continue
 		}
 		field := value.Field(index)
-		// 零值时间必须落成 SQL NULL：GoFrame 的软删除依赖 deleted_at IS NULL 判断，
-		// 写成 0001-01-01 会让镜像里所有行都被当成已删除。
-		// 这里用 Raw 而不是 nil：nil 会被 ORM 的数据过滤当成「未提供」而填成 0。
+		// 零值时间必须是 SQL NULL，否则镜像会被 ORM 误判为软删除。
 		if field.Type() == reflect.TypeOf(time.Time{}) {
 			if field.Interface().(time.Time).IsZero() {
 				row[column] = gdb.Raw("NULL")

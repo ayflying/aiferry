@@ -171,6 +171,56 @@ func TestApplySnapshotPrunesRowsRemovedOnMaster(t *testing.T) {
 	}
 }
 
+func TestApplySnapshotPrunesGlobalDifferenceOver800(t *testing.T) {
+	db := openWorkerDatabase(t)
+	ctx := context.Background()
+	snapshot := sampleSnapshot(1)
+	snapshot.Users = nil
+	for id := uint64(1); id <= 1705; id++ {
+		snapshot.Users = append(snapshot.Users, entity.Users{Id: id, Name: "user", Status: 1})
+	}
+	if err := applySnapshot(ctx, db, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Users = snapshot.Users[803:]
+	if err := applySnapshot(ctx, db, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if got := countRows(t, db, "users"); got != 902 {
+		t.Fatalf("got %d users, want 902", got)
+	}
+	stale, err := db.GetValue(ctx, "SELECT COUNT(*) FROM users WHERE id <= 803")
+	if err != nil || stale.Int() != 0 {
+		t.Fatalf("stale rows: %v %v", stale, err)
+	}
+	for _, id := range []int{804, 1204, 1604, 1705} {
+		found, err := db.GetValue(ctx, "SELECT id FROM users WHERE id = ?", id)
+		if err != nil || found.IsNil() {
+			t.Fatalf("retained id %d missing: %v", id, err)
+		}
+	}
+}
+
+func TestApplySnapshotUserGroupPolicy(t *testing.T) {
+	db := openWorkerDatabase(t)
+	snapshot := sampleSnapshot(1)
+	snapshot.UserChannelGroups = []UserChannelGroup{{UserId: 7, ChannelGroupId: 11}, {UserId: 7, ChannelGroupId: 12}}
+	if err := applySnapshot(context.Background(), db, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if got := countRows(t, db, "user_channel_groups"); got != 2 {
+		t.Fatalf("relations: %d", got)
+	}
+	snapshot.UserChannelGroups = []UserChannelGroup{{UserId: 7, ChannelGroupId: 13}}
+	if err := applySnapshot(context.Background(), db, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	value, err := db.GetValue(context.Background(), "SELECT channel_group_id FROM user_channel_groups WHERE user_id = 7")
+	if err != nil || value.Int() != 13 {
+		t.Fatalf("relation not replaced: %v %v", value, err)
+	}
+}
+
 func TestApplySnapshotStoresZeroTimeAsNull(t *testing.T) {
 	database := openWorkerDatabase(t)
 	ctx := context.Background()

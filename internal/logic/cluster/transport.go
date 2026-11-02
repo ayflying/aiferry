@@ -151,7 +151,7 @@ func signPathOf(path string) (string, error) {
 	if err != nil {
 		return "", gerror.Wrap(err, "parse cluster path")
 	}
-	return parsed.Path, nil
+	return parsed.RequestURI(), nil
 }
 
 // clusterNodeAddress 规范化节点上报地址：只允许 http/https，去掉结尾斜杠。

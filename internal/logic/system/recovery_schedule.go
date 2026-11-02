@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/redis/go-redis/v9"
+	"github.com/yunloli/aiferry/internal/logic/cache"
 )
 
 const (
@@ -167,7 +167,7 @@ func (s *sSystem) clearRecoverySchedule(ctx context.Context, target RecoveryTarg
 
 func (s *sSystem) loadRecoveryState(ctx context.Context, target RecoveryTarget, id uint64) (recoveryState, error) {
 	encoded, err := s.app.Redis.Get(ctx, recoveryStateKey(target, id)).Bytes()
-	if errors.Is(err, redis.Nil) {
+	if errors.Is(err, cache.ErrMiss) {
 		return recoveryState{}, nil
 	}
 	if err != nil {

@@ -2,8 +2,10 @@ package cluster
 
 import (
 	"context"
-	"fmt"
-	"strings"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sort"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -56,25 +58,40 @@ var fingerprintTables = []string{
 	"channels", "channel_credentials", "channel_models", "channel_model_credentials",
 	"channel_groups", "channel_group_members", "channel_types", "model_prices",
 	"model_price_rules", "price_sources", "system_settings", "api_keys",
-	"api_key_models", "api_key_channel_groups", "api_key_channel_credentials", "users",
+	"api_key_models", "api_key_channel_groups", "api_key_channel_credentials", "users", "user_channel_groups",
 }
 
-// Fingerprint 汇总每张配置表的行数与最后更新时间，得到可比较的指纹字符串。
+// Fingerprint 对配置表真实内容做稳定哈希，同计数的关系成员替换也能被发现。
 //
 // 这条兜底路径解决两类问题：新代码漏调用 Mark；运维直接改库。两者都不会递增
 // 版本号，子节点就会长期停在旧配置上。
 func (s *Service) Fingerprint(ctx context.Context) (string, error) {
-	parts := make([]string, 0, len(fingerprintTables))
+	digest := sha256.New()
 	for _, table := range fingerprintTables {
-		sql := fmt.Sprintf(
-			"SELECT CONCAT(COUNT(*), ':', COALESCE(UNIX_TIMESTAMP(MAX(updated_at)), -1)) FROM %s", table)
-		value, err := s.database.GetValue(ctx, sql)
+		rows, err := s.database.GetAll(ctx, "SELECT * FROM "+table)
 		if err != nil {
 			return "", gerror.Wrapf(err, "fingerprint table %s", table)
 		}
-		parts = append(parts, table+"="+value.String())
+		// 逐行确定性编码并排序，与数据库返回顺序无关，也不要求关系表有 updated_at。
+		encoded := make([]string, 0, len(rows))
+		for _, row := range rows {
+			data, err := json.Marshal(row.Map())
+			if err != nil {
+				return "", gerror.Wrapf(err, "encode fingerprint table %s", table)
+			}
+			encoded = append(encoded, string(data))
+		}
+		sort.Strings(encoded)
+		data, err := json.Marshal(struct {
+			Table string
+			Rows  []string
+		}{table, encoded})
+		if err != nil {
+			return "", gerror.Wrap(err, "encode config fingerprint")
+		}
+		_, _ = digest.Write(data)
 	}
-	return strings.Join(parts, "|"), nil
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 // WatchFingerprint 比较指纹与上次记录，变化时递增版本并返回 true。

@@ -3,13 +3,14 @@ package apikey
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/yunloli/aiferry/internal/dao"
+	"github.com/yunloli/aiferry/internal/logic/cache"
 	"github.com/yunloli/aiferry/internal/logic/secret"
 	"github.com/yunloli/aiferry/internal/model/do"
 )
@@ -35,27 +36,34 @@ func (s *sAPIKey) Authenticate(ctx context.Context, bearer string) (AuthKey, err
 
 func (s *sAPIKey) getCached(ctx context.Context, hash string) (AuthKey, error) {
 	var key AuthKey
-	value, err := s.app.Redis.Get(ctx, cacheKey(hash)).Result()
-	if err == nil {
-		if json.Unmarshal([]byte(value), &key) == nil {
-			return key, nil
+	// 子节点的 SQLite 是当前快照的权威数据；不复用跨快照的鉴权缓存，
+	// 避免密钥停用、额度及模型/分组权限变更后仍命中旧权限。查询始终留在本地。
+	useCache := !s.app.Config.IsWorker()
+	if useCache {
+		value, err := s.app.Redis.Get(ctx, cacheKey(hash)).Result()
+		if err == nil {
+			if json.Unmarshal([]byte(value), &key) == nil {
+				return key, nil
+			}
+		} else if !errors.Is(err, cache.ErrMiss) {
+			return AuthKey{}, gerror.Wrap(err, "read API key cache")
 		}
-	} else if err != redis.Nil {
-		return AuthKey{}, gerror.Wrap(err, "read API key cache")
 	}
 	columns := dao.ApiKeys.Columns()
-	if err = dao.ApiKeys.Ctx(ctx).
+	if err := dao.ApiKeys.Ctx(ctx).
 		Fields(columns.Id, columns.UserId, columns.Name, columns.KeyHash, columns.Status, columns.SpendLimit, columns.DailySpendLimit, columns.SpentAmount, columns.DailySpentAmount, columns.DailySpendDate, columns.ExpiresAt).
 		Where(columns.KeyHash, hash).
 		Scan(&key); err != nil {
 		return AuthKey{}, gerror.Wrap(err, "find API key")
 	}
 	if key.Id != 0 {
-		if err = s.populateAuthPolicy(ctx, &key); err != nil {
+		if err := s.populateAuthPolicy(ctx, &key); err != nil {
 			return AuthKey{}, err
 		}
-		encoded, _ := json.Marshal(key)
-		_ = s.app.Redis.Set(ctx, cacheKey(hash), encoded, cacheTTL).Err()
+		if useCache {
+			encoded, _ := json.Marshal(key)
+			_ = s.app.Redis.Set(ctx, cacheKey(hash), encoded, cacheTTL).Err()
+		}
 	}
 	return key, nil
 }

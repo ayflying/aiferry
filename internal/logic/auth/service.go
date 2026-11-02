@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/redis/go-redis/v9"
+	"github.com/yunloli/aiferry/internal/logic/cache"
 
 	authapi "github.com/yunloli/aiferry/api/auth"
 	"github.com/yunloli/aiferry/internal/logic/app"
@@ -43,11 +43,11 @@ type sAuth struct {
 }
 
 type SessionUser struct {
-	Id              uint64   `json:"id"`
-	IdentitySubject string   `json:"identitySubject"`
-	Name            string   `json:"name"`
-	Role            string   `json:"role"`
-	AvatarURL       string   `json:"avatarUrl"`
+	Id              uint64 `json:"id"`
+	IdentitySubject string `json:"identitySubject"`
+	Name            string `json:"name"`
+	Role            string `json:"role"`
+	AvatarURL       string `json:"avatarUrl"`
 }
 
 type oauthState struct {
@@ -70,20 +70,20 @@ type accountEnvelope struct {
 }
 
 type casdoorAccount struct {
-	Uid           string   `json:"uid"`
-	Id            string   `json:"id"`
-	Name          string   `json:"name"`
-	DisplayName   string   `json:"displayName"`
-	Avatar        string   `json:"avatar"`
-	Email         string   `json:"email"`
-	IsAdmin       bool     `json:"isAdmin"`
-	IsGlobalAdmin bool     `json:"isGlobalAdmin"`
-	IsForbidden   bool     `json:"isForbidden"`
-	IsDeleted     bool     `json:"isDeleted"`
-	Disabled      bool     `json:"disabled"`
-	Enabled       *bool    `json:"enabled"`
-	Status        string   `json:"status"`
-	DeletedTime   string   `json:"deletedTime"`
+	Uid           string `json:"uid"`
+	Id            string `json:"id"`
+	Name          string `json:"name"`
+	DisplayName   string `json:"displayName"`
+	Avatar        string `json:"avatar"`
+	Email         string `json:"email"`
+	IsAdmin       bool   `json:"isAdmin"`
+	IsGlobalAdmin bool   `json:"isGlobalAdmin"`
+	IsForbidden   bool   `json:"isForbidden"`
+	IsDeleted     bool   `json:"isDeleted"`
+	Disabled      bool   `json:"disabled"`
+	Enabled       *bool  `json:"enabled"`
+	Status        string `json:"status"`
+	DeletedTime   string `json:"deletedTime"`
 }
 
 func New(appSvc *app.Service, settingsSvc *system.Service) *sAuth {
@@ -145,7 +145,7 @@ func (s *sAuth) CompleteLogin(ctx context.Context, state, stateCookie, code stri
 	}
 	stored, err := s.app.Redis.GetDel(ctx, stateKey(state)).Bytes()
 	if err != nil {
-		if errors.Is(err, redis.Nil) {
+		if errors.Is(err, cache.ErrMiss) {
 			return SessionUser{}, "", "", ErrInvalidState
 		}
 		return SessionUser{}, "", "", gerror.Wrap(err, "read OAuth state")

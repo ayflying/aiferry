@@ -187,12 +187,12 @@ func waitFailedPayload(t *testing.T, dir, requestID string) payloadEntry {
 		data, err := os.ReadFile(filepath.Join(dir, requestID+".json"))
 		if err == nil {
 			var entry payloadEntry
-			if err := json.Unmarshal(data, &entry); err != nil {
-				t.Fatal(err)
+			if err := json.Unmarshal(data, &entry); err == nil {
+				return entry
 			}
-			return entry
+			// 文件存在不代表异步写入已完成，Windows还可能短暂持有文件锁。
 		}
-		if !os.IsNotExist(err) || time.Now().After(deadline) {
+		if time.Now().After(deadline) {
 			t.Fatalf("payload write did not complete: %v", err)
 		}
 		time.Sleep(5 * time.Millisecond)

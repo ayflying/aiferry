@@ -1,0 +1,39 @@
+name: 构建集群隔离测试镜像
+
+# 仅手动构建专用测试标签，绝不改写线上 latest 或正式版本镜像。
+on:
+  push:
+    branches: [cluster-test/243]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cluster-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 后端回归
+        run: go test ./...
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 构建完整后端和验收工具镜像
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          test_image="ghcr.io/${GITHUB_REPOSITORY,,}:cluster-test-${GITHUB_SHA::12}"
+          # 使用默认docker driver，第二阶段可以直接访问本机第一阶段镜像。
+          docker build --file Dockerfile.full --build-arg VERSION="$version" --build-arg VCS_REF="$GITHUB_SHA" --tag aiferry-cluster-test-backend:ci .
+          docker build --file Dockerfile.cluster-test --build-arg BACKEND_IMAGE=aiferry-cluster-test-backend:ci --tag "$test_image" .
+          docker push "$test_image"
+          printf '集群隔离测试镜像：`%s`\n' "$test_image" >> "$GITHUB_STEP_SUMMARY"

@@ -4,6 +4,12 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
+// UserChannelGroup 是快照协议中的用户分组授权关系（非生成数据库实体）。
+type UserChannelGroup struct {
+	UserId         uint64 `json:"userId" orm:"user_id"`
+	ChannelGroupId uint64 `json:"channelGroupId" orm:"channel_group_id"`
+}
+
 // Snapshot 是主节点下发给子节点的全量配置快照。
 //
 // 设计取舍：整包下发而不是增量补丁。配置表规模是「数十个渠道 + 千级模型」，
@@ -31,4 +37,5 @@ type Snapshot struct {
 	ApiKeyChannelGroups      []entity.ApiKeyChannelGroups      `json:"apiKeyChannelGroups"`
 	ApiKeyChannelCredentials []entity.ApiKeyChannelCredentials `json:"apiKeyChannelCredentials"`
 	Users                    []entity.Users                    `json:"users"`
+	UserChannelGroups        []UserChannelGroup                `json:"userChannelGroups"`
 }

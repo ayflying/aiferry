@@ -278,39 +278,6 @@ func (s *sUser) invalidateBalanceCache(ctx context.Context, id uint64) {
 	_ = s.app.Redis.Del(ctx, balanceCacheKey(id)).Err()
 }
 
-func (s *sUser) Debit(ctx context.Context, id uint64, amount decimal.Decimal) error {
-	if amount.LessThanOrEqual(decimal.Zero) {
-		return nil
-	}
-	amount = amount.Round(8)
-	if amount.LessThanOrEqual(decimal.Zero) {
-		return nil
-	}
-	return dao.Users.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
-		columns := dao.Users.Columns()
-		var account entity.Users
-		if err := dao.Users.Ctx(txCtx).
-			Fields(columns.Id, columns.Balance).
-			Where(columns.Id, id).
-			Lock(gdb.LockForUpdate).
-			Scan(&account); err != nil {
-			return gerror.Wrap(err, "lock user balance for debit")
-		}
-		balance := decimal.NewFromFloat(account.Balance).Round(8)
-		if account.Id == 0 || balance.LessThan(amount) {
-			return ErrInsufficientBalance
-		}
-		updatedBalance, _ := balance.Sub(amount).Round(8).Float64()
-		if _, err := dao.Users.Ctx(txCtx).
-			Where(columns.Id, account.Id).
-			Data(do.Users{Balance: updatedBalance}).
-			Update(); err != nil {
-			return gerror.Wrap(err, "debit user balance")
-		}
-		return nil
-	})
-}
-
 func (s *sUser) Credit(ctx context.Context, id uint64, amount decimal.Decimal) error {
 	amount = amount.Round(8)
 	if amount.LessThanOrEqual(decimal.Zero) {

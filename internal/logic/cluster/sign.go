@@ -98,7 +98,7 @@ func (s *Signer) Verify(ctx context.Context, r *http.Request, body []byte) (stri
 		return "", gerror.Newf("cluster: signature timestamp out of window (%s)", skew.Round(time.Second))
 	}
 	expected := s.signature(payload(node, timestamp, nonce,
-		r.Method, r.URL.Path, body))
+		r.Method, r.URL.RequestURI(), body))
 	if !hmac.Equal([]byte(expected), []byte(signature)) {
 		return "", gerror.New("cluster: signature mismatch")
 	}

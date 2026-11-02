@@ -11,7 +11,7 @@ import (
 // 这里刻意用接口而不是具体类型：user/apikey 逻辑包的类型未导出，
 // 而集群层只需要这两个方法。
 type balanceDebiter interface {
-	Debit(ctx context.Context, id uint64, amount decimal.Decimal) error
+	SettleUsage(ctx context.Context, id uint64, amount decimal.Decimal) error
 }
 
 // keySpender 是访问密钥消耗累计能力的窄接口。
@@ -30,7 +30,7 @@ func (b clusterBilling) Debit(ctx context.Context, userID uint64, amount decimal
 	if b.users == nil {
 		return nil
 	}
-	return b.users.Debit(ctx, userID, amount)
+	return b.users.SettleUsage(ctx, userID, amount)
 }
 
 func (b clusterBilling) AddSpend(ctx context.Context, apiKeyID uint64, amount float64) error {

@@ -114,9 +114,18 @@ func listModels(ctx context.Context, keyID uint64) ([]string, error) {
 }
 
 func listGroupIDs(ctx context.Context, keyID uint64) ([]uint64, error) {
-	ids := make([]uint64, 0)
-	err := dao.ApiKeyChannelGroups.Ctx(ctx).Fields(dao.ApiKeyChannelGroups.Columns().ChannelGroupId).Where(dao.ApiKeyChannelGroups.Columns().ApiKeyId, keyID).OrderAsc(dao.ApiKeyChannelGroups.Columns().ChannelGroupId).Scan(&ids)
-	return ids, gerror.Wrap(err, "list key group policy")
+	rows := make([]struct {
+		ChannelGroupID uint64 `orm:"channel_group_id"`
+	}, 0)
+	err := dao.ApiKeyChannelGroups.Ctx(ctx).Fields(dao.ApiKeyChannelGroups.Columns().ChannelGroupId).Where(dao.ApiKeyChannelGroups.Columns().ApiKeyId, keyID).OrderAsc(dao.ApiKeyChannelGroups.Columns().ChannelGroupId).Scan(&rows)
+	if err != nil {
+		return nil, gerror.Wrap(err, "list key group policy")
+	}
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ChannelGroupID)
+	}
+	return ids, nil
 }
 
 func normalizeModels(values []string) []string {

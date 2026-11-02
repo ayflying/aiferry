@@ -18,6 +18,13 @@ func (s *Service) FlushUsage(ctx context.Context) error {
 	if !s.Enabled() || !s.IsWorker() {
 		return nil
 	}
+	s.ledgerMu.Lock()
+	defer s.ledgerMu.Unlock()
+	return s.flushUsage(ctx)
+}
+
+// flushUsage 由持有 ledgerMu 的调用方使用，避免同步和后台回传交错。
+func (s *Service) flushUsage(ctx context.Context) error {
 	rows, err := s.pendingUsage(ctx, s.config.Cluster.BatchSize)
 	if err != nil || len(rows) == 0 {
 		return err
@@ -26,7 +33,7 @@ func (s *Service) FlushUsage(ctx context.Context) error {
 	for _, row := range rows {
 		ids = append(ids, row.Id)
 	}
-	batch := usageBatch{BatchID: newBatchID(), Rows: usageRows(rows)}
+	batch := usageBatch{BatchID: stableBatchID(rows), Rows: usageRows(rows)}
 	if batch.BatchID == "" {
 		return gerror.New("cluster: generate usage batch id")
 	}

@@ -12,12 +12,19 @@ import (
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/apikey"
+	"github.com/yunloli/aiferry/internal/logic/cluster"
 	"github.com/yunloli/aiferry/internal/logic/usage"
 )
 
 var ErrUpstreamUsageNotBillable = gerror.New("上游响应未返回可计费的用量信息")
 
 func (s *sRelay) record(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, clientIP, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) error {
+	return cluster.WithWorkerLedger(ctx, func(ledgerCtx context.Context) error {
+		return s.recordUsage(ledgerCtx, requestID, key, candidate, clientIP, endpoint, requestedModel, stream, attempts, startedAt, result)
+	})
+}
+
+func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.AuthKey, candidate Candidate, clientIP, endpoint, requestedModel string, stream bool, attempts int, startedAt time.Time, result attemptResult) error {
 	upstreamEndpoint := result.upstreamEndpoint
 	if upstreamEndpoint == "" {
 		upstreamEndpoint = endpoint

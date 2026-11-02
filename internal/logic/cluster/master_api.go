@@ -32,6 +32,23 @@ func (s *Service) Authorize(ctx context.Context, r *http.Request, body []byte) (
 	return s.FindNodeByName(ctx, name)
 }
 
+// AuthorizeMaster 校验主节点通知签名，不查询 worker 不具备的 cluster_nodes 表。
+// 这里只约束签名声明名，不能在共享 HMAC 密钥的节点之间建立密码学角色隔离。
+func (s *Service) AuthorizeMaster(ctx context.Context, r *http.Request, body []byte) error {
+	name, err := s.VerifiedNodeName(ctx, r, body)
+	if err != nil {
+		return err
+	}
+	expected := s.config.Cluster.MasterNodeName
+	if expected == "" {
+		expected = "master"
+	}
+	if !s.IsWorker() || name != expected {
+		return gerror.New("cluster: notify requires the configured master identity")
+	}
+	return nil
+}
+
 // RegisterInput 是注册接口除签名外的输入。
 type RegisterInput struct {
 	Name       string
@@ -75,15 +92,17 @@ func ParseQueryInt(raw string) (int64, error) {
 
 // ConfigPayload 返回给子节点的快照（gzip 压缩）。版本未变化时返回 notModified=true，
 // 让子节点用一条空响应结束同步，避免无谓的整包传输。
-func (s *Service) ConfigPayload(ctx context.Context, since int64) (payload []byte, notModified bool, err error) {
+func (s *Service) ConfigPayload(ctx context.Context, since int64, refresh ...bool) (payload []byte, notModified bool, err error) {
 	version, err := s.ConfigVersion(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	if since > 0 && since >= version {
+	// 余额/密钥消耗可在配置版本不变时变化，周期轮询可要求可信签名覆盖的强制刷新。
+	force := len(refresh) > 0 && refresh[0]
+	if since > 0 && since >= version && !force {
 		return nil, true, nil
 	}
-	snapshot, err := buildSnapshot(ctx, version)
+	snapshot, err := buildSnapshot(ctx, s.database, version)
 	if err != nil {
 		return nil, false, err
 	}

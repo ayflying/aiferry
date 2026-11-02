@@ -165,7 +165,10 @@ var (
 				s.BindHandler("GET:/auth/casdoor/callback", authCtrl.Callback)
 				s.Group("/api/admin", func(group *ghttp.RouterGroup) {
 					group.Middleware(authSvc.RequireUser)
-					clusterCtrl.RegisterAdmin(group)
+					group.Group("", func(admin *ghttp.RouterGroup) {
+						admin.Middleware(authSvc.RequireCurrentAdmin)
+						clusterCtrl.RegisterAdmin(admin)
+					})
 					adminCtrl.Register(group)
 				})
 			}

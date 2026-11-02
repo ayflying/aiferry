@@ -4,12 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/redis/go-redis/v9"
+	"github.com/yunloli/aiferry/internal/logic/cache"
 )
 
 // 上游密钥明文查看的邮箱验证门：
@@ -74,7 +75,7 @@ func (s *sMail) CredentialRevealVerified(ctx context.Context, userID uint64) (bo
 	}
 	ttl, err := s.app.Redis.TTL(ctx, credentialRevealVerifiedKey(userID)).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, cache.ErrMiss) {
 			return false, nil
 		}
 		return false, gerror.Wrap(err, "read credential reveal verification")
@@ -151,7 +152,7 @@ func (s *sMail) VerifyCredentialRevealCode(ctx context.Context, userID uint64, c
 	codeKey := credentialRevealCodeKey(userID)
 	stored, err := s.app.Redis.Get(ctx, codeKey).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, cache.ErrMiss) {
 			return gerror.New("验证码已过期，请重新获取")
 		}
 		return gerror.Wrap(err, "read credential reveal code")

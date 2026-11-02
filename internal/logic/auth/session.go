@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/redis/go-redis/v9"
+	"github.com/yunloli/aiferry/internal/logic/cache"
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/model/entity"
@@ -29,7 +29,7 @@ func (s *sAuth) Authenticate(ctx context.Context, token string) (SessionUser, er
 	}
 	encoded, err := s.app.Redis.Get(ctx, sessionKey(token)).Bytes()
 	if err != nil {
-		if errors.Is(err, redis.Nil) {
+		if errors.Is(err, cache.ErrMiss) {
 			return SessionUser{}, ErrUnauthorized
 		}
 		return SessionUser{}, gerror.Wrap(err, "read login session")

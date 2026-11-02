@@ -242,6 +242,12 @@ CREATE TABLE IF NOT EXISTS api_key_channel_credentials (
 	PRIMARY KEY (api_key_id, channel_id)
 );
 
+CREATE TABLE IF NOT EXISTS user_channel_groups (
+	user_id          INTEGER NOT NULL,
+	channel_group_id INTEGER NOT NULL,
+	PRIMARY KEY (user_id, channel_group_id)
+);
+
 -- 子节点本地待回传用量。主节点确认（ack）后即删除，本地不保留历史；
 -- id 自增序即回传游标，node_id 供主节点记账时标识来源节点。
 CREATE TABLE IF NOT EXISTS usage_logs (

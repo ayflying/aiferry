@@ -43,7 +43,7 @@ type Options struct {
 	Prices  PriceReloader
 	Client  *http.Client
 	Logger  Logger
-	// Billing 用于主节点对子节点回传的用量扣费；未注入时只入账不扣费。
+	// Billing 用于主节点结算已发生的子节点消费；缺失时拒绝收费明细，避免漏账。
 	Billing Billing
 	// OnConfigApplied 在子节点成功应用快照后调用，用于让路由缓存与价格缓存失效。
 	// 用回调而不是直接依赖 relay：集群层不应反向依赖转发层，否则会形成循环引用。
@@ -76,6 +76,8 @@ type Service struct {
 	pushPending bool
 	// 子节点侧：同一时刻只允许一次配置同步，避免推送与轮询并发写镜像。
 	syncMu sync.Mutex
+	// ledgerMu 串行化本地记账、回传与权威账务快照，防止覆盖未结算消费。
+	ledgerMu sync.Mutex
 }
 
 // New 构造集群服务。store 是节点内缓存（主节点 Redis、子节点 SQLite），

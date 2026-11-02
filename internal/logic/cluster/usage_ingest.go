@@ -1,63 +1,69 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/shopspring/decimal"
 )
 
-// usageIngestChunk 控制单次 SQL 的行数，避免超长语句。
-const usageIngestChunk = 200
-
-// HandleUsageBody 解析子节点上行载荷后入账，供内部接口直接调用。
+// HandleUsageBody 保留 JSON 数字精度，并拒绝未知顶层字段和尾随载荷。
 func (s *Service) HandleUsageBody(ctx context.Context, node *Node, body []byte) (*UsageAck, error) {
 	var input usageBatch
-	if err := json.Unmarshal(body, &input); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
 		return nil, gerror.Wrap(err, "decode usage batch")
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, gerror.New("cluster: trailing usage batch data")
 	}
 	return s.HandleUsage(ctx, node, input)
 }
 
-// HandleUsage 接收子节点回传的用量明细并完成记账。
-//
-// 幂等由两层保证：批次号唯一（同一批次重放直接返回），以及 request_id 唯一
-// （跨批次重复的行不会二次入账）。只有真正新插入的行才会触发扣费，
-// 因此子节点超时重试不会导致重复扣款。
+// HandleUsage 仅在整批明细和扣费均提交后 ACK。Accepted 始终是该批首次提交时
+// 真正新增的行数（重放也返回原值），不是收到的行数；重复 request_id 已经持久化，
+// 可以随本批确认。任何验证、写入、扣费或提交错误都不返回成功回执。
 func (s *Service) HandleUsage(ctx context.Context, node *Node, input usageBatch) (*usageAck, error) {
 	if node == nil || node.Id == 0 {
 		return nil, gerror.New("cluster: usage batch without node identity")
 	}
-	if len(input.Rows) == 0 {
-		return &usageAck{}, nil
+	rows, err := validateUsageBatch(input)
+	if err != nil {
+		return nil, err
 	}
 	ack := &usageAck{}
-	err := s.database.Transaction(ctx, func(txCtx context.Context, tx gdb.TX) error {
-		replayed, err := s.usageBatchSeen(txCtx, tx, node.Id, input.BatchID)
+	err = s.database.Transaction(ctx, func(txCtx context.Context, tx gdb.TX) error {
+		// 先通过唯一约束争抢批次。不能先做快照 SELECT：MySQL RR 下另一
+		// 事务提交后，旧快照仍可能看不到批次，造成误判或重复结算。
+		replayed, accepted, err := s.claimUsageBatch(txCtx, tx, node.Id, input.BatchID)
 		if err != nil {
 			return err
 		}
 		if replayed {
-			ack.Replayed = true
-			ack.Accepted = len(input.Rows)
+			ack.Replayed, ack.Accepted = true, accepted
 			return nil
 		}
-		rows, err := s.filterNewUsageRows(txCtx, tx, input.Rows)
+		inserted, err := s.insertUsageRows(txCtx, tx, node.Id, rows)
 		if err != nil {
 			return err
 		}
-		if len(rows) > 0 {
-			if err = s.insertUsageRows(txCtx, tx, node.Id, rows); err != nil {
-				return err
-			}
-			if err = s.billUsageRows(txCtx, rows); err != nil {
-				return err
-			}
+		if err = s.billUsageRows(txCtx, inserted); err != nil {
+			return err
 		}
-		ack.Accepted = len(rows)
-		return s.recordUsageBatch(txCtx, tx, node.Id, input.BatchID, len(input.Rows), len(rows))
+		ack.Accepted = len(inserted)
+		// 两张 wire 表无对应生成 DO；这里仅写内部固定列，绝不透传任意列。
+		_, err = tx.Ctx(txCtx).Model("cluster_usage_batches").
+			Where("node_id", node.Id).Where("batch_id", input.BatchID).
+			Data(gdb.Map{"rows": ack.Accepted}).Update()
+		return gerror.Wrap(err, "complete usage batch")
 	})
 	if err != nil {
 		return nil, err
@@ -65,152 +71,111 @@ func (s *Service) HandleUsage(ctx context.Context, node *Node, input usageBatch)
 	return ack, nil
 }
 
-// usageBatchSeen 判断该批次是否已经入账。
-func (s *Service) usageBatchSeen(ctx context.Context, tx gdb.TX, nodeID uint64, batchID string) (bool, error) {
-	if batchID == "" {
-		return false, nil
+func (s *Service) claimUsageBatch(ctx context.Context, tx gdb.TX, nodeID uint64, batchID string) (bool, int, error) {
+	_, err := tx.Ctx(ctx).Model("cluster_usage_batches").Data(gdb.Map{
+		"node_id": nodeID, "batch_id": batchID, "rows": 0,
+	}).Insert()
+	if err == nil {
+		return false, 0, nil
 	}
-	count, err := tx.Ctx(ctx).Model("cluster_usage_batches").
-		Where("node_id", nodeID).
-		Where("batch_id", batchID).
-		Count()
+	if !usageDuplicateError(err) {
+		return false, 0, gerror.Wrap(err, "claim usage batch")
+	}
+	model := tx.Ctx(ctx).Model("cluster_usage_batches").
+		Where("node_id", nodeID).Where("batch_id", batchID)
+	if s.database.GetConfig().Type == "mysql" {
+		// 当前读而非一致性快照读，看到唯一键等待者刚提交的 rows。
+		model = model.LockUpdate()
+	}
+	record, err := model.Fields("rows").One()
 	if err != nil {
-		return false, gerror.Wrap(err, "check usage batch")
+		return false, 0, gerror.Wrap(err, "read committed usage batch")
 	}
-	return count > 0, nil
+	if record.IsEmpty() {
+		return false, 0, gerror.New("cluster: conflicting usage batch is missing")
+	}
+	return true, record["rows"].Int(), nil
 }
 
-// recordUsageBatch 记录批次号，作为重放判定的依据。
-func (s *Service) recordUsageBatch(ctx context.Context, tx gdb.TX, nodeID uint64, batchID string, received, accepted int) error {
-	if batchID == "" {
-		return nil
-	}
-	// created_at 由数据库默认值生成，这里不手工写时间列。
-	if _, err := tx.Ctx(ctx).Model("cluster_usage_batches").Data(gdb.Map{
-		"node_id":  nodeID,
-		"batch_id": batchID,
-		"rows":     accepted,
-	}).Insert(); err != nil {
-		return gerror.Wrapf(err, "record usage batch (%d rows received)", received)
-	}
-	return nil
-}
-
-// filterNewUsageRows 过滤掉已经入过账的 request_id。
-func (s *Service) filterNewUsageRows(ctx context.Context, tx gdb.TX, rows []map[string]any) ([]map[string]any, error) {
-	requestIDs := make([]string, 0, len(rows))
+// 普通 INSERT 只忽略明确的唯一键冲突。MySQL INSERT IGNORE 还会把非重复的
+// 截断/非空等错误降级为 warning，不能用来判断账务写入是否成功。
+func (s *Service) insertUsageRows(ctx context.Context, tx gdb.TX, nodeID uint64, rows []map[string]any) ([]map[string]any, error) {
+	inserted := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		if value, ok := row["request_id"].(string); ok && value != "" {
-			requestIDs = append(requestIDs, value)
+		item := make(gdb.Map, len(row)+1)
+		for key, value := range row {
+			item[key] = value
 		}
-	}
-	if len(requestIDs) == 0 {
-		return rows, nil
-	}
-	existing := make(map[string]struct{}, len(requestIDs))
-	for start := 0; start < len(requestIDs); start += usageIngestChunk {
-		end := start + usageIngestChunk
-		if end > len(requestIDs) {
-			end = len(requestIDs)
-		}
-		values, err := tx.Ctx(ctx).Model("usage_logs").
-			Fields("request_id").
-			WhereIn("request_id", requestIDs[start:end]).
-			Array()
+		item["node_id"] = nodeID
+		result, err := tx.Ctx(ctx).Model("usage_logs").Data(item).Insert()
 		if err != nil {
-			return nil, gerror.Wrap(err, "check existing usage rows")
-		}
-		for _, value := range values {
-			existing[value.String()] = struct{}{}
-		}
-	}
-	filtered := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		id, _ := row["request_id"].(string)
-		if _, found := existing[id]; found {
-			continue
-		}
-		filtered = append(filtered, row)
-	}
-	return filtered, nil
-}
-
-// insertUsageRows 按节点归属写入明细，忽略并发插入造成的唯一键冲突。
-func (s *Service) insertUsageRows(ctx context.Context, tx gdb.TX, nodeID uint64, rows []map[string]any) error {
-	for start := 0; start < len(rows); start += usageIngestChunk {
-		end := start + usageIngestChunk
-		if end > len(rows) {
-			end = len(rows)
-		}
-		chunk := make([]map[string]any, 0, end-start)
-		for _, row := range rows[start:end] {
-			item := make(map[string]any, len(row)+1)
-			for key, value := range row {
-				item[key] = value
+			if usageDuplicateError(err) {
+				continue
 			}
-			item["node_id"] = nodeID
-			chunk = append(chunk, item)
+			return nil, gerror.Wrap(err, "insert usage row")
 		}
-		if _, err := tx.Ctx(ctx).Model("usage_logs").Data(chunk).InsertIgnore(); err != nil {
-			return gerror.Wrap(err, "insert usage rows")
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, gerror.Wrap(err, "read inserted usage row count")
 		}
+		if affected != 1 {
+			return nil, gerror.Newf("cluster: unexpected usage insert count %d", affected)
+		}
+		inserted = append(inserted, row)
 	}
-	return nil
+	return inserted, nil
 }
 
-// billUsageRows 对新增明细执行扣费，复用与转发侧完全相同的记账实现。
+func usageDuplicateError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1062
+	}
+	// SQLite 的扩展码：PRIMARY KEY / UNIQUE；不把所有 constraint 错误吞掉。
+	var sqliteErr interface{ Code() int }
+	return errors.As(err, &sqliteErr) && (sqliteErr.Code() == 1555 || sqliteErr.Code() == 2067)
+}
+
+// Billing 实现必须使用 txCtx 参与本事务；错误不能转为日志后继续 ACK。
 func (s *Service) billUsageRows(ctx context.Context, rows []map[string]any) error {
-	if s.billing == nil {
-		return nil
-	}
 	for _, row := range rows {
-		cost, ok := usageCostOf(row)
-		if !ok {
+		cost, charged := usageCostOf(row)
+		if !charged {
 			continue
 		}
-		userID := uintValueOf(row["user_id"])
-		if userID > 0 {
-			if err := s.billing.Debit(ctx, userID, cost); err != nil {
-				// 扣费失败不阻断入账：明细已经落库，运维可以按记录人工处理，
-				// 直接回滚会丢掉子节点已经删掉的唯一凭据。
-				s.clusterLogger().Warningf(ctx, "cluster: debit user %d: %v", userID, err)
-			}
+		if s.billing == nil {
+			return gerror.New("cluster: charged usage requires billing")
 		}
-		if apiKeyID := uintValueOf(row["api_key_id"]); apiKeyID > 0 {
-			if err := s.billing.AddSpend(ctx, apiKeyID, cost.InexactFloat64()); err != nil {
-				s.clusterLogger().Warningf(ctx, "cluster: add spend for key %d: %v", apiKeyID, err)
-			}
+		if cost.IsZero() {
+			continue
+		}
+		if err := s.billing.Debit(ctx, uintValueOf(row["user_id"]), cost); err != nil {
+			return gerror.Wrap(err, "debit usage user")
+		}
+		if err := s.billing.AddSpend(ctx, uintValueOf(row["api_key_id"]), cost.InexactFloat64()); err != nil {
+			return gerror.Wrap(err, "add usage key spend")
 		}
 	}
 	return nil
 }
 
-// usageCostOf 取出行内应扣金额。
-//
-// 只有 billing_details_json 里 charged 为 true 的行才扣费：自有渠道等
-// 只统计不扣费的行必须跳过，否则子节点的统计记录会被重复收费。
+// usageCostOf 只承认显式布尔 charged=true；缺失、损坏或类型错误绝不收费。
 func usageCostOf(row map[string]any) (decimal.Decimal, bool) {
-	amount, ok := floatValueOf(row["estimated_cost"])
-	if !ok || amount <= 0 {
+	charged, err := usageCharged(row["billing_details_json"])
+	if err != nil || !charged {
 		return decimal.Zero, false
 	}
-	raw, _ := row["billing_details_json"].(string)
-	if raw != "" {
-		var details struct {
-			Charged bool `json:"charged"`
-		}
-		if err := json.Unmarshal([]byte(raw), &details); err == nil && !details.Charged {
-			return decimal.Zero, false
-		}
+	cost, err := usageAmount(row["estimated_cost"])
+	if err != nil {
+		return decimal.Zero, false
 	}
-	return decimal.NewFromFloat(amount), true
+	return cost, true
 }
 
-// uintValueOf 把行内的数值列转成无符号整数，兼容驱动返回的各种数值类型。
 func uintValueOf(value any) uint64 {
-	parsed, ok := intValueOf(value)
-	if !ok || parsed < 0 {
+	parsed, err := usageUint(value)
+	if err != nil {
 		return 0
 	}
-	return uint64(parsed)
+	return parsed
 }

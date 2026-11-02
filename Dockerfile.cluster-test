@@ -1,0 +1,9 @@
+# CI first builds Dockerfile.full as a local, dedicated base image.
+ARG BACKEND_IMAGE=aiferry-cluster-test-backend:ci
+FROM golang:1.24-alpine AS fixture-build
+WORKDIR /fixture
+COPY manifest/cluster-test/fixture.go ./main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/cluster-test-fixture ./main.go
+
+FROM ${BACKEND_IMAGE}
+COPY --from=fixture-build /out/cluster-test-fixture /app/cluster-test-fixture

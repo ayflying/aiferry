@@ -72,6 +72,8 @@ var snapshotTables = []tableSpec{
 		func(s *Snapshot) []entity.ApiKeyChannelGroups { return s.ApiKeyChannelGroups }),
 	table("api_key_channel_credentials", []string{"api_key_id", "channel_id"}, nil, true,
 		func(s *Snapshot) []entity.ApiKeyChannelCredentials { return s.ApiKeyChannelCredentials }),
+	table("user_channel_groups", []string{"user_id", "channel_group_id"}, nil, true,
+		func(s *Snapshot) []UserChannelGroup { return s.UserChannelGroups }),
 	table("users", []string{"id"}, nil, false,
 		func(s *Snapshot) []entity.Users { return s.Users }),
 }

@@ -38,7 +38,7 @@ func newTestStore(t *testing.T) cache.Cache {
 func TestSignerVerifyAcceptsSignedRequest(t *testing.T) {
 	signer := NewSigner(strings.Repeat("k", 32), newTestStore(t))
 	body := []byte(`{"version":7}`)
-	headers, err := signer.Headers("worker-a", http.MethodPost, "/internal/cluster/config", body)
+	headers, err := signer.Headers("worker-a", http.MethodPost, "/internal/cluster/config?version=6", body)
 	if err != nil {
 		t.Fatalf("sign headers: %v", err)
 	}

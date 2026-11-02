@@ -1,0 +1,119 @@
+name: aiferry-cluster-test
+
+x-backend: &backend
+  image: ${CLUSTER_TEST_IMAGE:?Run cluster_test.py init --image with the CI test image}
+  pull_policy: never
+  restart: "no"
+  networks: [cluster-test]
+  healthcheck:
+    test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+    interval: 3s
+    timeout: 2s
+    retries: 40
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: "no"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TEST_MYSQL_ROOT_PASSWORD:?Initialize test credentials}
+      MYSQL_DATABASE: aiferry_cluster_test
+      MYSQL_USER: cluster_test
+      MYSQL_PASSWORD: ${TEST_MYSQL_PASSWORD:?Initialize test credentials}
+      TZ: Asia/Shanghai
+    volumes: [mysql-data:/var/lib/mysql]
+    networks: [cluster-test]
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql --protocol=TCP -h127.0.0.1 -u"$$MYSQL_USER" "$$MYSQL_DATABASE" -Nse "SELECT 1" >/dev/null']
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  redis:
+    image: redis:7.4-alpine
+    restart: "no"
+    environment:
+      REDIS_PASSWORD: ${TEST_REDIS_PASSWORD:?Initialize test credentials}
+    command: [sh, -ec, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis-data:/data]
+    networks: [cluster-test]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 3s
+      timeout: 2s
+      retries: 40
+
+  mock:
+    image: python:3.12-alpine
+    restart: "no"
+    command: [python, -B, /mock/mock_openai.py]
+    volumes: [./mock_openai.py:/mock/mock_openai.py:ro]
+    networks: [cluster-test]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz',timeout=2).read()"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  master:
+    <<: *backend
+    environment:
+      AIFERRY_ROLE: master
+      AIFERRY_NODE_NAME: master
+      AIFERRY_MASTER_NODE_NAME: master
+      AIFERRY_NODE_URL: http://master:8080
+      AIFERRY_MASTER_KEY: ${TEST_MASTER_KEY:?Initialize test credentials}
+      AIFERRY_CLUSTER_SECRET: ${TEST_CLUSTER_SECRET:?Initialize test credentials}
+      AIFERRY_FINGERPRINT_INTERVAL: "2"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: aiferry_cluster_test
+      MYSQL_USER: cluster_test
+      MYSQL_PASSWORD: ${TEST_MYSQL_PASSWORD:?Initialize test credentials}
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${TEST_REDIS_PASSWORD:?Initialize test credentials}
+      # Validation-only placeholders: no Casdoor service, login, DNS or egress.
+      CASDOOR_ENDPOINT: http://127.0.0.1:1
+      CASDOOR_CLIENT_ID: cluster-test-placeholder
+      CASDOOR_CLIENT_SECRET: cluster-test-placeholder-not-production
+      PAYLOAD_LOG_ENABLED: "false"
+      TZ: Asia/Shanghai
+    ports: ["127.0.0.1:39517:8080"]
+    volumes: [master-data:/app/data]
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      mock: {condition: service_healthy}
+
+  worker:
+    <<: *backend
+    environment:
+      AIFERRY_ROLE: worker
+      AIFERRY_NODE_NAME: test-worker
+      AIFERRY_MASTER_NODE_NAME: master
+      AIFERRY_NODE_URL: http://worker:8080
+      AIFERRY_MASTER_URL: http://master:8080
+      AIFERRY_MASTER_KEY: ${TEST_MASTER_KEY:?Initialize test credentials}
+      AIFERRY_CLUSTER_SECRET: ${TEST_CLUSTER_SECRET:?Initialize test credentials}
+      AIFERRY_SYNC_INTERVAL: "2"
+      AIFERRY_FLUSH_INTERVAL: "2"
+      AIFERRY_HEARTBEAT_INTERVAL: "2"
+      AIFERRY_BOOTSTRAP_REQUIRED: "true"
+      AIFERRY_DATA_DIR: /app/data
+      PAYLOAD_LOG_ENABLED: "false"
+      TZ: Asia/Shanghai
+    ports: ["127.0.0.1:39518:8080"]
+    volumes: [worker-data:/app/data]
+    depends_on:
+      master: {condition: service_healthy}
+      mock: {condition: service_healthy}
+
+networks:
+  cluster-test:
+    internal: true
+
+volumes:
+  mysql-data:
+  redis-data:
+  master-data:
+  worker-data:

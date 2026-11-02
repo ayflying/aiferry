@@ -83,7 +83,7 @@ func (c *Controller) Config(r *ghttp.Request) {
 		r.Response.WriteStatus(http.StatusBadRequest, err.Error())
 		return
 	}
-	payload, notModified, err := c.service.ConfigPayload(ctx, since)
+	payload, notModified, err := c.service.ConfigPayload(ctx, since, r.URL.Query().Get("refresh") == "1")
 	if err != nil {
 		g.Log().Warningf(ctx, "cluster: build config snapshot: %v", err)
 		r.Response.WriteStatus(http.StatusInternalServerError, "failed to build config snapshot")
@@ -143,7 +143,7 @@ func (c *Controller) Usage(r *ghttp.Request) {
 func (c *Controller) Notify(r *ghttp.Request) {
 	ctx := r.Context()
 	body := r.GetBody()
-	if _, err := c.service.Authorize(ctx, r.Request, body); err != nil {
+	if err := c.service.AuthorizeMaster(ctx, r.Request, body); err != nil {
 		writeUnauthorized(r, err)
 		return
 	}

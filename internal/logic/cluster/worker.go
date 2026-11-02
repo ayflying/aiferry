@@ -61,6 +61,7 @@ func (s *Service) EnsureRegistered(ctx context.Context) error {
 	body, err := json.Marshal(registerRequest{
 		Name:    s.NodeName(),
 		Version: buildinfo.RuntimeVersion(),
+		Address: s.config.Cluster.NodeURL,
 	})
 	if err != nil {
 		return gerror.Wrap(err, "encode cluster register request")
@@ -98,11 +99,21 @@ func (s *Service) SyncOnce(ctx context.Context) error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
+	s.ledgerMu.Lock()
+	defer s.ledgerMu.Unlock()
+	// 先结清全部本地明细，再替换权威余额；任何回传失败都保留旧镜像，
+	// 避免把尚未入主账的消费覆盖回去。记账路径共用ledgerMu，期间不会产生新明细。
+	for s.pendingRows(ctx) > 0 {
+		if err := s.flushUsage(ctx); err != nil {
+			return err
+		}
+	}
 	local, err := s.localConfigVersion(ctx)
 	if err != nil {
 		return err
 	}
-	path := "/config?version=" + formatInt(local)
+	// 配置版本不一定因消费递增，仍需周期刷新权威账务，不能一直返回304。
+	path := "/config?version=" + formatInt(local) + "&refresh=1"
 	response, err := s.call(ctx, s.config.Cluster.MasterURL, path, nil, "")
 	if err != nil {
 		return gerror.Wrap(err, "fetch cluster config")
@@ -339,7 +350,7 @@ func (s *Service) verifyMasterKey(ctx context.Context) error {
 		return nil
 	}
 	cipher, err := s.database.GetValue(ctx,
-		"SELECT secret_encrypted FROM channel_credentials WHERE secret_encrypted <> '' LIMIT 1")
+		"SELECT api_key_cipher FROM channel_credentials WHERE api_key_cipher <> '' LIMIT 1")
 	if err != nil {
 		return gerror.Wrap(err, "read credential for key verification")
 	}

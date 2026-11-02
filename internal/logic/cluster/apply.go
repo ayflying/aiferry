@@ -6,6 +6,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/util/gconv"
 )
 
 // mirrorInsertChunk 是单条 upsert 语句携带的行数上限，控制 SQL 长度与参数个数。
@@ -72,9 +73,20 @@ func pruneRows(ctx context.Context, tx gdb.TX, spec tableSpec, rows []map[string
 		}
 		return nil
 	}
-	values := make([]any, 0, len(rows))
+	// 先计算全局差集，再对待删主键做正向 IN 分块；不能对快照的每块分别 NOT IN。
+	keep := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		values = append(values, row[key])
+		keep[gconv.String(row[key])] = struct{}{}
+	}
+	existing, err := tx.Ctx(ctx).GetAll("SELECT " + key + " FROM " + spec.name)
+	if err != nil {
+		return gerror.Wrapf(err, "read mirror keys from %s", spec.name)
+	}
+	values := make([]any, 0)
+	for _, row := range existing {
+		if _, found := keep[row[key].String()]; !found {
+			values = append(values, row[key].Val())
+		}
 	}
 	const pruneChunk = 400
 	for start := 0; start < len(values); start += pruneChunk {
@@ -84,7 +96,7 @@ func pruneRows(ctx context.Context, tx gdb.TX, spec tableSpec, rows []map[string
 		}
 		chunk := values[start:end]
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
-		statement := "DELETE FROM " + spec.name + " WHERE " + key + " NOT IN (" + placeholders + ")"
+		statement := "DELETE FROM " + spec.name + " WHERE " + key + " IN (" + placeholders + ")"
 		if _, err := tx.Ctx(ctx).Exec(statement, chunk...); err != nil {
 			return gerror.Wrapf(err, "prune stale rows from %s", spec.name)
 		}

@@ -29,15 +29,21 @@ const nodeColumns = "id, name, address, version, config_version, pending_rows, l
 	"last_heartbeat_at, last_sync_at, status, created_at, updated_at"
 
 // RegisterNode 注册或更新子节点。同名节点重复注册视为同一次加入（例如容器重建），
-// 地址与版本会被刷新，状态恢复为启用。
+// 地址与版本会被刷新；已吊销的同名墓碑永久保留，禁止自助重新加入。
 func (s *Service) RegisterNode(ctx context.Context, name, address, version string) (*Node, error) {
+	// 唯一名称永不回收。并发吊销发生在更新前/后都不会把 status 改回 1。
+	now := time.Now()
 	if _, err := s.database.Exec(ctx,
 		`INSERT INTO cluster_nodes(name, address, version, last_heartbeat_at)
-		 VALUES(?, ?, ?, NOW(3))
-		 ON DUPLICATE KEY UPDATE address = VALUES(address), version = VALUES(version),
-		   last_heartbeat_at = NOW(3), status = 1`,
-		name, truncate(address, 255), truncate(version, 32)); err != nil {
+		 SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM cluster_nodes WHERE name = ?)`,
+		name, truncate(address, 255), truncate(version, 32), now, name); err != nil {
 		return nil, gerror.Wrap(err, "register cluster node")
+	}
+	if _, err := s.database.Exec(ctx,
+		`UPDATE cluster_nodes SET address = ?, version = ?, last_heartbeat_at = ?
+		 WHERE name = ? AND status = 1`,
+		truncate(address, 255), truncate(version, 32), now, name); err != nil {
+		return nil, gerror.Wrap(err, "refresh cluster node")
 	}
 	return s.FindNodeByName(ctx, name)
 }
@@ -86,9 +92,9 @@ func (s *Service) ActiveNodes(ctx context.Context) ([]Node, error) {
 	return nodes, nil
 }
 
-// DeleteNode 吊销并移除节点。子节点随后会用失效身份注册，需要重新配置密钥。
+// DeleteNode 吊销节点并保留同名墓碑，避免持有旧密钥的节点自助重新注册。
 func (s *Service) DeleteNode(ctx context.Context, id uint64) error {
-	if _, err := s.database.Exec(ctx, "DELETE FROM cluster_nodes WHERE id = ?", id); err != nil {
+	if _, err := s.database.Exec(ctx, "UPDATE cluster_nodes SET status = 0 WHERE id = ?", id); err != nil {
 		return gerror.Wrap(err, "delete cluster node")
 	}
 	return nil

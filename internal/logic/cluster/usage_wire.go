@@ -2,7 +2,11 @@ package cluster
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"fmt"
+
 	"encoding/hex"
+	"github.com/gogf/gf/v2/database/gdb"
 
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
@@ -39,7 +43,25 @@ func newBatchID() string {
 	return hex.EncodeToString(buffer)
 }
 
+// stableBatchID 根据有序出站行生成重试稳定的批次标识，重启后同一批仍可重放。
+func stableBatchID(rows []entity.UsageLogs) string {
+	hash := sha256.New()
+	for _, row := range rows {
+		fmt.Fprintf(hash, "%d:%s\n", row.Id, row.RequestId)
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 // usageRows 把本地用量明细转成可上行的行集合。
 func usageRows(rows []entity.UsageLogs) []map[string]any {
-	return entityRows(rows, usageRowReservedFields)
+	items := entityRows(rows, usageRowReservedFields)
+	for _, item := range items {
+		// gdb.Raw只能用于本机SQL，不能把字符串NULL作为时间发给主节点。
+		for column, value := range item {
+			if _, raw := value.(gdb.Raw); raw {
+				delete(item, column)
+			}
+		}
+	}
+	return items
 }

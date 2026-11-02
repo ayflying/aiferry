@@ -25,6 +25,11 @@ type Cluster struct {
 	Role Role
 	// NodeName 是节点在管理端展示的名字，worker 缺省取主机名。
 	NodeName string
+	// NodeURL 是 worker 主动上报的回调基地址；为空时主节点按来源 IP 推断。
+	NodeURL string
+	// MasterNodeName 是 worker 接受通知时要求的签名声明名，默认 master。
+	// 共享 HMAC 密钥并不隔离角色：所有持密钥节点仍有能力伪造此名称。
+	MasterNodeName string
 	// MasterURL 是 worker 访问主节点集群接口的基地址，例如 http://aiferry-master:8080。
 	MasterURL string
 	// Secret 是节点间 HMAC 签名密钥。主节点未配置时集群能力关闭（单机兼容），
@@ -71,6 +76,8 @@ func LoadCluster() (Cluster, Role, error) {
 	cluster := Cluster{
 		Role:                role,
 		NodeName:            strings.TrimSpace(os.Getenv("AIFERRY_NODE_NAME")),
+		NodeURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("AIFERRY_NODE_URL")), "/"),
+		MasterNodeName:      strings.TrimSpace(env("AIFERRY_MASTER_NODE_NAME", "master")),
 		MasterURL:           strings.TrimRight(env("AIFERRY_MASTER_URL", ""), "/"),
 		Secret:              strings.TrimSpace(os.Getenv("AIFERRY_CLUSTER_SECRET")),
 		SyncInterval:        envSeconds("AIFERRY_SYNC_INTERVAL", 60),
@@ -83,6 +90,18 @@ func LoadCluster() (Cluster, Role, error) {
 		OutboxMaxRows:       envInt("AIFERRY_OUTBOX_MAX_ROWS", 50000),
 		BootstrapRequired:   envBool("AIFERRY_BOOTSTRAP_REQUIRED", true),
 		DataDir:             env("AIFERRY_DATA_DIR", "/app/data"),
+	}
+	if cluster.BatchSize < 1 || cluster.BatchSize > 1000 {
+		return Cluster{}, role, gerror.New("AIFERRY_FLUSH_BATCH_SIZE must be between 1 and 1000")
+	}
+	if cluster.MasterNodeName == "" {
+		cluster.MasterNodeName = "master"
+	}
+	if cluster.NodeURL != "" {
+		parsed, parseErr := url.Parse(cluster.NodeURL)
+		if parseErr != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return Cluster{}, role, gerror.New("AIFERRY_NODE_URL must be an http(s) callback URL without credentials, query or fragment")
+		}
 	}
 	if role == RoleWorker {
 		if cluster.NodeName == "" {
