@@ -33,6 +33,16 @@ type SnapshotAPIKey struct {
 	DeletedAt        time.Time `json:"deletedAt" orm:"deleted_at"`
 }
 
+// SnapshotModelMetadata 是模型元数据的镜像协议，Metadata 保存原始 JSON 文本，
+// 不经生成 entity 的标量转换，保留嵌套 null、false 和零值。
+type SnapshotModelMetadata struct {
+	ChannelId uint64    `json:"channelId" orm:"channel_id"`
+	ModelName string    `json:"modelName" orm:"model_name"`
+	Metadata  string    `json:"metadata" orm:"metadata"`
+	CreatedAt time.Time `json:"createdAt" orm:"created_at"`
+	UpdatedAt time.Time `json:"updatedAt" orm:"updated_at"`
+}
+
 // Snapshot 是主节点下发给子节点的全量配置快照。
 //
 // 设计取舍：整包下发而不是增量补丁。配置表规模是「数十个渠道 + 千级模型」，
@@ -51,6 +61,7 @@ type Snapshot struct {
 	ChannelGroups            []entity.ChannelGroups            `json:"channelGroups"`
 	ChannelGroupMembers      []entity.ChannelGroupMembers      `json:"channelGroupMembers"`
 	ChannelTypes             []entity.ChannelTypes             `json:"channelTypes"`
+	ModelMetadata            []SnapshotModelMetadata           `json:"modelMetadata"`
 	ModelPrices              []SnapshotModelPrice              `json:"modelPrices"`
 	ModelPriceRules          []entity.ModelPriceRules          `json:"modelPriceRules"`
 	PriceSources             []entity.PriceSources             `json:"priceSources"`

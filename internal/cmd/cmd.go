@@ -173,6 +173,9 @@ var (
 				})
 			}
 			s.Group("/v1", func(group *ghttp.RouterGroup) {
+				if cfg.IsWorker() {
+					group.Middleware(workerLocalRoutes)
+				}
 				relayCtrl.Register(group)
 			})
 			if cfg.IsMaster() {

@@ -26,6 +26,7 @@ func buildSnapshot(ctx context.Context, database gdb.DB, version int64) (*Snapsh
 		{"channel_group_members", "channel_group_id, channel_id", &snapshot.ChannelGroupMembers},
 		{"channel_types", "id", &snapshot.ChannelTypes},
 		{"model_prices", "public_name", &snapshot.ModelPrices},
+		{"model_metadata", "channel_id, model_name", &snapshot.ModelMetadata},
 		{"model_price_rules", "id", &snapshot.ModelPriceRules},
 		{"price_sources", "id", &snapshot.PriceSources},
 		{"system_settings", "setting_key", &snapshot.SystemSettings},

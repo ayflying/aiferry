@@ -53,6 +53,8 @@ var snapshotTables = []tableSpec{
 		func(s *Snapshot) []entity.ChannelGroupMembers { return s.ChannelGroupMembers }),
 	table("channel_types", []string{"id"}, nil, true,
 		func(s *Snapshot) []entity.ChannelTypes { return s.ChannelTypes }),
+	table("model_metadata", []string{"channel_id", "model_name"}, nil, true,
+		func(s *Snapshot) []SnapshotModelMetadata { return s.ModelMetadata }),
 	table("model_prices", []string{"public_name"}, nil, true,
 		func(s *Snapshot) []SnapshotModelPrice { return s.ModelPrices }),
 	table("model_price_rules", []string{"id"}, nil, true,

@@ -57,7 +57,7 @@ func (s *Service) Mark(ctx context.Context, kind, ref string) error {
 var fingerprintTables = []string{
 	"channels", "channel_credentials", "channel_models", "channel_model_credentials",
 	"channel_groups", "channel_group_members", "channel_types", "model_prices",
-	"model_price_rules", "price_sources", "system_settings", "api_keys",
+	"model_price_rules", "model_metadata", "price_sources", "system_settings", "api_keys",
 	"api_key_models", "api_key_channel_groups", "api_key_channel_credentials", "users", "user_channel_groups",
 }
 

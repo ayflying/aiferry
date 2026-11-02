@@ -64,6 +64,12 @@ AIFERRY_ROLE=master MYSQL_DATABASE=aiferry_cluster_test \
 
 脚本失败返回非零，不打印 APIKey/密钥/SQL。排查只看该 project 的容器日志，分享前脱敏；不得为验收浏览生产 `.env` 或广泛搜索秘密。此脚本只应在独占测试期间运行，其他并发 fixture HTTP 请求会使精确数量断言失败。
 
+## worker 端点边界
+
+worker 的请求鉴权、模型列表和转发使用本地快照；余额视图为周期同步值，不保证跨节点即时余额。当前异步视频任务、历史账单和渠道余额接口仅允许直接访问 master：worker 对 `/v1/video/*`、`/v1/videos*`、`/v1/dashboard/billing/usage`、`/v1/dashboard/billing/channels` 返回 501 `master_node_required`，不会隐式逐请求代理到 master，也不会把待回传 outbox 冒充完整账单。
+
+集群共享 HMAC 密钥只适用于互信节点：拥有密钥的节点仍可能声明其他节点名，不提供节点之间的密码学角色隔离；生产跨网络必须使用可信网络与 TLS。`OutboxMaxRows` 当前是告警阈值，不是硬性准入上限；延迟余额允许超支，尚未证明超支严格限制为一个同步周期。渠道诊断数字的 nullable 语义尚未全部扩展，不能把测试通过解释为所有端点、所有上游均已验收。
+
 ## 停止、清理与复验
 
 ```sh

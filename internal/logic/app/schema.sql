@@ -316,6 +316,16 @@ CREATE TABLE IF NOT EXISTS local_events (
 	created_at TEXT
 );
 
+-- 模型元数据：保留 JSON 内部 null（未知/继承）与显式值；启动时自动补建旧 worker 缺表。
+CREATE TABLE IF NOT EXISTS model_metadata (
+	channel_id INTEGER NOT NULL,
+	model_name TEXT NOT NULL COLLATE BINARY,
+	metadata TEXT NOT NULL,
+	created_at TEXT,
+	updated_at TEXT,
+	PRIMARY KEY (channel_id, model_name)
+);
+
 -- 节点级键值状态：配置版本、最后同步时间、最后错误、节点 ID 等。
 CREATE TABLE IF NOT EXISTS sync_state (
 	state_key TEXT PRIMARY KEY,
