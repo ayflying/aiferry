@@ -32,7 +32,7 @@ def endpoint(role):
 class Cluster:
     def __init__(self, state_dir):
         self.state = Path(state_dir).expanduser().resolve()
-        # Runtime secrets must remain outside Dockerfile.full's COPY . . context.
+        # Runtime secrets must remain outside the root Dockerfile's COPY . . context.
         repo = HERE.parents[1]
         if self.state == repo or repo in self.state.parents:
             raise RuntimeError("--state-dir must be outside the checkout (build-context safety)")
