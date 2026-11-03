@@ -84,8 +84,9 @@ function selectColumns(availableWidth: number, isAdmin: boolean): UsageColumnSpe
 /**
  * 按容器可用宽度等比压缩列宽，返回每一列的实际渲染宽度。
  *
- * 压不下（容器比压缩下限还窄）时按下限返回并置 overflow=true，
- * 由表格内部横向滚动 + 固定首末列保证关键信息仍可见，整页不会超框。
+ * 核心不变式：只要容器宽度大于等于「压缩下限总和」，各列宽度之和就**正好等于**容器宽度。
+ * 既不会溢出（右侧被裁），也不会留下空档（表格没铺满、详情列悬在中间）。
+ * 低于下限时才按下限排布并置 overflow=true，交由表格内部横向滚动兜底。
  */
 export function usageColumnLayout(availableWidth: number, options: UsageColumnOptions): {
   columns: UsageColumnKey[]
@@ -94,42 +95,48 @@ export function usageColumnLayout(availableWidth: number, options: UsageColumnOp
 } {
   const width = options.availableWidth ?? availableWidth
   const selected = selectColumns(width, options.isAdmin)
-  const natural = naturalWidth(selected)
-  const floor = selected.reduce((sum, column) => sum + column.floorWidth, 0)
+  const columns = selected.map((column) => column.key)
 
-  if (width <= 0 || natural <= width) {
+  // 尚未测量：按自然宽度渲染，等测量回调再纠正。
+  if (width <= 0) {
     return {
-      columns: selected.map((column) => column.key),
+      columns,
       widths: selected.reduce<Record<string, number>>((map, column) => ({ ...map, [column.key]: column.width }), {}),
       overflow: false,
     }
   }
-  if (width <= floor) {
+
+  // 以 floorWidth→width 为区间做线性插值：
+  // 系数 1 时得到自然宽度；大于 1 时按「可压缩量」等比例外扩铺满容器；小于 1 时按同比例压缩。
+  const natural = naturalWidth(selected)
+  const floor = selected.reduce((sum, column) => sum + column.floorWidth, 0)
+  const ratio = natural === floor ? 1 : (width - floor) / (natural - floor)
+
+  // 连压缩下限都放不下：按下限排布，表格内部横向滚动。
+  if (ratio <= 0) {
     return {
-      columns: selected.map((column) => column.key),
+      columns,
       widths: selected.reduce<Record<string, number>>((map, column) => ({ ...map, [column.key]: column.floorWidth }), {}),
       overflow: true,
     }
   }
-  // 自然宽度之外按「可压缩空间」等比例分配，保证总和正好等于容器宽度，
-  // 既不溢出，也不会因为某一列被压得太狠而内容不可读。
-  const room = natural - floor
-  const extra = width - floor
-  const widths: Record<string, number> = {}
-  for (const column of selected) {
-    const slack = column.width - column.floorWidth
-    widths[column.key] = Math.floor(column.floorWidth + (slack * extra) / room)
-  }
-  // 取整会留下几像素余量，补给「成本」列（内容最需要横向空间）。
-  const assigned = selected.reduce((sum, column) => sum + widths[column.key], 0)
-  const remainder = Math.round(width) - assigned
-  if (remainder > 0 && widths.cost !== undefined) widths.cost += remainder
 
-  return {
-    columns: selected.map((column) => column.key),
-    widths,
-    overflow: false,
+  const widths: Record<string, number> = {}
+  let assigned = 0
+  for (const column of selected) {
+    const value = Math.max(column.floorWidth, Math.round(column.floorWidth + (column.width - column.floorWidth) * ratio))
+    widths[column.key] = value
+    assigned += value
   }
+
+  // 逐列取整会留下几像素误差，补给最宽的列，保证总和精确等于容器宽度。
+  const remainder = Math.round(width) - assigned
+  if (remainder !== 0) {
+    const widest = selected.reduce((a, b) => (b.width > a.width ? b : a))
+    widths[widest.key] = Math.max(1, widths[widest.key] + remainder)
+  }
+
+  return { columns, widths, overflow: false }
 }
 
 /**
@@ -143,5 +150,10 @@ export function visibleUsageColumns(availableWidth: number, options: UsageColumn
 
 /** 详情列提示文案：成功看计费规则，失败看错误首行，避免为了这一点信息还要打开详情弹窗。 */
 export function usageDetailHint(row: UsageLog, priceSummary: string, errorPreview: string): string {
-  return row.httpStatus >= 200 && row.httpStatus < 300 ? priceSummary : errorPreview
+  return isSuccessfulUsageLog(row) ? priceSummary : errorPreview
+}
+
+/** 与后端 success 判定同一口径：只有 2xx 是成功，其余一律按失败展示。 */
+export function isSuccessfulUsageLog(row: Pick<UsageLog, 'httpStatus'>): boolean {
+  return row.httpStatus >= 200 && row.httpStatus < 300
 }

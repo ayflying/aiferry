@@ -45,6 +45,12 @@ func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.A
 			recordError = streamTruncatedReason
 		}
 	}
+	// 失败请求同样消耗了上游算力：只要解析到用量，就把当时的计费快照落库，
+	// 让管理端能显示这笔已发生的成本（标记价 + charged=false，不扣用户余额）。
+	if !billable {
+		estimatedCost, failureDetails := failedUsageBilling(billingDetails)
+		cost, billingDetails = estimatedCost, failureDetails
+	}
 	// 只在需要扣款时开启跨表事务；纯日志路径仅有单条 INSERT，本身已原子。
 	// 元数据查询留在事务外，避免 SQLite 延迟事务先读后写升级锁。
 	ownChannel := candidate.CreatedByUserID != 0 && candidate.CreatedByUserID == key.UserId
@@ -172,6 +178,31 @@ func pricedUsageCost(priced bool, billingDetails *usage.BillingBreakdown) (*deci
 		return &freeCost, false
 	}
 	return nil, false
+}
+
+// failedUsageBilling 为失败请求生成「已计费但不扣款」的落库口径。
+//
+// 失败的调用同样消耗了上游算力：上游多数时候连 usage 一起返回，
+// 这里按当时的价格快照把它记成成本，管理端就能显示这笔真实开销。
+// 两点刻意的取舍：
+//   - 成本写成标记价而不是真实金额，真实金额只进计费快照，
+//     这样「未定价的失败」与「计过费的失败」在库里仍然可区分；
+//   - 没有任何用量或没有价格时什么都不写，避免把「无从估算」伪装成计费成功。
+func failedUsageBilling(billingDetails *usage.BillingBreakdown) (*decimal.Decimal, *usage.BillingBreakdown) {
+	if billingDetails == nil {
+		return nil, nil
+	}
+	details := usage.NewFailedBillingDetails(&usage.FailedBillingDetails{
+		Currency: billingDetails.Currency,
+		Items:    billingDetails.Items,
+		Subtotal: billingDetails.Subtotal,
+		Total:    billingDetails.Total,
+	})
+	if details == nil {
+		return nil, nil
+	}
+	marked := usage.FailureCost()
+	return &marked, details
 }
 
 // modelHealthScoreAtRequest 查询本次请求所用模型记录的当前健康分，作为日志快照。

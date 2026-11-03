@@ -435,8 +435,8 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 		HTTPStatus:           recordStatus,
 		Stream:               false,
 		Tokens:               result.tokens,
-		EstimatedCost:        audioCost(billingDetails),
-		BillingDetails:       billingDetails,
+		EstimatedCost:        audioCost(recordStatus, billingDetails),
+		BillingDetails:       audioDetails(recordStatus, billingDetails),
 		DurationMs:           time.Since(startedAt).Milliseconds(),
 		Attempts:             len(result.attemptFlow),
 		AttemptFlow:          result.attemptFlow,
@@ -447,12 +447,27 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 	return nil
 }
 
-func audioCost(billingDetails *usage.BillingBreakdown) *decimal.Decimal {
+// audioDetails 与对话转发保持同一口径：失败请求也保留计费快照（不扣款），
+// 让管理端能显示这笔已经发生的上游成本。
+func audioDetails(status int, billingDetails *usage.BillingBreakdown) *usage.BillingBreakdown {
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		return billingDetails
+	}
+	_, failureDetails := failedUsageBilling(billingDetails)
+	return failureDetails
+}
+
+// audioCost 按状态决定落库成本：成功写真实金额，失败写标记价（真实金额只在快照里）。
+func audioCost(status int, billingDetails *usage.BillingBreakdown) *decimal.Decimal {
 	if billingDetails == nil {
 		return nil
 	}
-	cost := billingDetails.Cost()
-	return &cost
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		cost := billingDetails.Cost()
+		return &cost
+	}
+	marked := usage.FailureCost()
+	return &marked
 }
 
 // chatAudioToBinary 从 chat 型 TTS 响应中提取 base64 音频并还原为二进制。

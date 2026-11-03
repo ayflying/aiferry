@@ -37,6 +37,8 @@ const visible = computed({
 const isSuccess = computed(() => !!props.usage && props.usage.httpStatus >= 200 && props.usage.httpStatus < 300)
 const billingDetails = computed(() => props.usage?.billingDetails)
 const billingItems = computed(() => billingDetails.value?.items ?? [])
+// 失败请求的计费快照同样是「调用时价格快照」，只是这次调用没有成功；
+// 文案要区分开，否则用户会以为失败请求也按正常流程扣了款（见 billingChargeLabel）。
 const resultMessage = computed(() => {
   if (!props.usage) return ''
   return props.usage.errorMessage || (isSuccess.value ? '模型响应正常' : '未返回错误详情')
@@ -52,10 +54,18 @@ const billingModeLabel = computed(() => {
     case 'request': return '按次'
     case 'rules': return '高级规则'
     case 'token': return '按 Token'
+    // 失败请求也按 token 规则估算成本，只是不扣款：标注清楚才不会和正常账单混淆。
+    case 'failed': return '按 Token（失败请求）'
     default: return '未保存'
   }
 })
 const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '历史价格快照复原' : '调用时价格快照')
+// 请求本身失败但上游确实消耗了算力：这里说明「已计费、未扣款」，避免把失败理解成零成本。
+const billingChargeLabel = computed(() => {
+  if (!billingDetails.value) return '—'
+  if (!isSuccess.value) return '失败请求未扣款（成本已计入统计）'
+  return billingDetails.value.charged ? '已按快照扣款' : '未扣款（自有渠道或免计费模型）'
+})
 const attemptFlow = computed(() => props.usage?.attemptFlow ?? [])
 const expandedFlowSteps = ref<number[]>([])
 // 原始报文懒加载：点按钮才请求落盘文件，避免每次打开详情都打后端。
@@ -167,6 +177,7 @@ function billingSummary() {
             <el-descriptions-item v-if="billingDetails.rule" label="命中规则">{{ billingDetails.rule.name || `规则 #${billingDetails.rule.id}` }} · P{{ billingDetails.rule.priority }} · {{ billingDetails.rule.source === 'sync' ? '上游同步' : '人工规则' }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="规则条件"><span class="detail-value mono">{{ billingDetails.rule.conditions }}</span></el-descriptions-item>
             <el-descriptions-item label="模型价格小计"><strong class="cost-value">{{ formatPreciseCost(billingDetails.subtotal, billingDetails.currency) }}</strong></el-descriptions-item>
+            <el-descriptions-item label="扣款状态" :span="billingDetails.rule ? 1 : 2">{{ billingChargeLabel }}</el-descriptions-item>
           </el-descriptions>
           <el-table :data="billingItems" border size="small" table-layout="fixed" class="billing-items" show-summary :summary-method="billingSummary">
             <el-table-column label="计价项" min-width="132"><template #default="{ row }"><div class="billing-item-name"><strong>{{ itemLabel(row) }}</strong><small v-if="itemPriceSource(row)">{{ itemPriceSource(row) }}</small></div></template></el-table-column>

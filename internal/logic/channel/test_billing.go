@@ -30,6 +30,11 @@ func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel e
 	}
 	recordStatus := result.HTTPStatus
 	recordMessage := result.Message
+	// 测试请求失败时同样可能已经消耗上游 token：保留计费快照并写标记价，
+	// 让管理端的测试记录也显示真实成本，而不是「未定价」。
+	if !result.Success {
+		cost, billingDetails = failureTestBilling(billingDetails)
+	}
 	var chargeErr error
 	if result.Success {
 		if cost != nil {
@@ -75,4 +80,23 @@ func (s *sChannel) recordTestUsage(ctx context.Context, userID uint64, channel e
 		result.Message = truncate(result.Message+"；用量记录失败："+recordErr.Error(), 1024)
 	}
 	return chargeErr
+}
+
+// failureTestBilling 把失败测试请求的成本口径改成「已计费但不扣款」：
+// 与转发侧 failedUsageBilling 一致——库里写标记价，真实金额只留在快照里。
+func failureTestBilling(billingDetails *usage.BillingBreakdown) (*decimal.Decimal, *usage.BillingBreakdown) {
+	if billingDetails == nil {
+		return nil, nil
+	}
+	details := usage.NewFailedBillingDetails(&usage.FailedBillingDetails{
+		Currency: billingDetails.Currency,
+		Items:    billingDetails.Items,
+		Subtotal: billingDetails.Subtotal,
+		Total:    billingDetails.Total,
+	})
+	if details == nil {
+		return nil, nil
+	}
+	marked := usage.FailureCost()
+	return &marked, details
 }

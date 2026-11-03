@@ -44,6 +44,7 @@ func (s *sUsage) listUsageLogs(ctx context.Context, input LogFilter) (LogPage, e
 		items[index].AttemptFlow = ParseAttemptFlow(items[index].AttemptFlowJSON)
 	}
 	s.reconstructLegacyBillingDetails(ctx, items)
+	s.reconstructFailureBillingDetails(ctx, items)
 	s.populateIPLocations(items)
 	return LogPage{Items: items, Summary: summary, StartAt: input.StartAt, EndAt: input.EndAt, Total: total, Page: input.Page, PageSize: input.PageSize}, nil
 }

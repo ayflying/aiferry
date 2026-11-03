@@ -108,7 +108,8 @@ export interface BillingRuleSnapshot {
 }
 
 export interface BillingDetails {
-  billingMode: 'token' | 'request' | 'rules'
+  /** failed 表示这是一条失败请求的计费快照：真实成本已发生，但没有扣用户余额。 */
+  billingMode: 'token' | 'request' | 'rules' | 'failed'
   currency: string
   charged: boolean
   reconstructed?: boolean

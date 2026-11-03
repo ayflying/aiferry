@@ -12,7 +12,9 @@ import (
 func (s *sUsage) reconstructLegacyBillingDetails(ctx context.Context, items []LogView) {
 	for index := range items {
 		item := &items[index]
-		if item.BillingDetails != nil || item.EstimatedCost == nil || item.HttpStatus < 200 || item.HttpStatus >= 300 {
+		// 成功记录才复原成正向账单；失败记录的计费快照由 reconstructFailureBillingDetails 处理，
+		// 两者分开是为了不让「失败也有成本」这条新语义影响既有的成功记录校验。
+		if item.BillingDetails != nil || item.EstimatedCost == nil || isFailureLog(*item) {
 			continue
 		}
 		// 必须用日志自身的 created_at 作为时段评估时刻：分时定价下套用「当前时间」
