@@ -15,8 +15,13 @@ import { isSuccessfulUsageLog } from './usage-columns'
  * 3. 既没有快照、也没有成本字段的远古记录：才允许显示「未定价」。
  */
 
-/** 与后端 usage.failureCostSentinel 对应：标记价不超过这个数量级时一律按标记处理。 */
-const FAILURE_COST_SENTINEL_CEILING = 1e-6
+/**
+ * 与后端 usage.failureCostSentinel（0.00000001）对应：不超过这个值一律按标记处理。
+ *
+ * 标记价取 decimal(20,8) 列能存下的最小值，真实金额几乎不可能小到 1e-8 美元，
+ * 所以「金额 <= 1e-8 就是标记」这个判定在实际数据上不会误伤。
+ */
+const FAILURE_COST_SENTINEL_CEILING = 1e-8
 
 /** 从「请求 + 计费快照」得出的展示金额（元信息，不参与换算）。 */
 export interface FailureCostView {
@@ -51,13 +56,13 @@ export function failureCostView(log: Pick<UsageLog, 'estimatedCost' | 'billingDe
   const recorded = log.estimatedCost
   if (recorded === undefined || recorded === null) return { fromSnapshot: false }
   // 标记价没有快照可依时不能冒充金额：它只是「当时算过费」的记号。
-  if (Math.abs(recorded) < FAILURE_COST_SENTINEL_CEILING) return { fromSnapshot: false }
+  if (Math.abs(recorded) <= FAILURE_COST_SENTINEL_CEILING) return { fromSnapshot: false }
   return { amount: recorded, fromSnapshot: false }
 }
 
 /** isFailureSentinel 判断一个成本值是不是「失败已计费」的标记价。 */
 export function isFailureSentinel(value?: number | null): boolean {
-  return value !== undefined && value !== null && Math.abs(value) < FAILURE_COST_SENTINEL_CEILING
+  return value !== undefined && value !== null && Math.abs(value) <= FAILURE_COST_SENTINEL_CEILING
 }
 
 function snapshotTotalOf(details?: BillingDetails): number | undefined {

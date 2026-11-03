@@ -81,14 +81,24 @@ func TestFailureCostIsDistinguishableFromZero(t *testing.T) {
 }
 
 func TestFailureCostSurvivesDatabaseRoundTrip(t *testing.T) {
-	// 标记价要经过 float64 → 数据库 decimal(20,8) → float64 的往返，
-	// 取 1e-9 就是因为它在这个精度下不会塌成 0，否则「失败已计费」会被读成「没有用量」。
-	recorded := FailureCost().InexactFloat64()
-	if recorded == 0 {
-		t.Fatal("failure cost marker collapsed to zero after float conversion")
+	// 标记价要写进 estimated_cost decimal(20,8)：
+	// 取 1e-9 时 MySQL 会把它舍入成 0.00000000，标记彻底失效，
+	// 「失败已计费」就退化成「这条记录没有成本」。这里按列的 8 位小数做一次往返。
+	marked := FailureCost()
+	stored := marked.Round(8)
+	if stored.IsZero() {
+		t.Fatalf("failure cost marker collapses to zero in decimal(20,8): %s", marked)
 	}
-	if !decimal.RequireFromString("0.00000001").GreaterThan(decimal.NewFromFloat(recorded)) {
-		t.Fatalf("failure cost marker must stay below settlement precision: %v", recorded)
+	if !stored.Equal(marked) {
+		t.Fatalf("failure cost marker must be exactly representable at 8 decimals: %s -> %s", marked, stored)
+	}
+}
+
+func TestFailureCostStaysBelowRealAmounts(t *testing.T) {
+	// 标记价必须远小于任何真实成本，否则会把失败标记算进金额统计。
+	cheapestRealistic := decimal.RequireFromString("0.000001")
+	if !FailureCost().LessThan(cheapestRealistic) {
+		t.Fatalf("failure cost marker %s is not negligible", FailureCost())
 	}
 }
 

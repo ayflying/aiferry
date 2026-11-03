@@ -10,8 +10,11 @@ import (
 //
 // 为什么不能用 0：estimated_cost 为 0 在库里和「这条记录没解析到用量」完全同形，
 // 一旦拿 0 当记号，成功的免费调用、历史脏数据都会被一起改写成计费快照。
-// 用一个不可能出现的极小正数做标记，判断成本极低，且不会和真实金额混淆。
-var failureCostSentinel = decimal.RequireFromString("1e-9")
+//
+// 取值必须落在 estimated_cost 的 decimal(20,8) 列能表示的范围内。
+// 实测教训：最初取 1e-9，落库时被 MySQL 舍入成 0.00000000，标记彻底失效；
+// 1e-8 是这一列能存下的最小非零值，正好够用，又不会在 SUM 里被当成真实金额。
+var failureCostSentinel = decimal.RequireFromString("0.00000001")
 
 // failureBillingMode 标记这类快照来自失败的请求，前端据此显示「已计费（失败）」而不是普通计费。
 const failureBillingMode = "failed"

@@ -18,15 +18,18 @@
 | 记录 | `estimated_cost` | 计费快照 | 界面 |
 | --- | --- | --- | --- |
 | 成功且计费 | 真实金额 | 有，`charged` 按实际扣款 | 金额 + 单价 |
-| 失败且有价格快照 | **标记价** `1e-9` | 有，`billingMode=failed`、`charged=false` | 快照里的真实金额 +「已计费」 |
+| 失败且有价格快照 | **标记价** `1e-8` | 有，`billingMode=failed`、`charged=false` | 快照里的真实金额 +「已计费」 |
 | 失败且无用量/无价格 | `NULL` | 无 | `$0.00` |
 
 三条关键设计：
 
 - **标记价故意非 0**。库里 0 与「这条记录没解析到用量」完全同形，
   用 0 当记号会把成功的免费调用、历史脏数据一起改写。
-  `1e-9` 在 `decimal(20,8)` 的落库精度下不会塌成 0，且远小于任何真实金额。
-  前端 `FAILURE_COST_SENTINEL_CEILING = 1e-6` 是同一数量级的判定线。
+- **标记价必须按列的精度取值**。`estimated_cost` 是 `decimal(20,8)`，
+  最初取 `1e-9`，落库时被 MySQL 直接舍入成 `0.00000000`，标记彻底失效
+  （已在 243 上实测复现：写 `1e-9` 读回 `0.00000000`）。
+  现取 `1e-8`——这一列能表示的最小非零值。前端
+  `FAILURE_COST_SENTINEL_CEILING = 1e-8` 是同一判定线。
 - **失败不扣款**。快照里 `charged=false`，用户余额、APIKey 累计消费都不变；
   失败请求的标记价不进入任何 SUM 累加（相对真实金额可以忽略），
   但真实金额可通过快照还原，供列表与详情展示。
@@ -60,7 +63,25 @@
 
 ## 测试
 
-- `internal/logic/usage/failure_billing_test.go` —— 标记价非 0、快照 `charged=false`、
-  零用量项剔除、JSON 往返、失败分类判定。
+- `internal/logic/usage/failure_billing_test.go` —— 标记价非 0、能在 `decimal(20,8)`
+  精度下原样落库（`TestFailureCostSurvivesDatabaseRoundTrip`，防 1e-9 被舍入成 0 的回归）、
+  快照 `charged=false`、零用量项剔除、JSON 往返、失败分类判定。
 - `frontend/src/lib/failure-cost.test.ts` —— 快照金额优先于标记价、无快照回落 `$0.00`、
-  「已计费」标记只出现在失败且带快照的行。
+  「已计费」标记只出现在失败且带快照的行、真实小额成本不被误判成标记。
+- `frontend/src/views/UsageView.cost.test.ts` —— 用后端真实落库形状（502 +
+  `estimated_cost=0.00000001` + `failed` 快照）驱动页面，断言 `costLabel` 返回 `$6.00`、
+  `costBadge` 返回「已计费」，且任何情况下都不出现「未定价」。
+
+## 验证记录
+
+243（`192.168.50.243`）隔离环境实测，mock 上游对同一请求返回 502 但带
+`prompt_tokens=1000000`、`completion_tokens=500000`，价格 2/8 每百万：
+
+| id | http | estimated_cost | 快照 total | billingMode | charged |
+| --- | --- | --- | --- | --- | --- |
+| 3 | 200 | 6.00000000 | 6.00000000 | token | true |
+| 4 | 502 | 0.00000000 | 6.00000000 | failed | false |
+| 5 | 502 | 0.00000001 | 6.00000000 | failed | false |
+
+id=4 是修正前（`1e-9` 被舍入成 0）的记录，id=5 是修正后的记录。
+两者快照都带真实金额，界面都显示 `$6.00`，且都未扣款。
