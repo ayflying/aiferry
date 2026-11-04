@@ -37,21 +37,29 @@ func EstimatePublicModelCost(ctx context.Context, modelName, endpoint string, to
 }
 
 func EstimatePublicModelBreakdown(ctx context.Context, modelName, endpoint string, tokens TokenUsage, at time.Time) *BillingBreakdown {
+	return estimatePublicModelBreakdown(ctx, modelName, endpoint, tokens, at, false)
+}
+
+func estimatePublicModelBreakdown(ctx context.Context, modelName, endpoint string, tokens TokenUsage, at time.Time, failure bool) *BillingBreakdown {
+	estimate := EstimateBreakdown
+	if failure {
+		estimate = EstimateFailureBreakdown
+	}
 	var price publicModelPrice
 	if err := dao.ModelPrices.Ctx(ctx).Where(dao.ModelPrices.Columns().PublicName, modelName).Scan(&price); err != nil || price.PublicName == "" {
 		return nil
 	}
 	switch price.BillingMode {
 	case "rules":
-		return EstimateRuleBreakdown(ctx, modelName, endpoint, tokens, at)
+		return estimateRuleBreakdown(ctx, modelName, endpoint, tokens, at, failure)
 	case "request":
-		breakdown := EstimateBreakdown(tokens, PriceRates{Request: price.RequestPrice})
+		breakdown := estimate(tokens, PriceRates{Request: price.RequestPrice})
 		if breakdown != nil {
 			breakdown.BillingMode = "request"
 		}
 		return breakdown
 	default:
-		return EstimateBreakdown(tokens, PriceRates{
+		return estimate(tokens, PriceRates{
 			Input:       price.InputPrice,
 			CachedInput: price.CachedInputPrice,
 			CacheWrite:  price.CacheWritePrice,
@@ -76,6 +84,14 @@ func EstimateRuleCost(ctx context.Context, modelName, endpoint string, tokens To
 // at 是用于时段判断的评估时刻，必须传「请求实际发生的时刻」，
 // 否则历史用量重建会套用当前时间段的费率，与库中已记录金额对不上。
 func EstimateRuleBreakdown(ctx context.Context, modelName, endpoint string, tokens TokenUsage, at time.Time) *BillingBreakdown {
+	return estimateRuleBreakdown(ctx, modelName, endpoint, tokens, at, false)
+}
+
+func estimateRuleBreakdown(ctx context.Context, modelName, endpoint string, tokens TokenUsage, at time.Time, failure bool) *BillingBreakdown {
+	estimate := RuleBreakdown
+	if failure {
+		estimate = RuleFailureBreakdown
+	}
 	rules := make([]entity.ModelPriceRules, 0)
 	columns := dao.ModelPriceRules.Columns()
 	err := dao.ModelPriceRules.Ctx(ctx).
@@ -97,7 +113,7 @@ func EstimateRuleBreakdown(ctx context.Context, modelName, endpoint string, toke
 		return rules[i].Id > rules[j].Id
 	})
 	for _, rule := range rules {
-		if breakdown, ok := RuleBreakdown(rule.ConditionsJson, rule.RatesJson, endpoint, tokens, at); ok {
+		if breakdown, ok := estimate(rule.ConditionsJson, rule.RatesJson, endpoint, tokens, at); ok {
 			currency := strings.ToUpper(strings.TrimSpace(rule.Currency))
 			if currency == "" {
 				currency = "USD"
@@ -167,6 +183,15 @@ func RuleCost(conditionsJSON, ratesJSON, endpoint string, tokens TokenUsage, at 
 	}
 	cost := breakdown.Cost()
 	return &cost, true
+}
+
+// RuleFailureBreakdown 与正常规则使用相同条件匹配，仅保留零用量费率。
+func RuleFailureBreakdown(conditionsJSON, ratesJSON, endpoint string, tokens TokenUsage, at time.Time) (*BillingBreakdown, bool) {
+	if !RuleMatches(conditionsJSON, endpoint, tokens, at) {
+		return nil, false
+	}
+	breakdown := EstimateFailureBreakdown(tokens, rulePriceRates(ratesJSON))
+	return breakdown, breakdown != nil
 }
 
 func RuleBreakdown(conditionsJSON, ratesJSON, endpoint string, tokens TokenUsage, at time.Time) (*BillingBreakdown, bool) {

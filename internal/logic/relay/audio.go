@@ -415,6 +415,9 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 	billingDetails := s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, startedAt)
 	recordStatus := result.status
 	recordError := result.errorMessage
+	if recordStatus < http.StatusOK || recordStatus >= http.StatusMultipleChoices {
+		billingDetails = s.prices.EstimateFailureBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, startedAt)
+	}
 	if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && billingDetails == nil && s.requiresBalanceCheck(candidate.PublicName) {
 		// 已定价模型无法估算音频成本时记录 0 成本，避免误判为不可计费而中断已成功的请求。
 		g.Log().Debugf(ctx, "audio usage %s: no billing breakdown for priced model %s", requestID, candidate.PublicName)
@@ -447,8 +450,7 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 	return nil
 }
 
-// audioDetails 与对话转发保持同一口径：失败请求也保留计费快照（不扣款），
-// 让管理端能显示这笔已经发生的上游成本。
+// audioDetails 与对话转发保持同一口径：失败保留价格快照，金额归零且不扣款。
 func audioDetails(status int, billingDetails *usage.BillingBreakdown) *usage.BillingBreakdown {
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
 		return billingDetails
@@ -457,17 +459,17 @@ func audioDetails(status int, billingDetails *usage.BillingBreakdown) *usage.Bil
 	return failureDetails
 }
 
-// audioCost 按状态决定落库成本：成功写真实金额，失败写标记价（真实金额只在快照里）。
+// audioCost 按状态决定落库成本：成功写真实金额，失败费用为零。
 func audioCost(status int, billingDetails *usage.BillingBreakdown) *decimal.Decimal {
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		cost := usage.FailureCost()
+		return &cost
+	}
 	if billingDetails == nil {
 		return nil
 	}
-	if status >= http.StatusOK && status < http.StatusMultipleChoices {
-		cost := billingDetails.Cost()
-		return &cost
-	}
-	marked := usage.FailureCost()
-	return &marked
+	cost := billingDetails.Cost()
+	return &cost
 }
 
 // chatAudioToBinary 从 chat 型 TTS 响应中提取 base64 音频并还原为二进制。

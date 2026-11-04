@@ -72,7 +72,7 @@ const failedWithSnapshot = row({
 const failedWithoutSnapshot = row({ httpStatus: 502, estimatedCost: null, inputTokens: 0, outputTokens: 0, totalTokens: 0 })
 
 describe('usage page cost labels', () => {
-  it('失败行：有快照显示真实金额并标记已计费，无快照显示 $0.00，都不出现未定价', async () => {
+  it('失败费用为零，但套餐名称和零用量费率仍展示', async () => {
     usagePage.items = [failedWithSnapshot, failedWithoutSnapshot]
     usagePage.total = 2
     const { default: UsageView } = await import('../views/UsageView.vue')
@@ -84,12 +84,21 @@ describe('usage page cost labels', () => {
     // 页面的表格/移动端模板都调用这两个函数；断言它们就是断言用户看到的文案。
     const vm = wrapper.vm as unknown as {
       costLabel: (r: unknown) => string
-      costBadge: (r: unknown) => string
+      modelPriceSummary: (r: unknown) => string
     }
-    expect(vm.costLabel(failedWithSnapshot)).toBe('$6.00')
-    expect(vm.costBadge(failedWithSnapshot)).toBe('已计费')
+    expect(vm.costLabel(failedWithSnapshot)).toBe('$0.00')
+    expect(vm.modelPriceSummary(failedWithSnapshot)).toBe('标准 · $2.00 / $8.00/M')
     expect(vm.costLabel(failedWithoutSnapshot)).toBe('$0.00')
-    expect(vm.costBadge(failedWithoutSnapshot)).toBe('')
+    const zeroUsageWithPlan = row({ httpStatus: 502, billingDetails: {
+      billingMode: 'rules', currency: 'USD', charged: false,
+      rule: { name: '高峰时段' },
+      items: [
+        { type: 'input', quantity: 0, unit: 'per_million_tokens', unitPrice: '2', amount: '0' },
+        { type: 'output', quantity: 0, unit: 'per_million_tokens', unitPrice: '8', amount: '0' },
+      ], total: '0', subtotal: '0',
+    } })
+    expect(vm.costLabel(zeroUsageWithPlan)).toBe('$0.00')
+    expect(vm.modelPriceSummary(zeroUsageWithPlan)).toBe('高峰时段 · $2.00 / $8.00/M')
 
     for (const value of [vm.costLabel(failedWithSnapshot), vm.costLabel(failedWithoutSnapshot)]) {
       expect(value).not.toContain('未定价')

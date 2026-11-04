@@ -11,7 +11,7 @@ import { showError } from '../lib/error'
 import { useAppStore } from '../stores/app'
 import { useAuthStore } from '../stores/auth'
 import { currentTimeInDisplayZone, formatCost, formatNumber, formatPreciseCost, formatReasoningEffort, formatTokenSpeed, formatTime, formatUsageDuration } from '../lib/format'
-import { isFailureButBilled, failureCostView } from '../lib/failure-cost'
+import { formatFailureCost } from '../lib/failure-cost'
 import { formatIPLocation } from '../lib/ip-location'
 import { streamLabel } from '../lib/usage'
 import { USAGE_COLUMN_WIDTHS, usageColumnLayout, usageDetailHint, type UsageColumnKey } from '../lib/usage-columns'
@@ -110,18 +110,9 @@ function changeTimeRange(value: [Date, Date] | null) {
   search()
 }
 function isSuccessful(row: UsageLog) { return row.httpStatus >= 200 && row.httpStatus < 300 }
-// 成本列主文案：成功走真实成本；失败优先用计费快照里的真实金额，
-// 没有快照就按 0 展示「未产生费用」，绝不再显示「未定价」——
-// 失败不代表没有成本，登录页也不该出现「失败 + 未定价」这种自相矛盾的组合。
+// 费用与套餐是两条独立信息：失败费用为零，下面仍正常显示快照中的费率。
 function costLabel(row: UsageLog) {
-  if (isSuccessful(row)) return formatCost(row.estimatedCost)
-  const view = failureCostView(row)
-  return view.amount === undefined ? formatCost(0) : formatCost(view.amount, view.currency)
-}
-// 失败且已计费的行加一个轻标记，避免把「失败但扣了上游钱」误读成「没花钱」。
-function costBadge(row: UsageLog) {
-  if (isSuccessful(row)) return ''
-  return isFailureButBilled(row) ? '已计费' : ''
+  return isSuccessful(row) ? formatCost(row.estimatedCost) : formatFailureCost(row)
 }
 // cachedInputTokens 由上游 usage 返回：缺失表示上游没有提供缓存统计，0 表示明确未命中，正数表示命中缓存。
 function cacheStatus(row: UsageLog) {
@@ -207,14 +198,14 @@ onMounted(() => {
         <el-table-column label="状态" :min-width="columnMinWidth('status')"><template #default="{ row }"><div class="status-cell"><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag><small v-if="row.modelHealthScore != null" :class="modelHealthTone(row.modelHealthScore)">健康分 {{ row.modelHealthScore }}</small><small v-else class="latency-unknown">健康分 —</small></div></template></el-table-column>
         <el-table-column v-if="hasColumn('stream')" label="流式" :min-width="columnMinWidth('stream')"><template #default="{ row }"><div class="stream-cell"><strong>{{ streamLabel(row) }}</strong><small>{{ formatTokenSpeed(row.outputTokens, row.durationMs) }}</small></div></template></el-table-column>
         <el-table-column label="Token" :min-width="columnMinWidth('tokens')"><template #default="{ row }"><div class="token-cell"><strong>入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</strong><small>缓存 {{ formatNumber(row.cachedInputTokens) }}</small></div></template></el-table-column>
-        <el-table-column label="估算成本" :min-width="columnMinWidth('cost')"><template #default="{ row }"><div class="cost-cell"><strong :class="row.estimatedCost == null && isSuccessful(row) ? 'muted' : 'mono'">{{ costLabel(row) }}</strong><small class="price-hint" :title="modelPriceSummary(row)"><span v-if="costBadge(row)" class="cost-badge">{{ costBadge(row) }}</span> {{ modelPriceSummary(row) }}</small></div></template></el-table-column>
+        <el-table-column label="估算成本" :min-width="columnMinWidth('cost')"><template #default="{ row }"><div class="cost-cell"><strong :class="row.estimatedCost == null && isSuccessful(row) ? 'muted' : 'mono'">{{ costLabel(row) }}</strong><small class="price-hint" :title="modelPriceSummary(row)">{{ modelPriceSummary(row) }}</small></div></template></el-table-column>
         <el-table-column label="耗时" :min-width="columnMinWidth('latency')"><template #default="{ row }"><div class="latency-cell"><span class="latency-strip" :class="{ 'single-latency': !row.isStream }"><i :class="row.isStream ? firstTokenTone(row) : totalLatencyTone(row)" /><i v-if="row.isStream" :class="totalLatencyTone(row)" /></span><div class="latency-copy"><template v-if="row.isStream"><strong>首字 <span :class="firstTokenTone(row)">{{ formatUsageDuration(row.firstTokenMs) }}</span></strong><small>耗时 <span :class="totalLatencyTone(row)">{{ formatUsageDuration(row.durationMs) }}</span></small></template><template v-else><strong>响应 <span :class="totalLatencyTone(row)">{{ formatUsageDuration(row.durationMs) }}</span></strong><small>非流式响应</small></template></div></div></template></el-table-column>
         <el-table-column label="详情" :width="columnMinWidth('detail')" fixed="right" align="center"><template #default="{ row }"><el-tooltip :content="usageDetailHint(row, modelPriceSummary(row), failurePreview(row))" placement="top" :show-after="200"><el-button text class="detail-trigger" :class="{ 'detail-trigger--failed': !isSuccessful(row) }" @click="openUsageDetail(row)"><span class="detail-link"><FileText v-if="isSuccessful(row)" :size="14" /><TriangleAlert v-else :size="14" />{{ isSuccessful(row) ? '计费' : '失败' }}</span></el-button></el-tooltip></template></el-table-column>
         </el-table></template>
         <template #mobile><MobileRecordList :loading="loading">
           <article v-for="row in usageItems" :key="row.id" class="mobile-record">
             <div class="mobile-record__header"><div class="mobile-record__title"><strong>{{ row.requestedModel }}</strong><small>{{ formatTime(row.createdAt) }} · {{ formatIPLocation(row.ipLocation) }}</small></div><div class="mobile-record__status"><el-tag :type="isSuccessful(row) ? 'success' : 'danger'" effect="plain" size="small">{{ row.httpStatus }}</el-tag><small v-if="row.modelHealthScore != null" :class="modelHealthTone(row.modelHealthScore)">健康分 {{ row.modelHealthScore }}</small><small v-else class="latency-unknown">健康分 —</small></div></div>
-            <dl class="mobile-record__facts"><div><dt>{{ isAdmin ? '渠道 / 密钥' : '访问密钥' }}</dt><dd><ChannelCredentialDisplay v-if="isAdmin" class="request-cell" :channel-name="row.channelName" :credential-index="row.channelCredentialIndex" :api-key-name="row.apiKeyName" /><span v-else>{{ row.apiKeyName || '—' }}</span></dd></div><div v-if="isAdmin"><dt>用户</dt><dd>{{ row.userName || `#${row.userId}` }}</dd></div><div><dt>Token</dt><dd class="mono">入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</dd></div><div><dt>请求缓存</dt><dd class="mono" :class="{ muted: row.cachedInputTokens == null }">{{ cacheStatus(row) }}</dd></div><div><dt>估算成本</dt><dd :class="row.estimatedCost == null && isSuccessful(row) ? 'muted' : 'mono'">{{ costLabel(row) }}<span v-if="costBadge(row)" class="cost-badge">{{ costBadge(row) }}</span></dd></div><div><dt>{{ row.isStream ? '流式速度' : '响应耗时' }}</dt><dd>{{ row.isStream ? formatTokenSpeed(row.outputTokens, row.durationMs) : formatUsageDuration(row.durationMs) }}</dd></div><div><dt>推理强度</dt><dd>{{ formatReasoningEffort(row.reasoningEffort) }}</dd></div></dl>
+            <dl class="mobile-record__facts"><div><dt>{{ isAdmin ? '渠道 / 密钥' : '访问密钥' }}</dt><dd><ChannelCredentialDisplay v-if="isAdmin" class="request-cell" :channel-name="row.channelName" :credential-index="row.channelCredentialIndex" :api-key-name="row.apiKeyName" /><span v-else>{{ row.apiKeyName || '—' }}</span></dd></div><div v-if="isAdmin"><dt>用户</dt><dd>{{ row.userName || `#${row.userId}` }}</dd></div><div><dt>Token</dt><dd class="mono">入 {{ formatNumber(row.inputTokens) }} · 出 {{ formatNumber(row.outputTokens) }}</dd></div><div><dt>请求缓存</dt><dd class="mono" :class="{ muted: row.cachedInputTokens == null }">{{ cacheStatus(row) }}</dd></div><div><dt>估算成本</dt><dd :class="row.estimatedCost == null && isSuccessful(row) ? 'muted' : 'mono'">{{ costLabel(row) }}</dd></div><div><dt>价格套餐</dt><dd>{{ modelPriceSummary(row) }}</dd></div><div><dt>{{ row.isStream ? '流式速度' : '响应耗时' }}</dt><dd>{{ row.isStream ? formatTokenSpeed(row.outputTokens, row.durationMs) : formatUsageDuration(row.durationMs) }}</dd></div><div><dt>推理强度</dt><dd>{{ formatReasoningEffort(row.reasoningEffort) }}</dd></div></dl>
             <div class="mobile-record__footer"><span class="muted">{{ streamLabel(row, true) }}</span><el-button size="small" @click="openUsageDetail(row)">{{ isSuccessful(row) ? '查看计费详情' : '查看失败日志' }}</el-button></div>
           </article>
         </MobileRecordList></template>

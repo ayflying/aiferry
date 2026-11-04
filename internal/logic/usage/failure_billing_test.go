@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"context"
+	"reflect"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -8,128 +10,128 @@ import (
 
 func failedBreakdownInput() *FailedBillingDetails {
 	return &FailedBillingDetails{
-		Currency: "USD",
+		BillingMode: "rules",
+		Currency:    "CNY",
+		Rule:        &BillingRuleSnapshot{ID: 7, Name: "夜间套餐", Source: "manual", Priority: 2, Conditions: `{"endpoint":"/chat/completions"}`},
 		Items: []BillingItem{
 			{Type: "input", Quantity: 1_000_000, Unit: billingUnitPerMillionTokens, UnitPrice: "2", Amount: "2"},
 			{Type: "output", Quantity: 500_000, Unit: billingUnitPerMillionTokens, UnitPrice: "8", Amount: "4"},
 		},
-		Subtotal: "6",
-		Total:    "6",
+		Subtotal: "6", Total: "6",
 	}
 }
 
-func TestNewFailedBillingDetailsMarksFailureAndKeepsCost(t *testing.T) {
-	breakdown := NewFailedBillingDetails(failedBreakdownInput())
-	if breakdown == nil {
-		t.Fatal("expected failed billing breakdown")
+func TestNewFailedBillingDetailsZerosCostAndKeepsRule(t *testing.T) {
+	input := failedBreakdownInput()
+	breakdown := NewFailedBillingDetails(input)
+	if breakdown == nil || breakdown.BillingMode != "rules" || breakdown.Currency != "CNY" || breakdown.Charged {
+		t.Fatalf("unexpected failure snapshot: %+v", breakdown)
 	}
-	if breakdown.BillingMode != failureBillingMode {
-		t.Fatalf("billing mode = %q, want %q", breakdown.BillingMode, failureBillingMode)
+	if !reflect.DeepEqual(breakdown.Rule, input.Rule) || breakdown.Rule == input.Rule {
+		t.Fatalf("rule must be preserved as an independent snapshot: %+v", breakdown.Rule)
 	}
-	// 失败请求不倒扣用户余额，charged 必须为 false，否则详情会谎称扣款成功。
-	if breakdown.Charged {
-		t.Fatal("failed billing must not be marked as charged")
+	if breakdown.Total != "0.00000000" || breakdown.Subtotal != "0" || !breakdown.Cost().IsZero() {
+		t.Fatalf("failed amounts must be zero: %+v", breakdown)
 	}
-	if breakdown.Total != "6.00000000" {
-		t.Fatalf("unexpected total: %s", breakdown.Total)
+	for i, item := range breakdown.Items {
+		if item.Amount != "0" || item.Quantity != input.Items[i].Quantity || item.UnitPrice != input.Items[i].UnitPrice {
+			t.Fatalf("only item amount should change: %+v", item)
+		}
 	}
-	if breakdown.Subtotal != "6" {
-		t.Fatalf("subtotal should keep the requested price snapshot: %s", breakdown.Subtotal)
+	breakdown.Rule.Name = "changed"
+	if input.Rule.Name != "夜间套餐" || input.Items[0].Amount != "2" || input.Total != "6" {
+		t.Fatalf("input snapshot was mutated: %+v", input)
 	}
 }
 
-func TestNewFailedBillingDetailsDropsZeroQuantityItems(t *testing.T) {
+func TestNewFailedBillingDetailsKeepsZeroQuantityItems(t *testing.T) {
 	breakdown := NewFailedBillingDetails(&FailedBillingDetails{
 		Items: []BillingItem{
-			// 上游没返回缓存用量时，按量项数量为 0，保留只会被误读成「算过缓存」。
 			{Type: "cached_input", Quantity: 0, Unit: billingUnitPerMillionTokens, UnitPrice: "0.5", Amount: "0"},
 			{Type: "input", Quantity: 1000, Unit: billingUnitPerMillionTokens, UnitPrice: "2", Amount: "0.002"},
-			// 按次计费的固定费用与用量无关，数量为 1 才出现，这里验证它不会被误删。
 			{Type: "request", Quantity: 1, Unit: billingUnitPerRequest, UnitPrice: "0.01", Amount: "0.01"},
 		},
 	})
-	if breakdown == nil {
-		t.Fatal("expected failed billing breakdown")
+	if breakdown == nil || len(breakdown.Items) != 3 || breakdown.Items[0].Quantity != 0 || breakdown.Items[0].UnitPrice != "0.5" {
+		t.Fatalf("zero-quantity rates must be retained: %+v", breakdown)
 	}
-	if len(breakdown.Items) != 2 {
-		t.Fatalf("expected zero-quantity items to be dropped: %+v", breakdown.Items)
-	}
-	if breakdown.Total != "0.01200000" {
-		t.Fatalf("unexpected total: %s", breakdown.Total)
+	if breakdown.BillingMode != "token" || breakdown.Currency != "USD" || !breakdown.Cost().IsZero() {
+		t.Fatalf("unexpected defaults or cost: %+v", breakdown)
 	}
 }
 
-func TestNewFailedBillingDetailsRequiresBillableItems(t *testing.T) {
-	if NewFailedBillingDetails(nil) != nil {
-		t.Fatal("nil input must not create a billing breakdown")
+func TestNewFailedBillingDetailsRequiresPriceMetadata(t *testing.T) {
+	if NewFailedBillingDetails(nil) != nil || NewFailedBillingDetails(&FailedBillingDetails{}) != nil {
+		t.Fatal("missing price metadata must not create a snapshot")
 	}
-	if NewFailedBillingDetails(&FailedBillingDetails{}) != nil {
-		t.Fatal("empty items must not create a billing breakdown")
+	if NewFailedBillingDetails(&FailedBillingDetails{Items: []BillingItem{{Type: "input", Quantity: 0, UnitPrice: "2", Amount: "0"}}}) == nil {
+		t.Fatal("zero quantity with a rate must create a snapshot")
 	}
-	if NewFailedBillingDetails(&FailedBillingDetails{Items: []BillingItem{
-		{Type: "input", Quantity: 0, Amount: "0"},
-	}}) != nil {
-		t.Fatal("all-zero quantities must not create a billing breakdown")
+	if NewFailedBillingDetails(&FailedBillingDetails{BillingMode: "rules", Rule: &BillingRuleSnapshot{ID: 1}}) == nil {
+		t.Fatal("rule metadata alone must be retained")
 	}
 }
 
-func TestFailureCostIsDistinguishableFromZero(t *testing.T) {
-	// 标记价必须非 0：库里 0 表示「没有用量」，两者混在一起就无法区分失败是否计费过。
-	if FailureCost().IsZero() || FailureCost().IsNegative() {
-		t.Fatalf("failure cost marker must be a positive value: %s", FailureCost())
+func TestFailureCostIsExactlyZeroIncludingDatabaseRoundTrip(t *testing.T) {
+	if !FailureCost().IsZero() || FailureCost().StringFixed(8) != "0.00000000" {
+		t.Fatalf("failure cost must be real zero, not a marker: %s", FailureCost())
+	}
+	stored, err := decimal.NewFromString(FailureCost().StringFixed(8))
+	if err != nil || !stored.IsZero() {
+		t.Fatalf("database decimal round trip must remain zero: %s, %v", stored, err)
 	}
 }
 
-func TestFailureCostSurvivesDatabaseRoundTrip(t *testing.T) {
-	// 标记价要写进 estimated_cost decimal(20,8)：
-	// 取 1e-9 时 MySQL 会把它舍入成 0.00000000，标记彻底失效，
-	// 「失败已计费」就退化成「这条记录没有成本」。这里按列的 8 位小数做一次往返。
-	marked := FailureCost()
-	stored := marked.Round(8)
-	if stored.IsZero() {
-		t.Fatalf("failure cost marker collapses to zero in decimal(20,8): %s", marked)
+func TestReconstructFailureBillingDetailsWithNilAndLegacyCosts(t *testing.T) {
+	zero, oldMarker, oldCost := 0.0, 0.00000001, 6.0
+	existing := &BillingBreakdown{Total: "0.00000000"}
+	items := []LogView{
+		{HttpStatus: 502},
+		{HttpStatus: 500, EstimatedCost: &zero},
+		{HttpStatus: 429, EstimatedCost: &oldMarker},
+		{HttpStatus: 503, EstimatedCost: &oldCost},
+		{HttpStatus: 200},
+		{HttpStatus: 299},
+		{HttpStatus: 502, BillingDetails: existing},
 	}
-	if !stored.Equal(marked) {
-		t.Fatalf("failure cost marker must be exactly representable at 8 decimals: %s -> %s", marked, stored)
+	calls := 0
+	reconstructFailureDetails(context.Background(), items, func(context.Context, LogView) *BillingBreakdown {
+		calls++
+		input := failedBreakdownInput()
+		return &BillingBreakdown{BillingMode: input.BillingMode, Currency: input.Currency, Rule: input.Rule, Items: input.Items, Subtotal: input.Subtotal, Total: input.Total}
+	})
+	if calls != 4 {
+		t.Fatalf("estimate calls = %d, want 4 failures without snapshots", calls)
+	}
+	for _, item := range items[:4] {
+		b := item.BillingDetails
+		if b == nil || !b.Reconstructed || b.Charged || b.BillingMode != "rules" || b.Rule.ID != 7 || !b.Cost().IsZero() || b.Items[0].Amount != "0" {
+			t.Fatalf("unexpected reconstructed failure: %+v", b)
+		}
+	}
+	if items[0].EstimatedCost != nil || oldMarker != 0.00000001 || oldCost != 6 || items[4].BillingDetails != nil || items[5].BillingDetails != nil || items[6].BillingDetails != existing {
+		t.Fatal("reconstruction must not alter stored costs, success logs or existing snapshots")
 	}
 }
 
-func TestFailureCostStaysBelowRealAmounts(t *testing.T) {
-	// 标记价必须远小于任何真实成本，否则会把失败标记算进金额统计。
-	cheapestRealistic := decimal.RequireFromString("0.000001")
-	if !FailureCost().LessThan(cheapestRealistic) {
-		t.Fatalf("failure cost marker %s is not negligible", FailureCost())
-	}
-}
-
-func TestReconstructFailureBillingDetailsOnlyTargetsFailures(t *testing.T) {
-	// 复原先决条件：这条记录已经是「失败且有成本」。状态码只用来确认分类，
-	// 真正的价格估算依赖数据库，这里验证分类判定与早退分支。
-	marked := FailureCost().InexactFloat64()
-	failed := LogView{HttpStatus: 502, EstimatedCost: &marked}
-	if !isFailureLog(failed) {
-		t.Fatal("502 must be treated as a failure")
-	}
-	if isFailureLog(LogView{HttpStatus: 200}) {
-		t.Fatal("200 must not be treated as a failure")
-	}
-	if isFailureLog(LogView{HttpStatus: 299}) {
-		t.Fatal("299 must not be treated as a failure")
+func TestReconstructFailureBillingDetailsWithoutPrice(t *testing.T) {
+	items := []LogView{{HttpStatus: 502}}
+	reconstructFailureDetails(context.Background(), items, func(context.Context, LogView) *BillingBreakdown { return nil })
+	if items[0].BillingDetails != nil {
+		t.Fatal("unpriced failure must not get an invented snapshot")
 	}
 }
 
 func TestFailedBillingRoundTripThroughSnapshot(t *testing.T) {
-	// 快照要落成 JSON 再读回来：失败标记与 total 都不能在序列化过程中丢失，
-	// 否则列表页与详情页会对同一笔开销给出不同说法。
 	encoded, err := NewFailedBillingDetails(failedBreakdownInput()).JSON()
 	if err != nil {
 		t.Fatal(err)
 	}
 	restored := ParseBillingBreakdown(encoded)
-	if restored == nil || restored.BillingMode != failureBillingMode || restored.Charged {
-		t.Fatalf("failed billing snapshot was not preserved: %+v", restored)
+	if restored == nil || restored.BillingMode != "rules" || restored.Charged || restored.Rule == nil || restored.Rule.ID != 7 {
+		t.Fatalf("failed price metadata was not preserved: %+v", restored)
 	}
-	if restored.Total != "6.00000000" || !restored.Cost().Equal(decimal.RequireFromString("6")) {
-		t.Fatalf("unexpected restored total: %s", restored.Total)
+	if restored.Total != "0.00000000" || !restored.Cost().IsZero() || restored.Items[0].Amount != "0" {
+		t.Fatalf("restored failure must be free: %+v", restored)
 	}
 }

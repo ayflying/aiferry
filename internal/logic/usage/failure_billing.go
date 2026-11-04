@@ -2,106 +2,95 @@ package usage
 
 import (
 	"context"
+	"strings"
 
 	"github.com/shopspring/decimal"
 )
 
-// failureCostSentinel 是「失败但按量计费过」的标记价。
-//
-// 为什么不能用 0：estimated_cost 为 0 在库里和「这条记录没解析到用量」完全同形，
-// 一旦拿 0 当记号，成功的免费调用、历史脏数据都会被一起改写成计费快照。
-//
-// 取值必须落在 estimated_cost 的 decimal(20,8) 列能表示的范围内。
-// 实测教训：最初取 1e-9，落库时被 MySQL 舍入成 0.00000000，标记彻底失效；
-// 1e-8 是这一列能存下的最小非零值，正好够用，又不会在 SUM 里被当成真实金额。
-var failureCostSentinel = decimal.RequireFromString("0.00000001")
-
-// failureBillingMode 标记这类快照来自失败的请求，前端据此显示「已计费（失败）」而不是普通计费。
-const failureBillingMode = "failed"
-
-// FailedBillingDetails 是失败请求的计费快照输入。
+// FailedBillingDetails 是失败请求的价格快照输入；费用归零，价格元数据保留。
 type FailedBillingDetails struct {
-	Currency string
-	Items    []BillingItem
-	Subtotal string
-	Total    string
+	BillingMode string
+	Currency    string
+	Rule        *BillingRuleSnapshot
+	Items       []BillingItem
+	Subtotal    string
+	Total       string
 }
 
-// FailureCost 返回写库用的标记价：失败的计费记录在库里表现为「非 0 但没有真实金额」。
+// FailureCost 返回失败请求的落库费用。失败不产生费用，也不使用非零哨兵。
 func FailureCost() decimal.Decimal {
-	return failureCostSentinel
+	return decimal.Zero
 }
 
-// NewFailedBillingDetails 把失败请求的计费快照（通常由请求侧按失败时的用量估算得到）
-// 转成可直接落库的 BillingBreakdown。
-//
-// 失败请求不受「已写出内容与否」限制：只要上游确实消耗了 token 并且有价格，
-// 这次调用就有成本，哪怕客户端拿到的是错误。所以这条路径刻意跳过
-// reconstructLegacyBillingDetails 里「只有 2xx 才复原」的守卫，
-// 并在快照上显式写明：未扣费（失败请求不倒扣用户余额）、但已计费。
+// NewFailedBillingDetails 保留原套餐、计费模式和费率，包括零用量项。
+// 数量保留供排障，但所有金额为零且不扣款；不修改调用方的原快照。
 func NewFailedBillingDetails(input *FailedBillingDetails) *BillingBreakdown {
-	if input == nil {
+	if input == nil || (len(input.Items) == 0 && input.Rule == nil) {
 		return nil
 	}
-	items := make([]BillingItem, 0, len(input.Items))
-	total := decimal.Zero
-	for _, item := range input.Items {
-		// 上游没有返回用量时按量项数量为 0，这类项留着只会让人误以为算过。
-		if item.Type != "request" && item.Quantity == 0 {
-			continue
-		}
-		items = append(items, item)
-		amount, err := decimal.NewFromString(item.Amount)
-		if err != nil {
-			continue
-		}
-		total = total.Add(amount)
-	}
-	if len(items) == 0 {
-		return nil
+	items := make([]BillingItem, len(input.Items))
+	for index, item := range input.Items {
+		item.Amount = "0"
+		items[index] = item
 	}
 	currency := input.Currency
 	if currency == "" {
 		currency = "USD"
 	}
-	subtotal := input.Subtotal
-	if subtotal == "" {
-		subtotal = total.String()
+	mode := input.BillingMode
+	if mode == "" {
+		mode = "token"
+	}
+	var rule *BillingRuleSnapshot
+	if input.Rule != nil {
+		snapshot := *input.Rule
+		rule = &snapshot
 	}
 	return &BillingBreakdown{
-		BillingMode: failureBillingMode,
+		BillingMode: mode,
 		Currency:    currency,
-		// 失败请求不从用户账户扣款，charged 必须保持 false，否则详情弹窗会谎称扣了钱。
-		Charged: false,
-		Items:   items,
-		Subtotal: subtotal,
-		Total:   total.StringFixed(8),
+		Rule:        rule,
+		Charged:     false,
+		Items:       items,
+		Subtotal:    "0",
+		Total:       "0.00000000",
 	}
 }
 
-// reconstructFailureBillingDetails 回填「失败但已计费」历史记录的计费快照。
-//
-// 只处理带标记价的失败记录：这些记录在库里已经是「有成本」的，
-// 重建只会让详情页显示当时的价格明细，不会改变任何金额或余额。
+// reconstructFailureBillingDetails 按日志的模型、端点和请求时刻回填失败价格。
+// 无快照时不依赖旧 estimated_cost 是否存在；只补展示信息，不回写金额或余额。
 func (s *sUsage) reconstructFailureBillingDetails(ctx context.Context, items []LogView) {
+	reconstructFailureDetails(ctx, items, func(ctx context.Context, item LogView) *BillingBreakdown {
+		endpoint := item.UpstreamEndpoint
+		if endpoint == "" {
+			endpoint = strings.TrimPrefix(item.Endpoint, "test:")
+		}
+		return estimatePublicModelBreakdown(ctx, item.RequestedModel, endpoint, tokenUsageFromLog(item), item.CreatedAt, true)
+	})
+}
+
+func reconstructFailureDetails(ctx context.Context, items []LogView, estimate func(context.Context, LogView) *BillingBreakdown) {
 	for index := range items {
 		item := &items[index]
-		if item.BillingDetails != nil || item.EstimatedCost == nil || !isFailureLog(*item) {
+		if item.BillingDetails != nil || !isFailureLog(*item) {
 			continue
 		}
-		// 与成功记录的复原保持一致：一律用日志自身的 created_at 评估时段价格。
-		breakdown := EstimatePublicModelBreakdown(ctx, item.RequestedModel, item.UpstreamEndpoint, tokenUsageFromLog(*item), item.CreatedAt)
-		if breakdown == nil {
+		original := estimate(ctx, *item)
+		if original == nil {
 			continue
 		}
-		breakdown.Charged = false
-		breakdown.Reconstructed = true
-		item.BillingDetails = breakdown
+		breakdown := NewFailedBillingDetails(&FailedBillingDetails{
+			BillingMode: original.BillingMode, Currency: original.Currency,
+			Rule: original.Rule, Items: original.Items,
+		})
+		if breakdown != nil {
+			breakdown.Reconstructed = true
+			item.BillingDetails = breakdown
+		}
 	}
 }
 
-// isFailureLog 把「失败」定义成状态码不在 2xx：这是全站统一的判定口径
-// （成功率、失败提示、详情按钮都按它算），失败计费也必须用同一把尺子。
+// isFailureLog 与全站成功率保持一致：非 2xx 都是失败。
 func isFailureLog(item LogView) bool {
 	return item.HttpStatus < 200 || item.HttpStatus >= 300
 }

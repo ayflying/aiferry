@@ -138,6 +138,21 @@ func (s *sPricingCache) IsPriced(modelName string) bool {
 }
 
 func (s *sPricingCache) EstimateBreakdown(modelName, endpoint string, tokens usage.TokenUsage, at time.Time) *usage.BillingBreakdown {
+	return s.estimateBreakdown(modelName, endpoint, tokens, at, false)
+}
+
+// EstimateFailureBreakdown 保留失败请求零用量时的套餐与费率，不改变正常计费。
+func (s *sPricingCache) EstimateFailureBreakdown(modelName, endpoint string, tokens usage.TokenUsage, at time.Time) *usage.BillingBreakdown {
+	return s.estimateBreakdown(modelName, endpoint, tokens, at, true)
+}
+
+func (s *sPricingCache) estimateBreakdown(modelName, endpoint string, tokens usage.TokenUsage, at time.Time, failure bool) *usage.BillingBreakdown {
+	estimate := usage.EstimateBreakdown
+	ruleEstimate := usage.RuleBreakdown
+	if failure {
+		estimate = usage.EstimateFailureBreakdown
+		ruleEstimate = usage.RuleFailureBreakdown
+	}
 	price, exists := s.current()[modelName]
 	if !exists {
 		return nil
@@ -145,7 +160,7 @@ func (s *sPricingCache) EstimateBreakdown(modelName, endpoint string, tokens usa
 	switch price.BillingMode {
 	case billingModeRules:
 		for _, rule := range price.Rules {
-			if breakdown, matches := usage.RuleBreakdown(rule.Conditions, rule.Rates, endpoint, tokens, at); matches {
+			if breakdown, matches := ruleEstimate(rule.Conditions, rule.Rates, endpoint, tokens, at); matches {
 				breakdown.BillingMode = billingModeRules
 				breakdown.Currency = normalizeCurrency(rule.Currency)
 				breakdown.Rule = &usage.BillingRuleSnapshot{
@@ -156,13 +171,13 @@ func (s *sPricingCache) EstimateBreakdown(modelName, endpoint string, tokens usa
 		}
 		return nil
 	case billingModeRequest:
-		breakdown := usage.EstimateBreakdown(tokens, usage.PriceRates{Request: price.Rates.Request})
+		breakdown := estimate(tokens, usage.PriceRates{Request: price.Rates.Request})
 		if breakdown != nil {
 			breakdown.BillingMode = billingModeRequest
 		}
 		return breakdown
 	default:
-		return usage.EstimateBreakdown(tokens, price.Rates)
+		return estimate(tokens, price.Rates)
 	}
 }
 

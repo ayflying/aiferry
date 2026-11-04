@@ -42,6 +42,15 @@ type BillingBreakdown struct {
 }
 
 func EstimateBreakdown(tokens TokenUsage, rates PriceRates) *BillingBreakdown {
+	return estimateBreakdown(tokens, rates, false)
+}
+
+// EstimateFailureBreakdown 复用正常估算，但保留零用量的已配置费率，供失败账单展示。
+func EstimateFailureBreakdown(tokens TokenUsage, rates PriceRates) *BillingBreakdown {
+	return estimateBreakdown(tokens, rates, true)
+}
+
+func estimateBreakdown(tokens TokenUsage, rates PriceRates, keepZero bool) *BillingBreakdown {
 	breakdown := &BillingBreakdown{
 		BillingMode: "token",
 		Currency:    "USD",
@@ -60,7 +69,7 @@ func EstimateBreakdown(tokens TokenUsage, rates PriceRates) *BillingBreakdown {
 			*inputRemaining -= quantity
 		}
 		price, source := preferredPrice(kind, preferred, fallback, "input")
-		if price == nil || quantity == 0 {
+		if price == nil || (quantity == 0 && !(keepZero && preferred != nil)) {
 			return
 		}
 		cost = cost.Add(addTokenItem(&breakdown.Items, kind, quantity, *price, source))
@@ -72,7 +81,7 @@ func EstimateBreakdown(tokens TokenUsage, rates PriceRates) *BillingBreakdown {
 			*outputRemaining -= quantity
 		}
 		price, source := preferredPrice(kind, preferred, fallback, "output")
-		if price == nil || quantity == 0 {
+		if price == nil || (quantity == 0 && !(keepZero && preferred != nil)) {
 			return
 		}
 		cost = cost.Add(addTokenItem(&breakdown.Items, kind, quantity, *price, source))
@@ -83,13 +92,13 @@ func EstimateBreakdown(tokens TokenUsage, rates PriceRates) *BillingBreakdown {
 	chargeInput("cache_write", tokens.CacheWrite, rates.CacheWrite, rates.Input)
 	chargeInput("image_input", tokens.ImageInput, rates.ImageInput, rates.Input)
 	chargeInput("audio_input", tokens.AudioInput, rates.AudioInput, rates.Input)
-	if inputRemaining != nil && rates.Input != nil && *inputRemaining > 0 {
-		cost = cost.Add(addTokenItem(&breakdown.Items, "input", *inputRemaining, *rates.Input, "input"))
+	if rates.Input != nil && (keepZero || tokenCount(inputRemaining) > 0) {
+		cost = cost.Add(addTokenItem(&breakdown.Items, "input", tokenCount(inputRemaining), *rates.Input, "input"))
 		priced = true
 	}
 	chargeOutput("audio_output", tokens.AudioOutput, rates.AudioOutput, rates.Output)
-	if outputRemaining != nil && rates.Output != nil && *outputRemaining > 0 {
-		cost = cost.Add(addTokenItem(&breakdown.Items, "output", *outputRemaining, *rates.Output, "output"))
+	if rates.Output != nil && (keepZero || tokenCount(outputRemaining) > 0) {
+		cost = cost.Add(addTokenItem(&breakdown.Items, "output", tokenCount(outputRemaining), *rates.Output, "output"))
 		priced = true
 	}
 	if rates.Request != nil {

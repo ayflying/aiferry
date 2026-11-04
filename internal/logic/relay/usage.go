@@ -45,9 +45,9 @@ func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.A
 			recordError = streamTruncatedReason
 		}
 	}
-	// 失败请求同样消耗了上游算力：只要解析到用量，就把当时的计费快照落库，
-	// 让管理端能显示这笔已发生的成本（标记价 + charged=false，不扣用户余额）。
+	// 失败请求保留当时的套餐和费率（包括无 usage 的零数量项），所有费用归零且不扣款。
 	if !billable {
+		billingDetails = s.prices.EstimateFailureBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, startedAt)
 		estimatedCost, failureDetails := failedUsageBilling(billingDetails)
 		cost, billingDetails = estimatedCost, failureDetails
 	}
@@ -180,29 +180,19 @@ func pricedUsageCost(priced bool, billingDetails *usage.BillingBreakdown) (*deci
 	return nil, false
 }
 
-// failedUsageBilling 为失败请求生成「已计费但不扣款」的落库口径。
-//
-// 失败的调用同样消耗了上游算力：上游多数时候连 usage 一起返回，
-// 这里按当时的价格快照把它记成成本，管理端就能显示这笔真实开销。
-// 两点刻意的取舍：
-//   - 成本写成标记价而不是真实金额，真实金额只进计费快照，
-//     这样「未定价的失败」与「计过费的失败」在库里仍然可区分；
-//   - 没有任何用量或没有价格时什么都不写，避免把「无从估算」伪装成计费成功。
+// failedUsageBilling 保留失败请求的价格快照，落库费用和快照金额均为零。
 func failedUsageBilling(billingDetails *usage.BillingBreakdown) (*decimal.Decimal, *usage.BillingBreakdown) {
+	cost := usage.FailureCost()
 	if billingDetails == nil {
-		return nil, nil
+		return &cost, nil
 	}
 	details := usage.NewFailedBillingDetails(&usage.FailedBillingDetails{
-		Currency: billingDetails.Currency,
-		Items:    billingDetails.Items,
-		Subtotal: billingDetails.Subtotal,
-		Total:    billingDetails.Total,
+		BillingMode: billingDetails.BillingMode,
+		Currency:    billingDetails.Currency,
+		Rule:        billingDetails.Rule,
+		Items:       billingDetails.Items,
 	})
-	if details == nil {
-		return nil, nil
-	}
-	marked := usage.FailureCost()
-	return &marked, details
+	return &cost, details
 }
 
 // modelHealthScoreAtRequest 查询本次请求所用模型记录的当前健康分，作为日志快照。

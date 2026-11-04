@@ -36,7 +36,10 @@ const visible = computed({
 })
 const isSuccess = computed(() => !!props.usage && props.usage.httpStatus >= 200 && props.usage.httpStatus < 300)
 const billingDetails = computed(() => props.usage?.billingDetails)
-const billingItems = computed(() => billingDetails.value?.items ?? [])
+// 旧版失败快照可能带有非零 amount：费率仍展示，本次费用统一为零。
+const billingItems = computed(() => (billingDetails.value?.items ?? []).map((item) =>
+  isSuccess.value ? item : { ...item, amount: '0' },
+))
 // 失败请求的计费快照同样是「调用时价格快照」，只是这次调用没有成功；
 // 文案要区分开，否则用户会以为失败请求也按正常流程扣了款（见 billingChargeLabel）。
 const resultMessage = computed(() => {
@@ -59,11 +62,11 @@ const billingModeLabel = computed(() => {
     default: return '未保存'
   }
 })
-const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '历史价格快照复原' : '调用时价格快照')
-// 请求本身失败但上游确实消耗了算力：这里说明「已计费、未扣款」，避免把失败理解成零成本。
+const billingSourceLabel = computed(() => billingDetails.value?.reconstructed ? '按日志时间重建的参考费率（非原始快照）' : '调用时价格快照')
+// 是否有套餐费率，不代表本次失败请求产生了费用。
 const billingChargeLabel = computed(() => {
   if (!billingDetails.value) return '—'
-  if (!isSuccess.value) return '失败请求未扣款（成本已计入统计）'
+  if (!isSuccess.value) return '失败请求，费用为 0，未扣款'
   return billingDetails.value.charged ? '已按快照扣款' : '未扣款（自有渠道或免计费模型）'
 })
 const attemptFlow = computed(() => props.usage?.attemptFlow ?? [])
@@ -133,7 +136,7 @@ function itemLabel(item: BillingItem) {
 
 function billingSummary() {
   const details = billingDetails.value
-  return ['总计', '', '', details ? formatPreciseCost(details.total, details.currency) : '']
+  return ['总计', '', '', details ? formatPreciseCost(isSuccess.value ? details.total : 0, details.currency) : '']
 }
 </script>
 
@@ -176,7 +179,7 @@ function billingSummary() {
             <el-descriptions-item label="价格来源">{{ billingSourceLabel }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="命中规则">{{ billingDetails.rule.name || `规则 #${billingDetails.rule.id}` }} · P{{ billingDetails.rule.priority }} · {{ billingDetails.rule.source === 'sync' ? '上游同步' : '人工规则' }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="规则条件"><span class="detail-value mono">{{ billingDetails.rule.conditions }}</span></el-descriptions-item>
-            <el-descriptions-item label="模型价格小计"><strong class="cost-value">{{ formatPreciseCost(billingDetails.subtotal, billingDetails.currency) }}</strong></el-descriptions-item>
+            <el-descriptions-item label="模型价格小计"><strong class="cost-value">{{ formatPreciseCost(isSuccess ? billingDetails.subtotal : 0, billingDetails.currency) }}</strong></el-descriptions-item>
             <el-descriptions-item label="扣款状态" :span="billingDetails.rule ? 1 : 2">{{ billingChargeLabel }}</el-descriptions-item>
           </el-descriptions>
           <el-table :data="billingItems" border size="small" table-layout="fixed" class="billing-items" show-summary :summary-method="billingSummary">
