@@ -83,11 +83,17 @@ func (h *hub) markClosed(session *wsSession) {
 }
 
 // writeLoop 独占写协程：gorilla/websocket 不允许并发写。
-func (h *hub) writeLoop(w *wsSession) {
+//
+// ctx 只用于「服务停止」，不能传请求上下文：请求上下文在 HTTP 处理返回时即被取消，
+// 而连接这时应当继续存活并发心跳。
+func (h *hub) writeLoop(ctx context.Context, w *wsSession) {
 	ping := time.NewTicker(wsPingInterval)
 	defer ping.Stop()
 	for {
 		select {
+		case <-ctx.Done():
+			h.markClosed(w)
+			return
 		case <-w.closed:
 			_ = w.conn.Close()
 			return
@@ -229,6 +235,11 @@ func (s *Service) OnlineNodes() []string {
 //
 // 握手成功后先下发一条 state 消息（携带当前配置版本），
 // 让子节点立刻知道是否需要补一次同步，而不用等下一次轮询。
+//
+// 连接一旦被 Upgrade 接管，生命周期就不再受 HTTP 请求上下文控制：
+// GoFrame 会在请求处理返回后取消该上下文，若写协程跟着它退出，
+// 连接看起来正常却再也收不到 ping，子节点只能靠读超时反复重连
+// （2026-11-06 线上实测表现为每 50 秒断开一次）。
 func (s *Service) ServeStream(ctx context.Context, w http.ResponseWriter, r *http.Request, name, version string) error {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -239,7 +250,9 @@ func (s *Service) ServeStream(ctx context.Context, w http.ResponseWriter, r *htt
 	if previous := s.hub.register(session); previous != nil {
 		s.clusterLogger().Infof(ctx, "cluster: node %s reconnected over websocket, replaced stale session", name)
 	}
-	go s.hub.writeLoop(session)
+	// loopCtx 只表达「服务是否停止」，不继承请求上下文。
+	loopCtx := context.Background()
+	go s.hub.writeLoop(loopCtx, session)
 	go s.hub.readLoop(session)
 	defer s.hub.markClosed(session)
 
