@@ -34,6 +34,23 @@ const (
 	wsReadLimit = 8 << 10
 )
 
+// configureStreamReader 为双方统一安装控制帧处理器，须在开始读取之前调用。
+// 主节点发 ping，子节点回 pong：接收 ping 的一侧也必须刷新读期限，
+// 不能只处理 pong，否则空闲但健康的子节点仍会在 wsPongWait 后超时。
+// WriteControl 可与唯一的业务写协程并发使用，不改写它的写期限。
+func configureStreamReader(conn *websocket.Conn, wait, writeTimeout time.Duration) {
+	conn.SetReadLimit(wsReadLimit)
+	refresh := func() error { return conn.SetReadDeadline(time.Now().Add(wait)) }
+	_ = refresh()
+	conn.SetPongHandler(func(string) error { return refresh() })
+	conn.SetPingHandler(func(data string) error {
+		if err := refresh(); err != nil {
+			return err
+		}
+		return conn.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(writeTimeout))
+	})
+}
+
 // wsMessage 是通道上的报文。两个方向都用同一个结构，靠 type 区分。
 type wsMessage struct {
 	Type    string `json:"type"`

@@ -95,12 +95,13 @@ func (s *Service) serveStreamOnce(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	conn.SetReadLimit(wsReadLimit)
-	_ = conn.SetReadDeadline(time.Now().Add(wsPongWait))
-	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(wsPongWait))
-	})
+	configureStreamReader(conn, wsPongWait, wsWriteTimeout)
 	s.clusterLogger().Infof(ctx, "cluster: subscribed to master config stream")
+
+	// 取消服务上下文时主动关闭连接，唤醒阻塞中的 ReadJSON；不能只等读超时。
+	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopClose()
+
 	for {
 		message := wsMessage{}
 		if err = conn.ReadJSON(&message); err != nil {

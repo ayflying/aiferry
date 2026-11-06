@@ -99,8 +99,8 @@ func TestListNodesReportsStreamState(t *testing.T) {
 // TestServeStreamDeliversVersion 验证主节点侧订阅语义：验签通过后登记在线并下发版本号，
 // 之后推送直接进会话队列而不回落 HTTP 回调。
 //
-// 这里不用真实 WS 握手：httptest 的服务端响应不支持 Hijack，gorilla 的 Upgrade 必然失败，
-// 强行升级会把「握手失败」误当成「通道逻辑失败」。真实握手由端到端脚本在测试环境覆盖。
+// 此测试只覆盖会话队列语义；真实 TCP 握手和心跳见 ws_heartbeat_test.go。
+// httptest.NewServer 支持 Hijack，只有 ResponseRecorder 不支持，不能混为一谈。
 func TestServeStreamDeliversVersion(t *testing.T) {
 	db := openWorkerDatabase(t)
 	ctx := context.Background()

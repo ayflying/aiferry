@@ -49,6 +49,7 @@ func (c *Controller) Stream(r *ghttp.Request) {
 		writeUnauthorized(r, err)
 		return
 	}
+	// 与 GoFrame Request.WebSocket 使用相同的底层 writer 完成升级。
 	if err = c.service.ServeStream(ctx, r.Response.Writer, r.Request, name, r.Header.Get("X-Aiferry-Version")); err != nil {
 		g.Log().Warningf(ctx, "cluster: upgrade stream for node %s: %v", name, err)
 	}

@@ -82,10 +82,8 @@ func (h *hub) markClosed(session *wsSession) {
 	h.forget(session)
 }
 
-// writeLoop 独占写协程：gorilla/websocket 不允许并发写。
-//
-// ctx 只用于「服务停止」，不能传请求上下文：请求上下文在 HTTP 处理返回时即被取消，
-// 而连接这时应当继续存活并发心跳。
+// writeLoop 独占业务写协程，并由主节点定期发送 ping。
+// ctx 不继承 HTTP 请求上下文；升级后的连接通过 session.closed 管理。
 func (h *hub) writeLoop(ctx context.Context, w *wsSession) {
 	ping := time.NewTicker(wsPingInterval)
 	defer ping.Stop()
@@ -103,8 +101,7 @@ func (h *hub) writeLoop(ctx context.Context, w *wsSession) {
 				h.markClosed(w)
 			}
 		case <-ping.C:
-			_ = w.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-			if err := w.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := w.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(wsWriteTimeout)); err != nil {
 				h.markClosed(w)
 			}
 		}
@@ -115,11 +112,7 @@ func (h *hub) writeLoop(ctx context.Context, w *wsSession) {
 // 因此收到的数据帧一律忽略，仅把 pong 当作链路健康证据。
 func (h *hub) readLoop(w *wsSession) {
 	defer h.markClosed(w)
-	w.conn.SetReadLimit(wsReadLimit)
-	_ = w.conn.SetReadDeadline(time.Now().Add(wsPongWait))
-	w.conn.SetPongHandler(func(string) error {
-		return w.conn.SetReadDeadline(time.Now().Add(wsPongWait))
-	})
+	configureStreamReader(w.conn, wsPongWait, wsWriteTimeout)
 	for {
 		if _, _, err := w.conn.ReadMessage(); err != nil {
 			return
@@ -236,11 +229,9 @@ func (s *Service) OnlineNodes() []string {
 // 握手成功后先下发一条 state 消息（携带当前配置版本），
 // 让子节点立刻知道是否需要补一次同步，而不用等下一次轮询。
 //
-// 两个关键约束，都是实测踩出来的：
-//  1. 连接被 Upgrade 接管后就不再受 HTTP 请求上下文控制。GoFrame 在请求处理
-//     返回时立刻取消该上下文，写协程若跟着它退出，连接看起来正常却永远收不到 ping。
-//  2. 连接生命周期只由 session.closed 表达，这个函数不能阻塞到连接结束——
-//     GoFrame 在请求处理返回后可能回收连接相关状态，阻塞会得到 1006 异常关闭。
+// Upgrade 成功后连接由 gorilla 接管，后续控制帧不经过 HTTP 响应缓冲层。
+// 会话读写在独立协程中运行，HTTP 请求返回不会中断会话；
+// 连接关闭时通过 session.closed 统一结束读写并摘除在线状态。
 func (s *Service) ServeStream(ctx context.Context, w http.ResponseWriter, r *http.Request, name, version string) error {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
