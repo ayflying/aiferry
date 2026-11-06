@@ -513,11 +513,22 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	return result, true, nil
 }
 
+// responseHeaders 挑选要回写给客户端的上游响应头。
+//
+// 网关只压缩客户端连接，因此必须剥掉上游的压缩相关头：
+//   - net/http 读取上游体时会按 Content-Encoding 自动解压，并把 Content-Encoding、
+//     Content-Length 从 resp.Header 中删掉，所以这里只能拿到解压后的明文；
+//   - 若把上游的 Content-Length 原样回写，它表示的是压缩后的长度，与明文长度不符，
+//     客户端会按该值截断或直接报错；
+//   - 上游若返回 Transfer-Encoding: chunked，原样回写会让已解压的明文被误标成分块编码。
+//
+// 因此统一删除这几类头，由网关按自己实际写出的字节重新决定。
 func responseHeaders(headers http.Header, plan protocol.Plan) http.Header {
 	result := headers.Clone()
+	for _, name := range []string{"Content-Length", "Content-Encoding", "Transfer-Encoding"} {
+		result.Del(name)
+	}
 	if plan.Converts() {
-		result.Del("Content-Length")
-		result.Del("Content-Encoding")
 		result.Set("Content-Type", "application/json")
 	}
 	return result

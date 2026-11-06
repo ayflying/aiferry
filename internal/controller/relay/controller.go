@@ -371,8 +371,7 @@ func normalizedVideoClientResponse(status int, body []byte, headers http.Header)
 
 func copyUpstreamResponseHeaders(target, source http.Header) {
 	for name, values := range source {
-		switch strings.ToLower(name) {
-		case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "content-length":
+		if relaysvc.DropClientResponseHeader(name) {
 			continue
 		}
 		for _, value := range values {

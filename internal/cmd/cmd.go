@@ -137,6 +137,13 @@ var (
 					r.Response.Header().Set("Cache-Control", "no-cache")
 				}
 			})
+			// 响应压缩在输出前统一决定，必须落在 HookBeforeOutput，且在静态文件分支
+			// 之外生效：GoFrame 的静态文件检索优先于动态路由，资源直接从磁盘回源，
+			// 两者都不能依赖路由中间件。
+			// 背景（0.6.84）：/v1 转发与 /api 管理接口此前完全没有压缩，客户端
+			// 拿到的是明文 JSON / SSE，流量与首屏耗时都被放大。上游压缩头已在 relay
+			// 回包时剥除，网关按客户端能力在这一跳重新压缩，内容保持不变。
+			s.BindHookHandler("/*", ghttp.HookBeforeOutput, NegotiateResponseCompression)
 			s.BindHandler("GET:/healthz", func(r *ghttp.Request) {
 				r.Response.WriteJson(map[string]any{
 					"status":   "ok",
