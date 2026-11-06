@@ -63,6 +63,11 @@ func (s *Service) pushToNodes(ctx context.Context) error {
 		return err
 	}
 	for _, node := range nodes {
+		// 优先走 WS：子节点可能在内网，主节点根本连不进去，
+		// 此时 node.Address 推送注定失败，只有反向长连接能通知到它。
+		if s.hub.push(node.Name, version) {
+			continue
+		}
 		if node.Address == "" {
 			continue
 		}

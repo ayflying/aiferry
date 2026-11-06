@@ -53,6 +53,40 @@ func (s *Service) Wake() {
 	}
 }
 
+// SyncNow 通知指定子节点立即同步一次配置。
+//
+// 用于管理端「立即同步」按钮：只通过 WS 下发一条当前版本号，
+// 子节点收到后自己判断是否落后并决定是否拉快照，
+// 因此不会因为人工点击产生无条件的全量传输。
+func (s *Service) SyncNode(ctx context.Context, id uint64) error {
+	if s.IsWorker() {
+		return gerror.New("cluster: only the master can ask a node to sync")
+	}
+	node, err := s.FindNodeByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	version, err := s.ConfigVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if s.hub.push(node.Name, version) {
+		return nil
+	}
+	if node.Address == "" {
+		return gerror.Newf("cluster: node %s has no websocket session and no callback address", node.Name)
+	}
+	return s.notifyNode(ctx, *node, version)
+}
+
+// StreamConnected 判断节点当前是否通过 WS 订阅着主节点。
+func (s *Service) StreamConnected(name string) (ConnectionInfo, bool) {
+	if s.IsWorker() {
+		return ConnectionInfo{}, false
+	}
+	return s.hub.connected(name)
+}
+
 // EnsureRegistered 向主节点注册并拿到节点 ID。
 //
 // 注册是幂等的：同名节点重复注册只刷新地址与版本，因此容器重建后不需要人工干预。
@@ -242,6 +276,9 @@ func (s *Service) startWorkerLoops(ctx context.Context) (func(), error) {
 	go s.syncLoop(ctx)
 	go s.heartbeatLoop(ctx)
 	go s.usageLoop(ctx)
+	// WS 通道只是通知加速器：主节点不可达或未启用时连接循环会自己退避重试，
+	// 配置收敛仍由 syncLoop 的定时条件轮询保证。
+	go s.wsConnectLoop(ctx)
 	return func() {}, nil
 }
 

@@ -23,6 +23,12 @@ type Node struct {
 	UpdatedAt     time.Time `json:"updatedAt"`
 	// Stale 表示该节点配置版本落后于主节点，查询时即时计算，不入库。
 	Stale bool `json:"stale"`
+	// Online 表示该节点当前通过 WS 长连接订阅着主节点，同样即时计算。
+	Online bool `json:"online"`
+	// StreamSince 是本次长连接建立时间，不在线时为空。
+	StreamSince time.Time `json:"streamSince"`
+	// StreamVersion 是子节点自报的运行版本，取自 WS 连接而不落库。
+	StreamVersion string `json:"streamVersion"`
 }
 
 const nodeColumns = "id, name, address, version, config_version, pending_rows, last_error, " +
@@ -66,7 +72,22 @@ func (s *Service) FindNodeByName(ctx context.Context, name string) (*Node, error
 	return node, nil
 }
 
-// ListNodes 返回全部节点（含已吊销），并标出配置落后的节点。
+// FindNodeByID 按主键读取节点（含已吊销），管理端操作用。
+func (s *Service) FindNodeByID(ctx context.Context, id uint64) (*Node, error) {
+	node := &Node{}
+	if err := s.database.Model("cluster_nodes").Ctx(ctx).Where("id = ?", id).Scan(node); err != nil {
+		return nil, gerror.Wrap(err, "load cluster node")
+	}
+	if node.Id == 0 {
+		return nil, gerror.Newf("cluster: node %d does not exist", id)
+	}
+	return node, nil
+}
+
+// ListNodes 返回全部节点（含已吊销），并标出配置落后与是否在线。
+//
+// 在线与否只看 WS 订阅是否存在，不看心跳时间：心跳只能说明「最近来过」，
+// 进程僵死或网络单向中断时心跳列仍然是新鲜的，会造成误判在线。
 func (s *Service) ListNodes(ctx context.Context) ([]Node, error) {
 	nodes := make([]Node, 0, 8)
 	if err := s.database.Model("cluster_nodes").Ctx(ctx).Order("id ASC").Scan(&nodes); err != nil {
@@ -78,6 +99,11 @@ func (s *Service) ListNodes(ctx context.Context) ([]Node, error) {
 	}
 	for index := range nodes {
 		nodes[index].Stale = nodes[index].Status == 1 && nodes[index].ConfigVersion < version
+		if info, ok := s.hub.connected(nodes[index].Name); ok {
+			nodes[index].Online = info.Online
+			nodes[index].StreamSince = info.Since
+			nodes[index].StreamVersion = info.Version
+		}
 	}
 	return nodes, nil
 }

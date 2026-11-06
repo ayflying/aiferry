@@ -78,6 +78,8 @@ type Service struct {
 	syncMu sync.Mutex
 	// ledgerMu 串行化本地记账、回传与权威账务快照，防止覆盖未结算消费。
 	ledgerMu sync.Mutex
+	// hub 是主节点侧的 WS 订阅表，同时是「子节点是否在线」的唯一真相来源。
+	hub hub
 }
 
 // New 构造集群服务。store 是节点内缓存（主节点 Redis、子节点 SQLite），

@@ -21,12 +21,37 @@ func New(service *cluster.Service) *Controller {
 	return &Controller{service: service}
 }
 
-// RegisterForMaster 注册主节点侧接口：子节点注册、拉取快照、上报心跳、回传用量。
+// RegisterForMaster 注册主节点侧接口：子节点注册、拉取快照、上报心跳、回传用量，
+// 以及子节点主动订阅的 WS 通知通道。
 func (c *Controller) RegisterForMaster(group *ghttp.RouterGroup) {
 	group.POST("/register", c.Register)
 	group.POST("/config", c.Config)
 	group.POST("/heartbeat", c.Heartbeat)
 	group.POST("/usage", c.Usage)
+	group.GET("/stream", c.Stream)
+}
+
+// Stream 把已验签的 GET 升级成 WS 长连接，用于向子节点即时下发配置变更。
+//
+// 为什么必须放在主节点：子节点可能部署在内网，主节点无法主动连进去，
+// 只能由子节点反向建链。端口与 HTTP 完全共用，不需要额外开放。
+//
+// 验签在升级之前完成：升级后 GoFrame 已交出连接，中间件不再生效。
+func (c *Controller) Stream(r *ghttp.Request) {
+	ctx := r.Context()
+	name, err := c.service.VerifiedNodeName(ctx, r.Request, nil)
+	if err != nil {
+		writeUnauthorized(r, err)
+		return
+	}
+	// 只有已注册且未吊销的节点才允许订阅，吊销后连接会在下一次重连时被拒。
+	if _, err = c.service.FindNodeByName(ctx, name); err != nil {
+		writeUnauthorized(r, err)
+		return
+	}
+	if err = c.service.ServeStream(ctx, r.Response.Writer, r.Request, name, r.Header.Get("X-Aiferry-Version")); err != nil {
+		g.Log().Warningf(ctx, "cluster: upgrade stream for node %s: %v", name, err)
+	}
 }
 
 // RegisterForWorker 注册子节点侧接口：只接收主节点的配置变更通知。

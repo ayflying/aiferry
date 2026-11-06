@@ -7,8 +7,8 @@
 
 | 角色 | `AIFERRY_ROLE` | 依赖 | 暴露的接口 |
 | --- | --- | --- | --- |
-| 主节点 | 不设或 `master` | MySQL、Redis、Casdoor | `/v1`、`/api/admin`、`/api/auth`、管理端页面、`/internal/cluster/*` |
-| 子节点 | `worker` | 无外部依赖，仅本地数据卷 | `/v1`、`/internal/cluster/notify` |
+| 主节点 | 不设或 `master` | MySQL、Redis、Casdoor | `/v1`、`/api/admin`、`/api/auth`、管理端页面、`/internal/cluster/*`（含 WS `/stream`） |
+| 子节点 | `worker` | 无外部依赖，仅本地数据卷 | `/v1`、`/internal/cluster/notify`，并主动连主节点 `/internal/cluster/stream` |
 
 `AIFERRY_ROLE` 不设即为主节点，且未配置 `AIFERRY_CLUSTER_SECRET` 时不注册任何内部接口，
 与单机部署逐字节一致；回滚只需把角色的环境变量去掉。
@@ -44,7 +44,42 @@
 | `POST /internal/cluster/config?version=N` | 子 → 主 | 拉取全量快照，版本未变返回 304 |
 | `POST /internal/cluster/heartbeat` | 子 → 主 | 上报配置版本、待回传行数、最近一次错误 |
 | `POST /internal/cluster/usage` | 子 → 主 | 批量回传用量明细 |
-| `POST /internal/cluster/notify` | 主 → 子 | 配置版本变化通知，子节点收到后立即同步 |
+| `GET /internal/cluster/stream` | 子 → 主 | **WS 长连接**，主节点据此下发配置变更 |
+| `POST /internal/cluster/notify` | 主 → 子 | 旧推送方式，仅在子节点没有 WS 连接时兜底 |
+
+## WebSocket 通知通道
+
+子节点常常部署在内网，主节点根本连不进去，因此把「通知方向」反了过来：
+
+- 子节点主动向主节点建立 **WS 长连接**，路径 `GET /internal/cluster/stream`，
+  **端口与 HTTP 完全共用**（`AIFERRY_MASTER_URL` 用哪个端口就用哪个端口），不需要额外开放端口；
+- 握手仍是普通 HTTP 请求，沿用同一套 HMAC 签名（`X-Aiferry-Node/-Ts/-Nonce/-Signature`，
+  签名路径为 `/internal/cluster/stream`），因此没有引入第二套密钥或 token；
+- 升级前必须验签 + 校验节点已注册未吊销；升级后 GoFrame 已交出连接，中间件不再生效，
+  所以这一步刻意放在控制器里先做；
+- 建链后主节点立刻下发一条 `state`（当前配置版本），子节点据此判断是否需要补一次同步；
+- 之后每次配置变更下发 `notify`（版本号），子节点收到后仍用原来的 `/config` 拉快照，
+  因此**快照、用量、心跳仍是 HTTP**，WS 只承担单向通知；
+- 主节点每 25 秒 ping 一次，50 秒无 pong 视为断链；写超时 5 秒；
+- 断线后子节点指数退避重连（1s 起、上限 30s），期间自动回落到原有定时轮询，
+  配置收敛仍由轮询保证，不依赖长连接；
+- 通道满（对端长期不读）时主节点直接断开该连接，而不是丢消息——丢掉最新版本号会让
+  子节点长期停在旧配置上。
+
+> 边界：共享 HMAC 仍是唯一的身份凭据，持密钥的节点彼此互信；WS 只解决「主节点推不进去」，
+> 不提供更强的角色隔离。跨公网请使用 HTTPS（自动升级为 `wss`）并限制 `/internal/cluster/*` 的来源。
+
+## 节点在线状态
+
+管理端「集群节点」页（`/cluster`）显示每个节点是否在线：
+
+- 在线判定只看 **WS 连接是否存在**，不看心跳时间。心跳只能说明「最近来过」，
+  进程僵死或单向断网时心跳列可能仍是新鲜的，会造成误判在线；
+- 列出的连接时长来自本次订阅建立时间，版本取握手中自报的值，均为主节点内存实时计算，不落库；
+- 页面每 15 秒静默刷新一次；
+- 「立即同步」只下发一条当前版本号，节点版本一致时不会重复拉快照，
+  因此可以放心点击；它用于验证通道是否真的打通。
+
 
 ## 配置同步
 
@@ -79,5 +114,8 @@
 - 主节点必须先于子节点启动；子节点在 `AIFERRY_BOOTSTRAP_REQUIRED=true` 时注册失败会直接退出。
 - 子节点不需要 MySQL / Redis / Casdoor 的任何凭据，误配会直接报错而不是静默忽略。
 - 子节点的 `AIFERRY_DATA_DIR` 必须是持久卷，否则重启后需要重新全量同步。
-- 主节点「节点管理」接口：`GET /api/admin/cluster/nodes` 列出节点与是否落后，
-  `DELETE /api/admin/cluster/nodes/:id` 吊销节点，被吊销的节点注册会被拒绝。
+- 主节点「节点管理」接口：`GET /api/admin/cluster/nodes` 列出节点、是否落后与是否在线，
+  `POST /api/admin/cluster/nodes/:id/sync` 要求某节点立即比对版本，
+  `DELETE /api/admin/cluster/nodes/:id` 吊销节点，被吊销的节点注册与订阅都会被拒绝。
+- 子节点在内网时不需要填写 `AIFERRY_NODE_URL`：配置变更通过子节点主动建立的 WS 长连接下发，
+  该变量只在「主节点能直连子节点」时作为 WS 断开期间的兜底推送地址。
