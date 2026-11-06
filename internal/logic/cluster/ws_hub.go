@@ -236,10 +236,11 @@ func (s *Service) OnlineNodes() []string {
 // 握手成功后先下发一条 state 消息（携带当前配置版本），
 // 让子节点立刻知道是否需要补一次同步，而不用等下一次轮询。
 //
-// 连接一旦被 Upgrade 接管，生命周期就不再受 HTTP 请求上下文控制：
-// GoFrame 会在请求处理返回后取消该上下文，若写协程跟着它退出，
-// 连接看起来正常却再也收不到 ping，子节点只能靠读超时反复重连
-// （2026-11-06 线上实测表现为每 50 秒断开一次）。
+// 两个关键约束，都是实测踩出来的：
+//  1. 连接被 Upgrade 接管后就不再受 HTTP 请求上下文控制。GoFrame 在请求处理
+//     返回时立刻取消该上下文，写协程若跟着它退出，连接看起来正常却永远收不到 ping。
+//  2. 连接生命周期只由 session.closed 表达，这个函数不能阻塞到连接结束——
+//     GoFrame 在请求处理返回后可能回收连接相关状态，阻塞会得到 1006 异常关闭。
 func (s *Service) ServeStream(ctx context.Context, w http.ResponseWriter, r *http.Request, name, version string) error {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -251,10 +252,13 @@ func (s *Service) ServeStream(ctx context.Context, w http.ResponseWriter, r *htt
 		s.clusterLogger().Infof(ctx, "cluster: node %s reconnected over websocket, replaced stale session", name)
 	}
 	// loopCtx 只表达「服务是否停止」，不继承请求上下文。
-	loopCtx := context.Background()
+	loopCtx, stop := context.WithCancel(context.Background())
+	go func() {
+		<-session.closed
+		stop()
+	}()
 	go s.hub.writeLoop(loopCtx, session)
 	go s.hub.readLoop(session)
-	defer s.hub.markClosed(session)
 
 	current, err := s.ConfigVersion(ctx)
 	if err != nil {
@@ -263,7 +267,5 @@ func (s *Service) ServeStream(ctx context.Context, w http.ResponseWriter, r *htt
 	}
 	s.hub.send(session, wsMessage{Type: wsMessageState, Version: current})
 	s.clusterLogger().Infof(ctx, "cluster: node %s subscribed to config stream (version %d)", name, current)
-	<-session.closed
-	s.clusterLogger().Infof(ctx, "cluster: node %s config stream closed", name)
 	return nil
 }
