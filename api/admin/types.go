@@ -28,6 +28,13 @@ type ChannelInput struct {
 type ChannelCredentialInput struct {
 	APIKey        string  `json:"apiKey" v:"required|length:1,4096"`
 	ManagementKey *string `json:"managementKey"`
+	Remark        string  `json:"remark" v:"length:0,500#备注最多500个字符"`
+}
+
+// ChannelCredentialRemarkInput 只更新说明文字；显式空字符串用于清除备注。
+// 指针用于区分漏传字段与清空，避免空请求意外覆盖已有备注。
+type ChannelCredentialRemarkInput struct {
+	Remark *string `json:"remark" v:"length:0,500#备注最多500个字符"`
 }
 
 type ChannelCredentialManagementKeyInput struct {

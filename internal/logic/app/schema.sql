@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS channel_credentials (
 	key_hash                  TEXT,
 	api_key_cipher            TEXT,
 	management_key_cipher     TEXT,
+	remark                    TEXT NOT NULL DEFAULT '',
 	status                    INTEGER NOT NULL DEFAULT 1,
 	auto_disabled_at          TEXT,
 	auto_disabled_reason      TEXT,

@@ -246,6 +246,7 @@ export interface ChannelCredential {
   /** 固定序号：按创建顺序编号（含已删密钥占位），与用量明细「渠道 #N」一致；删除不重排。 */
   index: number
   keyPrefix: string
+  remark: string
   hasManagementKey?: boolean
   status: number
   autoDisabled: boolean

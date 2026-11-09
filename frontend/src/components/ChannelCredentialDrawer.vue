@@ -9,6 +9,7 @@ import { showError, showSuccess, showWarning } from '../lib/error'
 import { copyText } from '../lib/clipboard'
 import { formatBalance, formatCost, formatTime, formatNumber, formatUsageValue, usageCurrency } from '../lib/format'
 import { channelQueryValueLabel, isUsageMode } from '../lib/channelTypeDisplay'
+import CredentialRemarkEditor from './CredentialRemarkEditor.vue'
 
 const props = defineProps<{ modelValue: boolean; channel?: Channel; quotaSupported?: boolean; managementKeySupported?: boolean; managementKeyPair?: boolean; loginSupported?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; changed: []; 'query-quota': [credential: ChannelCredential] }>()
@@ -24,6 +25,7 @@ const addMode = ref<'manual' | 'login'>('manual')
 function openAddCredential() {
   credentialValue.value = ''
   credentialManagementValue.value = ''
+  credentialRemark.value = ''
   addMode.value = props.loginSupported ? 'login' : 'manual'
   addDialogVisible.value = true
 }
@@ -34,6 +36,16 @@ function beginCredentialLogin() {
 const querying = ref(false)
 const credentialValue = ref('')
 const credentialManagementValue = ref('')
+const credentialRemark = ref('')
+let credentialGeneration = 0
+let loadGeneration = 0
+function resetCredentials() {
+  credentialGeneration += 1
+  loadGeneration += 1
+  rows.value = []
+  loading.value = false
+  adding.value = false
+}
 // 火山 AFP 的管理密钥是 AK/SK 两个值，弹窗内分开输入，保存时合并为 "AK:SK"。
 const mgmtDialogVisible = ref(false)
 const mgmtDialogTarget = ref<ChannelCredential | null>(null)
@@ -190,6 +202,7 @@ function stopLoginPolling() {
 watch(() => props.modelValue, (open) => {
   if (open) void load(true)
   else {
+    resetCredentials()
     clearRevealState()
     addDialogVisible.value = false
     loginDialogVisible.value = false
@@ -200,6 +213,7 @@ watch(loginDialogVisible, (open) => {
   if (!open) stopLoginPolling()
 })
 watch(() => props.channel?.id, () => {
+  resetCredentials()
   addDialogVisible.value = false
   loginDialogVisible.value = false
   stopLoginPolling()
@@ -209,6 +223,7 @@ watch(() => props.channel?.id, () => {
   }
 })
 onBeforeUnmount(() => {
+  resetCredentials()
   stopCodeCountdown()
   stopLoginPolling()
 })
@@ -226,37 +241,49 @@ function clearRevealState() {
 
 async function load(resetDetails = false) {
   if (!props.channel) return
+  const channelID = props.channel.id
+  const generation = ++loadGeneration
   loading.value = true
   if (resetDetails) {
     queryDetails.value = []
     summaries.value = props.channel.costSummaries || []
   }
   try {
-    rows.value = await apiGet<ChannelCredential[]>(`/channels/${props.channel.id}/credentials`)
+    const result = await apiGet<ChannelCredential[]>(`/channels/${channelID}/credentials`)
+    if (generation === loadGeneration && props.channel?.id === channelID) rows.value = result
   } catch (error) {
-    showError(error, '加载上游密钥失败')
+    if (generation === loadGeneration) showError(error, '加载上游密钥失败')
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) loading.value = false
   }
 }
 
 async function addCredential() {
-  if (!props.channel || !credentialValue.value.trim()) return
+  if (!props.channel || !credentialValue.value.trim() || adding.value) return
+  if (Array.from(credentialRemark.value).length > 500) {
+    showWarning('备注不能超过 500 字符')
+    return
+  }
+  const channelID = props.channel.id
+  const generation = credentialGeneration
   adding.value = true
   try {
     const payload: Record<string, string> = { apiKey: credentialValue.value.trim() }
     if (credentialManagementValue.value.trim()) payload.managementKey = credentialManagementValue.value.trim()
-    await apiPost(`/channels/${props.channel.id}/credentials`, payload)
+    if (credentialRemark.value) payload.remark = credentialRemark.value
+    await apiPost(`/channels/${channelID}/credentials`, payload)
+    if (generation !== credentialGeneration || props.channel?.id !== channelID) return
     credentialValue.value = ''
     credentialManagementValue.value = ''
+    credentialRemark.value = ''
     addDialogVisible.value = false
     showSuccess('上游密钥已追加')
     await load(true)
-    emit('changed')
+    if (generation === credentialGeneration) emit('changed')
   } catch (error) {
-    showError(error, '追加上游密钥失败')
+    if (generation === credentialGeneration) showError(error, '追加上游密钥失败')
   } finally {
-    adding.value = false
+    if (generation === credentialGeneration) adding.value = false
   }
 }
 
@@ -554,7 +581,13 @@ function stopCodeCountdown() {
 
     <div v-loading="loading" class="credential-table">
       <el-table :data="rows" row-key="id" size="small">
-        <el-table-column label="上游密钥" min-width="200"><template #default="{ row }"><span class="mono key-prefix"><el-tooltip content="固定序号：按创建顺序编号（含已删密钥占位），与用量明细的「渠道 #N」一致；删除后不重排" placement="top"><span class="cred-index">#{{ row.index }}</span></el-tooltip><KeyRound :size="14" />{{ row.keyPrefix }}<el-tooltip v-if="props.managementKeySupported && row.hasManagementKey" content="已配置该账号的管理密钥"><span class="mgmt-badge">管</span></el-tooltip></span></template></el-table-column>
+        <el-table-column label="上游密钥" min-width="200"><template #default="{ row }"><span class="mono key-prefix"><el-tooltip content="固定序号：按创建顺序编号（含已删密钥占位），与用量明细的「渠道 #N」一致；删除后不重排" placement="top"><span class="cred-index">#{{ row.index }}</span></el-tooltip><KeyRound :size="14" />{{ row.keyPrefix }}<el-tooltip v-if="props.managementKeySupported && row.hasManagementKey" content="已配置该账号的管理密钥"><span class="mgmt-badge">管</span></el-tooltip></span>
+          <CredentialRemarkEditor
+            v-if="channel && visible" :key="`${channel.id}:${row.id}`"
+            :channel-id="channel.id" :credential-id="row.id" :remark="row.remark || ''"
+            @saved="row.remark = $event; emit('changed')"
+          />
+        </template></el-table-column>
         <el-table-column label="状态" min-width="156"><template #default="{ row }"><el-tooltip v-if="row.autoDisabled" :content="autoDisabledDetail(row)" placement="top-start"><div class="credential-status"><span class="status-dot warning">自动禁用</span><small v-if="row.autoDisabledAt">{{ formatTime(row.autoDisabledAt) }}</small></div></el-tooltip><span v-else class="status-dot" :class="row.status === 1 ? 'success' : ''">{{ statusText(row) }}</span></template></el-table-column>
         <el-table-column :label="usageQuery ? '积分与额度' : '费用与余额'" min-width="200"><template #default="{ row }"><div class="cost-state"><template v-if="costDetail(row)?.error"><span class="danger-text">{{ costDetail(row)?.error }}</span></template><template v-else>
           <template v-if="!usageQuery"><span v-if="hasNumber(row.lastCostUsed)">已用 {{ formatCost(row.lastCostUsed, row.lastCostCurrency) }}</span><span v-if="hasNumber(row.lastCostRemaining)">余额 {{ formatBalance(row.lastCostRemaining, row.lastCostCurrency) }}</span></template>
@@ -625,8 +658,9 @@ function stopCodeCountdown() {
       <template v-if="addMode === 'manual'">
         <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" placeholder="填写上游 API Key" @keyup.enter="addCredential" />
         <el-input v-if="props.managementKeySupported" v-model="credentialManagementValue" type="password" show-password autocomplete="new-password" :placeholder="props.managementKeyPair ? '管理密钥（可选，格式 AK:SK）' : '管理密钥（可选）'" style="margin-top: 12px" />
+        <el-input v-model="credentialRemark" type="textarea" :rows="2" maxlength="500" show-word-limit aria-label="新密钥备注" placeholder="备注（可选，最多 500 字符）" style="margin-top: 12px" />
       </template>
-      <el-alert v-else type="info" :closable="false" title="通过平台官方登录添加密钥。完成登录后，凭据会自动保存到当前渠道。" />
+      <el-alert v-else type="info" :closable="false" title="通过平台官方登录添加密钥。完成登录后，凭据会自动保存到当前渠道，可在密钥行中添加备注。" />
       <template #footer>
         <el-button :disabled="adding" @click="addDialogVisible = false">取消</el-button>
         <el-button v-if="addMode === 'manual'" type="primary" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">添加密钥</el-button>

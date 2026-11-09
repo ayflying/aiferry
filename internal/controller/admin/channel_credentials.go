@@ -17,6 +17,7 @@ func (c *Controller) registerChannelCredentialRoutes(group *ghttp.RouterGroup) {
 	// 成功时令牌作为新的渠道凭据落库。
 	group.POST("/channels/{id}/credentials/login", c.startChannelLogin)
 	group.POST("/channels/{id}/credentials/login/poll", c.pollChannelLogin)
+	group.PUT("/channels/{id}/credentials/{credentialId}/remark", c.updateChannelCredentialRemark)
 	group.PUT("/channels/{id}/credentials/{credentialId}/status", c.updateChannelCredentialStatus)
 	group.PUT("/channels/{id}/credentials/{credentialId}/management-key", c.updateChannelCredentialManagementKey)
 	group.DELETE("/channels/{id}/credentials/{credentialId}", c.deleteChannelCredential)
@@ -128,6 +129,14 @@ func (c *Controller) pollChannelLogin(r *ghttp.Request) {
 		CredentialID: result.CredentialID,
 		UID:          result.UID,
 	}, nil)
+}
+
+func (c *Controller) updateChannelCredentialRemark(r *ghttp.Request) {
+	var input adminapi.ChannelCredentialRemarkInput
+	if !parse(r, &input) {
+		return
+	}
+	respond(r, map[string]any{}, c.channels.SetCredentialRemark(r.Context(), routeID(r), credentialRouteID(r), input))
 }
 
 func (c *Controller) updateChannelCredentialStatus(r *ghttp.Request) {

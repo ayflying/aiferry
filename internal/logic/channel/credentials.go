@@ -31,6 +31,7 @@ type CredentialView struct {
 	// 历史调用日志仍保留，但被删密钥的外键引用会置空。
 	Index                  uint       `json:"index"`
 	KeyPrefix              string     `json:"keyPrefix"`
+	Remark                 string     `json:"remark"`
 	HasManagementKey       bool       `json:"hasManagementKey"`
 	Status                 int        `json:"status"`
 	AutoDisabled           bool       `json:"autoDisabled"`
@@ -57,6 +58,7 @@ type credentialRow struct {
 	Id                     uint64     `orm:"id"`
 	ChannelId              uint64     `orm:"channel_id"`
 	KeyPrefix              string     `orm:"key_prefix"`
+	Remark                 string     `orm:"remark"`
 	KeyHash                string     `orm:"key_hash"`
 	ApiKeyCipher           string     `orm:"api_key_cipher"`
 	ManagementKeyCipher    string     `orm:"management_key_cipher"`
@@ -76,6 +78,10 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 	if err := s.ensureOwned(ctx, channelID); err != nil {
 		return 0, err
 	}
+	remark, err := normalizeCredentialRemark(input.Remark)
+	if err != nil {
+		return 0, err
+	}
 	plainText := strings.TrimSpace(input.APIKey)
 	keyHash := upstreamKeyHash(plainText)
 	data, err := s.newCredentialData(plainText)
@@ -87,6 +93,7 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 		return 0, err
 	}
 	data.ManagementKeyCipher = managementKey
+	data.Remark = remark
 	exists, err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID, KeyHash: keyHash}).Count()
 	if err != nil {
 		return 0, gerror.Wrap(err, "check duplicate channel credential")
@@ -642,7 +649,7 @@ func (s *sChannel) encryptOptionalCredentialKey(value *string) (string, error) {
 
 func credentialView(row credentialRow, config channeltype.CostConfig) CredentialView {
 	view := CredentialView{
-		Id: row.Id, KeyPrefix: row.KeyPrefix, HasManagementKey: row.ManagementKeyCipher != "", Status: row.Status, AutoDisabledReason: row.AutoDisabledReason,
+		Id: row.Id, KeyPrefix: row.KeyPrefix, Remark: row.Remark, HasManagementKey: row.ManagementKeyCipher != "", Status: row.Status, AutoDisabledReason: row.AutoDisabledReason,
 		AutoDisabledStatusCode: row.AutoDisabledStatusCode, LastCostUsed: row.LastCostUsed, LastCostRemaining: row.LastCostRemaining,
 		LastCostCurrency: row.LastCostCurrency, LastCostAt: row.LastCostAt, CreatedAt: row.CreatedAt,
 	}

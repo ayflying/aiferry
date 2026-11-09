@@ -16,6 +16,7 @@ type ChannelCredentials struct {
 	KeyHash                string    `json:"keyHash"                orm:"key_hash"                  description:""` //
 	ApiKeyCipher           string    `json:"apiKeyCipher"           orm:"api_key_cipher"            description:""` //
 	ManagementKeyCipher    string    `json:"managementKeyCipher"    orm:"management_key_cipher"     description:""` //
+	Remark                 string    `json:"remark"                 orm:"remark"                    description:""` //
 	Status                 int       `json:"status"                 orm:"status"                    description:""` //
 	AutoDisabledAt         time.Time `json:"autoDisabledAt"         orm:"auto_disabled_at"          description:""` //
 	AutoDisabledReason     string    `json:"autoDisabledReason"     orm:"auto_disabled_reason"      description:""` //

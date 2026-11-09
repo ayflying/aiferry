@@ -56,6 +56,24 @@ func execSchema(ctx context.Context, instance gdb.DB) error {
 			return gerror.Wrapf(err, "apply worker schema statement: %.80s", statement)
 		}
 	}
+	return ensureWorkerCredentialRemark(ctx, instance)
+}
+
+// ensureWorkerCredentialRemark 升级已有子节点数据库；CREATE TABLE IF NOT EXISTS
+// 不会给旧表补列，而集群快照会携带新的备注字段。先查列再补列保证重启幂等。
+func ensureWorkerCredentialRemark(ctx context.Context, instance gdb.DB) error {
+	rows, err := instance.GetAll(ctx, "PRAGMA table_info(channel_credentials)")
+	if err != nil {
+		return gerror.Wrap(err, "inspect worker credential schema")
+	}
+	for _, row := range rows {
+		if row["name"].String() == "remark" {
+			return nil
+		}
+	}
+	if _, err = instance.Exec(ctx, "ALTER TABLE channel_credentials ADD COLUMN remark TEXT NOT NULL DEFAULT ''"); err != nil {
+		return gerror.Wrap(err, "upgrade worker credential remark schema")
+	}
 	return nil
 }
 

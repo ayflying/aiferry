@@ -17,6 +17,7 @@ type ChannelCredentials struct {
 	KeyHash                any //
 	ApiKeyCipher           any //
 	ManagementKeyCipher    any //
+	Remark                 any //
 	Status                 any //
 	AutoDisabledAt         any //
 	AutoDisabledReason     any //
