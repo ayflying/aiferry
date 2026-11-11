@@ -280,7 +280,7 @@ func (s *sRelay) queryTaskOnUpstream(ctx context.Context, incomingHeaders http.H
 }
 
 // downloadAdapterVideo 下载适配器协议的视频文件：优先使用路由里缓存的资源地址，
-// 否则先查一次任务状态再解析。跨域资源不走渠道代理。
+// 否则先查一次任务状态再解析。跨域资源剥离上游鉴权，但仍必须使用渠道代理。
 func (s *sRelay) downloadAdapterVideo(ctx context.Context, incomingHeaders http.Header, taskID string, candidate Candidate, adapter videoAdapter, resourceURL string) (int, []byte, http.Header, error) {
 	if strings.TrimSpace(resourceURL) == "" {
 		status, body, headers, err, resolved := s.queryTaskOnUpstream(ctx, incomingHeaders, taskID, candidate, adapter, videoContentPath(taskID, openAIVideoAPI))
@@ -297,7 +297,6 @@ func (s *sRelay) downloadAdapterVideo(ctx context.Context, incomingHeaders http.
 		fileCandidate.APIKeyCipher = ""
 		fileCandidate.OrganizationID = ""
 		fileCandidate.ProjectID = ""
-		fileCandidate.ProxyURLCipher = ""
 		fileCandidate.DirectHTTP = true
 	}
 	file := s.callVideoUpstream(ctx, http.MethodGet, resourceURL, incomingHeaders, nil, fileCandidate)

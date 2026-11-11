@@ -112,8 +112,8 @@ func (s *sChannel) encryptProxyURL(value string) (string, error) {
 	return cipher, gerror.Wrap(err, "encrypt channel proxy URL")
 }
 
-// ProxyURLs 解密渠道代理配置并拆成多行地址列表；未配置或解密结果为空行时
-// 返回 nil（直连）。
+// ProxyURLs 是渠道出口策略的唯一解密入口：只有未配置密文才允许无代理。
+// 已配置但解密为空、损坏或任一代理非法时必须失败关闭，绝不把配置故障解释为直连。
 func (s *sChannel) ProxyURLs(proxyURLCipher string) ([]string, error) {
 	if proxyURLCipher == "" {
 		return nil, nil
@@ -124,7 +124,12 @@ func (s *sChannel) ProxyURLs(proxyURLCipher string) ([]string, error) {
 	}
 	lines := splitProxyLines(plainText)
 	if len(lines) == 0 {
-		return nil, nil
+		return nil, gerror.New("渠道已配置代理，但代理地址为空；为保护账号已禁止直连")
+	}
+	for index, line := range lines {
+		if _, err := appservice.NewProxyHTTPClient(s.app.HTTP, line); err != nil {
+			return nil, gerror.Newf("渠道第 %d 个代理配置无效；为保护账号已禁止直连", index+1)
+		}
 	}
 	return lines, nil
 }
@@ -166,12 +171,22 @@ func (s *sChannel) ClientFor(proxies *CredentialProxies) (*http.Client, error) {
 	if proxies.Total() == 0 {
 		return s.app.HTTP, nil
 	}
+	if strings.TrimSpace(proxies.Current()) == "" {
+		return nil, gerror.New("渠道代理计划为空；为保护账号已禁止直连")
+	}
 	return appservice.NewProxyHTTPClient(s.app.HTTP, proxies.Current())
 }
 
 // HTTPClientForCredential 按密钥固定序号选定代理并构建客户端（不轮换）。
 // 供管理端模型测试等「要如实反映该密钥真实出口」的诊断路径使用。
 func (s *sChannel) HTTPClientForCredential(ctx context.Context, proxyURLCipher string, channelID, credentialID uint64) (*http.Client, error) {
+	if channelID > 0 {
+		current, err := s.CurrentProxyCipher(ctx, channelID)
+		if err != nil {
+			return nil, err
+		}
+		proxyURLCipher = current
+	}
 	proxies, err := s.ProxiesForCredential(ctx, proxyURLCipher, channelID, credentialID)
 	if err != nil {
 		return nil, err
@@ -225,18 +240,11 @@ func doViaProxies(proxies *CredentialProxies, clientFor func(*CredentialProxies)
 // 供费用查询、额度查询等与具体密钥无关的管理操作使用；转发链路请走
 // ProxiesForCredential（按密钥序号配对）。
 func (s *sChannel) HTTPClientForProxy(proxyURLCipher string) (*http.Client, error) {
-	if proxyURLCipher == "" {
-		return s.app.HTTP, nil
-	}
-	proxyURL, err := s.app.Secrets.Decrypt(proxyURLCipher)
+	urls, err := s.ProxyURLs(proxyURLCipher)
 	if err != nil {
-		return nil, gerror.Wrap(err, "decrypt channel proxy URL")
+		return nil, err
 	}
-	lines := splitProxyLines(proxyURL)
-	if len(lines) == 0 {
-		return s.app.HTTP, nil
-	}
-	return appservice.NewProxyHTTPClient(s.app.HTTP, lines[0])
+	return s.ClientFor(newCredentialProxies(urls, 0))
 }
 
 // RevealProxyURL 解密并返回渠道代理地址明文（多行，每行一个），仅供管理端

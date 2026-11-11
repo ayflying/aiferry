@@ -54,7 +54,7 @@ func TestEmptyUpstreamCompletionIsRejectedAsBadGateway(t *testing.T) {
 	}
 	settings := adminapi.SystemResilienceSettingsInput{ProtocolConversionEnabled: true, NonStreamTimeoutSeconds: 30}
 	candidate := Candidate{
-		ChannelID:    9,
+		// 无持久化渠道：此例只验证协议响应转换。
 		ChannelName:  "ch-empty-completion",
 		ChannelType:  "probe_empty",
 		BaseURL:      upstream.URL,

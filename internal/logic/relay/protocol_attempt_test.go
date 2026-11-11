@@ -133,7 +133,7 @@ func TestAttemptRecordsProtocolFallbackFlow(t *testing.T) {
 	}
 	settings := adminapi.SystemResilienceSettingsInput{ProtocolConversionEnabled: true, NonStreamTimeoutSeconds: 30}
 	candidate := Candidate{
-		ChannelID:    7,
+		// 无持久化渠道：此例只验证协议回退。
 		ChannelName:  "ch-fallback-test",
 		ChannelType:  "probe_fallback",
 		BaseURL:      upstream.URL,

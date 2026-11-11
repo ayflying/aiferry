@@ -20,8 +20,8 @@ func NewProxyHTTPClient(base *http.Client, rawURL string) (*http.Client, error) 
 	if err != nil || parsed.Hostname() == "" || parsed.Port() == "" {
 		return nil, gerror.New("proxy URL must use http://user:pass@host:port or socks5://user:pass@host:port")
 	}
-	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return nil, gerror.New("proxy URL must not contain a query or fragment")
+	if (parsed.Path != "" && parsed.Path != "/") || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, gerror.New("proxy URL must not contain a path, query or fragment")
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https":
@@ -47,9 +47,17 @@ func newSOCKS5HTTPClient(base *http.Client, parsed *url.URL) (*http.Client, erro
 	}
 	transport := cloneTransport(base)
 	transport.Proxy = nil
-	transport.DialContext = func(_ context.Context, network, address string) (net.Conn, error) {
-		return dialer.Dial(network, address)
+	// SOCKS 代理负责目标域名解析；DialContext 同时传播取消/超时，绝不回退直连。
+	contextDialer, ok := dialer.(proxy.ContextDialer)
+	if !ok {
+		return nil, gerror.New("SOCKS5 proxy does not support context dialing")
 	}
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		return contextDialer.DialContext(ctx, network, address)
+	}
+	// 自定义 TLS 拨号器可能绕过 DialContext，从而绕过 SOCKS 代理，必须清除。
+	transport.DialTLS = nil
+	transport.DialTLSContext = nil
 	return clientWithTransport(base, transport), nil
 }
 

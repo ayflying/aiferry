@@ -51,12 +51,12 @@ func TestPrepareVideoRequestBodyPreservesNonMiniMaxPayload(t *testing.T) {
 
 func TestVideoAdapterURLsPerProtocol(t *testing.T) {
 	cases := []struct {
-		adapter       string
-		baseURL       string
-		legacyCreate  string
-		openAICreate  string
-		legacyQuery   string
-		openAIQuery   string
+		adapter      string
+		baseURL      string
+		legacyCreate string
+		openAICreate string
+		legacyQuery  string
+		openAIQuery  string
 	}{
 		{channeltype.VideoAdapterOpenAI, "https://gateway.example/v1",
 			"https://gateway.example/v1/video/generations",
@@ -186,13 +186,6 @@ func TestResolveMiniMaxVideoResourceURL(t *testing.T) {
 	}
 	if sameUpstreamOrigin("https://gateway.example/v1", "https://cdn.example/result.mp4") {
 		t.Fatal("expected different upstream origin")
-	}
-	candidate := Candidate{ProxyURLCipher: "encrypted-proxy"}
-	if !sameUpstreamOrigin(candidate.BaseURL, resource) {
-		candidate.ProxyURLCipher = ""
-	}
-	if candidate.ProxyURLCipher != "" {
-		t.Fatal("cross-origin resource must not use the channel proxy")
 	}
 }
 

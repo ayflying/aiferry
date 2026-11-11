@@ -25,20 +25,30 @@ func resetRequestBody(req *http.Request) func() error {
 }
 
 // doViaProxy 经渠道代理执行一次上游请求，是 relay 各分支统一的代理入口：
-//   - DirectHTTP（视频文件下载等）强制直连，不参与密钥-代理配对；
+//   - 配置渠道代理时始终按代理计划执行，DirectHTTP 不得绕过配置；
+//   - DirectHTTP（视频文件下载等）仅在未配置代理时使用 HTTPDirect；
 //   - 其余按渠道代理配置 + 密钥固定序号模运算配对（2 代理 5 密钥：
 //     1-1,2-2,3-1,4-2,5-1），代理层失败仅当前这把密钥顺延下一个代理，
 //     不随机、不影响其它密钥的映射，详见 channel.DoViaProxies。
 //
 // do 内通过 GetBody 回卷请求体，可安全地对同一 req 重试。
 func (s *sRelay) doViaProxy(ctx context.Context, req *http.Request, candidate Candidate, do func(*http.Client) (*http.Response, error)) (*http.Response, error) {
+	// 路由缓存和异步任务中的代理快照可能过期；真实渠道每次出站前
+	// 强制读取当前策略，读取失败绝不能使用旧值或降级直连。
+	if candidate.ChannelID > 0 {
+		current, err := s.channels.CurrentProxyCipher(ctx, candidate.ChannelID)
+		if err != nil {
+			return nil, err
+		}
+		candidate.ProxyURLCipher = current
+	}
 	if candidate.ChannelType == "codex" {
 		originalDo := do
 		do = func(client *http.Client) (*http.Response, error) {
 			return originalDo(channel.CodexHTTPClient(client))
 		}
 	}
-	if candidate.DirectHTTP {
+	if candidate.DirectHTTP && candidate.ProxyURLCipher == "" {
 		return do(s.app.HTTPDirect)
 	}
 	proxies, err := s.channels.ProxiesForCredential(ctx, candidate.ProxyURLCipher, candidate.ChannelID, candidate.ChannelCredentialID)

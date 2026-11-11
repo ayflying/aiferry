@@ -66,7 +66,7 @@ func TestCodexAttemptAggregatesAndNeverFallsBack(t *testing.T) {
 				}
 				appSvc := &app.Service{Secrets: secrets, HTTP: upstream.Client()}
 				service := &sRelay{app: appSvc, channels: channel.New(appSvc, channeltype.New(&config.BuiltinRegistry{}, nil), nil, nil, nil, nil, nil, nil), prices: pricingcache.New()}
-				candidate := Candidate{ChannelID: 7, ChannelType: "codex", UpstreamName: "future-model", BaseURL: upstream.URL}
+				candidate := Candidate{ChannelType: "codex", UpstreamName: "future-model", BaseURL: upstream.URL}
 				body := []byte(`{"model":"alias","messages":[{"role":"user","content":"hi"}],"temperature":0.8,"max_completion_tokens":16}`)
 				if endpoint == protocol.ResponsesEndpoint {
 					body = []byte(`{"model":"alias","input":"hi","temperature":0.8,"max_output_tokens":16}`)

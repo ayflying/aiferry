@@ -99,7 +99,7 @@ func transientHTTPFixture(t *testing.T, handler http.Handler) (*sRelay, Candidat
 		app:      appSvc,
 		channels: channel.New(appSvc, channeltype.New(&config.BuiltinRegistry{}, nil), nil, nil, nil, nil, nil, nil),
 		prices:   pricingcache.New(),
-	}, Candidate{ChannelID: 7, ChannelCredentialID: 22, ChannelName: "transient-http-test", ChannelType: "probe_fallback", BaseURL: upstream.URL, UpstreamName: "qwen-test"}
+	}, Candidate{ChannelCredentialID: 22, ChannelName: "transient-http-test", ChannelType: "probe_fallback", BaseURL: upstream.URL, UpstreamName: "qwen-test"}
 }
 
 func transientHTTPSettings() adminapi.SystemResilienceSettingsInput {

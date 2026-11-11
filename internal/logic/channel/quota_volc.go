@@ -148,7 +148,7 @@ func (s *sChannel) queryVolcAFPWithKey(ctx context.Context, channel entity.Chann
 	payloadHash := sha256.Sum256(body)
 	req.Header.Set("X-Content-Sha256", hex.EncodeToString(payloadHash[:]))
 
-	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
+	client, err := s.HTTPClientForChannel(ctx, channel)
 	if err != nil {
 		return QuotaView{}, err
 	}

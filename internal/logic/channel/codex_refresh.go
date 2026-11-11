@@ -76,7 +76,7 @@ func (s *sChannel) codexCredentialForRequest(ctx context.Context, original codex
 	if err = dao.Channels.Ctx(ctx).Where(do.Channels{Id: row.ChannelId}).Scan(&channel); err != nil || channel.Id == 0 {
 		return codexCredential{}, gerror.New("Codex 凭据所属渠道不存在")
 	}
-	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
+	client, err := s.HTTPClientForChannel(ctx, channel)
 	if err != nil {
 		return codexCredential{}, err
 	}

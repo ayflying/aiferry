@@ -65,7 +65,7 @@ func (s *sChannel) fetchUpstreamJSON(ctx context.Context, channel entity.Channel
 			req.Header.Add(name, value)
 		}
 	}
-	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
+	client, err := s.HTTPClientForChannel(ctx, channel)
 	if err != nil {
 		return nil, err
 	}

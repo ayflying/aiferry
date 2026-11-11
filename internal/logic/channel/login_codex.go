@@ -42,7 +42,7 @@ func (s *sChannel) startCodexLogin(ctx context.Context, channel entity.Channels)
 	if !ok {
 		return ChannelLoginSession{}, gerror.New("未登录")
 	}
-	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
+	client, err := s.HTTPClientForChannel(ctx, channel)
 	if err != nil {
 		return ChannelLoginSession{}, err
 	}
@@ -141,7 +141,7 @@ func (s *sChannel) pollCodexLogin(ctx context.Context, channel entity.Channels, 
 	if session.Credential != nil {
 		return s.completeCodexLogin(ctx, state, session)
 	}
-	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
+	client, err := s.HTTPClientForChannel(ctx, channel)
 	if err != nil {
 		return ChannelLoginResult{}, err
 	}

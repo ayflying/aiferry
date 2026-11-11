@@ -157,7 +157,7 @@ func (s *sChannel) fetchLoginJSON(ctx context.Context, channel entity.Channels, 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	client, err := s.HTTPClientForProxy(channel.ProxyUrlCipher)
+	client, err := s.HTTPClientForChannel(ctx, channel)
 	if err != nil {
 		return nil, err
 	}

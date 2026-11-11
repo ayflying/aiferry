@@ -86,7 +86,7 @@ func TestRerankAttemptPreservesProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := adminapi.SystemResilienceSettingsInput{ProtocolConversionEnabled: true, NonStreamTimeoutSeconds: 30, MessagesModels: []string{"claude-*"}}
-	candidate := Candidate{ChannelID: 7, ChannelName: "rerank-test", ChannelType: "probe_rerank", BaseURL: upstream.URL, APIKeyCipher: cipher, UpstreamName: "claude-rerank", AdvancedConfig: `{"forceOpenAIFormat":true}`}
+	candidate := Candidate{ChannelName: "rerank-test", ChannelType: "probe_rerank", BaseURL: upstream.URL, APIKeyCipher: cipher, UpstreamName: "claude-rerank", AdvancedConfig: `{"forceOpenAIFormat":true}`}
 	body := []byte(`{"model":"公开模型","query":"湖北省会","documents":["上海",{"text":"武汉"}],"top_n":1,"return_documents":true,"stream":false,"unknown":"移除"}`)
 	result, handled, err := relay.attempt(context.Background(), nil, http.Header{}, "/rerank", body, candidate, false, 11, 42, settings, nil)
 	if err != nil {
