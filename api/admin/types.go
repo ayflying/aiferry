@@ -48,8 +48,11 @@ type ChannelCredentialStatusInput struct {
 // ChannelLoginSessionView 是一次外链登录的发起结果：authUrl 交给管理员在浏览器里打开
 // 完成登录，state 用于随后轮询换票。
 type ChannelLoginSessionView struct {
-	State   string `json:"state"`
-	AuthURL string `json:"authUrl"`
+	State            string `json:"state"`
+	AuthURL          string `json:"authUrl"`
+	UserCode         string `json:"userCode,omitempty"`
+	IntervalSeconds  int    `json:"intervalSeconds,omitempty"`
+	ExpiresInSeconds int    `json:"expiresInSeconds,omitempty"`
 }
 
 // ChannelLoginPollInput 轮询一次登录结果。

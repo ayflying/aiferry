@@ -75,14 +75,25 @@ type credentialRow struct {
 }
 
 func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input adminapi.ChannelCredentialInput) (uint64, error) {
-	if err := s.ensureOwned(ctx, channelID); err != nil {
+	channel, err := s.GetOwned(ctx, channelID)
+	if err != nil {
 		return 0, err
+	}
+	_, typeConfig, err := s.types.GetByCode(ctx, channel.Type)
+	if err != nil {
+		return 0, err
+	}
+	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
+		return 0, gerror.New("官方 Codex 套餐只能通过登录授权添加账号，不接受 API Key")
 	}
 	remark, err := normalizeCredentialRemark(input.Remark)
 	if err != nil {
 		return 0, err
 	}
 	plainText := strings.TrimSpace(input.APIKey)
+	if strings.HasPrefix(plainText, codexCredentialPrefix) {
+		return 0, gerror.New("不允许手工导入内部登录凭据，请使用平台登录")
+	}
 	keyHash := upstreamKeyHash(plainText)
 	data, err := s.newCredentialData(plainText)
 	if err != nil {
@@ -625,6 +636,9 @@ func (s *sChannel) ensureCredentialMetadata(ctx context.Context, row *credential
 }
 
 func (s *sChannel) newCredentialData(value string) (do.ChannelCredentials, error) {
+	if strings.HasPrefix(strings.TrimSpace(value), codexCredentialPrefix) {
+		return do.ChannelCredentials{}, gerror.New("不允许手工导入内部登录凭据，请使用平台登录")
+	}
 	cipherText, err := s.app.Secrets.Encrypt(strings.TrimSpace(value))
 	if err != nil {
 		return do.ChannelCredentials{}, err

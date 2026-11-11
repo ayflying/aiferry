@@ -409,6 +409,9 @@ func sameUpstreamOrigin(baseURL, targetURL string) bool {
 }
 
 func (s *sRelay) callVideoUpstream(ctx context.Context, method, target string, incomingHeaders http.Header, body []byte, candidate Candidate) videoUpstreamResult {
+	if result, unsupported := codexUnsupportedResult(candidate); unsupported {
+		return videoUpstreamResult{status: result.status, body: result.body}
+	}
 	requestCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, method, target, bytes.NewReader(body))

@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -81,7 +82,27 @@ func (s *sChannel) ApplyUpstreamAuthHeaders(req *http.Request, in UpstreamAuthIn
 		if err != nil {
 			return err
 		}
-		setUpstreamAuthHeader(req, in.Spec, key)
+		if strings.HasPrefix(key, codexCredentialPrefix) {
+			credential, err := decodeCodexCredential(key)
+			if err != nil {
+				return err
+			}
+			seal, sealErr := s.app.Secrets.Decrypt(credential.Seal)
+			if sealErr != nil || seal != fmt.Sprintf("codex:%d:%s", credential.ChannelID, credential.AccountID) {
+				return gerror.New("Codex 凭据来源无效，请通过官方登录授权")
+			}
+			if !isCodexUpstreamURL(req.URL) {
+				return gerror.New("Codex 登录凭据只能发送至官方 ChatGPT 接口")
+			}
+			credential, err = s.codexCredentialForRequest(req.Context(), credential)
+			if err != nil {
+				return err
+			}
+			req.Header.Set("Authorization", "Bearer "+credential.AccessToken)
+			req.Header.Set("ChatGPT-Account-Id", credential.AccountID)
+		} else {
+			setUpstreamAuthHeader(req, in.Spec, key)
+		}
 	case channeltype.AuthManagementKey:
 		if in.ManagementKeyCipher == "" {
 			if !in.TolerateMissingKey {

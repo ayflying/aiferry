@@ -450,6 +450,9 @@ func (s *sChannel) credentialCiphers(ctx context.Context, channelID uint64) ([]q
 }
 
 func parseQuotaResponse(adapter string, body []byte) (QuotaView, error) {
+	if adapter == channeltype.AdapterCodexUsage {
+		return parseCodexUsage(body)
+	}
 	if adapter == channeltype.AdapterOpenCodeGo {
 		return parseOpenCodeGoUsage(body)
 	}

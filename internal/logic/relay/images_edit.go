@@ -143,6 +143,9 @@ func (s *sRelay) HandleImagesEdit(ctx context.Context, incomingHeaders http.Head
 // attemptImagesEditUpstream 把 multipart 请求按渠道重建并发往上游 /images/edits。
 // 2xx 响应直接回写客户端并标记 handled，其余情况返回结果供上层决定是否换渠道重试。
 func (s *sRelay) attemptImagesEditUpstream(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, parts []imagesEditPart, candidate Candidate, settings adminapi.SystemResilienceSettingsInput, startedAt time.Time) (attemptResult, bool) {
+	if result, unsupported := codexUnsupportedResult(candidate); unsupported {
+		return result, false
+	}
 	upstreamModel := candidate.UpstreamName
 	if strings.TrimSpace(upstreamModel) == "" {
 		upstreamModel = candidate.PublicName

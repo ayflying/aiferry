@@ -97,7 +97,7 @@ export interface ChannelTypeEndpointConfig {
 }
 
 export interface ChannelTypeQuotaConfig {
-  adapter: 'none' | 'zhipu_coding_plan' | 'opencode_go_usage' | 'volcengine_afp' | 'workbuddy_credits'
+  adapter: 'none' | 'zhipu_coding_plan' | 'opencode_go_usage' | 'volcengine_afp' | 'workbuddy_credits' | 'codex_usage'
   method: string
   path: string
   authType: 'none' | 'channel_key' | 'management_key'
@@ -121,7 +121,7 @@ export interface ChannelTypeProtocolConfig {
 
 /** 渠道类型的登录方式声明；adapter 决定登录形态（external_link = 浏览器外链 SSO）。 */
 export interface ChannelTypeLoginConfig {
-  adapter: 'none' | 'external_link'
+  adapter: 'none' | 'external_link' | 'codex_device'
   platform?: string
   prefixPath?: string
 }
@@ -232,6 +232,9 @@ export interface CostSummary {
 export interface ChannelLoginSession {
   state: string
   authUrl: string
+  userCode?: string
+  intervalSeconds?: number
+  expiresInSeconds?: number
 }
 
 /** 登录轮询结果：pending 表示等待用户完成登录，completed 表示令牌已写入凭据。 */

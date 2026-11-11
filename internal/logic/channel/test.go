@@ -72,6 +72,12 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 		return TestResult{}, err
 	}
 	endpoints := testEndpoints(input.Endpoint, model.UpstreamName, typeConfig, settings)
+	if channel.Type == "codex" {
+		endpoints, err = codexTestEndpoints(input.Endpoint)
+		if err != nil {
+			return TestResult{}, err
+		}
+	}
 	advancedConfig, err := ParseAdvancedConfig([]byte(channel.AdvancedConfig))
 	if err != nil {
 		return TestResult{}, err
@@ -171,6 +177,13 @@ func buildTestRequest(ctx context.Context, url string, channelType string, paylo
 		}
 	}
 	forcedStream := false
+	if channelType == "codex" {
+		body, err = ApplyCodexBody(body)
+		if err != nil {
+			return nil, false, err
+		}
+		forcedStream = true
+	}
 	if !rerank && IsOpenCodeFreeLane(channelType, url) {
 		body, forcedStream, err = ApplyOpenCodeFreeBody(body)
 		if err != nil {
@@ -240,6 +253,9 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	if clientErr != nil {
 		return TestResult{}, path, usage.TokenUsage{}, clientErr
 	}
+	if channel.Type == "codex" {
+		client = CodexHTTPClient(client)
+	}
 	resp, requestErr := client.Do(req)
 	latency := time.Since(startedAt).Milliseconds()
 	result := TestResult{Endpoint: endpoint, Stream: streamed, Model: model.PublicName, LatencyMs: latency}
@@ -262,6 +278,11 @@ func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channel
 	result.OutputTokens = int64(testTokenValue(tokens.Output))
 	if result.Success {
 		result.Message = "模型响应正常"
+		if channel.Type == "codex" {
+			if message := codexTestStreamError(responseBody); message != "" {
+				result.Success, result.Message = false, message
+			}
+		}
 	} else {
 		result.Message = upstreamerror.Message(responseBody, resp.Status)
 	}

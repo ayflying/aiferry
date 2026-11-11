@@ -3,6 +3,8 @@ package relay
 import (
 	"context"
 	"net/http"
+
+	"github.com/yunloli/aiferry/internal/logic/channel"
 )
 
 // resetRequestBody 返回一个在每次重试前把 req.Body 回卷到起点的函数。
@@ -30,6 +32,12 @@ func resetRequestBody(req *http.Request) func() error {
 //
 // do 内通过 GetBody 回卷请求体，可安全地对同一 req 重试。
 func (s *sRelay) doViaProxy(ctx context.Context, req *http.Request, candidate Candidate, do func(*http.Client) (*http.Response, error)) (*http.Response, error) {
+	if candidate.ChannelType == "codex" {
+		originalDo := do
+		do = func(client *http.Client) (*http.Response, error) {
+			return originalDo(channel.CodexHTTPClient(client))
+		}
+	}
 	if candidate.DirectHTTP {
 		return do(s.app.HTTPDirect)
 	}

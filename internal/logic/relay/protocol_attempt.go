@@ -29,6 +29,10 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	if advancedConfig.ProtocolConversion != nil {
 		conversionEnabled = *advancedConfig.ProtocolConversion
 	}
+	if candidate.ChannelType == "codex" && !codexEndpointAllowed(endpoint, conversionEnabled) {
+		message := "Codex 官方渠道仅支持 Responses；Chat 请求需要启用协议转换"
+		return attemptResult{status: http.StatusBadRequest, body: openAIError("invalid_request_error", message), errorMessage: message}, false, nil
+	}
 	primary := s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled, settings)
 	primaryStartedAt := time.Now()
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
@@ -42,7 +46,7 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	// 关闭协议转换时不做端点回退：AlternatePlan 给出的备选端点必然要求转换，
 	// 继续回退等于绕过开关。此时把上游的原始失败结果交还给客户端。
-	if handled || attemptErr != nil || !needsFallback || !conversionEnabled {
+	if handled || attemptErr != nil || !needsFallback || !conversionEnabled || candidate.ChannelType == "codex" {
 		return result, handled, attemptErr
 	}
 	fallback, ok := protocol.AlternatePlan(endpoint, primary)
@@ -63,6 +67,9 @@ func (s *sRelay) preferredProtocolPlan(ctx context.Context, endpoint string, can
 	// 模型名名单只用于聊天协议，rerank/embeddings 等端点不得转成 Messages。
 	if !allowConversion || (endpoint != protocol.ChatCompletionsEndpoint && endpoint != protocol.ResponsesEndpoint) {
 		return protocol.DirectPlan(endpoint)
+	}
+	if candidate.ChannelType == "codex" {
+		return protocol.PreferredResponsesPlan(endpoint)
 	}
 	// 渠道类型声明的协议偏好先于模型名推断判定：转投必然失败的端点
 	// 等于每次请求多一次上游往返。
@@ -170,6 +177,13 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		upstreamURL = s.rerankUpstreamURL(ctx, candidate)
 	}
 	forcedStream := false
+	if candidate.ChannelType == "codex" {
+		body, err = channel.ApplyCodexBody(body)
+		if err != nil {
+			return attemptResult{}, false, err
+		}
+		forcedStream = true
+	}
 	if channel.IsOpenCodeFreeLane(candidate.ChannelType, candidate.BaseURL) && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		var forced bool
 		body, forced, err = channel.ApplyOpenCodeFreeBody(body)
@@ -239,7 +253,12 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		// 把分片聚合成 chat.completion 后再走非流式回包/计费。
 		forcedStreamAggregate := forcedStream && !stream && resp.StatusCode >= 200 && resp.StatusCode < 300 && readErr == nil
 		if forcedStreamAggregate {
-			responseBody = aggregateChatCompletionSSE(responseBody)
+			var failure *streamFailure
+			responseBody, failure = aggregateForcedStream(responseBody, plan)
+			if failure != nil {
+				return attemptResult{status: failure.status, body: failure.body, errorMessage: failure.message,
+					headers: responseHeaders(resp.Header, plan), upstreamEndpoint: plan.UpstreamEndpoint(), protocolConversion: plan.Conversion()}, false, nil
+			}
 		}
 		// 思考内容在响应改写前捕获，仅用于报文记录；响应正文不再被改写任何字段
 		// （思考块搬移那套模型补丁已于 2026-10-29 删除，见 content_guard.go 头部）。

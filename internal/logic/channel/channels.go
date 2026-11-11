@@ -164,6 +164,9 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 	if input.APIKey != nil {
 		apiKey = strings.TrimSpace(*input.APIKey)
 	}
+	if strings.HasPrefix(apiKey, codexCredentialPrefix) {
+		return 0, gerror.New("不允许手工导入内部登录凭据")
+	}
 	apiKeyCipher, err := s.app.Secrets.Encrypt(apiKey)
 	if err != nil {
 		return 0, err
@@ -171,6 +174,9 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 	typeRow, typeConfig, err := s.writableType(ctx, input.Type)
 	if err != nil {
 		return 0, err
+	}
+	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice && apiKey != "" {
+		return 0, gerror.New("官方 Codex 套餐不使用 API Key，请创建渠道后登录授权")
 	}
 	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, "", baseURL)
 	if err != nil {
@@ -216,6 +222,9 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 		if groupErr := s.groups.SetChannelIDs(txCtx, id, input.GroupIDs); groupErr != nil {
 			return groupErr
 		}
+		if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
+			return nil
+		}
 		return s.createCredentialTx(txCtx, id, apiKey)
 	})
 	if err != nil {
@@ -237,6 +246,12 @@ func (s *sChannel) Update(ctx context.Context, id uint64, input adminapi.Channel
 	typeRow, typeConfig, err := s.writableType(ctx, input.Type)
 	if err != nil {
 		return err
+	}
+	if input.APIKey != nil && strings.HasPrefix(strings.TrimSpace(*input.APIKey), codexCredentialPrefix) {
+		return gerror.New("不允许手工导入内部登录凭据")
+	}
+	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice && input.APIKey != nil && strings.TrimSpace(*input.APIKey) != "" {
+		return gerror.New("官方 Codex 套餐不使用 API Key，请通过登录授权添加账号")
 	}
 	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, current.AdvancedConfig, baseURL)
 	if err != nil {

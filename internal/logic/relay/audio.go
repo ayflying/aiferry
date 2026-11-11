@@ -332,6 +332,9 @@ func (s *sRelay) handleAudio(ctx context.Context, incomingHeaders http.Header, c
 }
 
 func (s *sRelay) attemptAudioUpstream(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, body []byte, candidate Candidate, handler audioRequest, startedAt time.Time, settings adminapi.SystemResilienceSettingsInput) (attemptResult, bool) {
+	if result, unsupported := codexUnsupportedResult(candidate); unsupported {
+		return result, false
+	}
 	upstreamModel := candidate.UpstreamName
 	if strings.TrimSpace(upstreamModel) == "" {
 		upstreamModel = candidate.PublicName

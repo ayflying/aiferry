@@ -1,6 +1,23 @@
 {
   "channelTypes": [
     {
+      "id": 9000000000000025,
+      "name": "官方 Codex 套餐",
+      "code": "codex",
+      "config": {
+        "baseUrl": "https://chatgpt.com/backend-api/codex",
+        "models": { "method": "GET", "path": "/models?client_version=0.101.0", "listPath": "models", "idPath": "slug", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "costs": { "adapter": "none" },
+        "pricing": { "adapter": "none" },
+        "login": { "adapter": "codex_device" },
+        "quota": { "adapter": "codex_usage", "method": "GET", "path": "/backend-api/wham/usage", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
+        "protocol": { "forceUpstreamStream": true },
+        "endpoints": {
+          "responses": { "method": "POST", "path": "/responses", "requestBody": "json", "supportsStream": true, "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " }
+        }
+      }
+    },
+    {
       "id": 9000000000000001,
       "name": "OpenAI",
       "code": "openai",

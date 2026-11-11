@@ -60,6 +60,7 @@ export const QUOTA_ADAPTER_OPTIONS: ConfigOption[] = [
   { value: 'zhipu_coding_plan', label: '智谱 Coding Plan' },
   { value: 'opencode_go_usage', label: 'OpenCode Go 用量' },
   { value: 'volcengine_afp', label: '火山方舟 AFP' },
+  { value: 'codex_usage', label: 'Codex 套餐用量' },
 ]
 
 export const AUDIO_ADAPTER_OPTIONS: ConfigOption[] = [
@@ -171,7 +172,7 @@ export function pricingDetailVisible(config: TypeConfigRecord): boolean {
  */
 export function quotaDetailLocked(config: TypeConfigRecord): boolean {
   const adapter = String(config?.quota?.adapter ?? 'none')
-  return adapter === 'opencode_go_usage' || adapter === 'volcengine_afp'
+  return adapter === 'opencode_go_usage' || adapter === 'volcengine_afp' || adapter === 'codex_usage'
 }
 
 /** 套餐额度是否需要填写路径与鉴权（仅智谱适配器会真正用到）。 */

@@ -105,6 +105,30 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     wrapper.unmount()
   })
 
+  it('Codex 创建表单不展示首个推理密钥字段，并说明保存后平台登录', async () => {
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path === '/channel-types' ? [{ code: 'codex', name: 'Codex', status: 1, config: { baseUrl: 'https://chatgpt.com/backend-api/codex', login: { adapter: 'codex_device' } } }] : []))
+    const wrapper = shallowMount(ChannelsView, { global: { renderStubDefaultSlot: true } })
+    await flushPromises()
+    wrapper.findComponent(ChannelListPanel).vm.$emit('create')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Codex 不使用 API Key')
+    expect(wrapper.findAllComponents({ name: 'ElFormItem' }).some(item => item.attributes('label') === '首个推理密钥（可选）')).toBe(false)
+    expect(wrapper.findAllComponents({ name: 'ElInput' }).some(item => item.attributes('placeholder')?.includes('sk-...'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('Codex 设备登录能力传入抽屉，禁用手工 API Key', async () => {
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path === '/channel-types' ? [{ code: 'codex', config: { models: {}, costs: {}, pricing: {}, login: { adapter: 'codex_device' } } }] : []))
+    const wrapper = mountView()
+    await flushPromises()
+    openCredentials(wrapper, { ...channel, type: 'codex' })
+    await flushPromises()
+    const drawer = wrapper.findComponent(ChannelCredentialDrawer)
+    expect(drawer.props('loginSupported')).toBe(true)
+    expect(drawer.props('loginAdapter')).toBe('codex_device')
+    wrapper.unmount()
+  })
+
   it('普通渠道仍走手动密钥，并复用已加载配置', async () => {
     mocks.get.mockImplementation((path: string) => Promise.resolve(path === '/channel-types' ? [manualType] : []))
     const wrapper = mountView()

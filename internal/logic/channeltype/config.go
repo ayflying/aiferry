@@ -122,6 +122,10 @@ func normalizeLoginConfig(config *LoginConfig) error {
 	case "", AdapterLoginNone:
 		*config = LoginConfig{}
 		return nil
+	case AdapterLoginCodexDevice:
+		// Codex 使用官方设备授权流程，不使用外链登录的平台与路径参数。
+		*config = LoginConfig{Adapter: AdapterLoginCodexDevice}
+		return nil
 	case AdapterLoginExternalLink:
 		config.Platform = strings.ToLower(strings.TrimSpace(config.Platform))
 		if config.Platform == "" {
@@ -137,7 +141,7 @@ func normalizeLoginConfig(config *LoginConfig) error {
 		}
 		return nil
 	default:
-		return gerror.Newf("unsupported login adapter %q (expected none or %s)", config.Adapter, AdapterLoginExternalLink)
+		return gerror.Newf("unsupported login adapter %q (expected none, %s or %s)", config.Adapter, AdapterLoginExternalLink, AdapterLoginCodexDevice)
 	}
 }
 
@@ -165,6 +169,13 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 		*config = QuotaConfig{Adapter: AdapterNone}
 		return nil
 	case AdapterZhipuQuota:
+	case AdapterCodexUsage:
+		if strings.TrimSpace(config.Path) == "" {
+			config.Path = "/backend-api/wham/usage"
+		}
+		if config.HeaderPrefix == "" {
+			config.HeaderPrefix = "Bearer "
+		}
 	case AdapterOpenCodeGo:
 		// OpenCode Go /usage 接口位于 baseUrl 路径之下（…/zen/go/v1/usage），
 		// 与智谱（host 根路径）不同，endpoint 拼接由 quota 解析层用完整 URL
@@ -212,7 +223,7 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 		}
 		return nil
 	default:
-		return gerror.Newf("unsupported quota adapter %q (expected none, %s, %s, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterOpenCodeGo, AdapterVolcAFP, AdapterWorkBuddy)
+		return gerror.Newf("unsupported quota adapter %q (expected none, %s, %s, %s, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterOpenCodeGo, AdapterVolcAFP, AdapterWorkBuddy, AdapterCodexUsage)
 	}
 	config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
 	if config.Method == "" {

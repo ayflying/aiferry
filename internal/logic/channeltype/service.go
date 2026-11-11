@@ -28,6 +28,7 @@ const (
 	AdapterOpenRouter  = "openrouter_credits"
 	AdapterZhipuQuota  = "zhipu_coding_plan"
 	AdapterOpenCodeGo  = "opencode_go_usage"
+	AdapterCodexUsage  = "codex_usage"
 	AdapterVolcAFP     = "volcengine_afp"
 	AdapterWorkBuddy   = "workbuddy_credits"
 	// AdapterQiniuUsage remains supported for custom types created before 0.5.18.
@@ -37,6 +38,7 @@ const (
 	// 登录适配器：声明渠道支持"登录换取凭据"而不是手工填写密钥。
 	AdapterLoginNone         = "none"
 	AdapterLoginExternalLink = "external_link"
+	AdapterLoginCodexDevice  = "codex_device"
 
 	ValueTypeCost  = "cost"
 	ValueTypeUsage = "usage"
@@ -164,7 +166,7 @@ type Config struct {
 //
 // adapter 留空或 "none" 表示该渠道类型不支持登录，凭据只能手工填写密钥。
 type LoginConfig struct {
-	// Adapter 登录适配器，目前仅支持 external_link。
+	// Adapter 登录适配器：external_link 外链登录或 codex_device 设备授权。
 	Adapter string `json:"adapter"`
 	// Platform 传给平台登录接口的 platform 参数（如 workbuddy）。
 	Platform string `json:"platform"`

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   configForForm, costsShowsBalanceFields, costsShowsUsageFields, createEndpointConfig,
   endpointNames, endpointSummary, parseTypeConfigText, pricingDetailVisible,
-  quotaDetailLocked, quotaDetailVisible, renameEndpoint,
+  quotaDetailLocked, quotaDetailVisible, quotaSummary, QUOTA_ADAPTER_OPTIONS, renameEndpoint,
 } from './channelTypeConfig'
 
 describe('channel type config helpers', () => {
@@ -75,6 +75,10 @@ describe('channel type config helpers', () => {
     // OpenCode Go 与火山 AFP 的请求方式、鉴权由后端固定覆盖，字段只读。
     expect(quotaDetailLocked({ quota: { adapter: 'opencode_go_usage' } })).toBe(true)
     expect(quotaDetailLocked({ quota: { adapter: 'volcengine_afp' } })).toBe(true)
+    expect(quotaDetailLocked({ quota: { adapter: 'codex_usage' } })).toBe(true)
+    expect(quotaDetailVisible({ quota: { adapter: 'codex_usage' } })).toBe(true)
+    expect(QUOTA_ADAPTER_OPTIONS).toContainEqual({ value: 'codex_usage', label: 'Codex 套餐用量' })
+    expect(quotaSummary({ quota: { adapter: 'codex_usage' } })).toBe('Codex 套餐用量')
     expect(quotaDetailLocked({ quota: { adapter: 'zhipu_coding_plan' } })).toBe(false)
   })
 

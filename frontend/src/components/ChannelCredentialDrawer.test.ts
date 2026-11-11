@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel } from '../api/types'
 import ChannelCredentialDrawer from './ChannelCredentialDrawer.vue'
 
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), success: vi.fn() }))
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), success: vi.fn(), copy: vi.fn() }))
+vi.mock('../lib/clipboard', () => ({ copyText: api.copy }))
 vi.mock('../api/client', () => ({ apiGet: api.get, apiPost: api.post, apiPut: vi.fn(), apiDelete: vi.fn() }))
 vi.mock('../lib/error', () => ({ showError: vi.fn(), showSuccess: api.success, showWarning: vi.fn() }))
 const Slot = defineComponent({ setup: (_, { slots }) => () => h('div', [slots.default?.(), slots.footer?.()]) })
@@ -13,7 +14,7 @@ const Dialog = defineComponent({ props: ['modelValue', 'title'], setup: (props, 
 const Button = defineComponent({ props: ['disabled', 'loading'], setup: (props, { slots }) => () => h('button', { disabled: props.disabled || props.loading }, slots.default?.()) })
 const channel = { id: 35, name: 'WorkBuddy' } as Channel
 function mountDrawer(loginSupported = true) {
-  return shallowMount(ChannelCredentialDrawer, { props: { modelValue: true, channel, loginSupported }, global: { stubs: { ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElRadioGroup: RadioGroup } } })
+  return shallowMount(ChannelCredentialDrawer, { props: { modelValue: true, channel, loginSupported }, global: { stubs: { ChannelLoginDialog: false, ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElRadioGroup: RadioGroup } } })
 }
 function button(wrapper: ReturnType<typeof mountDrawer>, label: string) {
   const result = wrapper.findAll('button').find(item => item.text() === label)
@@ -25,6 +26,51 @@ beforeEach(() => { vi.useFakeTimers(); api.get.mockResolvedValue([]); api.post.m
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('添加上游密钥', () => {
+  it('Codex 仅允许平台登录，展示设备码并按服务端间隔轮询、到期停止', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    api.post.mockResolvedValueOnce({ state: 'device-state', authUrl: 'https://auth.openai.com/codex/device', userCode: 'ABCD-EFGH', intervalSeconds: 5, expiresInSeconds: 12 })
+      .mockResolvedValue({ status: 'pending' })
+    const wrapper = mountDrawer()
+    await wrapper.setProps({ channel: { ...channel, type: 'codex' }, loginAdapter: 'codex_device' })
+    await button(wrapper, '添加密钥').trigger('click')
+    expect(wrapper.findComponent({ name: 'ElRadioGroup' }).exists()).toBe(false)
+    expect(wrapper.find('[data-title="添加上游密钥"]').findComponent({ name: 'ElInput' }).exists()).toBe(false)
+    await button(wrapper, '打开平台登录页').trigger('click')
+    await flushPromises()
+    const code = wrapper.findAllComponents({ name: 'ElInput' }).find(input => input.attributes('aria-label') === '设备授权用户码')
+    expect(code?.props('modelValue')).toBe('ABCD-EFGH')
+    await button(wrapper, '复制用户码').trigger('click')
+    expect(api.copy).toHaveBeenCalledWith('ABCD-EFGH')
+    await vi.advanceTimersByTimeAsync(4999)
+    expect(api.post).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(api.post).toHaveBeenLastCalledWith('/channels/35/credentials/login/poll', { state: 'device-state' })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.post).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(api.post).toHaveBeenCalledTimes(3)
+    expect(wrapper.text()).toContain('登录地址已超时')
+    wrapper.unmount()
+  })
+
+  it('设备授权慢请求在有效期结束后完成，不接收迟到凭据', async () => {
+    let resolve!: (value: unknown) => void
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    api.post.mockResolvedValueOnce({ state: 'device', authUrl: 'https://auth.openai.com', intervalSeconds: 3, expiresInSeconds: 4 })
+      .mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const wrapper = mountDrawer()
+    await button(wrapper, '添加密钥').trigger('click')
+    await button(wrapper, '打开平台登录页').trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(4000)
+    resolve({ status: 'completed' })
+    await flushPromises()
+    expect(wrapper.emitted('changed')).toBeUndefined()
+    expect(api.success).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('登录地址已超时')
+    wrapper.unmount()
+  })
+
   it('支持登录的渠道默认展示平台登录，但打开添加弹窗不会自动发起请求', async () => {
     const wrapper = mountDrawer()
     await button(wrapper, '添加密钥').trigger('click')

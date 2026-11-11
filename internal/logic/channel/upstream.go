@@ -69,6 +69,9 @@ func (s *sChannel) fetchUpstreamJSON(ctx context.Context, channel entity.Channel
 	if err != nil {
 		return nil, err
 	}
+	if req.Header.Get("ChatGPT-Account-Id") != "" {
+		client = CodexHTTPClient(client)
+	}
 	return s.fetchJSON(client, req, input)
 }
 

@@ -110,7 +110,10 @@ func (c *Controller) startChannelLogin(r *ghttp.Request) {
 		respond(r, nil, err)
 		return
 	}
-	respond(r, adminapi.ChannelLoginSessionView{State: session.State, AuthURL: session.AuthURL}, nil)
+	respond(r, adminapi.ChannelLoginSessionView{
+		State: session.State, AuthURL: session.AuthURL, UserCode: session.UserCode,
+		IntervalSeconds: session.IntervalSeconds, ExpiresInSeconds: session.ExpiresInSeconds,
+	}, nil)
 }
 
 // pollChannelLogin 轮询登录结果；status=completed 时凭据已写入该渠道。

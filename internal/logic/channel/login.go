@@ -20,8 +20,11 @@ const pendingLoginCode = 11217
 // ChannelLoginSession 是一次外链登录会话：AuthURL 交给管理员在浏览器里完成登录
 // （微信扫码、账号密码、企业 SSO 都由平台登录页决定），State 用于随后轮询换票。
 type ChannelLoginSession struct {
-	State   string
-	AuthURL string
+	State            string
+	AuthURL          string
+	UserCode         string
+	IntervalSeconds  int
+	ExpiresInSeconds int
 }
 
 // ChannelLoginResult 是一次登录轮询的结果。Status 为 pending 表示还在等待用户
@@ -39,6 +42,9 @@ func (s *sChannel) StartChannelLogin(ctx context.Context, channelID uint64) (Cha
 	channel, config, err := s.loginContext(ctx, channelID)
 	if err != nil {
 		return ChannelLoginSession{}, err
+	}
+	if config.Login.Adapter == channeltype.AdapterLoginCodexDevice {
+		return s.startCodexLogin(ctx, channel)
 	}
 	endpoint, err := loginEndpoint(channel.BaseUrl, config, "auth/state")
 	if err != nil {
@@ -73,6 +79,9 @@ func (s *sChannel) PollChannelLogin(ctx context.Context, channelID uint64, state
 	channel, config, err := s.loginContext(ctx, channelID)
 	if err != nil {
 		return ChannelLoginResult{}, err
+	}
+	if config.Login.Adapter == channeltype.AdapterLoginCodexDevice {
+		return s.pollCodexLogin(ctx, channel, state)
 	}
 	endpoint, err := loginEndpoint(channel.BaseUrl, config, "auth/token")
 	if err != nil {
@@ -114,7 +123,7 @@ func (s *sChannel) loginContext(ctx context.Context, channelID uint64) (entity.C
 	if err != nil {
 		return entity.Channels{}, channeltype.Config{}, err
 	}
-	if config.Login.Adapter != channeltype.AdapterLoginExternalLink {
+	if config.Login.Adapter != channeltype.AdapterLoginExternalLink && config.Login.Adapter != channeltype.AdapterLoginCodexDevice {
 		return entity.Channels{}, channeltype.Config{}, gerror.Newf("渠道类型 %s 不支持登录，请手工填写密钥", channel.Type)
 	}
 	return channel, config, nil
