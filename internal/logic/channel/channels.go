@@ -175,8 +175,17 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 	if err != nil {
 		return 0, err
 	}
-	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice && apiKey != "" {
-		return 0, gerror.New("官方 Codex 套餐不使用 API Key，请创建渠道后登录授权")
+	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
+		if apiKey != "" {
+			if _, err := manualCodexCredential(apiKey); err != nil {
+				return 0, err
+			}
+		}
+		// Codex 只在凭据表存储加密且密封的令牌，避免渠道级遗留原始 token。
+		apiKeyCipher, err = s.app.Secrets.Encrypt("")
+		if err != nil {
+			return 0, err
+		}
 	}
 	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, "", baseURL)
 	if err != nil {
@@ -223,7 +232,15 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 			return groupErr
 		}
 		if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
-			return nil
+			if apiKey == "" {
+				return nil
+			}
+			credential, err := s.manualCodexCredentialData(id, apiKey)
+			if err != nil {
+				return err
+			}
+			_, err = dao.ChannelCredentials.Ctx(txCtx).Data(credential).Insert()
+			return err
 		}
 		return s.createCredentialTx(txCtx, id, apiKey)
 	})
@@ -251,7 +268,9 @@ func (s *sChannel) Update(ctx context.Context, id uint64, input adminapi.Channel
 		return gerror.New("不允许手工导入内部登录凭据")
 	}
 	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice && input.APIKey != nil && strings.TrimSpace(*input.APIKey) != "" {
-		return gerror.New("官方 Codex 套餐不使用 API Key，请通过登录授权添加账号")
+		if _, err := manualCodexCredential(strings.TrimSpace(*input.APIKey)); err != nil {
+			return err
+		}
 	}
 	advancedConfig, err := advancedConfigJSON(input.AdvancedConfig, current.AdvancedConfig, baseURL)
 	if err != nil {

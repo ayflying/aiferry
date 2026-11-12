@@ -27,6 +27,13 @@ func exchangeCodexTokens(ctx context.Context, client *http.Client, form url.Valu
 }
 
 func (s *sChannel) codexCredentialForRequest(ctx context.Context, original codexCredential) (codexCredential, error) {
+	// 手动 access token 没有 refresh_token，仍可使用到真实到期时刻，不能尝试换票。
+	if original.RefreshToken == "" {
+		if original.ExpiresAt <= time.Now().Unix() {
+			return codexCredential{}, gerror.New("Codex 手动访问令牌已过期，请重新填写或登录授权")
+		}
+		return original, nil
+	}
 	if original.ExpiresAt > time.Now().Add(time.Minute).Unix() {
 		return original, nil
 	}
@@ -57,6 +64,9 @@ func (s *sChannel) codexCredentialForRequest(ctx context.Context, original codex
 				if e != nil {
 					return codexCredential{}, e
 				}
+				if current.RefreshToken == "" {
+					return s.codexCredentialForRequest(ctx, current)
+				}
 				if current.ExpiresAt > time.Now().Add(time.Minute).Unix() {
 					return current, nil
 				}
@@ -68,6 +78,9 @@ func (s *sChannel) codexCredentialForRequest(ctx context.Context, original codex
 	row, current, err := s.latestCodexCredential(ctx, original.ChannelID, original.AccountID)
 	if err != nil {
 		return codexCredential{}, err
+	}
+	if current.RefreshToken == "" {
+		return s.codexCredentialForRequest(ctx, current)
 	}
 	if current.ExpiresAt > time.Now().Add(time.Minute).Unix() {
 		return current, nil

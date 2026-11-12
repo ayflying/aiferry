@@ -28,7 +28,7 @@ function openAddCredential() {
   credentialValue.value = ''
   credentialManagementValue.value = ''
   credentialRemark.value = ''
-  addMode.value = loginSupported.value || !manualSupported.value ? 'login' : 'manual'
+  addMode.value = loginSupported.value ? 'login' : 'manual'
   addDialogVisible.value = true
 }
 function beginCredentialLogin() {
@@ -99,7 +99,7 @@ const queryLabel = computed(() => {
 })
 
 const loginSupported = computed(() => props.loginSupported === true || props.loginAdapter === 'codex_device')
-const manualSupported = computed(() => props.channel?.type !== 'codex' && props.loginAdapter !== 'codex_device')
+const codexChannel = computed(() => props.channel?.type === 'codex' || props.loginAdapter === 'codex_device')
 const {
   visible: loginDialogVisible, starting: loginStarting, session: loginSession,
   error: loginError, elapsed: loginElapsed, expiresIn: loginExpiresIn, start: startLogin,
@@ -161,7 +161,7 @@ async function load(resetDetails = false) {
 }
 
 async function addCredential() {
-  if (!props.channel || !manualSupported.value || !credentialValue.value.trim() || adding.value) return
+  if (!props.channel || !credentialValue.value.trim() || adding.value) return
   if (Array.from(credentialRemark.value).length > 500) {
     showWarning('备注不能超过 500 字符')
     return
@@ -507,7 +507,7 @@ function stopCodeCountdown() {
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
         <el-table-column label="操作" width="150" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip content="查看完整密钥"><button class="icon-button" type="button" :aria-label="`查看 ${row.keyPrefix}`" :disabled="secretLoading[row.id]" @click="openSecret(row)"><Eye :size="16" /></button></el-tooltip><el-tooltip v-if="props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询全部账号的套餐额度"><button class="icon-button" type="button" :aria-label="`查询全部账号的套餐额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
       </el-table>
-      <div v-if="!loading && !rows.length" class="credential-empty"><CircleAlert :size="18" /><span>{{ !manualSupported ? 'Codex 不使用 API Key，请点「添加密钥」通过平台登录添加账号' : loginSupported ? '当前渠道还没有上游密钥，请点「添加密钥」选择平台登录或手动填写 API Key' : '当前渠道没有可管理的上游密钥' }}</span></div>
+      <div v-if="!loading && !rows.length" class="credential-empty"><CircleAlert :size="18" /><span>{{ codexChannel ? '当前渠道还没有账号，请点「添加密钥」选择平台登录或手动填写账号 access token' : loginSupported ? '当前渠道还没有上游密钥，请点「添加密钥」选择平台登录或手动填写 API Key' : '当前渠道没有可管理的上游密钥' }}</span></div>
     </div>
 
     <div v-if="props.managementKeySupported && queryDetails.some(item => item.shared)" class="shared-balance">
@@ -553,19 +553,20 @@ function stopCodeCountdown() {
       </template>
     </el-dialog>
     <el-dialog v-model="addDialogVisible" title="添加上游密钥" width="min(560px, 94vw)" append-to-body>
-      <el-radio-group v-if="loginSupported && manualSupported" v-model="addMode" style="margin-bottom: 16px">
+      <el-radio-group v-if="loginSupported" v-model="addMode" style="margin-bottom: 16px">
         <el-radio-button value="login">平台登录</el-radio-button>
-        <el-radio-button value="manual">手动填写 API Key</el-radio-button>
+        <el-radio-button value="manual">{{ codexChannel ? '手动填写 access token' : '手动填写 API Key' }}</el-radio-button>
       </el-radio-group>
-      <template v-if="manualSupported && addMode === 'manual'">
-        <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" placeholder="填写上游 API Key" @keyup.enter="addCredential" />
+      <template v-if="addMode === 'manual'">
+        <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" :placeholder="codexChannel ? '填写 Codex 账号 access token（非 sk API Key）' : '填写上游 API Key'" @keyup.enter="addCredential" />
+        <p v-if="codexChannel">手动填写的 access token 过期后需重新填写；也可切换「平台登录」添加账号。</p>
         <el-input v-if="props.managementKeySupported" v-model="credentialManagementValue" type="password" show-password autocomplete="new-password" :placeholder="props.managementKeyPair ? '管理密钥（可选，格式 AK:SK）' : '管理密钥（可选）'" style="margin-top: 12px" />
         <el-input v-model="credentialRemark" type="textarea" :rows="2" maxlength="500" show-word-limit aria-label="新密钥备注" placeholder="备注（可选，最多 500 字符）" style="margin-top: 12px" />
       </template>
       <el-alert v-else type="info" :closable="false" title="通过平台官方登录添加密钥。完成登录后，凭据会自动保存到当前渠道，可在密钥行中添加备注。" />
       <template #footer>
         <el-button :disabled="adding" @click="addDialogVisible = false">取消</el-button>
-        <el-button v-if="manualSupported && addMode === 'manual'" type="primary" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">添加密钥</el-button>
+        <el-button v-if="addMode === 'manual'" type="primary" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">添加密钥</el-button>
         <el-button v-else type="primary" :icon="LogIn" :loading="loginStarting" @click="beginCredentialLogin">打开平台登录页</el-button>
       </template>
     </el-dialog>

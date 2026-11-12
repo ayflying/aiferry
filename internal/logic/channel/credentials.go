@@ -83,9 +83,6 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 	if err != nil {
 		return 0, err
 	}
-	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
-		return 0, gerror.New("官方 Codex 套餐只能通过登录授权添加账号，不接受 API Key")
-	}
 	remark, err := normalizeCredentialRemark(input.Remark)
 	if err != nil {
 		return 0, err
@@ -94,8 +91,12 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 	if strings.HasPrefix(plainText, codexCredentialPrefix) {
 		return 0, gerror.New("不允许手工导入内部登录凭据，请使用平台登录")
 	}
-	keyHash := upstreamKeyHash(plainText)
-	data, err := s.newCredentialData(plainText)
+	var data do.ChannelCredentials
+	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
+		data, err = s.manualCodexCredentialData(channelID, plainText)
+	} else {
+		data, err = s.newCredentialData(plainText)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -105,7 +106,7 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 	}
 	data.ManagementKeyCipher = managementKey
 	data.Remark = remark
-	exists, err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID, KeyHash: keyHash}).Count()
+	exists, err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID, KeyHash: data.KeyHash}).Count()
 	if err != nil {
 		return 0, gerror.Wrap(err, "check duplicate channel credential")
 	}
@@ -180,6 +181,14 @@ func (s *sChannel) RevealCredential(ctx context.Context, channelID, credentialID
 	plainText, err := s.app.Secrets.Decrypt(credential.ApiKeyCipher)
 	if err != nil {
 		return "", gerror.Wrap(err, "decrypt channel credential")
+	}
+	if strings.HasPrefix(plainText, codexCredentialPrefix) {
+		credential, err := decodeCodexCredential(plainText)
+		if err != nil {
+			return "", err
+		}
+		// 显示账号访问令牌，而非含刷新令牌与服务端密封信息的内部封装。
+		return credential.AccessToken, nil
 	}
 	return plainText, nil
 }

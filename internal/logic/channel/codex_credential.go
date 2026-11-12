@@ -102,7 +102,7 @@ func encodeCodexCredential(credential codexCredential) string {
 
 func decodeCodexCredential(plain string) (codexCredential, error) {
 	var credential codexCredential
-	if !strings.HasPrefix(plain, codexCredentialPrefix) || json.Unmarshal([]byte(strings.TrimPrefix(plain, codexCredentialPrefix)), &credential) != nil || credential.AccessToken == "" || credential.RefreshToken == "" || credential.AccountID == "" || credential.ExpiresAt <= 0 {
+	if !strings.HasPrefix(plain, codexCredentialPrefix) || json.Unmarshal([]byte(strings.TrimPrefix(plain, codexCredentialPrefix)), &credential) != nil || credential.AccessToken == "" || credential.AccountID == "" || credential.ExpiresAt <= 0 {
 		return credential, gerror.New("Codex 登录凭据无效，请重新授权")
 	}
 	return credential, nil

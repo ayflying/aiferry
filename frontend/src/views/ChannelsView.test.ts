@@ -7,8 +7,8 @@ import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
 import ChannelListPanel from '../components/ChannelListPanel.vue'
 import ChannelsView from './ChannelsView.vue'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), error: vi.fn() }))
-vi.mock('../api/client', () => ({ apiGet: mocks.get, apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), error: vi.fn() }))
+vi.mock('../api/client', () => ({ apiGet: mocks.get, apiPost: mocks.post, apiPut: vi.fn(), apiDelete: vi.fn() }))
 vi.mock('../lib/error', () => ({ showError: mocks.error, showSuccess: vi.fn() }))
 vi.mock('../stores/auth', () => ({ useAuthStore: () => ({ user: { isAdmin: true } }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ meta: { channelTab: 'channels' } }) }))
@@ -26,6 +26,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   mocks.get.mockReset().mockResolvedValue([])
   mocks.error.mockReset()
+  mocks.post.mockReset().mockResolvedValue({})
 })
 
 function mountView() {
@@ -117,19 +118,29 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     wrapper.unmount()
   })
 
-  it('Codex 创建表单不展示首个推理密钥字段，并说明保存后平台登录', async () => {
+  it.each(['account-access-token', ''])('Codex 创建可选账号 token=%j，填写保留、留空也能保存', async (token) => {
     mocks.get.mockImplementation((path: string) => Promise.resolve(path === '/channel-types' ? [{ code: 'codex', name: 'Codex', status: 1, config: { baseUrl: 'https://chatgpt.com/backend-api/codex', login: { adapter: 'codex_device' } } }] : []))
-    const wrapper = shallowMount(ChannelsView, { global: { renderStubDefaultSlot: true } })
+    const wrapper = shallowMount(ChannelsView, { global: { renderStubDefaultSlot: true, stubs: { ElDrawer: { template: '<section><slot /><slot name="footer" /></section>' } } } })
     await flushPromises()
     wrapper.findComponent(ChannelListPanel).vm.$emit('create')
     await flushPromises()
-    expect(wrapper.text()).toContain('Codex 不使用 API Key')
-    expect(wrapper.findAllComponents({ name: 'ElFormItem' }).some(item => item.attributes('label') === '首个推理密钥（可选）')).toBe(false)
-    expect(wrapper.findAllComponents({ name: 'ElInput' }).some(item => item.attributes('placeholder')?.includes('sk-...'))).toBe(false)
+    expect(wrapper.text()).toContain('可留空，保存渠道后')
+    expect(wrapper.text()).toContain('过期后需重新填写')
+    expect(wrapper.findAllComponents({ name: 'ElFormItem' }).some(item => item.attributes('label') === '首个推理密钥（可选）')).toBe(true)
+    const inputs = wrapper.findAllComponents({ name: 'ElInput' })
+    const tokenInput = inputs.find(item => item.attributes('placeholder')?.includes('账号 access token（非 sk API Key）'))!
+    expect(tokenInput.exists()).toBe(true)
+    inputs.find(item => item.attributes('placeholder') === '例如 OpenAI 主线路')!.vm.$emit('update:modelValue', 'Codex fixture')
+    tokenInput.vm.$emit('update:modelValue', token)
+    await flushPromises()
+    const save = wrapper.findAllComponents({ name: 'ElButton' }).find(item => item.text() === '保存渠道')!
+    save.vm.$emit('click')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenCalledWith('/channels', expect.objectContaining({ name: 'Codex fixture', type: 'codex', apiKey: token }))
     wrapper.unmount()
   })
 
-  it('Codex 设备登录能力传入抽屉，禁用手工 API Key', async () => {
+  it('Codex 设备登录能力仍传入抽屉，保留平台登录入口', async () => {
     mocks.get.mockImplementation((path: string) => Promise.resolve(path === '/channel-types' ? [{ code: 'codex', config: { models: {}, costs: {}, pricing: {}, login: { adapter: 'codex_device' } } }] : []))
     const wrapper = mountView()
     await flushPromises()

@@ -26,14 +26,14 @@ beforeEach(() => { vi.useFakeTimers(); api.get.mockResolvedValue([]); api.post.m
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('添加上游密钥', () => {
-  it('Codex 仅允许平台登录，展示设备码并按服务端间隔轮询、到期停止', async () => {
+  it('Codex 默认平台登录，展示设备码并按服务端间隔轮询、到期停止', async () => {
     vi.spyOn(window, 'open').mockReturnValue(null)
     api.post.mockResolvedValueOnce({ state: 'device-state', authUrl: 'https://auth.openai.com/codex/device', userCode: 'ABCD-EFGH', intervalSeconds: 5, expiresInSeconds: 12 })
       .mockResolvedValue({ status: 'pending' })
     const wrapper = mountDrawer()
     await wrapper.setProps({ channel: { ...channel, type: 'codex' }, loginAdapter: 'codex_device' })
     await button(wrapper, '添加密钥').trigger('click')
-    expect(wrapper.findComponent({ name: 'ElRadioGroup' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'ElRadioGroup' }).exists()).toBe(true)
     expect(wrapper.find('[data-title="添加上游密钥"]').findComponent({ name: 'ElInput' }).exists()).toBe(false)
     await button(wrapper, '打开平台登录页').trigger('click')
     await flushPromises()
@@ -50,6 +50,26 @@ describe('添加上游密钥', () => {
     await vi.advanceTimersByTimeAsync(10000)
     expect(api.post).toHaveBeenCalledTimes(3)
     expect(wrapper.text()).toContain('登录地址已超时')
+    wrapper.unmount()
+  })
+
+  it('Codex 可切换手动账号 access token 并保留提交值，空值不能追加', async () => {
+    const wrapper = mountDrawer()
+    await wrapper.setProps({ channel: { ...channel, type: 'codex' }, loginAdapter: 'codex_device' })
+    await button(wrapper, '添加密钥').trigger('click')
+    wrapper.findComponent({ name: 'ElRadioGroup' }).vm.$emit('update:modelValue', 'manual')
+    await flushPromises()
+    const dialog = wrapper.find('[data-title="添加上游密钥"]')
+    const input = dialog.findComponent({ name: 'ElInput' })
+    expect(input.attributes('placeholder')).toContain('账号 access token（非 sk API Key）')
+    expect(dialog.text()).toContain('过期后需重新填写')
+    expect(dialog.findAll('button')[1]!.attributes('disabled')).toBeDefined()
+    input.vm.$emit('update:modelValue', ' account-access-token ')
+    await flushPromises()
+    await dialog.findAll('button')[1]!.trigger('click')
+    await flushPromises()
+    expect(api.post).toHaveBeenCalledWith('/channels/35/credentials', { apiKey: 'account-access-token' })
+    expect(wrapper.emitted('changed')).toHaveLength(1)
     wrapper.unmount()
   })
 
