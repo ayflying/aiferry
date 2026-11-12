@@ -105,6 +105,18 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     wrapper.unmount()
   })
 
+  it('渠道类型下拉优先向下，仅允许在上下方向避让，不侧向展开', async () => {
+    const wrapper = shallowMount(ChannelsView, { global: { renderStubDefaultSlot: true } })
+    await flushPromises()
+    wrapper.findComponent(ChannelListPanel).vm.$emit('create')
+    await flushPromises()
+    const select = wrapper.findComponent({ name: 'ElSelect' })
+    expect(select.attributes('placeholder')).toBe('选择渠道类型')
+    expect(select.attributes('placement')).toBe('bottom-start')
+    expect(select.props('fallbackPlacements')).toEqual(['bottom-start', 'top-start'])
+    wrapper.unmount()
+  })
+
   it('Codex 创建表单不展示首个推理密钥字段，并说明保存后平台登录', async () => {
     mocks.get.mockImplementation((path: string) => Promise.resolve(path === '/channel-types' ? [{ code: 'codex', name: 'Codex', status: 1, config: { baseUrl: 'https://chatgpt.com/backend-api/codex', login: { adapter: 'codex_device' } } }] : []))
     const wrapper = shallowMount(ChannelsView, { global: { renderStubDefaultSlot: true } })
