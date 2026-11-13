@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { apiPut } from '../api/client'
-import { showError, showSuccess, showWarning } from '../lib/error'
+import { showError, showWarning } from '../lib/error'
 
 const props = defineProps<{ channelId: number; credentialId: number; remark: string }>()
 const emit = defineEmits<{ saved: [remark: string] }>()
@@ -35,7 +35,6 @@ async function save() {
     if (current !== generation) return
     emit('saved', remark)
     editing.value = false
-    showSuccess(remark ? '密钥备注已保存' : '密钥备注已清除')
   } catch (error) {
     if (current === generation) showError(error, '保存密钥备注失败')
   } finally {

@@ -38,6 +38,8 @@ describe('凭据备注编辑', () => {
     request.resolve()
     await flushPromises()
     expect(wrapper.emitted('saved')).toEqual([['新备注\n第二行']])
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(api.success).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -50,6 +52,8 @@ describe('凭据备注编辑', () => {
     await flushPromises()
     expect(api.put).toHaveBeenCalledWith('/channels/3/credentials/9/remark', { remark: '' })
     expect(wrapper.emitted('saved')).toEqual([['']])
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(api.success).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
