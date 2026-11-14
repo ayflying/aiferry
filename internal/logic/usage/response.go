@@ -37,12 +37,12 @@ func ParseJSONUsage(body []byte) TokenUsage {
 		"usage.input_tokens_details.cached_tokens",
 		"usage.prompt_tokens_details.cached_tokens",
 		"response.usage.input_tokens_details.cached_tokens",
-		// DeepSeek reports cache hits at the top level of usage.
+		// 缓存命中数按顶层的 prompt_cache_hit_tokens 给出（部分上游的 usage 口径）。
 		"usage.prompt_cache_hit_tokens",
 		"response.usage.prompt_cache_hit_tokens",
 	)
 	cacheWrite := optionalUint(body, "usage.cache_write_tokens", "usage.cache_creation_input_tokens", "usage.cache_creation_tokens", "usage.input_tokens_details.cache_write_tokens", "usage.prompt_tokens_details.cache_write_tokens", "usage.input_tokens_details.cache_creation_tokens", "usage.prompt_tokens_details.cache_creation_tokens")
-	// DeepSeek reports cache misses at the top level of usage.
+	// 缓存未命中数按顶层的 prompt_cache_miss_tokens 给出（同一口径）。
 	cacheMiss := optionalUint(body, "usage.prompt_cache_miss_tokens", "response.usage.prompt_cache_miss_tokens")
 	imageInput := optionalUint(body, "usage.image_tokens", "usage.input_tokens_details.image_tokens", "usage.prompt_tokens_details.image_tokens")
 	audioInput := optionalUint(body, "usage.audio_tokens", "usage.input_tokens_details.audio_tokens", "usage.prompt_tokens_details.audio_tokens")

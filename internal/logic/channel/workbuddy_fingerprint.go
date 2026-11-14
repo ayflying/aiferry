@@ -24,7 +24,7 @@ import (
 // 会凭空改变对话，工具定义与图片 part 一律不动。
 //
 // developer 必须一起改（2026-10-29 14:07 生产实证 afreq_ea1065d7…，
-// deepseek-flash-1017 五次上游 400）：那条请求**没有 system 消息**，身份提示写
+// 该次请求连续五次上游 400）：那条请求**没有 system 消息**，身份提示写
 // 在 developer 里（58 assistant / 1 developer / 52 tool / 18 user），本层先跑、
 // 当时只看 system/assistant 便跳过了它；紧接着 ApplyWorkBuddyBody 把 developer
 // 规范化成 system 再发出，指纹就原样落进上游的扫描面。所以「改词」与「角色

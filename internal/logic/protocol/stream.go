@@ -105,7 +105,7 @@ func (c *StreamConverter) responsesToChat(payload []byte) [][]byte {
 	switch eventType {
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		// 思考内容统一落成 Chat 的 delta.reasoning_content：这是各上游与客户端
-		// 唯一都认的标准字段名（reasoning 在 DeepSeek/GLM 系会被拒，见
+		// 唯一都认的标准字段名（写成聚合方言的 reasoning 会被部分上游拒绝，见
 		// docs/reasoning-echo.md）。summary 与 text 两种事件都承载思考正文，
 		// 上游按自身能力择一发送。
 		delta := gjson.GetBytes(payload, "delta").String()

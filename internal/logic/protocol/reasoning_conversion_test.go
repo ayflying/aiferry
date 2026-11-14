@@ -8,7 +8,7 @@ import (
 )
 
 // Responses 的 reasoning 输入项必须回填成 Chat 的 reasoning_content：
-// DeepSeek/Kimi 等开启思考的上游在发生过工具调用后要求原样回传，否则直接 400。
+// 开启思考的上游在发生过工具调用后要求原样回传，否则直接 400。
 func TestResponsesReasoningBackfillsReasoningContent(t *testing.T) {
 	body, err := responsesRequestToChat([]byte(`{
   "model":"deepseek-v4-pro",
@@ -25,7 +25,7 @@ func TestResponsesReasoningBackfillsReasoningContent(t *testing.T) {
 	if actual := gjson.GetBytes(body, "messages.1.reasoning_content").String(); actual != "需要先查两个城市" {
 		t.Fatalf("reasoning_content = %q, body=%s", actual, body)
 	}
-	// 只写标准字段：聚合方言 reasoning 在 DeepSeek/GLM 系会被拒绝。
+	// 只写标准字段：聚合方言 reasoning 会被部分上游拒绝。
 	if gjson.GetBytes(body, "messages.1.reasoning").Exists() {
 		t.Fatalf("reasoning must not be written, body=%s", body)
 	}

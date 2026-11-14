@@ -10,16 +10,10 @@ import (
 
 // 协议标记守卫（content guard）。
 //
-// 【已删除的一半，2026-10-29】原先这里还有一套「思考块改写」：上游把整段思考用
-// <thinking>…</thinking> 或 <analysis>…</analysis> 包进正文时，网关把它搬进
-// reasoning_content、剥掉标签，正文只留真正的回答。那是按 adesk 渠道 deepseek
-// 系列的实证加的模型专用补丁。用户 2026-10-29 确认上游已修复标签错乱，网关不再为
-// 这类模型做特殊处理，整套分支已删除（实现见 git 历史 58319ba 之前的
-// content_guard_thinking.go / content_guard_probe.go / content_guard_hold.go）。
-// 现在上游若仍把思考标签写进正文，网关按普通正文原样透传：不改写、不搬移、
-// 不因它拒答。
+// 网关不为任何模型或渠道单独改写正文：上游若把思考标签（<thinking>、<analysis>）
+// 写进正文，按普通正文原样透传，不改写、不搬移、不因它拒答。
 //
-// 【保留的一半与模型无关】上游把自家客户端 / Agent 框架的内部标记当正文写出：
+// 上游把自家客户端 / Agent 框架的内部标记当正文写出：
 // <tool_result name=read> 整块文件内容、<tool_call(s)>、<tool invoke>、｜…｜ 形式的
 // DSML 收尾标记（workbuddy 渠道实证），以及 Agent 框架上下文压缩用的
 // <summary>…</summary> 摘要信封（adesk 渠道 afreq_04b72bca01aaab19292942ab 实证：

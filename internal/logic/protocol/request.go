@@ -77,7 +77,7 @@ func responsesToolChoiceToChat(value any) any {
 // 必须一一对应，否则上游会因为「工具结果找不到对应的工具调用」而拒绝请求。
 //
 // 同一段里出现的 reasoning 输入项（思考模式的历史）会作为 reasoning_content 挂到这条
-// assistant 消息上：DeepSeek/Kimi 等开启思考的上游要求发生过工具调用后必须原样回传思考，
+// assistant 消息上：开启思考的上游要求在发生过工具调用后必须原样回传思考，
 // 否则直接 400（实测口径见 docs/reasoning-echo.md）。这不涉及改写响应正文——只是把客户端
 // 自己带来的思考历史换一个字段名交给上游。
 func responsesInputToChat(value any) []any {
