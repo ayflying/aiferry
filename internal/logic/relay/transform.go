@@ -23,6 +23,9 @@ func prepareRequestBody(endpoint string, originalBody []byte, upstreamModel stri
 		delete(payload, "stream")
 	}
 	applyRestrictedFields(payload, config)
+	// developer 是过渡兼容层：国内上游多数还不认这个角色，统一改写成 system。
+	// 上游普遍支持后，删掉这一行与 developer_role.go 即可（见该文件说明）。
+	normalizeDeveloperRole(endpoint, payload)
 	applyDefaultSystemPrompt(endpoint, payload, config)
 	payload["model"] = upstreamModel
 	if endpoint == "/chat/completions" && boolValue(payload["stream"]) {
