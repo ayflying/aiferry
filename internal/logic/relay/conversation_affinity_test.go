@@ -92,6 +92,54 @@ func TestApplyConversationChannelAffinityKeepsPinnedFirst(t *testing.T) {
 	}
 }
 
+func TestApplyConversationChannelAffinityNeverCrossesPriority(t *testing.T) {
+	// 高优先级组（priority 10）有渠道 3、5；低优先级组（priority 5）有渠道 9。
+	// 记忆把低优先级的 9 排在第一位，它也不能越过本轮仍可用的高优先级渠道。
+	candidates := []Candidate{
+		{ChannelID: 3, ChannelModelID: 30, Priority: 10},
+		{ChannelID: 5, ChannelModelID: 50, Priority: 10},
+		{ChannelID: 9, ChannelModelID: 90, Priority: 5},
+	}
+	ordered := applyConversationChannelAffinity(candidates, []uint64{9, 5, 3})
+	want := []uint64{5, 3, 9}
+	for index, channelID := range want {
+		if ordered[index].ChannelID != channelID {
+			t.Fatalf("第 %d 位应为渠道 %d，实际 %d（低优先级不得越界）", index, channelID, ordered[index].ChannelID)
+		}
+	}
+}
+
+func TestApplyConversationChannelAffinityPinsInsideSamePriority(t *testing.T) {
+	// 同一优先级内的记忆顺序仍然生效：组内 5 排到 3 前面，低优先级 9 依旧垫底。
+	candidates := []Candidate{
+		{ChannelID: 3, ChannelModelID: 30, Priority: 10},
+		{ChannelID: 5, ChannelModelID: 50, Priority: 10},
+		{ChannelID: 9, ChannelModelID: 90, Priority: 5},
+	}
+	ordered := applyConversationChannelAffinity(candidates, []uint64{9, 5})
+	want := []uint64{5, 3, 9}
+	for index, channelID := range want {
+		if ordered[index].ChannelID != channelID {
+			t.Fatalf("第 %d 位应为渠道 %d，实际 %d", index, channelID, ordered[index].ChannelID)
+		}
+	}
+}
+
+func TestApplyConversationChannelAffinityReachesLowPriorityWhenHighGone(t *testing.T) {
+	// 高优先级候选全部不可用（不在入参里）时，低优先级组内仍按记忆排定顺序。
+	candidates := []Candidate{
+		{ChannelID: 9, ChannelModelID: 90, Priority: 5},
+		{ChannelID: 8, ChannelModelID: 80, Priority: 5},
+	}
+	ordered := applyConversationChannelAffinity(candidates, []uint64{8})
+	want := []uint64{8, 9}
+	for index, channelID := range want {
+		if ordered[index].ChannelID != channelID {
+			t.Fatalf("第 %d 位应为渠道 %d，实际 %d", index, channelID, ordered[index].ChannelID)
+		}
+	}
+}
+
 func TestApplyConversationChannelAffinitySkipsUnavailableAndAppendsNew(t *testing.T) {
 	// 记忆里渠道 9 当前不可用（不在候选里，代表被禁用/关闭时段过滤），渠道 10 是本轮新增的。
 	candidates := []Candidate{

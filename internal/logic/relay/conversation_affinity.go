@@ -27,6 +27,8 @@ import (
 //   - 顺序里排在前面的渠道只要可用就一定先被选中；
 //   - 坏掉的渠道（自动禁用/关闭时段/不可用）根本不在候选里，自然落到下一跳；
 //   - 它恢复后重新回到候选，靠顺序自动回到第一位——不需要额外的「恢复检测」逻辑。
+//   - 记忆只在同一优先级内部生效：优先级是硬边界，低优先级渠道不可能因为记忆排前
+//     就越过本轮仍可用的高优先级渠道（见 applyConversationChannelAffinity）。
 //
 // 记忆按 (API Key, 模型, 会话标识) 存 Redis，TTL 到期回收。只存渠道 ID，
 // 不含提示词内容与任何凭据。
@@ -129,14 +131,53 @@ func userMessageText(content gjson.Result) string {
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
-// applyConversationChannelAffinity 按会话记忆的优先顺序重排候选：
-// 记忆里排前的渠道先，其余候选保持本次的加权顺序接在后面。
+// applyConversationChannelAffinity 按会话记忆的优先顺序重排候选。
+//
+// 优先级是硬边界，粘性只在同一优先级内部生效：先按本次候选的优先级从高到低分组
+// （顺序沿用入参，即 weightedOrder 已经排好的顺序），再在每个组内按记忆位置重排。
+// 这样低优先级渠道无论记忆里排多前，都不可能越过本轮仍可用的高优先级渠道——
+// 只有高优先级候选全部不可用时（它们根本不在入参里），低优先级才会被真正用到。
+//
+// 组内重排规则：记忆里排前的渠道先，其余候选保持本次的加权顺序接在后面。
 // 记忆里已不可用（被禁用、过滤、删除）的渠道直接跳过——这就是「坏了切备用」，
 // 它恢复后重新出现在候选里又会排到前面，即「恢复了切回去」。
 func applyConversationChannelAffinity(candidates []Candidate, pinned []uint64) []Candidate {
 	if len(pinned) == 0 || len(candidates) == 0 {
 		return candidates
 	}
+	ordered := make([]Candidate, 0, len(candidates))
+	for _, priority := range candidatePriorityGroups(candidates) {
+		ordered = append(ordered, applyPinnedOrder(candidates[priority.start:priority.end], pinned)...)
+	}
+	return ordered
+}
+
+// prioritySpan 是同一优先级候选在入参切片里占的区间（左闭右开）。
+type prioritySpan struct {
+	start int
+	end   int
+}
+
+// candidatePriorityGroups 按入参顺序切出各优先级在入参切片里的连续区间。
+//
+// 假定同优先级候选在入参里连续（weightedOrder 就是按优先级分组拼接的结果）。
+// 若个别调用方传入乱序数据导致同一优先级被切成多段，也只是粘性在该优先级内少生效，
+// 不会让候选丢失或跨优先级越界，因此这里不做额外归并。
+func candidatePriorityGroups(candidates []Candidate) []prioritySpan {
+	spans := make([]prioritySpan, 0, len(candidates))
+	for index, candidate := range candidates {
+		if index > 0 && candidates[index-1].Priority == candidate.Priority {
+			spans[len(spans)-1].end = index + 1
+			continue
+		}
+		spans = append(spans, prioritySpan{start: index, end: index + 1})
+	}
+	return spans
+}
+
+// applyPinnedOrder 在给定的同一优先级候选内按记忆顺序重排。
+// 入参必须是同优先级的候选，函数不校验优先级，排序结果不会离开本组。
+func applyPinnedOrder(candidates []Candidate, pinned []uint64) []Candidate {
 	pending := make(map[uint64][]Candidate, len(candidates))
 	for _, candidate := range candidates {
 		pending[candidate.ChannelID] = append(pending[candidate.ChannelID], candidate)
