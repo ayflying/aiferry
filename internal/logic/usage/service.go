@@ -151,6 +151,9 @@ type LogView struct {
 	APIKeyName             string            `json:"apiKeyName" orm:"api_key_name"`
 	ChannelName            string            `json:"channelName" orm:"channel_name"`
 	ChannelCredentialIndex uint              `json:"channelCredentialIndex" orm:"channel_credential_index"`
+	// ChannelCredentialRemark 是渠道密钥的自定义备注，为空表示该密钥没有备注。
+	// 只做展示补充，不参与筛选与计费，缺失时前端继续显示渠道名与序号。
+	ChannelCredentialRemark string           `json:"channelCredentialRemark" orm:"-"`
 	Endpoint               string            `json:"endpoint" orm:"endpoint"`
 	UpstreamEndpoint       string            `json:"upstreamEndpoint" orm:"upstream_endpoint"`
 	ProtocolConversion     string            `json:"protocolConversion" orm:"protocol_conversion"`

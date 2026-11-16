@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -111,7 +112,7 @@ func populateUsageLogReferences(ctx context.Context, items []LogView) error {
 	if err != nil {
 		return err
 	}
-	credentialIndexes, err := loadUsageCredentialIndexes(ctx, channelIDs)
+	credentialIndexes, credentialRemarks, err := loadUsageCredentialLabels(ctx, channelIDs)
 	if err != nil {
 		return err
 	}
@@ -130,6 +131,7 @@ func populateUsageLogReferences(ctx context.Context, items []LogView) error {
 			item.ChannelName = "已删除渠道"
 		}
 		item.ChannelCredentialIndex = credentialIndexes[item.ChannelCredentialId]
+		item.ChannelCredentialRemark = credentialRemarks[item.ChannelCredentialId]
 		item.APIKeyName = apiKeyNames[item.APIKeyId]
 		if item.APIKeyName == "" {
 			item.APIKeyName = "系统测试"
@@ -146,27 +148,41 @@ func populateUsageLogReferences(ctx context.Context, items []LogView) error {
 	return nil
 }
 
-func loadUsageCredentialIndexes(ctx context.Context, channelIDs []uint64) (map[uint64]uint, error) {
-	indexes := make(map[uint64]uint)
+// loadUsageCredentialLabels 一次性查回这些渠道下的全部密钥，供用量列表补充
+// 「渠道 / 密钥」列的展示信息（序号与备注）。使用 Unscoped 是为了让已软删的
+// 历史密钥仍参与排序，避免同渠道其余密钥的序号在密钥被删除后发生漂移。
+func loadUsageCredentialLabels(ctx context.Context, channelIDs []uint64) (map[uint64]uint, map[uint64]string, error) {
 	if len(channelIDs) == 0 {
-		return indexes, nil
+		return map[uint64]uint{}, map[uint64]string{}, nil
 	}
 	columns := dao.ChannelCredentials.Columns()
 	credentials := make([]entity.ChannelCredentials, 0)
 	if err := dao.ChannelCredentials.Ctx(ctx).Unscoped().
-		Fields(columns.Id, columns.ChannelId).
+		Fields(columns.Id, columns.ChannelId, columns.Remark).
 		WhereIn(columns.ChannelId, channelIDs).
 		OrderAsc(columns.ChannelId).
 		OrderAsc(columns.Id).
 		Scan(&credentials); err != nil {
-		return nil, gerror.Wrap(err, "load usage log channel credentials")
+		return nil, nil, gerror.Wrap(err, "load usage log channel credentials")
 	}
+	indexes, remarks := credentialLabels(credentials)
+	return indexes, remarks, nil
+}
+
+// credentialLabels 按渠道内密钥的创建顺序计算 1 起的序号，并带出非空备注。
+// 纯函数便于单测：序号只依赖传入顺序，备注为空白时视为没有备注。
+func credentialLabels(credentials []entity.ChannelCredentials) (map[uint64]uint, map[uint64]string) {
+	indexes := make(map[uint64]uint, len(credentials))
+	remarks := make(map[uint64]string, len(credentials))
 	perChannel := make(map[uint64]uint)
 	for _, credential := range credentials {
 		perChannel[credential.ChannelId]++
 		indexes[credential.Id] = perChannel[credential.ChannelId]
+		if remark := strings.TrimSpace(credential.Remark); remark != "" {
+			remarks[credential.Id] = remark
+		}
 	}
-	return indexes, nil
+	return indexes, remarks
 }
 
 func loadUsageAPIKeyNames(ctx context.Context, apiKeyIDs []uint64) (map[uint64]string, error) {

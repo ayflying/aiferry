@@ -347,6 +347,7 @@ func (c *Controller) listUsage(r *ghttp.Request) {
 		for index := range data.Items {
 			data.Items[index].ChannelName = ""
 			data.Items[index].ChannelCredentialIndex = 0
+			data.Items[index].ChannelCredentialRemark = ""
 		}
 	}
 	respond(r, data, err)
