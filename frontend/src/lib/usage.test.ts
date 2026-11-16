@@ -6,6 +6,17 @@ describe('channelCredentialReference', () => {
     expect(channelCredentialReference('宝塔', 1)).toBe('宝塔 #1')
     expect(channelCredentialReference('', 0)).toBe('已删除渠道 #未记录')
   })
+
+  it('有备注时用备注顶替序号', () => {
+    expect(channelCredentialReference('宝塔', 3, '生产主密钥')).toBe('宝塔 生产主密钥')
+    expect(channelCredentialReference('宝塔', 0, '备用')).toBe('宝塔 备用')
+  })
+
+  it('备注为空白或只有空格时仍用序号', () => {
+    expect(channelCredentialReference('宝塔', 2, '')).toBe('宝塔 #2')
+    expect(channelCredentialReference('宝塔', 2, '   ')).toBe('宝塔 #2')
+    expect(channelCredentialReference('宝塔', 2, undefined)).toBe('宝塔 #2')
+  })
 })
 
 describe('streamLabel', () => {

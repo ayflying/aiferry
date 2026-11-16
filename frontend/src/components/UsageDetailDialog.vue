@@ -165,7 +165,7 @@ function billingSummary() {
           <el-descriptions-item label="请求模型">{{ usage.requestedModel }}</el-descriptions-item>
           <el-descriptions-item label="推理强度">{{ formatReasoningEffort(usage.reasoningEffort) }}</el-descriptions-item>
           <el-descriptions-item label="上游模型">{{ usage.upstreamModel || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="渠道">{{ channelCredentialReference(usage.channelName, usage.channelCredentialIndex) }}</el-descriptions-item>
+          <el-descriptions-item label="渠道">{{ channelCredentialReference(usage.channelName, usage.channelCredentialIndex, usage.channelCredentialRemark) }}</el-descriptions-item>
 		  <el-descriptions-item label="访问密钥" :span="2">{{ usage.apiKeyName || '—' }}</el-descriptions-item>
         </el-descriptions>
       </section>
