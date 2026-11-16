@@ -10,13 +10,13 @@ on:
 # 版本号由开发者在提交前手动递增根目录 VERSION 文件，CI 只做校验和使用，不再自动递增并回推提交
 permissions:
   contents: read
-  packages: write
 
 env:
   # 生产镜像以 Docker Hub 为准：国内宿主机直连 ghcr.io 会反复超时重试，
   # 拉不下来（2026-11-15 栈 103 部署即因此失败）。Docker Hub 走宿主机镜像
-  # 加速器可以稳定拉取。ghcr 继续同步推送，保留给 GitHub 一侧的既有引用。
-  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+  # 加速器可以稳定拉取。ghcr 一并推送会在登录环节拖垮整条流水线
+  # （2026-11-16 连续两次 denied: denied），因此正式镜像只推 Docker Hub。
+  # 集群隔离测试镜像仍由 cluster-test.yml 推 ghcr，与本流程互不影响。
   DOCKERHUB_IMAGE: docker.io/${{ vars.DOCKERHUB_USERNAME }}/aiferry
 
 jobs:
@@ -78,13 +78,6 @@ jobs:
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 登录 GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: 登录 Docker Hub
         uses: docker/login-action@v3
         with:
@@ -95,9 +88,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.DOCKERHUB_IMAGE }}
-            ${{ env.GHCR_IMAGE }}
+          images: ${{ env.DOCKERHUB_IMAGE }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag

@@ -21,7 +21,7 @@
 - DAO、DO、entity 与服务接口仍须使用 GoFrame 生成工具生成，禁止手工修改；生成所需数据库连接不得使用生产凭据。
 - 本机基础测试不等于生产验收；提交推送后检查 CI 结果。生产部署是独立操作，未经本次明确授权不更新容器。
 - 宿主机服务端口固定为 `38517`，容器内仍监听 `8080`。部署后验证 `http://127.0.0.1:38517/healthz`。
-- 生产 Compose 只能引用 `docker.io/ayflying/aiferry:<版本>`，不得包含 `build`。运行前执行 `docker compose pull aiferry`，再执行 `docker compose up -d --no-deps aiferry`。国内宿主机直连 `ghcr.io` 会反复超时，生产镜像以 Docker Hub 为准；CI 仍同步推送 `ghcr.io/ayflying/aiferry` 供 GitHub 一侧引用，但不得再作为生产部署来源。
+- 生产 Compose 只能引用 `docker.io/ayflying/aiferry:<版本>`，不得包含 `build`。运行前执行 `docker compose pull aiferry`，再执行 `docker compose up -d --no-deps aiferry`。国内宿主机直连 `ghcr.io` 会反复超时，正式镜像只由 CI 推送到 Docker Hub；`ghcr.io/ayflying/aiferry` 仅残留集群隔离测试标签，不得作为生产部署来源。
 
 ## 版本与镜像
 
