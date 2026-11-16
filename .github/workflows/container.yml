@@ -13,8 +13,11 @@ permissions:
   packages: write
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # 生产镜像以 Docker Hub 为准：国内宿主机直连 ghcr.io 会反复超时重试，
+  # 拉不下来（2026-11-15 栈 103 部署即因此失败）。Docker Hub 走宿主机镜像
+  # 加速器可以稳定拉取。ghcr 继续同步推送，保留给 GitHub 一侧的既有引用。
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+  DOCKERHUB_IMAGE: docker.io/${{ vars.DOCKERHUB_USERNAME }}/aiferry
 
 jobs:
   container:
@@ -60,21 +63,41 @@ jobs:
           fi
           printf 'value=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
+      - name: 校验镜像仓库配置
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          # 变量名在仓库 Settings -> Variables 里配置，Token 放在 Secrets，
+          # 缺任意一项都不要走到构建阶段才发现推不上去。
+          if [[ -z "$DOCKERHUB_USERNAME" ]]; then
+            echo "缺少仓库变量 DOCKERHUB_USERNAME，无法推送到 Docker Hub" >&2
+            exit 1
+          fi
+
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: 登录 GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: 生成镜像标签和元数据
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.DOCKERHUB_IMAGE }}
+            ${{ env.GHCR_IMAGE }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag

@@ -9,7 +9,7 @@ services:
   aiferry:
     # 固定版本标签：latest 在节点侧有缓存延迟，曾导致部署后仍跑上一版本。
     # 发布脚本会按 VERSION 改写这一行，因此这里必须保持字面版本号。
-    image: ghcr.io/ayflying/aiferry:0.6.63
+    image: docker.io/ayflying/aiferry:0.7.16
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       # 容器内路径，不是外部配置，保持字面值。

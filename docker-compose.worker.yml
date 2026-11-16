@@ -12,7 +12,7 @@
 # 主节点不可达时子节点会拒绝启动而不是带着空配置对外服务。
 services:
   aiferry-worker:
-    image: ghcr.io/ayflying/aiferry:0.6.66
+    image: docker.io/ayflying/aiferry:0.7.16
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Shanghai}
