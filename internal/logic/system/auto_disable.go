@@ -8,7 +8,6 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gtime"
 
 	adminapi "github.com/yunloli/aiferry/api/admin"
@@ -215,12 +214,6 @@ func (s *sSystem) disableCredential(ctx context.Context, channel entity.Channels
 func (s *sSystem) disableCredentialNow(ctx context.Context, channel entity.Channels, credential entity.ChannelCredentials, input AutoDisableInput) (bool, error) {
 	reason := autoDisableReason(input)
 	source := autoDisableSource(input.Source)
-	// 禁用一个密钥之前先记下渠道还剩几个可用密钥：只有跨过「0 个可用密钥」的边界
-	// 才需要发渠道级邮件，3→2 这种中间状态不打扰管理员。
-	beforeActive, err := s.CountActiveCredentials(ctx, channel.Id)
-	if err != nil {
-		g.Log().Warningf(ctx, "count active credentials before disabling %d: %v", credential.Id, err)
-	}
 	data := do.ChannelCredentials{
 		Status:                 0,
 		AutoDisabledAt:         gtime.Now(),
@@ -240,8 +233,8 @@ func (s *sSystem) disableCredentialNow(ctx context.Context, channel entity.Chann
 	}
 	s.resetRecoverySchedule(ctx, RecoveryTargetCredential, credential.Id)
 	s.clearCredentialTransient(ctx, credential.Id)
-	s.NotifyCredentialAvailabilityChange(ctx, channel.Id, CredentialAvailabilityChange{
-		Before:              beforeActive,
+	s.NotifyCredentialStatusChange(ctx, CredentialStatusNotification{
+		ChannelID:           channel.Id,
 		CredentialID:        credential.Id,
 		CredentialKeyPrefix: credential.KeyPrefix,
 		Source:              source,
@@ -310,11 +303,6 @@ func (s *sSystem) RecoverCredentialIfAllowed(ctx context.Context, credentialID u
 	if credential.Id == 0 || credential.Status != 0 || credential.AutoDisabledAt.IsZero() {
 		return false, nil
 	}
-	// 恢复前记下渠道可用密钥数：此时该密钥仍处于禁用状态，Before 反映其它密钥的可用情况。
-	beforeActive, countErr := s.CountActiveCredentials(ctx, credential.ChannelId)
-	if countErr != nil {
-		g.Log().Warningf(ctx, "count active credentials before recovering %d: %v", credential.Id, countErr)
-	}
 	result, err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: credential.Id, Status: 0}).Data(do.ChannelCredentials{
 		Status:                 1,
 		AutoDisabledAt:         gdb.Raw("NULL"),
@@ -330,10 +318,11 @@ func (s *sSystem) RecoverCredentialIfAllowed(ctx context.Context, credentialID u
 	}
 	s.clearRecoverySchedule(ctx, RecoveryTargetCredential, credential.Id)
 	s.clearCredentialTransient(ctx, credential.Id)
-	s.NotifyCredentialAvailabilityChange(ctx, credential.ChannelId, CredentialAvailabilityChange{
-		Before:              beforeActive,
+	s.NotifyCredentialStatusChange(ctx, CredentialStatusNotification{
+		ChannelID:           credential.ChannelId,
 		CredentialID:        credential.Id,
 		CredentialKeyPrefix: credential.KeyPrefix,
+		Recovered:           true,
 		Source:              credential.AutoDisabledSource,
 		StatusCode:          credential.AutoDisabledStatusCode,
 		Reason:              credential.AutoDisabledReason,

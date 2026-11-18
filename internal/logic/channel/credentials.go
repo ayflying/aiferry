@@ -258,11 +258,7 @@ func (s *sChannel) SetCredentialStatus(ctx context.Context, channelID, credentia
 	if err != nil {
 		return err
 	}
-	// 写库前先记下渠道可用密钥数，供「密钥全部不可用 / 恢复可用」的边界判断使用。
-	beforeActive, countErr := s.resilience.CountActiveCredentials(ctx, channelID)
-	if countErr != nil {
-		g.Log().Warningf(ctx, "count active credentials for channel %d: %v", channelID, countErr)
-	}
+	previousStatus := credential.Status
 	data := do.ChannelCredentials{
 		Status:                 boolStatus(input.Status),
 		AutoDisabledAt:         gdb.Raw("NULL"),
@@ -279,14 +275,18 @@ func (s *sChannel) SetCredentialStatus(ctx context.Context, channelID, credentia
 	if err = s.invalidateRoutes(ctx); err != nil {
 		return err
 	}
-	// 手动启停与自动禁用走同一套邮件口径：只有跨过「0 个可用密钥」才发信。
-	s.resilience.NotifyCredentialAvailabilityChange(ctx, channelID, system.CredentialAvailabilityChange{
-		Before:     beforeActive,
-		CredentialID: credential.Id,
-		CredentialKeyPrefix: credential.KeyPrefix,
-		Source:     "manual",
-		Reason:     "管理端手动调整密钥状态",
-	})
+	// 一把密钥就是一个独立上游账号：管理端手动启停也要发信，与自动禁用同一套措辞。
+	if previousStatus != boolStatus(input.Status) {
+		s.resilience.NotifyCredentialStatusChange(ctx, system.CredentialStatusNotification{
+			ChannelID:           channelID,
+			CredentialID:        credential.Id,
+			CredentialKeyPrefix: credential.KeyPrefix,
+			Recovered:           boolStatus(input.Status) == 1,
+			Manual:              true,
+			Source:              "manual",
+			Reason:              "管理端手动调整密钥状态",
+		})
+	}
 	return nil
 }
 

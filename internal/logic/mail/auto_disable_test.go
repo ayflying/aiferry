@@ -11,10 +11,10 @@ func renderNotification(notification system.AutoDisableNotification) (string, st
 	return renderAutoDisableTransition("AiFerry", notification)
 }
 
-// 密钥全部不可用时，标题落在渠道上，正文带上最后一把不可用密钥的细节。
-func TestRenderCredentialAvailabilityLost(t *testing.T) {
+// 密钥被自动禁用：标题带渠道名，正文点名具体是哪把密钥。
+func TestRenderCredentialDisabled(t *testing.T) {
 	subject, body := renderNotification(system.AutoDisableNotification{
-		Kind:                system.NotificationKindCredentialAvailability,
+		Kind:                system.NotificationKindCredentialStatus,
 		ChannelID:           26,
 		ChannelName:         "智谱",
 		CredentialID:        62,
@@ -23,36 +23,59 @@ func TestRenderCredentialAvailabilityLost(t *testing.T) {
 		StatusCode:          401,
 		Reason:              "上游返回鉴权失败",
 	})
-	for _, want := range []string{"渠道已无可用密钥", "智谱"} {
+	for _, want := range []string{"上游密钥已禁用", "智谱"} {
 		if !strings.Contains(subject, want) {
 			t.Fatalf("标题缺少 %q：%s", want, subject)
 		}
 	}
-	for _, want := range []string{"全部不可用", "sk-ab", "转发请求", "401", "上游返回鉴权失败"} {
+	for _, want := range []string{"sk-ab", "自动禁用", "转发请求", "401", "上游返回鉴权失败"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("正文缺少 %q：%s", want, body)
 		}
 	}
 }
 
-// 恢复时说明当前还有几个可用密钥，并带上当初不可用的来源。
-func TestRenderCredentialAvailabilityRestored(t *testing.T) {
+// 密钥自动恢复：说明恢复方式并带上当初禁用原因。
+func TestRenderCredentialRecovered(t *testing.T) {
 	subject, body := renderNotification(system.AutoDisableNotification{
-		Kind:                  system.NotificationKindCredentialAvailability,
-		Recovered:             true,
-		ChannelID:             26,
-		ChannelName:           "智谱",
-		ActiveCredentialCount: 1,
-		Source:                "manual",
-		Reason:                "管理端手动调整密钥状态",
+		Kind:                system.NotificationKindCredentialStatus,
+		Recovered:           true,
+		ChannelID:           26,
+		ChannelName:         "智谱",
+		CredentialID:        62,
+		CredentialKeyPrefix: "sk-ab",
+		Source:              system.AutoDisableSourceRelayRequest,
+		StatusCode:          429,
+		Reason:              "限流",
 	})
-	if !strings.Contains(subject, "渠道已恢复可用") {
+	if !strings.Contains(subject, "上游密钥已恢复") {
 		t.Fatalf("标题不符：%s", subject)
 	}
-	for _, want := range []string{"当前启用 1 个", "管理端手动操作"} {
+	for _, want := range []string{"自动恢复启用", "上次禁用来源", "429"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("正文缺少 %q：%s", want, body)
 		}
+	}
+}
+
+// 手动禁用要用手动措辞，不能写成「因上游异常被自动禁用」。
+func TestRenderCredentialManualDisabled(t *testing.T) {
+	_, body := renderNotification(system.AutoDisableNotification{
+		Kind:                system.NotificationKindCredentialStatus,
+		Manual:              true,
+		ChannelID:           26,
+		ChannelName:         "智谱",
+		CredentialID:        62,
+		CredentialKeyPrefix: "sk-ab",
+		Source:              "manual",
+	})
+	for _, want := range []string{"管理端手动禁用", "管理端手动操作"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("正文缺少 %q：%s", want, body)
+		}
+	}
+	if strings.Contains(body, "因上游异常") {
+		t.Fatalf("手动禁用不应套用自动禁用措辞：%s", body)
 	}
 }
 
@@ -120,7 +143,7 @@ func TestRenderChannelRecovered(t *testing.T) {
 	}
 }
 
-// 原有的自动禁用通知行为不变：未指定 Kind 时仍按 CredentialID / ModelID 生成标题。
+// 未指定 Kind 时仍按 CredentialID / ModelID 生成标题，保证原有自动禁用通知不变。
 func TestRenderLegacyAutoDisableUnchanged(t *testing.T) {
 	subject, _ := renderNotification(system.AutoDisableNotification{
 		ChannelID:   26,

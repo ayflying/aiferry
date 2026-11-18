@@ -29,8 +29,8 @@ func (s *sMail) notifyAutoDisableTransition(ctx context.Context, notification sy
 
 func renderAutoDisableTransition(systemName string, notification system.AutoDisableNotification) (string, string) {
 	switch notification.Kind {
-	case system.NotificationKindCredentialAvailability:
-		return renderCredentialAvailability(systemName, notification)
+	case system.NotificationKindCredentialStatus:
+		return renderCredentialStatus(systemName, notification)
 	case system.NotificationKindModelAvailability:
 		return renderModelAvailability(systemName, notification)
 	case system.NotificationKindChannelAvailability:
@@ -54,20 +54,29 @@ func renderAutoDisableTransition(systemName string, notification system.AutoDisa
 		fmt.Sprintf("%s 已因上游异常被自动禁用。\n\n触发来源：%s\n状态码：%s\n触发原因：%s", detail, notificationSource(notification.Source), notificationStatusCode(notification.StatusCode), notificationReason(notification.Reason))
 }
 
-// renderCredentialAvailability 渲染「渠道下密钥全部不可用 / 恢复可用」。
-// 渠道本身的启用状态没变，只是没有可用密钥了，所以标题落在「渠道」而不是「渠道密钥」：
-// 管理员需要判断的是这个渠道还能不能承接请求，而不是某一把 key 的细节。
-func renderCredentialAvailability(systemName string, notification system.AutoDisableNotification) (string, string) {
+// renderCredentialStatus 渲染单把上游密钥被禁用 / 恢复。
+// 生产上同一个渠道会放多把密钥（每把是一个独立账号），所以标题带上渠道名，
+// 正文点名具体是哪把密钥，避免只看前缀分不清。
+func renderCredentialStatus(systemName string, notification system.AutoDisableNotification) (string, string) {
 	name := notificationChannelName(notification.ChannelName)
-	detail := fmt.Sprintf("渠道 %s（ID：%d）", name, notification.ChannelID)
+	key := notificationCredentialName(notification.CredentialKeyPrefix)
+	detail := fmt.Sprintf("渠道 %s（ID：%d）的上游密钥 %s（ID：%d）", name, notification.ChannelID, key, notification.CredentialID)
 	if notification.Recovered {
-		return fmt.Sprintf("%s 渠道已恢复可用：%s", systemName, name),
-			fmt.Sprintf("%s 已有可用密钥（当前启用 %d 个），该渠道重新参与路由。\n\n上次不可用来源：%s\n上次不可用状态码：%s\n上次不可用原因：%s",
-				detail, notification.ActiveCredentialCount, notificationSource(notification.Source), notificationStatusCode(notification.StatusCode), notificationReason(notification.Reason))
+		how := "已通过探测并自动恢复启用。"
+		if notification.Manual {
+			how = "已由管理端手动启用。"
+		}
+		return fmt.Sprintf("%s 上游密钥已恢复：%s", systemName, name),
+			fmt.Sprintf("%s %s\n\n上次禁用来源：%s\n上次禁用状态码：%s\n上次禁用原因：%s",
+				detail, how, notificationSource(notification.Source), notificationStatusCode(notification.StatusCode), notificationReason(notification.Reason))
 	}
-	return fmt.Sprintf("%s 渠道已无可用密钥：%s", systemName, name),
-		fmt.Sprintf("%s 下的上游密钥已全部不可用，该渠道当前无法承接请求。\n\n最后不可用的密钥：%s（ID：%d）\n触发来源：%s\n状态码：%s\n触发原因：%s",
-			detail, notificationCredentialName(notification.CredentialKeyPrefix), notification.CredentialID, notificationSource(notification.Source), notificationStatusCode(notification.StatusCode), notificationReason(notification.Reason))
+	how := "已因上游异常被自动禁用。"
+	if notification.Manual {
+		how = "已由管理端手动禁用。"
+	}
+	return fmt.Sprintf("%s 上游密钥已禁用：%s", systemName, name),
+		fmt.Sprintf("%s %s\n\n触发来源：%s\n状态码：%s\n触发原因：%s",
+			detail, how, notificationSource(notification.Source), notificationStatusCode(notification.StatusCode), notificationReason(notification.Reason))
 }
 
 // renderModelAvailability 渲染「单个模型暂时没有可用组合 / 恢复」。

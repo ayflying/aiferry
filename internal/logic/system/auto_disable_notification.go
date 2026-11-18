@@ -16,8 +16,9 @@ const (
 	// NotificationKindAutoDisable 沿用原有语义：按 CredentialID / ModelID 判断是
 	// 渠道、密钥还是模型被自动禁用或自动恢复。
 	NotificationKindAutoDisable NotificationKind = iota
-	// NotificationKindCredentialAvailability 表示渠道下的密钥已全部不可用，或恢复可用。
-	NotificationKindCredentialAvailability
+	// NotificationKindCredentialStatus 表示单把上游密钥被禁用或恢复。
+	// 生产上同一渠道会放多把密钥（每把是一个独立账号），这类通知逐把发送。
+	NotificationKindCredentialStatus
 	// NotificationKindModelAvailability 表示单个模型在该渠道暂时没有可用组合，或恢复。
 	NotificationKindModelAvailability
 	// NotificationKindChannelAvailability 表示整个渠道不可用或恢复：手动开关渠道，
@@ -40,8 +41,6 @@ type AutoDisableNotification struct {
 	StatusCode          uint
 	// Manual 表示本次变化来自管理端手动操作，而不是自动探测。
 	Manual bool
-	// ActiveCredentialCount 是变化之后渠道仍然启用的密钥数量，供邮件说明当前状态。
-	ActiveCredentialCount int
 	// AvailableModelCount 是变化之后渠道仍有可用组合的模型数量。
 	AvailableModelCount int
 }

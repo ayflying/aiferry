@@ -5,7 +5,6 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/frame/g"
 
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/system"
@@ -27,16 +26,6 @@ func (s *sChannel) SetStatus(ctx context.Context, channelID uint64, status int) 
 		return gerror.Wrap(err, "load channel status before update")
 	}
 	credentialIDs := make([]uint64, 0)
-	// 启用渠道会连带把所有密钥重新启用，因此要按密钥口径再看一次渠道可用性：
-	// 之前「全部密钥不可用」的渠道，启用之后应当发一封恢复通知。
-	beforeActive := 0
-	if status == 1 {
-		count, countErr := s.resilience.CountActiveCredentials(ctx, channelID)
-		if countErr != nil {
-			g.Log().Warningf(ctx, "count active credentials for channel %d: %v", channelID, countErr)
-		}
-		beforeActive = count
-	}
 	err := dao.Channels.Transaction(ctx, func(txCtx context.Context, _ gdb.TX) error {
 		channelData := do.Channels{
 			Status:                 status,
@@ -91,17 +80,10 @@ func (s *sChannel) SetStatus(ctx context.Context, channelID uint64, status int) 
 	if err = s.invalidateRoutes(ctx); err != nil {
 		return err
 	}
-	// 手动开关渠道是管理员的显式动作，需要留痕：与自动禁用共用同一套通知口径，
-	// 关注点是「这个渠道整体退出了路由 / 重新参与路由」。状态没变化时不重复发信。
+	// 手动开关渠道是管理员的显式动作，需要留痕。启用渠道会连带恢复全部密钥，
+	// 但那是「打开渠道」的连带效果，不逐把发密钥邮件，避免一次点开关收几十封。
 	if previous.Status != status {
 		s.resilience.NotifyChannelStatusChange(ctx, channelID, status == 1)
-	}
-	if status == 1 {
-		s.resilience.NotifyCredentialAvailabilityChange(ctx, channelID, system.CredentialAvailabilityChange{
-			Before: beforeActive,
-			Source: "manual",
-			Reason: "管理端启用渠道时恢复全部密钥",
-		})
 	}
 	return nil
 }
