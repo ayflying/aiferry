@@ -284,10 +284,11 @@ func (s *sChannel) UpdateModel(ctx context.Context, id uint64, input adminapi.Mo
 		return gerror.New("model not found")
 	}
 	publicName := strings.TrimSpace(input.PublicName)
+	newEnabled := boolInt(input.Enabled)
 	modelData := do.ChannelModels{
 		PublicName:   publicName,
 		UpstreamName: strings.TrimSpace(input.UpstreamName),
-		Enabled:      boolInt(input.Enabled),
+		Enabled:      newEnabled,
 	}
 	// 手动重新启用模型时重置健康评分并清除禁用标记，给它一个全新的开始。
 	if boolInt(input.Enabled) == 1 {
@@ -317,6 +318,11 @@ func (s *sChannel) UpdateModel(ctx context.Context, id uint64, input adminapi.Mo
 	s.InvalidateListCache(ctx)
 	if err = s.invalidateRoutes(ctx); err != nil {
 		return err
+	}
+	// 手动启停模型与组合隔离走同一套判定：关掉一个模型只影响它自己，
+	// 只有渠道内一个可用模型都不剩时才升级为渠道级通知。
+	if model.Enabled != newEnabled {
+		s.resilience.NotifyModelAvailabilityTransition(ctx, model.ChannelId, model.Id, newEnabled == 1)
 	}
 	return s.prices.Load(ctx)
 }

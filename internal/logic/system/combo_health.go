@@ -61,6 +61,13 @@ func (s *sSystem) changeComboHealth(ctx context.Context, channelID, modelID, cre
 	if credentialID == 0 {
 		return nil
 	}
+	// 组合健康分跨过 0 的边界才算「隔离刚刚生效 / 刚刚解除」，邮件只在边界发：
+	// 同一组合在 100 分之间反复加减不需要提醒。
+	var (
+		becameUnavailable bool
+		becameAvailable   bool
+		affectedChannel   uint64
+	)
 	err := dao.ChannelModels.Transaction(ctx, func(ctx context.Context, tx gdb.TX) error {
 		var model entity.ChannelModels
 		if err := dao.ChannelModels.Ctx(ctx).Where(do.ChannelModels{Id: modelID}).LockUpdate().Scan(&model); err != nil {
@@ -92,6 +99,13 @@ func (s *sSystem) changeComboHealth(ctx context.Context, channelID, modelID, cre
 			combo.Id, combo.HealthScore = uint64(id), 100
 		}
 		score := max(0, min(100, combo.HealthScore+delta))
+		if combo.HealthScore > 0 && score == 0 {
+			becameUnavailable = true
+		}
+		if combo.HealthScore == 0 && score > 0 {
+			becameAvailable = true
+		}
+		affectedChannel = model.ChannelId
 		data := do.ChannelModelCredentials{HealthScore: score}
 		if !success && dailyQuota {
 			// 日配额耗尽不依赖健康分扣到 0：Remaining=0 是确定状态，直接冷却到
@@ -129,6 +143,11 @@ func (s *sSystem) changeComboHealth(ctx context.Context, channelID, modelID, cre
 	})
 	if err == nil && s.app != nil && s.app.Redis != nil {
 		s.invalidateRouteWeights(ctx)
+	}
+	// 事务外再判断模型整体可用性：这里需要读组合与密钥的完整现状，
+	// 放进事务里既看不到尚未提交的兄弟组合，也会无谓拉长锁持有时间。
+	if err == nil && affectedChannel > 0 && (becameUnavailable || becameAvailable) {
+		s.NotifyModelAvailabilityTransition(ctx, affectedChannel, modelID, becameAvailable)
 	}
 	return err
 }
