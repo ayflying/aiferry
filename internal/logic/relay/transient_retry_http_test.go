@@ -88,10 +88,7 @@ func TestTransientRetryHTTPFirstWriteFailureCannotReplay(t *testing.T) {
 
 func transientHTTPFixture(t *testing.T, handler http.Handler) (*sRelay, Candidate) {
 	t.Helper()
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	upstream := httptest.NewServer(handler)
 	t.Cleanup(upstream.Close)
 	appSvc := &app.Service{Secrets: secrets, HTTP: upstream.Client()}

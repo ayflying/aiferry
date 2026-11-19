@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -26,7 +25,6 @@ type App struct {
 	RedisAddr              string
 	RedisPassword          string
 	RedisDB                int
-	MasterKey              []byte
 	WebRoot                string
 	MigrationsDir          string
 	ChannelCooldownSeconds int
@@ -65,13 +63,9 @@ func Load() (App, error) {
 	var (
 		mysqlPort, errPort = strconv.Atoi(env("MYSQL_PORT", "3306"))
 		redisDB, errRedis  = strconv.Atoi(env("REDIS_DB", "0"))
-		masterKey, errKey  = base64.StdEncoding.DecodeString(os.Getenv("AIFERRY_MASTER_KEY"))
 	)
 	if errPort != nil || errRedis != nil {
 		return App{}, gerror.New("MYSQL_PORT or REDIS_DB is invalid")
-	}
-	if errKey != nil || len(masterKey) != 32 {
-		return App{}, gerror.New("AIFERRY_MASTER_KEY must be a base64-encoded 32-byte key")
 	}
 	cluster, role, errCluster := LoadCluster()
 	if errCluster != nil {
@@ -86,7 +80,6 @@ func Load() (App, error) {
 		RedisAddr:              env("REDIS_ADDR", "127.0.0.1:6379"),
 		RedisPassword:          os.Getenv("REDIS_PASSWORD"),
 		RedisDB:                redisDB,
-		MasterKey:              masterKey,
 		WebRoot:                env("WEB_ROOT", "./web"),
 		MigrationsDir:          env("MIGRATIONS_DIR", "manifest/migrations"),
 		ChannelCooldownSeconds: envInt("CHANNEL_COOLDOWN_SECONDS", 60),

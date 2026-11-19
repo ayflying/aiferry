@@ -19,10 +19,7 @@ import (
 
 func proxyTestRelay(t *testing.T, direct *http.Client) *sRelay {
 	t.Helper()
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	base := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: time.Second}
 	t.Cleanup(base.CloseIdleConnections)
 	appSvc := &app.Service{Secrets: secrets, HTTP: base, HTTPDirect: direct}

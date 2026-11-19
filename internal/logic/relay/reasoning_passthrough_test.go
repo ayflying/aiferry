@@ -39,10 +39,7 @@ func TestAttemptPreservesClientReasoningHistory(t *testing.T) {
 				_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
 			}))
 			defer upstream.Close()
-			secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			secrets := secret.New()
 			appSvc := &app.Service{Secrets: secrets, HTTP: upstream.Client()}
 			svc := &sRelay{app: appSvc, channels: channel.New(appSvc, channeltype.New(&config.BuiltinRegistry{}, nil), nil, nil, nil, nil, nil, nil)}
 			candidate := Candidate{BaseURL: upstream.URL, UpstreamName: "deepseek-flash"}

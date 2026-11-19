@@ -51,7 +51,7 @@ AIFERRY_ROLE=master MYSQL_DATABASE=aiferry_cluster_test \
   go run ./manifest/cluster-test/fixture.go --repair-policy > .git/cluster-test-repair.sql
 ```
 
-此模式仅校验 role 和测试数据库名，不读取 stdin、MasterKey 或运行态凭据。SQL 幂等建立 owner `990002`、测试分组及用户/APIKey 关联，更新渠道创建者与配置版本；不清除历史、不重置余额、不改 APIKey 或上游密钥。脚本用 before 增量检查，不要求删除既有失败用量。
+此模式仅校验 role 和测试数据库名，不读取 stdin 或运行态凭据。SQL 幂等建立 owner `990002`、测试分组及用户/APIKey 关联，更新渠道创建者与配置版本；不清除历史、不重置余额、不改 APIKey 或上游密钥。脚本用 before 增量检查，不要求删除既有失败用量。
 
 ## 自动断言覆盖
 

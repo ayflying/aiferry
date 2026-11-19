@@ -27,10 +27,7 @@ import (
 // 修复后这类空回包必须判为上游失败（502），交给候选循环换渠道重试，
 // 而不是当成功响应交付给客户端。
 func TestEmptyUpstreamCompletionIsRejectedAsBadGateway(t *testing.T) {
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	var chatCalls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

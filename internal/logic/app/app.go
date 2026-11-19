@@ -22,19 +22,16 @@ type sApp struct {
 
 // New 按角色装配进程依赖：主节点连 MySQL/Redis，子节点只开内置 SQLite。
 func New(ctx context.Context, cfg config.App) (*sApp, error) {
-	secrets, err := secret.New(cfg.MasterKey)
-	if err != nil {
-		return nil, err
-	}
 	shared, direct := newHTTPClients()
-	service := &sApp{Config: cfg, Secrets: secrets, HTTP: shared, HTTPDirect: direct}
+	service := &sApp{Config: cfg, Secrets: secret.New(), HTTP: shared, HTTPDirect: direct}
 	if cfg.IsWorker() {
-		err = service.openWorker(ctx)
+		if err := service.openWorker(ctx); err != nil {
+			return nil, err
+		}
 	} else {
-		err = service.openMaster(ctx)
-	}
-	if err != nil {
-		return nil, err
+		if err := service.openMaster(ctx); err != nil {
+			return nil, err
+		}
 	}
 	return service, nil
 }

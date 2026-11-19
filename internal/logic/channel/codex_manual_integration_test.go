@@ -81,10 +81,7 @@ func TestCodexManualCredentialIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	registry, err := config.LoadBuiltins(filepath.Join("..", "..", "..", "manifest", "builtins.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +190,7 @@ func TestCodexManualCredentialIntegration(t *testing.T) {
 	if err = dao.Channels.Ctx(ctx).Where(do.Channels{Id: channelID}).Scan(&channel); err != nil {
 		t.Fatal(err)
 	}
-	if plain, err := secrets.Decrypt(channel.ApiKeyCipher); err != nil || plain != "" {
+	if channel.ApiKeyCipher != "" {
 		t.Fatal("channel retained raw manual token")
 	}
 	row, credential, err := svc.latestCodexCredential(ctx, channelID, "acct-manual")
@@ -203,10 +200,11 @@ func TestCodexManualCredentialIntegration(t *testing.T) {
 	if credential.AccessToken != token || credential.RefreshToken != "" || credential.ChannelID != channelID || credential.Seal == "" || row.KeyHash != codexAccountHash("acct-manual") {
 		t.Fatal("manual credential lost seal/account/hash or invented refresh token")
 	}
-	if strings.Contains(row.ApiKeyCipher, token) || strings.Contains(row.ApiKeyCipher, codexCredentialPrefix) {
-		t.Fatal("credential not encrypted at rest")
+	// 明文直通后 envelope 原样落库，token 本来就在里面，这里只校验确实写进去了。
+	if !strings.Contains(row.ApiKeyCipher, token) {
+		t.Fatal("manual credential envelope missing from storage")
 	}
-	if seal, err := secrets.Decrypt(credential.Seal); err != nil || seal != fmt.Sprintf("codex:%d:acct-manual", channelID) {
+	if seal := credential.Seal; seal != fmt.Sprintf("codex:%d:acct-manual", channelID) {
 		t.Fatal("invalid channel-bound seal")
 	}
 	if status, _, revealed := call("reveal", channelID, row.Id, nil); status != 200 || revealed != token {

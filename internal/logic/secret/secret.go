@@ -1,8 +1,6 @@
 package secret
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -18,45 +16,34 @@ const (
 	legacyAPIKeyPrefix = "af_"
 )
 
-type sSecret struct {
-	aead cipher.AEAD
+// Service 负责数据库里敏感字段的读写。
+//
+// 2026-11-19 起不再加密。原来的 AIFERRY_MASTER_KEY 方案有两个无法回避的问题：
+// 主密钥一旦与加密时使用的值不一致，所有渠道密钥都会解不开（报
+// cipher: message authentication failed），而换一种部署方式就必然要重新配一次
+// 主密钥，配错一次就是全部渠道失效。运维成本明显高于它带来的收益。
+//
+// 现在渠道密钥、管理密钥、Codex 凭据、代理地址、SMTP 密码一律明文存库，
+// Encrypt / Decrypt 保留下来只是为了让这 8 类字段的读写路径不必改动：
+// 字段名仍带 cipher 后缀，改名要迁移表结构，收益不大。
+//
+// 安全边界随之改变：能读到数据库或其备份的人就能直接看到这些密钥。
+// 部署时应把 MySQL 限制在内网、不要外露端口，并用独立的低权限账号连接。
+type Service struct{}
+
+// New 构造读写服务。原来需要主密钥，现在不再需要任何参数。
+func New() *Service {
+	return &Service{}
 }
 
-func New(masterKey []byte) (*sSecret, error) {
-	block, err := aes.NewCipher(masterKey)
-	if err != nil {
-		return nil, gerror.Wrap(err, "create AES cipher")
-	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, gerror.Wrap(err, "create AES-GCM cipher")
-	}
-	return &sSecret{aead: aead}, nil
+// Encrypt 原样返回：写库时不做任何变换。
+func (s *Service) Encrypt(plainText string) (string, error) {
+	return plainText, nil
 }
 
-func (s *sSecret) Encrypt(plainText string) (string, error) {
-	nonce := make([]byte, s.aead.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", gerror.Wrap(err, "generate encryption nonce")
-	}
-	sealed := s.aead.Seal(nonce, nonce, []byte(plainText), nil)
-	return base64.RawStdEncoding.EncodeToString(sealed), nil
-}
-
-func (s *sSecret) Decrypt(value string) (string, error) {
-	sealed, err := base64.RawStdEncoding.DecodeString(value)
-	if err != nil {
-		return "", gerror.Wrap(err, "decode encrypted secret")
-	}
-	nonceSize := s.aead.NonceSize()
-	if len(sealed) < nonceSize {
-		return "", gerror.New("encrypted secret is truncated")
-	}
-	plainText, err := s.aead.Open(nil, sealed[:nonceSize], sealed[nonceSize:], nil)
-	if err != nil {
-		return "", gerror.Wrap(err, "decrypt secret")
-	}
-	return string(plainText), nil
+// Decrypt 原样返回：库里存的已经是明文。
+func (s *Service) Decrypt(value string) (string, error) {
+	return value, nil
 }
 
 func GenerateAPIKey() (plainText, prefix, hash string, err error) {

@@ -270,9 +270,6 @@ func (s *Service) startWorkerLoops(ctx context.Context) (func(), error) {
 		}
 		s.clusterLogger().Warningf(ctx, "cluster: initial sync failed, will retry: %v", err)
 	}
-	if err := s.verifyMasterKey(ctx); err != nil {
-		return nil, err
-	}
 	go s.syncLoop(ctx)
 	go s.heartbeatLoop(ctx)
 	go s.usageLoop(ctx)
@@ -383,29 +380,6 @@ func (s *Service) reportError(ctx context.Context, cause error) {
 	if response, callErr := s.call(ctx, s.config.Cluster.MasterURL, "/heartbeat", body, contentTypeJSON); callErr == nil && response != nil {
 		_ = response.Body.Close()
 	}
-}
-
-// verifyMasterKey 验证本节点主密钥与主节点一致：能解开快照里的凭据密文才算通过。
-//
-// 这是最容易踩的坑：密钥不一致时配置齐全但所有请求都会解密失败，
-// 因此在启动阶段就快速失败，而不是等到第一个用户请求才暴露。
-func (s *Service) verifyMasterKey(ctx context.Context) error {
-	if s.secrets == nil {
-		return nil
-	}
-	cipher, err := s.database.GetValue(ctx,
-		"SELECT api_key_cipher FROM channel_credentials WHERE api_key_cipher <> '' LIMIT 1")
-	if err != nil {
-		return gerror.Wrap(err, "read credential for key verification")
-	}
-	if cipher.IsNil() {
-		return nil
-	}
-	if _, err = s.secrets.Decrypt(cipher.String()); err != nil {
-		return gerror.Wrapf(err,
-			"worker master key does not match the master node: set AIFERRY_MASTER_KEY to the master's value")
-	}
-	return nil
 }
 
 func (s *Service) localInt(ctx context.Context, key string) (int64, error) {

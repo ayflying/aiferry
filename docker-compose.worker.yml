@@ -6,7 +6,6 @@
 # 必填：
 #   AIFERRY_CLUSTER_SECRET  与主节点一致，至少 32 字节随机串
 #   AIFERRY_MASTER_URL      主节点地址，例如 http://aiferry:8080（同一 Docker 网络）
-#   AIFERRY_MASTER_KEY      必须与主节点相同：渠道密钥由它解密，不一致会直接启动失败
 #
 # 启动顺序：主节点必须先就绪。AIFERRY_BOOTSTRAP_REQUIRED 默认为 true，
 # 主节点不可达时子节点会拒绝启动而不是带着空配置对外服务。
@@ -21,7 +20,6 @@ services:
       AIFERRY_CLUSTER_SECRET: ${AIFERRY_CLUSTER_SECRET}
       AIFERRY_MASTER_URL: ${AIFERRY_MASTER_URL}
       AIFERRY_NODE_NAME: ${AIFERRY_NODE_NAME:-worker-1}
-      AIFERRY_MASTER_KEY: ${AIFERRY_MASTER_KEY}
       AIFERRY_DATA_DIR: /app/data
       AIFERRY_SYNC_INTERVAL: ${AIFERRY_SYNC_INTERVAL:-60}
       AIFERRY_FLUSH_INTERVAL: ${AIFERRY_FLUSH_INTERVAL:-30}

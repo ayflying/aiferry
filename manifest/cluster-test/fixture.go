@@ -2,11 +2,7 @@
 package main
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -52,33 +48,9 @@ func run() error {
 	if !strings.HasPrefix(input.APIKey, "sk-cluster-test-") || len(input.UpstreamKey) < 32 {
 		return fmt.Errorf("invalid test input")
 	}
-	key, err := base64.StdEncoding.DecodeString(os.Getenv("AIFERRY_MASTER_KEY"))
-	if err != nil || len(key) != 32 {
-		return fmt.Errorf("invalid test master key")
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return err
-	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return err
-	}
-	encrypt := func(value string) (string, error) {
-		nonce := make([]byte, aead.NonceSize())
-		if _, err := rand.Read(nonce); err != nil {
-			return "", err
-		}
-		return base64.RawStdEncoding.EncodeToString(aead.Seal(nonce, nonce, []byte(value), nil)), nil
-	}
-	upstream, err := encrypt(input.UpstreamKey)
-	if err != nil {
-		return err
-	}
-	apiCipher, err := encrypt(input.APIKey)
-	if err != nil {
-		return err
-	}
+	// 敏感字段自 2026-11-19 起明文存库，夹具直接写入原文，不再模拟加密。
+	upstream := input.UpstreamKey
+	apiCipher := input.APIKey
 	hash := func(value string) string {
 		digest := sha256.Sum256([]byte(value))
 		return hex.EncodeToString(digest[:])

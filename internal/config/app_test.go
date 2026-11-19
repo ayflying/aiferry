@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 func TestLoadUsesBeijingStorageTimezone(t *testing.T) {
 	t.Setenv("MYSQL_PASSWORD", "test-password")
-	t.Setenv("AIFERRY_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	t.Setenv("CASDOOR_ENDPOINT", "https://casdoor.example.test")
 	t.Setenv("CASDOOR_CLIENT_ID", "test-client")
 	t.Setenv("CASDOOR_CLIENT_SECRET", "test-secret")

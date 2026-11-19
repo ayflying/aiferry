@@ -62,7 +62,6 @@ services:
       AIFERRY_NODE_NAME: master
       AIFERRY_MASTER_NODE_NAME: master
       AIFERRY_NODE_URL: http://master:8080
-      AIFERRY_MASTER_KEY: ${TEST_MASTER_KEY:?Initialize test credentials}
       AIFERRY_CLUSTER_SECRET: ${TEST_CLUSTER_SECRET:?Initialize test credentials}
       AIFERRY_FINGERPRINT_INTERVAL: "2"
       MYSQL_HOST: mysql
@@ -93,7 +92,6 @@ services:
       AIFERRY_MASTER_NODE_NAME: master
       AIFERRY_NODE_URL: http://worker:8080
       AIFERRY_MASTER_URL: http://master:8080
-      AIFERRY_MASTER_KEY: ${TEST_MASTER_KEY:?Initialize test credentials}
       AIFERRY_CLUSTER_SECRET: ${TEST_CLUSTER_SECRET:?Initialize test credentials}
       AIFERRY_SYNC_INTERVAL: "2"
       AIFERRY_FLUSH_INTERVAL: "2"

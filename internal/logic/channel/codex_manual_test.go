@@ -41,26 +41,24 @@ func TestManualCodexCredentialValidation(t *testing.T) {
 }
 
 func TestManualCodexCredentialSealAndAuth(t *testing.T) {
-	svc, secrets := newUpstreamAuthTestService(t, `{}`)
+	svc, _ := newUpstreamAuthTestService(t, `{}`)
 	token := manualCodexTestToken(time.Now().Add(time.Hour).Unix())
 	data, err := svc.manualCodexCredentialData(42, token)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cipher, ok := data.ApiKeyCipher.(string)
-	if !ok || cipher == "" || strings.Contains(cipher, token) {
-		t.Fatal("manual token is not encrypted")
+	// 明文直通后 api_key_cipher 存的就是 envelope 本身，不再做加密变换，
+	// 因此这里断言 token 确实写进去了（旧断言要求「不含 token」已不成立）。
+	if !ok || cipher == "" || !strings.Contains(cipher, token) {
+		t.Fatal("manual token 未写入 api_key_cipher")
 	}
-	plain, err := secrets.Decrypt(cipher)
-	if err != nil {
-		t.Fatal(err)
-	}
+	plain := cipher
 	credential, err := decodeCodexCredential(plain)
 	if err != nil || credential.ChannelID != 42 || credential.AccountID != "acct-manual" || credential.RefreshToken != "" || credential.AccessToken != token {
 		t.Fatalf("manual envelope lost claims: %v", err)
 	}
-	seal, err := secrets.Decrypt(credential.Seal)
-	if err != nil || seal != "codex:42:acct-manual" || data.KeyHash != codexAccountHash("acct-manual") {
+	if seal := credential.Seal; seal != "codex:42:acct-manual" || data.KeyHash != codexAccountHash("acct-manual") {
 		t.Fatal("manual envelope source/channel not sealed")
 	}
 	for _, endpoint := range []string{"https://chatgpt.com/backend-api/codex/responses", "https://chatgpt.com/backend-api/codex/models?client_version=0.101.0", "https://chatgpt.com/backend-api/wham/usage"} {

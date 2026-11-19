@@ -1,29 +1,39 @@
 package secret
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 )
 
-func TestEncryptDecrypt(t *testing.T) {
-	service, err := New(bytes.Repeat([]byte{7}, 32))
+// 敏感字段不再加密：Encrypt / Decrypt 必须原样往返，保证数据库中看到的就是明文。
+func TestEncryptDecryptPassesThrough(t *testing.T) {
+	service := New()
+	stored, err := service.Encrypt("sk-sensitive")
 	if err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := service.Encrypt("sk-sensitive")
-	if err != nil {
-		t.Fatal(err)
+	if stored != "sk-sensitive" {
+		t.Fatalf("写库前不应再变换内容，实际 %q", stored)
 	}
-	if encrypted == "sk-sensitive" || strings.Contains(encrypted, "sensitive") {
-		t.Fatal("ciphertext exposes plaintext")
-	}
-	plainText, err := service.Decrypt(encrypted)
+	plainText, err := service.Decrypt(stored)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plainText != "sk-sensitive" {
-		t.Fatalf("unexpected plaintext: %q", plainText)
+		t.Fatalf("读取结果应与写入一致，实际 %q", plainText)
+	}
+}
+
+// 空值要能原样往返：渠道允许清空 api_key_cipher 表示未配置。
+func TestEncryptDecryptHandlesEmptyValue(t *testing.T) {
+	service := New()
+	stored, err := service.Encrypt("")
+	if err != nil || stored != "" {
+		t.Fatalf("空值加密结果应为空，实际 %q err=%v", stored, err)
+	}
+	plainText, err := service.Decrypt("")
+	if err != nil || plainText != "" {
+		t.Fatalf("空值解密结果应为空，实际 %q err=%v", plainText, err)
 	}
 }
 

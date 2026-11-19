@@ -60,10 +60,7 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	registry, err := config.LoadBuiltins(filepath.Join("..", "..", "..", "manifest", "builtins.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -214,8 +211,9 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 		t.Fatalf("start: %d %+v", status, session)
 	}
 	cachedState, err := store.Get(ctx, "aiferry:codex-login:"+session.State).Result()
-	if err != nil || strings.Contains(cachedState, "fixture-device") || strings.Contains(cachedState, "ABCD-EFGH") {
-		t.Fatal("device authorization state was not encrypted")
+	// 明文直通后登录态在缓存里就是可见 JSON，这里只校验确实写入了（含 user code）。
+	if err != nil || !strings.Contains(cachedState, "ABCD-EFGH") {
+		t.Fatal("device authorization state 未写入缓存")
 	}
 	for _, item := range []struct {
 		channel int
@@ -267,8 +265,9 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 		t.Fatalf("saved credential invalid: %v", err)
 	}
 	stored, err := db.GetValue(ctx, "SELECT api_key_cipher FROM channel_credentials WHERE id=?", completed.CredentialID)
-	if err != nil || strings.Contains(stored.String(), "access-initial") || strings.Contains(stored.String(), "refresh-initial") {
-		t.Fatal("OAuth tokens were not encrypted at rest")
+	// 明文直通后 token 原样落库，这里只校验确实持久化成功。
+	if err != nil || !strings.Contains(stored.String(), "access-initial") {
+		t.Fatal("OAuth tokens were not persisted")
 	}
 
 	// 真实持久化刷新轮转：过期 envelope 刷新后保留账号、渠道与稳定哈希。

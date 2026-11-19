@@ -16,10 +16,7 @@ import (
 // TestApplyUpstreamAuthHeadersFollowsChannelType 验证正式转发不再硬编码
 // Authorization: Bearer，而是与模型测试/同步共用渠道类型声明的鉴权规则。
 func TestApplyUpstreamAuthHeadersFollowsChannelType(t *testing.T) {
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	builtins := &config.BuiltinRegistry{ChannelTypes: []config.BuiltinChannelType{{
 		ID: 99, Name: "Custom", Code: "custom_openai",
 		Config: json.RawMessage(`{"models":{"path":"/models","idPath":"id","authType":"channel_key","headerName":"x-api-key","headerPrefix":""},"costs":{"adapter":"none"}}`),

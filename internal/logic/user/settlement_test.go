@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"testing"
 
@@ -44,8 +43,7 @@ func TestSQLiteUserSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	appSvc, err := app.New(ctx, config.App{
-		MasterKey: []byte(strings.Repeat("k", 32)),
-		Cluster:   config.Cluster{Role: config.RoleWorker, DataDir: t.TempDir()},
+		Cluster: config.Cluster{Role: config.RoleWorker, DataDir: t.TempDir()},
 	})
 	if err != nil {
 		t.Fatal(err)

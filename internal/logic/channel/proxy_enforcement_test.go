@@ -163,7 +163,12 @@ func TestProxyEnforcementClientBuilders(t *testing.T) {
 func TestProxyEnforcementRejectsConfiguredInvalidCipher(t *testing.T) {
 	svc, secrets := newUpstreamAuthTestService(t, `{}`)
 	svc.app.HTTP = &http.Client{Timeout: time.Second}
-	for _, plain := range []string{"", " \n\t\n", "not-a-proxy", "http://127.0.0.1:1234\ninvalid-second-line"} {
+	// 空值表示「未配置代理」：明文直通后 Encrypt("") 拿到的仍是空串，走的是
+	// 未配置分支（回落到直连），而不是「已配置但地址为空」的失败关闭分支。
+	if client, err := svc.HTTPClientForProxy(""); err != nil || client == nil {
+		t.Errorf("空代理配置应回落到直连客户端: client=%v err=%v", client, err)
+	}
+	for _, plain := range []string{" \n\t\n", "not-a-proxy", "http://127.0.0.1:1234\ninvalid-second-line"} {
 		cipher, err := secrets.Encrypt(plain)
 		if err != nil {
 			t.Fatal(err)

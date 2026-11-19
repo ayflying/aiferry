@@ -104,10 +104,7 @@ func TestPreferredProtocolPlanUsesUpstreamModel(t *testing.T) {
 // 协议回退（首选端点 404 → 回退另一端点）是同一候选内的第二次真实上游调用：
 // attempt() 必须把首跳的失败登记进 precedingFlow，供调用方并入调用流程与尝试计数。
 func TestAttemptRecordsProtocolFallbackFlow(t *testing.T) {
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	var responsesCalls, chatCalls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

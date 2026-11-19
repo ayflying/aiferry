@@ -70,10 +70,7 @@ func TestRerankAttemptPreservesProtocol(t *testing.T) {
 		_, _ = w.Write([]byte(response))
 	}))
 	defer upstream.Close()
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	appSvc := &app.Service{Secrets: secrets, HTTP: upstream.Client()}
 	builtins := &config.BuiltinRegistry{ChannelTypes: []config.BuiltinChannelType{{
 		ID: 99, Name: "重排测试", Code: "probe_rerank",

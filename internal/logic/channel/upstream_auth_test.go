@@ -16,10 +16,7 @@ import (
 // 用于验证正式转发与模型测试共用的上游鉴权规则。
 func newUpstreamAuthTestService(t *testing.T, channelTypeJSON string) (*sChannel, *secret.Service) {
 	t.Helper()
-	secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	secrets := secret.New()
 	builtins := &config.BuiltinRegistry{ChannelTypes: []config.BuiltinChannelType{{
 		ID: 77, Name: "AuthFixture", Code: "auth_fixture", Config: json.RawMessage(channelTypeJSON),
 	}}}

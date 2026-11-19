@@ -60,10 +60,7 @@ func TestCodexAttemptAggregatesAndNeverFallsBack(t *testing.T) {
 					}
 				}))
 				defer upstream.Close()
-				secrets, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-				if err != nil {
-					t.Fatal(err)
-				}
+				secrets := secret.New()
 				appSvc := &app.Service{Secrets: secrets, HTTP: upstream.Client()}
 				service := &sRelay{app: appSvc, channels: channel.New(appSvc, channeltype.New(&config.BuiltinRegistry{}, nil), nil, nil, nil, nil, nil, nil), prices: pricingcache.New()}
 				candidate := Candidate{ChannelType: "codex", UpstreamName: "future-model", BaseURL: upstream.URL}

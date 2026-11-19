@@ -45,12 +45,11 @@ https://your-aiferry.example.com/auth/casdoor/callback
 ```text
 MYSQL_HOST / MYSQL_PORT / MYSQL_DATABASE / MYSQL_USER / MYSQL_PASSWORD
 REDIS_ADDR / REDIS_PASSWORD
-AIFERRY_MASTER_KEY
 CASDOOR_ENDPOINT / CASDOOR_CLIENT_ID / CASDOOR_CLIENT_SECRET
 AIFERRY_ADMIN_ROLES
 ```
 
-`AIFERRY_MASTER_KEY` 必须是 Base64 编码的 32 字节随机密钥。渠道推理密钥和管理密钥由它使用 AES-GCM 加密。
+渠道密钥、管理密钥、Codex 凭据、代理地址与 SMTP 密码均**明文存库**（2026-11-19 起移除了主密钥加密，因为它换一次部署就要重配一次，配错即全部渠道解不开）。因此数据库必须限制在内网、不要暴露端口，并使用仅能访问本库的低权限账号。
 
 登录会话有效期固定 30 天，每次请求都会滑动续期（刷新 Redis TTL 和 Cookie），不提供环境变量配置。历史上可用 `SESSION_TTL_HOURS` 覆盖，曾被压到十几小时导致隔天掉登录，现已移除。
 

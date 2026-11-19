@@ -60,8 +60,8 @@
 ## 硬性约束（写进流程）
 
 - **不要给栈的 `Env` 传空数组或空白条目**：空数组会覆盖 `stack.env`，空白条目会写出 `=`。
-- `stack.env` 现在 11 个变量：`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER`、
-  `MYSQL_PASSWORD`、`REDIS_ADDR`、`REDIS_PASSWORD`、`AIFERRY_MASTER_KEY`、`CASDOOR_ENDPOINT`、
+- `stack.env` 现在 10 个变量：`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`、`MYSQL_USER`、
+  `MYSQL_PASSWORD`、`REDIS_ADDR`、`REDIS_PASSWORD`、`CASDOOR_ENDPOINT`、
   `CASDOOR_CLIENT_ID`、`CASDOOR_CLIENT_SECRET`。值只在本地 `.env` 与本机备份中出现，不写入文档、不打印。
 - 上线判定只认 `https://aiferry.yunloli.cn/healthz` 的 `version` 与 `revision`；
   「镜像构建成功」和「栈 PUT 返回 200」都不算发布成功。
