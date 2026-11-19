@@ -151,6 +151,15 @@ var (
 					"revision": buildinfo.Revision,
 				})
 			})
+			// /version 是给人工核对发版结果的独立入口：/healthz 同时承担探活语义，
+			// 排查时容易被负载均衡或监控缓存干扰，这里只回答"当前镜像是什么版本"，
+			// 数据源与 /healthz 完全一致（buildinfo），不额外持久化也不读数据库。
+			s.BindHandler("GET:/version", func(r *ghttp.Request) {
+				r.Response.WriteJson(map[string]any{
+					"version":  buildinfo.RuntimeVersion(),
+					"revision": buildinfo.Revision,
+				})
+			})
 			// 未配置集群密钥时完全不注册内部接口，保持与单机部署完全一致。
 			if clusterSvc.Enabled() {
 				s.Group("/internal/cluster", func(group *ghttp.RouterGroup) {
