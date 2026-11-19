@@ -30,6 +30,9 @@ export const useSystemStore = defineStore('system', () => {
 
   const systemName = computed(() => information.value.systemName)
   const logoUrl = computed(() => information.value.logoUrl || '/aiferry-logo.png')
+  // 运行时版本由服务端随公开配置下发，用于页脚展示「线上到底跑的是哪个版本」。
+  const version = computed(() => information.value.version?.trim() || '')
+  const revision = computed(() => information.value.revision?.trim() || '')
 
   function apply(value?: Partial<SystemInformationSettings>) {
     information.value = normalize(value)
@@ -44,5 +47,5 @@ export const useSystemStore = defineStore('system', () => {
     return pending
   }
 
-  return { information, loaded, systemName, logoUrl, apply, load }
+  return { information, loaded, systemName, logoUrl, version, revision, apply, load }
 })

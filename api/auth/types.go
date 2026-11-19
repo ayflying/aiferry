@@ -32,6 +32,10 @@ type SystemInformationView struct {
 	UserAgreement         string `json:"userAgreement"`
 	PrivacyPolicy         string `json:"privacyPolicy"`
 	PublicHomepageEnabled bool   `json:"publicHomepageEnabled"`
+	// Version / Revision 是当前运行镜像的版本与提交号（来自 buildinfo，非持久化配置）。
+	// 前端在页脚展示，便于确认线上到底跑的是哪个版本、镜像是否已更新。
+	Version  string `json:"version"`
+	Revision string `json:"revision"`
 }
 
 type UserView struct {

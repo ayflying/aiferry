@@ -5,6 +5,9 @@ import { useSystemStore } from '../stores/system'
 
 const site = useSystemStore()
 const footerText = computed(() => site.information.footer || `${site.systemName} · OPENAI GATEWAY`)
+// 版本号固定展示在页脚：升级后一眼就能确认镜像有没有真的换成新版，
+// 不必再去点设置页或调 /healthz。鼠标悬停可看到对应的提交号。
+const versionLabel = computed(() => (site.version ? `v${site.version}` : ''))
 const termsURL = computed(() => site.information.userAgreement.trim())
 const privacyURL = computed(() => site.information.privacyPolicy.trim())
 
@@ -24,10 +27,11 @@ function isExternal(value: string) {
       <a v-if="site.information.about.trim()" href="/about">关于</a>
       <a v-if="termsURL" :href="documentTarget(termsURL, '/terms')" :target="isExternal(termsURL) ? '_blank' : undefined" :rel="isExternal(termsURL) ? 'noopener noreferrer' : undefined">用户协议</a>
       <a v-if="privacyURL" :href="documentTarget(privacyURL, '/privacy')" :target="isExternal(privacyURL) ? '_blank' : undefined" :rel="isExternal(privacyURL) ? 'noopener noreferrer' : undefined">隐私政策</a>
+      <span v-if="versionLabel" class="footer-version" :title="site.revision ? `revision ${site.revision}` : ''">{{ versionLabel }}</span>
     </nav>
   </footer>
 </template>
 
 <style scoped>
-.site-footer { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; border-top: 1px solid #dce2e7; color: #66717d; font-size: 11px; }.footer-links { display: flex; flex-wrap: wrap; gap: 14px; }.footer-links a { color: inherit; text-decoration: none; }.footer-links a:hover { color: #1677ff; }@media (max-width: 600px) { .site-footer { align-items: flex-start; flex-direction: column; padding-inline: 14px; gap: 8px; } }
+.site-footer { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; border-top: 1px solid #dce2e7; color: #66717d; font-size: 11px; }.footer-links { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }.footer-links a { color: inherit; text-decoration: none; }.footer-links a:hover { color: #1677ff; }.footer-version { color: #8a949f; font-family: 'JetBrains Mono', monospace; letter-spacing: .02em; cursor: default; }@media (max-width: 600px) { .site-footer { align-items: flex-start; flex-direction: column; padding-inline: 14px; gap: 8px; } }
 </style>

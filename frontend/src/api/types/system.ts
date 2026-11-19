@@ -28,6 +28,9 @@ export interface SystemInformationSettings {
   userAgreement: string
   privacyPolicy: string
   publicHomepageEnabled: boolean
+  // 以下两项由服务端按运行镜像下发，不是可保存的站点配置。
+  version?: string
+  revision?: string
 }
 
 export interface ModelQualitySettings {

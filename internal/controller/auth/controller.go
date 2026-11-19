@@ -11,6 +11,7 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	authapi "github.com/yunloli/aiferry/api/auth"
+	"github.com/yunloli/aiferry/internal/buildinfo"
 	"github.com/yunloli/aiferry/internal/logic/auth"
 	"github.com/yunloli/aiferry/internal/logic/system"
 	"github.com/yunloli/aiferry/internal/logic/user"
@@ -115,6 +116,7 @@ func (c *Controller) publicSystemInformation(r *ghttp.Request) authapi.SystemInf
 		Footer: information.Footer, About: information.About, HomeContent: information.HomeContent,
 		UserAgreement: information.UserAgreement, PrivacyPolicy: information.PrivacyPolicy,
 		PublicHomepageEnabled: information.PublicHomepageEnabled,
+		Version:               buildinfo.RuntimeVersion(), Revision: buildinfo.Revision,
 	}
 }
 
