@@ -78,7 +78,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 			return TestResult{}, err
 		}
 	}
-	advancedConfig, err := ParseAdvancedConfig([]byte(channel.AdvancedConfig))
+	advancedConfig, err := ParseChannelAdvancedConfig([]byte(channel.AdvancedConfig), channel.Type)
 	if err != nil {
 		return TestResult{}, err
 	}

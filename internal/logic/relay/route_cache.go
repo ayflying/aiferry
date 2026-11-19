@@ -126,7 +126,7 @@ func (s *sRelay) routeStatic(ctx context.Context, model string) ([]Candidate, er
 		if !exists {
 			continue
 		}
-		advancedConfig, configErr := channelconfig.ParseAdvancedConfig([]byte(channel.AdvancedConfig))
+		advancedConfig, configErr := channelconfig.ParseChannelAdvancedConfig([]byte(channel.AdvancedConfig), channel.Type)
 		if configErr != nil {
 			return nil, gerror.Wrap(configErr, "parse channel advanced config")
 		}

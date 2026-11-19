@@ -20,7 +20,7 @@ import (
 )
 
 func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomingHeaders http.Header, endpoint string, originalBody []byte, candidate Candidate, stream bool, userID, apiKeyID uint64, settings adminapi.SystemResilienceSettingsInput, sensitiveDataRestorer *sensitiveDataRestorer) (attemptResult, bool, error) {
-	advancedConfig, err := channel.ParseAdvancedConfig([]byte(candidate.AdvancedConfig))
+	advancedConfig, err := channel.ParseChannelAdvancedConfig([]byte(candidate.AdvancedConfig), candidate.ChannelType)
 	if err != nil {
 		return attemptResult{}, false, err
 	}

@@ -43,6 +43,19 @@ error: code="UNKNOWN_FIELD" message="未知请求字段：prompt_cache_key" data
 因此这类问题**只能靠正式流量暴露** —— 表现为「点测试通过、正式请求 400」。现在两条链路
 按同一策略处置：渠道声明 `off` 时测试同样不下发缓存字段，声明缺省时测试同样注入稳定键。
 
+## 渠道类型的默认值
+
+有些上游能力不是可选项而是硬约束，这类默认值下沉到渠道类型，新建同类型渠道自动生效：
+
+| 渠道类型 | 默认 `promptCacheMode` | 原因 |
+| --- | --- | --- |
+| `gemini` | `off` | Google 的 OpenAI 兼容层对请求体做白名单校验，注入 `prompt_cache_key` 直接 400：`Invalid JSON payload received. Unknown name "prompt_cache_key": Cannot find field.` |
+
+统一入口是 `channel.ParseChannelAdvancedConfig`：转发、协议回退、模型测试三条链路都走它，
+因此不会出现某条链路漏套默认值。渠道显式声明 `stable` / `passthrough` 时以渠道配置为准；
+管理端展示与保存仍读渠道自身配置（`toView` / `advancedConfigJSON` 用 `ParseAdvancedConfig`），
+不会把类型默认值写回数据库。
+
 ## 排查线索
 
 - `usage_logs.error_message` 同时出现 `UNKNOWN_FIELD` 与 `prompt_cache_key`；

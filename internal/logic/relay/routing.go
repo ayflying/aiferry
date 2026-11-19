@@ -43,7 +43,7 @@ func (s *sRelay) route(ctx context.Context, model string, key apikey.AuthKey) ([
 		if !exists {
 			continue
 		}
-		advancedConfig, configErr := channelconfig.ParseAdvancedConfig([]byte(channel.AdvancedConfig))
+		advancedConfig, configErr := channelconfig.ParseChannelAdvancedConfig([]byte(channel.AdvancedConfig), channel.Type)
 		if configErr != nil {
 			return nil, gerror.Wrap(configErr, "parse channel advanced config")
 		}
