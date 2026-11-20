@@ -277,6 +277,8 @@ export interface CredentialRevealStatus {
   emailMasked: string
   /** 验证窗口剩余秒数（仅 verified 时有意义）。 */
   expiresInSeconds?: number
+  /** 验证码发送冷却剩余秒数；0 或未返回表示当前可以发送。 */
+  codeCooldownSeconds?: number
 }
 
 export interface ChannelCredentialCost {

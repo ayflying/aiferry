@@ -71,6 +71,17 @@ const verifyingCode = ref(false)
 const codeCountdown = ref(0)
 let codeCountdownTimer: ReturnType<typeof setInterval> | undefined
 let pendingRevealId: number | null = null
+// 邮箱验证弹窗的提示文案跟随发送状态：打开弹窗不再自动发码，所以未发送时
+// 必须明确告诉用户「还需要点一次发送」；已发送时改为说明投递目标。
+const revealAlertText = computed(() => {
+  if (!revealStatus.value?.emailReady) {
+    return '尚未填写邮箱，请先在「个人设置」中填写邮箱后再发送验证码。'
+  }
+  const target = revealStatus.value.emailMasked || '你的邮箱'
+  return codeCountdown.value > 0
+    ? `验证码已发送至 ${target}，请查收。`
+    : `验证码将发送至 ${target}，点击「发送验证码」后查收。`
+})
 const drawerSize = window.innerWidth <= 600 ? '94%' : '760px'
 const usageQuery = computed(() => isUsageMode(props.channel?.costQueryType, props.channel?.costQueryMode))
 // usageQuery 表示该渠道的「查询」查的是计数额度（积分/Token）而不是金额。
@@ -368,8 +379,10 @@ async function openSecret(item: ChannelCredential) {
     revealCode.value = ''
     pendingRevealId = item.id
     revealDialogVisible.value = true
-    // 打开即自动发一次码，少一步点击。
-    if (status.emailReady) void sendRevealCode()
+    // 打开弹窗不自动发码：发码是一次真实邮件投递，必须由用户点「发送验证码」触发，
+    // 否则每打开一次弹窗就发一封。若上一次发送仍在后端冷却期内，用服务端返回的
+    // 剩余秒数恢复倒计时，避免按钮看起来可点、点下去却被「发送太频繁」拒绝。
+    startCodeCountdown(status.codeCooldownSeconds ?? 0)
   } catch (error) {
     showError(error, '检查邮箱验证状态失败')
   } finally {
@@ -406,9 +419,11 @@ async function sendRevealCode() {
   if (sendingCode.value || codeCountdown.value > 0) return
   sendingCode.value = true
   try {
-    revealStatus.value = await apiPost<CredentialRevealStatus>('/credential-reveal/code')
+    const status = await apiPost<CredentialRevealStatus>('/credential-reveal/code')
+    revealStatus.value = status
     showSuccess('验证码已发送，请查收邮箱')
-    startCodeCountdown(60)
+    // 冷却以内为准：前端倒计时与后端 SetNX 冷却共用同一份剩余秒数。
+    startCodeCountdown(status.codeCooldownSeconds ?? 60)
   } catch (error) {
     showError(error, '发送验证码失败')
   } finally {
@@ -439,6 +454,9 @@ async function verifyRevealCode() {
 
 function startCodeCountdown(seconds: number) {
   stopCodeCountdown()
+  // 0 或负数表示当前不在冷却期：停在「可以发送」状态，不启动计时器，
+  // 否则计时器会在 0 下面多跑一拍才停。
+  if (seconds <= 0) return
   codeCountdown.value = seconds
   codeCountdownTimer = setInterval(() => {
     codeCountdown.value -= 1
@@ -538,7 +556,7 @@ function stopCodeCountdown() {
     </el-dialog>
 
     <el-dialog v-model="revealDialogVisible" title="邮箱验证 · 查看密钥明文" width="460px" append-to-body @closed="revealCode = ''">
-      <el-alert type="info" :closable="false" show-icon class="reveal-alert" :title="revealStatus?.emailReady ? `验证码将发送至 ${revealStatus.emailMasked}` : '尚未填写邮箱，请先在「个人设置」中填写邮箱后再发送验证码。'" />
+      <el-alert type="info" :closable="false" show-icon class="reveal-alert" :title="revealAlertText" />
       <el-form label-position="top" @submit.prevent="verifyRevealCode">
         <el-form-item label="验证码">
           <div class="reveal-code-row">

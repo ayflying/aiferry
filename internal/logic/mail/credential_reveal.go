@@ -33,6 +33,12 @@ type CredentialRevealStatus struct {
 	EmailMasked string `json:"emailMasked"`
 	// ExpiresInSeconds 是验证窗口剩余秒数（仅 Verified 时有意义）。
 	ExpiresInSeconds int64 `json:"expiresInSeconds"`
+	// CodeCooldownSeconds 是验证码发送冷却的剩余秒数，0 表示当前可以发送。
+	//
+	// 前端只在用户主动点击「发送验证码」时才发信，所以重开弹窗时无法从本地状态
+	// 推断冷却是否还在。把剩余秒数交给前端恢复倒计时，避免按钮看起来可点、
+	// 点下去却被后端以「发送太频繁」拒绝。
+	CodeCooldownSeconds int64 `json:"codeCooldownSeconds"`
 }
 
 func credentialRevealCodeKey(userID uint64) string {
@@ -65,7 +71,20 @@ func (s *sMail) CredentialRevealStatus(ctx context.Context, userID uint64) (Cred
 		status.Verified = true
 		status.ExpiresInSeconds = int64(ttl.Seconds())
 	}
+	status.CodeCooldownSeconds = s.credentialRevealCooldownSeconds(ctx, userID)
 	return status, nil
+}
+
+// credentialRevealCooldownSeconds 返回验证码发送冷却的剩余秒数，不在冷却期返回 0。
+// 与发码时的 SetNX 冷却同源：前端倒计时必须与现实一致，否则用户会看到一个
+// 可点的「发送验证码」，点下去却被后端拒绝。
+func (s *sMail) credentialRevealCooldownSeconds(ctx context.Context, userID uint64) int64 {
+	ttl, err := s.app.Redis.TTL(ctx, credentialRevealCooldownKey(userID)).Result()
+	if err != nil || ttl <= 0 {
+		return 0
+	}
+	// 向上取整到秒：TTL 的亚秒部分耗尽后仍处于冷却，不能提前显示为可发送。
+	return int64(ttl.Seconds()) + 1
 }
 
 // CredentialRevealVerified 返回 10 分钟验证窗口是否仍有效（揭示接口的权威门）。
