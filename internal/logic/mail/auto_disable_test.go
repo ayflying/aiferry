@@ -99,6 +99,22 @@ func TestRenderModelUnavailable(t *testing.T) {
 	}
 }
 
+func TestRenderMappedModelAvailability(t *testing.T) {
+	for _, kind := range []system.NotificationKind{system.NotificationKindModelAvailability, system.NotificationKindChannelAvailability} {
+		for _, recovered := range []bool{false, true} {
+			_, body := renderNotification(system.AutoDisableNotification{
+				Kind: kind, Recovered: recovered, ChannelID: 9, ChannelName: "adesk",
+				ModelID: 849, ModelName: "gpt-6.1-sol", UpstreamModelName: "gpt-6.2-sol",
+			})
+			for _, want := range []string{"对外模型 gpt-6.1-sol", "ID：849", "实际请求上游：gpt-6.2-sol"} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("正文缺少 %q：%s", want, body)
+				}
+			}
+		}
+	}
+}
+
 // 手动关渠道用「手动关闭」措辞，与「模型全挂导致不可用」区分开。
 func TestRenderChannelManualDisabled(t *testing.T) {
 	subject, body := renderNotification(system.AutoDisableNotification{

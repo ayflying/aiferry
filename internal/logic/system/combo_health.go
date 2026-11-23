@@ -147,7 +147,7 @@ func (s *sSystem) changeComboHealth(ctx context.Context, channelID, modelID, cre
 	// 事务外再判断模型整体可用性：这里需要读组合与密钥的完整现状，
 	// 放进事务里既看不到尚未提交的兄弟组合，也会无谓拉长锁持有时间。
 	if err == nil && affectedChannel > 0 && (becameUnavailable || becameAvailable) {
-		s.NotifyModelAvailabilityTransition(ctx, affectedChannel, modelID, becameAvailable)
+		s.NotifyModelAvailabilityTransition(ctx, affectedChannel, modelID, becameAvailable, false)
 	}
 	return err
 }

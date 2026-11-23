@@ -322,7 +322,7 @@ func (s *sChannel) UpdateModel(ctx context.Context, id uint64, input adminapi.Mo
 	// 手动启停模型与组合隔离走同一套判定：关掉一个模型只影响它自己，
 	// 只有渠道内一个可用模型都不剩时才升级为渠道级通知。
 	if model.Enabled != newEnabled {
-		s.resilience.NotifyModelAvailabilityTransition(ctx, model.ChannelId, model.Id, newEnabled == 1)
+		s.resilience.NotifyModelAvailabilityTransition(ctx, model.ChannelId, model.Id, newEnabled == 1, true)
 	}
 	return s.prices.Load(ctx)
 }

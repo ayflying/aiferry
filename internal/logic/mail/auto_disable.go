@@ -18,7 +18,7 @@ func (s *sMail) notifyAutoDisableTransition(ctx context.Context, notification sy
 		return
 	}
 	recipients, err := s.users.AdminEmails(ctx)
-	if err != nil || len(recipients) == 0 {
+	if err != nil || len(recipients) == 0 || !s.allowAvailabilityMail(ctx, notification) {
 		return
 	}
 	subject, body := renderAutoDisableTransition(s.systemName(ctx), notification)
@@ -84,7 +84,13 @@ func renderCredentialStatus(systemName string, notification system.AutoDisableNo
 func renderModelAvailability(systemName string, notification system.AutoDisableNotification) (string, string) {
 	model := notificationModelName(notification.ModelName)
 	name := notificationChannelName(notification.ChannelName)
-	detail := fmt.Sprintf("渠道 %s（ID：%d）的模型 %s（ID：%d）", name, notification.ChannelID, model, notification.ModelID)
+	detail := fmt.Sprintf("渠道 %s（ID：%d）的%s", name, notification.ChannelID, availabilityModelDetail(notification))
+	if notification.Manual {
+		if notification.Recovered {
+			return fmt.Sprintf("%s 渠道模型已手动启用：%s", systemName, model), detail + " 已在管理端启用并恢复参与路由。"
+		}
+		return fmt.Sprintf("%s 渠道模型已手动关闭：%s", systemName, model), detail + " 已在管理端关闭，不再参与路由。"
+	}
 	if notification.Recovered {
 		return fmt.Sprintf("%s 渠道模型已恢复：%s", systemName, model),
 			fmt.Sprintf("%s 已重新有可用密钥组合，恢复参与路由。", detail)
@@ -98,17 +104,30 @@ func renderModelAvailability(systemName string, notification system.AutoDisableN
 func renderChannelAvailability(systemName string, notification system.AutoDisableNotification) (string, string) {
 	name := notificationChannelName(notification.ChannelName)
 	detail := fmt.Sprintf("渠道 %s（ID：%d）", name, notification.ChannelID)
-	if notification.Recovered {
-		return fmt.Sprintf("%s 渠道已恢复：%s", systemName, name),
-			fmt.Sprintf("%s 已重新参与路由。", detail)
+	trigger := ""
+	if notification.ModelID != 0 {
+		trigger = "\n\n触发模型：" + availabilityModelDetail(notification)
 	}
-	if notification.Manual {
+	if notification.Recovered {
+		return fmt.Sprintf("%s 渠道已恢复：%s", systemName, name), detail + " 已重新参与路由。" + trigger
+	}
+	// 手动关闭渠道内的一个模型，不等于手动关闭整个渠道。
+	if notification.Manual && notification.ModelID == 0 {
 		return fmt.Sprintf("%s 渠道已被手动关闭：%s", systemName, name),
 			fmt.Sprintf("%s 已在管理端被关闭，退出路由直到重新启用。", detail)
 	}
 	return fmt.Sprintf("%s 渠道已无可用模型：%s", systemName, name),
-		fmt.Sprintf("%s 下的模型已全部不可用（每个模型的所有启用密钥组合都在隔离中），该渠道当前无法承接请求。\n\n当前可用模型：%d 个",
-			detail, notification.AvailableModelCount)
+		fmt.Sprintf("%s 当前没有可参与路由的模型，无法承接请求。\n\n当前可用模型：%d 个",
+			detail, notification.AvailableModelCount) + trigger
+}
+
+func availabilityModelDetail(notification system.AutoDisableNotification) string {
+	publicName := notificationModelName(notification.ModelName)
+	upstreamName := strings.TrimSpace(notification.UpstreamModelName)
+	if upstreamName != "" && upstreamName != publicName {
+		return fmt.Sprintf("对外模型 %s（ID：%d，实际请求上游：%s）", publicName, notification.ModelID, upstreamName)
+	}
+	return fmt.Sprintf("模型 %s（ID：%d）", publicName, notification.ModelID)
 }
 
 func notificationModelName(value string) string {

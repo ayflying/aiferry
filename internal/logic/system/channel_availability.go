@@ -17,18 +17,22 @@ import (
 
 // NotifyModelAvailabilityTransition 在某个模型的组合隔离/恢复之后调用。
 // recovered 表示本次是恢复方向；函数内部按当前真实状态判断该发模型级还是渠道级。
-func (s *sSystem) NotifyModelAvailabilityTransition(ctx context.Context, channelID, modelID uint64, recovered bool) {
+func (s *sSystem) NotifyModelAvailabilityTransition(ctx context.Context, channelID, modelID uint64, recovered, manual bool) {
 	items, err := s.loadModelAvailability(ctx, channelID)
 	if err != nil {
 		g.Log().Warningf(ctx, "load model availability for channel %d: %v", channelID, err)
 		return
 	}
-	target := modelAvailability{ModelID: modelID}
+	var target modelAvailability
 	for _, item := range items {
 		if item.ModelID == modelID {
 			target = item
 			break
 		}
+	}
+	// 自动事件可能在事务提交后遇到人工禁用或删除，不能把旧事件当成当前告警。
+	if target.ModelID == 0 || (!manual && !target.Enabled) {
+		return
 	}
 	available := countAvailableModels(items)
 	notification := AutoDisableNotification{
@@ -36,6 +40,8 @@ func (s *sSystem) NotifyModelAvailabilityTransition(ctx context.Context, channel
 		ChannelName:         s.autoDisableNotificationChannelName(ctx, channelID),
 		ModelID:             modelID,
 		ModelName:           target.Name,
+		UpstreamModelName:   target.UpstreamName,
+		Manual:              manual,
 		AvailableModelCount: available,
 	}
 	switch {

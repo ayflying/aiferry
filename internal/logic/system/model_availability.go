@@ -22,10 +22,11 @@ import (
 
 // modelAvailability 描述渠道内单个模型当前是否还有可用的「模型 × 密钥」组合。
 type modelAvailability struct {
-	ModelID   uint64
-	Name      string
-	Enabled   bool
-	Available bool
+	ModelID      uint64
+	Name         string
+	UpstreamName string
+	Enabled      bool
+	Available    bool
 }
 
 // availabilityNow 是判定组合冷却是否已过期的基准时间，抽成函数便于单测固定时钟。
@@ -105,7 +106,7 @@ func (s *sSystem) loadModelAvailability(ctx context.Context, channelID uint64) (
 	now := availabilityNow()
 	result := make([]modelAvailability, 0, len(models))
 	for _, model := range models {
-		item := modelAvailability{ModelID: model.Id, Name: model.PublicName, Enabled: model.Enabled == 1}
+		item := modelAvailability{ModelID: model.Id, Name: model.PublicName, UpstreamName: model.UpstreamName, Enabled: model.Enabled == 1}
 		item.Available = item.Enabled && modelComboAvailable(model.Id, activeCredentialIDs, cooldowns, now)
 		result = append(result, item)
 	}
