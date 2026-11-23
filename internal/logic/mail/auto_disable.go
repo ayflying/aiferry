@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gogf/gf/v2/frame/g"
+
 	"github.com/yunloli/aiferry/internal/logic/system"
 )
 
@@ -18,13 +20,28 @@ func (s *sMail) notifyAutoDisableTransition(ctx context.Context, notification sy
 		return
 	}
 	recipients, err := s.users.AdminEmails(ctx)
-	if err != nil || len(recipients) == 0 || !s.allowAvailabilityMail(ctx, notification) {
+	if err != nil || len(recipients) == 0 {
+		return
+	}
+	decision := s.allowAvailabilityMail(ctx, notification)
+	if !decision.Allow {
+		// 线上排查依赖这条日志区分「没触发」与「被限频拦下」。
+		g.Log().Infof(ctx, "availability mail skipped kind=%d channel=%d model=%d credential=%d recovered=%t reason=%s",
+			notification.Kind, notification.ChannelID, notification.ModelID, notification.CredentialID, notification.Recovered, decision.Reason)
 		return
 	}
 	subject, body := renderAutoDisableTransition(s.systemName(ctx), notification)
+	sent := 0
 	for _, recipient := range recipients {
-		_ = send(settings, recipient, subject, body)
+		if err := send(settings, recipient, subject, body); err != nil {
+			g.Log().Warningf(ctx, "availability mail delivery failed channel=%d model=%d credential=%d: %v",
+				notification.ChannelID, notification.ModelID, notification.CredentialID, err)
+			continue
+		}
+		sent++
 	}
+	g.Log().Infof(ctx, "availability mail sent kind=%d channel=%d model=%d credential=%d recovered=%t recipients=%d/%d",
+		notification.Kind, notification.ChannelID, notification.ModelID, notification.CredentialID, notification.Recovered, sent, len(recipients))
 }
 
 func renderAutoDisableTransition(systemName string, notification system.AutoDisableNotification) (string, string) {
