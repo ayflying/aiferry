@@ -212,6 +212,9 @@ func (s *sRelay) attemptChannel(ctx context.Context, writer http.ResponseWriter,
 }
 
 func candidateBaseURLs(candidate Candidate) []string {
+	if candidate.ChannelType == channel.GeminiSubscriptionChannelType {
+		return []string{channel.GeminiSubscriptionBaseURL}
+	}
 	urls := make([]string, 0, len(candidate.BackupBaseURLs)+1)
 	seen := make(map[string]struct{}, len(candidate.BackupBaseURLs)+1)
 	for _, value := range append([]string{candidate.BaseURL}, candidate.BackupBaseURLs...) {

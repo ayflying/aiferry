@@ -82,6 +82,9 @@ func (s *sChannel) ApplyUpstreamAuthHeaders(req *http.Request, in UpstreamAuthIn
 		if err != nil {
 			return err
 		}
+		if strings.HasPrefix(key, geminiCredentialPrefix) {
+			return gerror.New("Gemini OAuth 凭据只能用于订阅专用请求")
+		}
 		if strings.HasPrefix(key, codexCredentialPrefix) {
 			credential, err := decodeCodexCredential(key)
 			if err != nil {

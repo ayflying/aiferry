@@ -10,6 +10,7 @@ type ModelOption = {
 defineProps<{
   editing: boolean
   models: ModelOption[]
+  fixedBaseUrl?: boolean
 }>()
 
 const priority = defineModel<number>('priority', { required: true })
@@ -44,7 +45,7 @@ function removeBackupBaseURL(index: number) {
           <span>用于负载均衡。权重越高，请求越多</span>
         </label>
       </div>
-      <div class="backup-base-urls">
+      <div v-if="!fixedBaseUrl" class="backup-base-urls">
         <div class="backup-heading"><strong>备用 API 根地址</strong><span>主地址失败时会依次尝试备用 CDN；全部失败后才回退其他渠道。</span></div>
         <div v-for="(baseURL, index) in backupBaseUrls" :key="index" class="backup-base-url-row">
           <el-input v-model="backupBaseUrls[index]" placeholder="https://cdn.example.com/v1" />

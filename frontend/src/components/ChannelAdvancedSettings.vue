@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { SlidersHorizontal } from '@lucide/vue'
 import type { ChannelAdvancedConfig } from '../api/types'
 
-defineProps<{ testingProxy: boolean }>()
+defineProps<{ testingProxy: boolean; proxyRequired?: boolean }>()
 const emit = defineEmits<{ testProxy: [] }>()
 const config = defineModel<ChannelAdvancedConfig>('config', { required: true })
 const proxyUrl = defineModel<string | undefined>('proxyUrl')
@@ -80,11 +80,11 @@ const promptCacheMode = computed({
 
     <div class="proxy-field">
       <div class="field-label">
-        <strong>代理地址</strong>
+        <strong>{{ proxyRequired ? '代理地址（必填）' : '代理地址' }}</strong>
         <el-button size="small" :loading="testingProxy" :disabled="!(proxyUrl && proxyUrl.trim())" @click="emit('testProxy')">测试代理</el-button>
       </div>
       <el-input v-model="proxyUrl" type="textarea" :rows="3" clearable placeholder="每行一个代理地址，例如 http://user:pass@host:port" autocomplete="off" spellcheck="false" />
-      <span>支持多行，每行一个代理（HTTP/HTTPS / SOCKS5），按行序与渠道密钥取模固定配对（2 个代理、5 把密钥即 1-1、2-2、3-1、4-2、5-1）；某代理失败时仅对应密钥顺延到下一个，其它密钥不变。留空表示不使用代理，保存时清空即删除</span>
+      <span>支持多行，每行一个代理（HTTP/HTTPS / SOCKS5），按行序与渠道密钥取模固定配对（2 个代理、5 把密钥即 1-1、2-2、3-1、4-2、5-1）；某代理失败时仅对应密钥顺延到下一个，其它密钥不变。{{ proxyRequired ? 'Gemini 订阅必须通过渠道代理连接。' : '留空表示不使用代理，保存时清空即删除' }}</span>
     </div>
 
     <div class="prompt-field">

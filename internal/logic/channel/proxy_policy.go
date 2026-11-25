@@ -26,6 +26,41 @@ func (s *sChannel) HTTPClientForChannel(ctx context.Context, channel entity.Chan
 	return s.HTTPClientForProxy(cipher)
 }
 
+// GeminiSubscriptionChannelType 与普通 Gemini API Key 渠道独立。
+const GeminiSubscriptionChannelType = "gemini_subscription"
+
+// RequireGeminiSubscriptionProxy 防止未配置或删除代理后以直连发送账号凭据。
+func RequireGeminiSubscriptionProxy(cipher string) error {
+	if cipher == "" {
+		return gerror.New("Gemini 订阅渠道必须配置代理；已阻止直连")
+	}
+	return nil
+}
+
+// GeminiSubscriptionHTTPClient 对登录、续期和模型同步应用当前渠道出口策略。
+func (s *sChannel) GeminiSubscriptionHTTPClient(ctx context.Context, channel entity.Channels, credentialID uint64) (*http.Client, error) {
+	cipher := channel.ProxyUrlCipher
+	if channel.Id > 0 {
+		current, err := s.CurrentProxyCipher(ctx, channel.Id)
+		if err != nil {
+			return nil, err
+		}
+		cipher = current
+	}
+	if err := RequireGeminiSubscriptionProxy(cipher); err != nil {
+		return nil, err
+	}
+	proxies, err := s.ProxiesForCredential(ctx, cipher, channel.Id, credentialID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.ClientFor(proxies)
+	if err != nil {
+		return nil, err
+	}
+	return CodexHTTPClient(client), nil // 同样不允许携带凭据的请求跟随重定向。
+}
+
 // CurrentProxyCipher 在真正发请求前读取当前出口策略，不信任路由缓存或异步任务
 // 中的旧快照。数据库不可用、渠道已删除都必须失败关闭，不能被解释成无代理。
 func (s *sChannel) CurrentProxyCipher(ctx context.Context, channelID uint64) (string, error) {

@@ -3,12 +3,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, ChannelType } from '../api/types'
 import { useAppStore } from '../stores/app'
+import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
+import ChannelRouteCoverageSettings from '../components/ChannelRouteCoverageSettings.vue'
 import ChannelListPanel from '../components/ChannelListPanel.vue'
 import ChannelsView from './ChannelsView.vue'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), error: vi.fn() }))
-vi.mock('../api/client', () => ({ apiGet: mocks.get, apiPost: mocks.post, apiPut: vi.fn(), apiDelete: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), error: vi.fn() }))
+vi.mock('../api/client', () => ({ apiGet: mocks.get, apiPost: mocks.post, apiPut: mocks.put, apiDelete: vi.fn() }))
 vi.mock('../lib/error', () => ({ showError: mocks.error, showSuccess: vi.fn() }))
 vi.mock('../stores/auth', () => ({ useAuthStore: () => ({ user: { isAdmin: true } }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ meta: { channelTab: 'channels' } }) }))
@@ -27,6 +29,7 @@ beforeEach(() => {
   mocks.get.mockReset().mockResolvedValue([])
   mocks.error.mockReset()
   mocks.post.mockReset().mockResolvedValue({})
+  mocks.put.mockReset().mockResolvedValue({})
 })
 
 function mountView() {
@@ -149,6 +152,81 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     const drawer = wrapper.findComponent(ChannelCredentialDrawer)
     expect(drawer.props('loginSupported')).toBe(true)
     expect(drawer.props('loginAdapter')).toBe('codex_device')
+    wrapper.unmount()
+  })
+
+  const geminiType = {
+    code: 'gemini_subscription', name: 'Gemini 订阅', status: 1,
+    config: { models: {}, costs: {}, pricing: {}, login: { adapter: 'gemini_oauth' } },
+  } as ChannelType
+  const geminiChannel = {
+    ...channel, type: geminiType.code, name: 'Gemini 订阅', projectId: 'test-project', hasProxy: true,
+    priority: 0, weight: 1, healthCheckModelId: 0, autoDisableEnabled: true,
+  }
+  const geminiBaseUrl = 'https://cloudcode-pa.googleapis.com'
+  function mountForm() {
+    return shallowMount(ChannelsView, { global: { renderStubDefaultSlot: true, stubs: { ElDrawer: { template: '<section><slot /><slot name="footer" /></section>' } } } })
+  }
+
+  it('Gemini 订阅锁定预设地址、隐藏手工密钥，并要求明确项目与代理后才提交', async () => {
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path === '/channel-types' ? [geminiType] : []))
+    const wrapper = mountForm()
+    wrapper.findComponent(ChannelListPanel).vm.$emit('create')
+    await flushPromises()
+    const inputs = wrapper.findAllComponents({ name: 'ElInput' })
+    expect(inputs.find(input => input.props('modelValue') === geminiBaseUrl)?.props('readonly')).toBe(true)
+    expect(wrapper.findAllComponents({ name: 'ElFormItem' }).some(item => item.attributes('label') === '首个推理密钥（可选）')).toBe(false)
+    expect(wrapper.findComponent(ChannelRouteCoverageSettings).props('fixedBaseUrl')).toBe(true)
+    const advanced = wrapper.findComponent(ChannelAdvancedSettings)
+    expect(advanced.props('proxyRequired')).toBe(true)
+    const project = inputs.find(input => input.attributes('placeholder') === '输入经 Google 账号授权的项目 ID')!
+    const save = wrapper.findAllComponents({ name: 'ElButton' }).find(item => item.text() === '保存渠道')!
+    inputs.find(input => input.attributes('placeholder') === '例如 OpenAI 主线路')!.vm.$emit('update:modelValue', 'Gemini fixture')
+    save.vm.$emit('click')
+    expect(mocks.error).toHaveBeenLastCalledWith(expect.stringContaining('Google Cloud 项目 ID'), '信息不完整')
+    project.vm.$emit('update:modelValue', ' test-project ')
+    advanced.vm.$emit('update:proxyUrl', ' \n ')
+    save.vm.$emit('click')
+    expect(mocks.error).toHaveBeenLastCalledWith(expect.stringContaining('代理地址'), '信息不完整')
+    expect(mocks.post).not.toHaveBeenCalled()
+    advanced.vm.$emit('update:proxyUrl', 'http://proxy.test:8080')
+    save.vm.$emit('click')
+    await flushPromises()
+    const [path, payload] = mocks.post.mock.lastCall!
+    expect(path).toBe('/channels')
+    expect(payload).toMatchObject({ type: geminiType.code, baseUrl: geminiBaseUrl, projectId: 'test-project', proxyUrl: 'http://proxy.test:8080' })
+    expect(payload).not.toHaveProperty('apiKey')
+    expect(payload).not.toHaveProperty('managementKey')
+    openCredentials(wrapper, geminiChannel)
+    await flushPromises()
+    expect(wrapper.findComponent(ChannelCredentialDrawer).props()).toMatchObject({ loginSupported: true, loginAdapter: 'gemini_oauth' })
+    wrapper.unmount()
+  })
+
+  it('Gemini 订阅未能回填已有代理时省略代理字段，但不允许主动清空', async () => {
+    mocks.get.mockImplementation((path: string) => {
+      if (path.endsWith('/proxy')) return Promise.reject(new Error('代理读取失败'))
+      return Promise.resolve(path === '/channel-types' ? [geminiType] : [])
+    })
+    const wrapper = mountForm()
+    wrapper.findComponent(ChannelListPanel).vm.$emit('edit', geminiChannel)
+    await flushPromises()
+    const input = wrapper.findAllComponents({ name: 'ElInput' }).find(item => item.attributes('placeholder') === '输入经 Google 账号授权的项目 ID')!
+    expect(input.props('modelValue')).toBe('test-project')
+    expect(wrapper.findComponent({ name: 'ElSelect' }).props('disabled')).toBe(true)
+    const save = wrapper.findAllComponents({ name: 'ElButton' }).find(item => item.text() === '保存渠道')!
+    save.vm.$emit('click')
+    await flushPromises()
+    const [path, payload] = mocks.put.mock.lastCall!
+    expect(path).toBe(`/channels/${geminiChannel.id}`)
+    expect(payload).toMatchObject({ baseUrl: geminiBaseUrl, projectId: 'test-project' })
+    expect(payload).not.toHaveProperty('proxyUrl')
+    wrapper.findComponent(ChannelListPanel).vm.$emit('edit', geminiChannel)
+    await flushPromises()
+    wrapper.findComponent(ChannelAdvancedSettings).vm.$emit('update:proxyUrl', '')
+    save.vm.$emit('click')
+    expect(mocks.put).toHaveBeenCalledTimes(1)
+    expect(mocks.error).toHaveBeenLastCalledWith(expect.stringContaining('代理地址'), '信息不完整')
     wrapper.unmount()
   })
 

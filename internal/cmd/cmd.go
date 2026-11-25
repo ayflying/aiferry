@@ -179,6 +179,7 @@ var (
 					authCtrl.RegisterProtected(group)
 				})
 				s.BindHandler("GET:/auth/casdoor/callback", authCtrl.Callback)
+				s.BindHandler("GET:"+channel.GeminiOAuthCallbackPath, geminiSubscriptionCallback(channelSvc.AcceptGeminiOAuthCallback))
 				s.Group("/api/admin", func(group *ghttp.RouterGroup) {
 					group.Middleware(authSvc.RequireUser)
 					group.Group("", func(admin *ghttp.RouterGroup) {

@@ -73,6 +73,34 @@ describe('添加上游密钥', () => {
     wrapper.unmount()
   })
 
+  it('Gemini 订阅仅通过 Google 登录添加账号，且不能查看明文或设置管理密钥', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    api.get.mockResolvedValue([{ id: 7, index: 1, keyPrefix: 'Google #1', status: 1, hasManagementKey: true }])
+    api.post.mockResolvedValueOnce({ state: 'google-state', authUrl: 'https://accounts.google.com/o/oauth2/v2/auth', intervalSeconds: 3 })
+      .mockResolvedValueOnce({ status: 'completed' })
+    const rowSlots = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.({ row: { id: 7, index: 1, keyPrefix: 'Google #1', status: 1, hasManagementKey: true } })) })
+    const wrapper = shallowMount(ChannelCredentialDrawer, {
+      props: { modelValue: true, channel: { ...channel, type: 'gemini_subscription' }, loginAdapter: 'gemini_oauth', managementKeySupported: true },
+      global: { stubs: { ChannelLoginDialog: false, ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElRadioGroup: RadioGroup, ElTable: Slot, ElTableColumn: rowSlots, ElTooltip: Slot } },
+    })
+    expect(wrapper.find('button[aria-label="删除 Google #1"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="查看 Google #1"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="设置 Google #1 管理密钥"]').exists()).toBe(false)
+    await button(wrapper, '添加账号').trigger('click')
+    const dialog = wrapper.find('[data-title="添加 Google 账号"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.findComponent({ name: 'ElRadioGroup' }).exists()).toBe(false)
+    expect(dialog.findComponent({ name: 'ElInput' }).exists()).toBe(false)
+    expect(api.post).not.toHaveBeenCalled()
+    await button(wrapper, '打开 Google 登录页').trigger('click')
+    await flushPromises()
+    expect(api.post).toHaveBeenCalledWith('/channels/35/credentials/login')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(api.post).toHaveBeenCalledWith('/channels/35/credentials/login/poll', { state: 'google-state' })
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('设备授权慢请求在有效期结束后完成，不接收迟到凭据', async () => {
     let resolve!: (value: unknown) => void
     vi.spyOn(window, 'open').mockReturnValue(null)

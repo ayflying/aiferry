@@ -121,7 +121,7 @@ export interface ChannelTypeProtocolConfig {
 
 /** 渠道类型的登录方式声明；adapter 决定登录形态（external_link = 浏览器外链 SSO）。 */
 export interface ChannelTypeLoginConfig {
-  adapter: 'none' | 'external_link' | 'codex_device'
+  adapter: 'none' | 'external_link' | 'codex_device' | 'gemini_oauth'
   platform?: string
   prefixPath?: string
 }

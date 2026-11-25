@@ -1,0 +1,15 @@
+{
+  "model": "public-name",
+  "messages": [
+    {"role": "system", "content": "Use short sentences."},
+    {"role": "developer", "content": [{"type": "text", "text": "Answer in Chinese."}]},
+    {"role": "user", "content": [{"type": "text", "text": "你好"}, {"type": "text", "text": "，世界"}]},
+    {"role": "assistant", "content": "你好！"},
+    {"role": "user", "content": "继续。"}
+  ],
+  "temperature": 0,
+  "top_p": 0.8,
+  "max_tokens": 128,
+  "max_completion_tokens": 256,
+  "stop": ["END"]
+}

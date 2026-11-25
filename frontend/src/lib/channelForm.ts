@@ -1,5 +1,8 @@
 import type { ChannelAdvancedConfig, ChannelInput, ChannelType } from '../api/types'
 
+export const geminiSubscriptionType = 'gemini_subscription'
+export const geminiSubscriptionBaseURL = 'https://cloudcode-pa.googleapis.com'
+
 export function createDefaultChannelAdvancedConfig(): ChannelAdvancedConfig {
   return {
     backupBaseUrls: [],

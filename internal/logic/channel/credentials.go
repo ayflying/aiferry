@@ -83,6 +83,9 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 	if err != nil {
 		return 0, err
 	}
+	if channel.Type == GeminiSubscriptionChannelType || typeConfig.Login.Adapter == channeltype.AdapterLoginGeminiOAuth {
+		return 0, gerror.New("Gemini 订阅渠道不接受手工密钥，请使用 Google OAuth 登录")
+	}
 	remark, err := normalizeCredentialRemark(input.Remark)
 	if err != nil {
 		return 0, err
@@ -181,6 +184,9 @@ func (s *sChannel) RevealCredential(ctx context.Context, channelID, credentialID
 	plainText, err := s.app.Secrets.Decrypt(credential.ApiKeyCipher)
 	if err != nil {
 		return "", gerror.Wrap(err, "decrypt channel credential")
+	}
+	if strings.HasPrefix(plainText, geminiCredentialPrefix) {
+		return "", gerror.New("Gemini OAuth 登录凭据不可显示，请通过登录重新授权")
 	}
 	if strings.HasPrefix(plainText, codexCredentialPrefix) {
 		credential, err := decodeCodexCredential(plainText)
@@ -661,7 +667,8 @@ func (s *sChannel) ensureCredentialMetadata(ctx context.Context, row *credential
 }
 
 func (s *sChannel) newCredentialData(value string) (do.ChannelCredentials, error) {
-	if strings.HasPrefix(strings.TrimSpace(value), codexCredentialPrefix) {
+	trimmed := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmed, codexCredentialPrefix) || strings.HasPrefix(trimmed, geminiCredentialPrefix) {
 		return do.ChannelCredentials{}, gerror.New("不允许手工导入内部登录凭据，请使用平台登录")
 	}
 	cipherText, err := s.app.Secrets.Encrypt(strings.TrimSpace(value))

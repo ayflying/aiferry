@@ -39,6 +39,7 @@ const (
 	AdapterLoginNone         = "none"
 	AdapterLoginExternalLink = "external_link"
 	AdapterLoginCodexDevice  = "codex_device"
+	AdapterLoginGeminiOAuth  = "gemini_oauth"
 
 	ValueTypeCost  = "cost"
 	ValueTypeUsage = "usage"
@@ -399,6 +400,9 @@ func (s *sChannelType) Create(ctx context.Context, input adminapi.ChannelTypeInp
 	if err != nil {
 		return 0, err
 	}
+	if config.Login.Adapter == AdapterLoginGeminiOAuth {
+		return 0, gerror.New("Gemini OAuth 仅用于内置 Gemini 订阅渠道")
+	}
 	encoded, _ := json.Marshal(config)
 	id, err := dao.ChannelTypes.Ctx(ctx).Data(do.ChannelTypes{
 		Name:       name,
@@ -427,6 +431,9 @@ func (s *sChannelType) Update(ctx context.Context, id uint64, input adminapi.Cha
 	config, err := ParseConfig(input.Config)
 	if err != nil {
 		return err
+	}
+	if config.Login.Adapter == AdapterLoginGeminiOAuth {
+		return gerror.New("Gemini OAuth 仅用于内置 Gemini 订阅渠道")
 	}
 	encoded, _ := json.Marshal(config)
 	if _, err = dao.ChannelTypes.Ctx(ctx).Where(dao.ChannelTypes.Columns().Id, id).Data(do.ChannelTypes{

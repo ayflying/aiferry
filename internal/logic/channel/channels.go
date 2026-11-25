@@ -175,6 +175,11 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 	if err != nil {
 		return 0, err
 	}
+	if typeRow.Code == GeminiSubscriptionChannelType {
+		if err := validateGeminiSubscriptionInput(baseURL, input, false); err != nil {
+			return 0, err
+		}
+	}
 	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
 		if apiKey != "" {
 			if _, err := manualCodexCredential(apiKey); err != nil {
@@ -231,6 +236,9 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 		if groupErr := s.groups.SetChannelIDs(txCtx, id, input.GroupIDs); groupErr != nil {
 			return groupErr
 		}
+		if typeRow.Code == GeminiSubscriptionChannelType {
+			return nil // 授权成功后才创建账号凭据。
+		}
 		if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
 			if apiKey == "" {
 				return nil
@@ -263,6 +271,14 @@ func (s *sChannel) Update(ctx context.Context, id uint64, input adminapi.Channel
 	typeRow, typeConfig, err := s.writableType(ctx, input.Type)
 	if err != nil {
 		return err
+	}
+	if current.Type != typeRow.Code && (current.Type == GeminiSubscriptionChannelType || typeRow.Code == GeminiSubscriptionChannelType) {
+		return gerror.New("Gemini 订阅渠道不能与其他类型互转，请新建渠道")
+	}
+	if typeRow.Code == GeminiSubscriptionChannelType {
+		if err := validateGeminiSubscriptionInput(baseURL, input, current.ProxyUrlCipher != ""); err != nil {
+			return err
+		}
 	}
 	if input.APIKey != nil && strings.HasPrefix(strings.TrimSpace(*input.APIKey), codexCredentialPrefix) {
 		return gerror.New("不允许手工导入内部登录凭据")

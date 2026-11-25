@@ -15,7 +15,7 @@ import ChannelRouteCoverageSettings from '../components/ChannelRouteCoverageSett
 import ChannelTypeConfigEditor from '../components/ChannelTypeConfigEditor.vue'
 import ChannelTypeListPanel from '../components/ChannelTypeListPanel.vue'
 import { type ChannelTab, useChannelConfiguration } from '../composables/useChannelConfiguration'
-import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput, supportsOrganizationIdentity } from '../lib/channelForm'
+import { channelTypeBaseURL, createDefaultChannelAdvancedConfig, createEmptyChannelInput, geminiSubscriptionBaseURL, geminiSubscriptionType, supportsOrganizationIdentity } from '../lib/channelForm'
 import { showError, showSuccess } from '../lib/error'
 import { expandModelMappingRows, groupModelMappingRows, sortDiscoveredModels, splitPublicModelNames } from '../lib/models'
 import { closedWindowPayload, closedWindowsFromModels } from '../lib/time-window'
@@ -81,7 +81,12 @@ const drawerSize = window.innerWidth <= 600 ? '94%' : '620px'
 const typeDrawerSize = window.innerWidth <= 600 ? '94%' : '680px'
 const form = reactive<ChannelInput>(createEmptyChannelInput())
 const title = computed(() => editingId.value ? '编辑渠道' : '添加渠道')
-const activeTypes = computed(() => store.channelTypes.filter((item) => item.status === 1 || item.code === form.type))
+const editingGeminiSubscription = ref(false)
+const hasSavedProxy = ref(false)
+const geminiSubscription = computed(() => form.type === geminiSubscriptionType)
+const activeTypes = computed(() => store.channelTypes.filter((item) =>
+  (item.status === 1 || item.code === form.type) && (!editingId.value || item.code !== geminiSubscriptionType || editingGeminiSubscription.value),
+))
 const selectedChannelType = computed(() => store.channelTypes.find((item) => item.code === form.type))
 const codexChannel = computed(() => form.type === 'codex' || selectedChannelType.value?.config.login?.adapter === 'codex_device')
 // 组织 ID / 项目 ID 只对 OpenAI 官方渠道有意义（注入 OpenAI-Organization /
@@ -103,7 +108,7 @@ const credentialManagementKeyPair = computed(() => {
   return config?.quota?.adapter === 'volcengine_afp'
 })
 const credentialLoginAdapter = computed(() => store.channelTypes.find((item) => item.code === credentialChannel.value?.type)?.config.login?.adapter)
-const credentialLoginSupported = computed(() => ['external_link', 'codex_device'].includes(credentialLoginAdapter.value || ''))
+const credentialLoginSupported = computed(() => ['external_link', 'codex_device', 'gemini_oauth'].includes(credentialLoginAdapter.value || ''))
 const healthCheckModelOptions = computed(() => [...healthCheckModels.value]
   .filter((item) => item.enabled === 1)
   .sort((left, right) => left.publicName.localeCompare(right.publicName) || left.upstreamName.localeCompare(right.upstreamName)))
@@ -187,6 +192,8 @@ const {
 
 async function openCreate() {
   editingId.value = undefined
+  editingGeminiSubscription.value = false
+  hasSavedProxy.value = false
   healthCheckModels.value = []
   Object.assign(form, createEmptyChannelInput())
   drawerOpen.value = true
@@ -197,11 +204,25 @@ async function openCreate() {
 }
 
 function applyDefaultBaseURL(type: string) {
-  if (!editingId.value) form.baseUrl = channelTypeBaseURL(store.channelTypes, type)
+  if (!editingId.value) form.baseUrl = type === geminiSubscriptionType ? geminiSubscriptionBaseURL : channelTypeBaseURL(store.channelTypes, type)
+}
+
+function changeChannelType(type: string) {
+  if (type === form.type) return
+  if ((type === geminiSubscriptionType) !== geminiSubscription.value) {
+    if (editingId.value) return // Gemini 订阅渠道不能与其他渠道类型互转。
+    form.projectId = ''
+    form.organizationId = ''
+    form.apiKey = ''
+  }
+  form.type = type
+  applyDefaultBaseURL(type)
 }
 
 async function openEdit(channel: Channel) {
   editingId.value = channel.id
+  editingGeminiSubscription.value = channel.type === geminiSubscriptionType
+  hasSavedProxy.value = channel.hasProxy
   Object.assign(form, {
     name: channel.name,
     type: channel.type,
@@ -246,7 +267,9 @@ async function loadHealthCheckModels(channelID: number) {
 async function loadProxyUrl(channelID: number) {
   try {
     const data = await apiGet<{ proxyUrl: string }>(`/channels/${channelID}/proxy`)
-    if (editingId.value === channelID) form.proxyUrl = data.proxyUrl
+    if (editingId.value === channelID && (!geminiSubscription.value || form.proxyUrl === undefined)) {
+      form.proxyUrl = data.proxyUrl
+    }
   } catch (error) {
     showError(error, '读取代理地址失败')
   }
@@ -285,16 +308,34 @@ async function testProxy() {
 }
 
 async function save() {
-  if (!form.name.trim() || !form.type || !form.baseUrl.trim()) {
+  if (!form.name.trim() || !form.type || (!geminiSubscription.value && !form.baseUrl.trim())) {
     showError('请填写渠道名称、渠道类型和 API 根地址', '信息不完整')
     return
+  }
+  if (geminiSubscription.value) {
+    if (!form.projectId?.trim()) {
+      showError('请填写经 Google 账号授权的 Google Cloud 项目 ID', '信息不完整')
+      return
+    }
+    // 编辑时若尚未读取到已有代理，保持字段缺省；用户主动清空时必须拦截。
+    const hasProxy = form.proxyUrl === undefined ? hasSavedProxy.value : Boolean(form.proxyUrl.trim())
+    if (!hasProxy) {
+      showError('请配置渠道代理地址，Gemini 订阅不支持直连', '信息不完整')
+      return
+    }
   }
   saving.value = true
   try {
     const payload: ChannelInput = JSON.parse(JSON.stringify(form))
-    // 切成非 OpenAI 渠道时一并清掉组织 / 项目标识，避免留下
-    // 「表单里看不见、请求里却仍在发」的隐形配置。
-    if (!supportsOrganizationIdentityFields.value) {
+    if (geminiSubscription.value) {
+      payload.baseUrl = geminiSubscriptionBaseURL
+      payload.organizationId = ''
+      payload.projectId = payload.projectId?.trim()
+      payload.advancedConfig.backupBaseUrls = []
+      delete payload.apiKey
+      delete payload.managementKey
+    } else if (!supportsOrganizationIdentityFields.value) {
+      // 不发送界面中不可见的 OpenAI 组织与项目标识。
       payload.organizationId = ''
       payload.projectId = ''
     }
@@ -598,7 +639,7 @@ watch(activeTab, (tab) => {
     <ChannelQuotaDialog v-model="quotaOpen" :channel-name="quotaTitle" :loading="quotaLoading" :error="quotaError" :result="quotaResult" @refresh="quotaChannel && queryQuota(quotaChannel, true, quotaCredential)" />
     <ChannelCredentialDrawer v-model="credentialsOpen" :channel="credentialChannel" :quota-supported="credentialChannel?.quotaSupported" :management-key-supported="credentialUsesManagementKey" :management-key-pair="credentialManagementKeyPair" :login-supported="credentialLoginSupported" :login-adapter="credentialLoginAdapter" @changed="loadChannels" @query-quota="onCredentialQuota" />
 
-    <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form v-loading="channelFormLoading" label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select v-model="form.type" filterable placement="bottom-start" :fallback-placements="['bottom-start', 'top-start']" placeholder="选择渠道类型" @change="applyDefaultBaseURL"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-model="form.baseUrl" :placeholder="selectedChannelType?.config.baseUrl || 'https://api.openai.com/v1'" /></el-form-item><el-form-item v-if="!editingId" label="首个推理密钥（可选）"><el-input v-model="form.apiKey" type="password" show-password :placeholder="codexChannel ? '可选：填写 Codex 账号 access token（非 sk API Key）' : 'sk-... 或上游密钥；本地服务（如 Ollama）可留空'" autocomplete="new-password" /><span v-if="codexChannel">可留空，保存渠道后在「上游密钥」中通过平台登录添加账号；手动填写的 access token 过期后需重新填写。</span></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><ChannelRouteCoverageSettings v-model:priority="form.priority" v-model:weight="form.weight" v-model:backup-base-urls="form.advancedConfig.backupBaseUrls" v-model:health-check-model-id="form.healthCheckModelId" v-model:auto-disable-enabled="form.autoDisableEnabled" :editing="Boolean(editingId)" :models="healthCheckModelOptions" /><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :testing-proxy="testingProxy" @test-proxy="testProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
+    <el-drawer v-model="drawerOpen" :title="title" :size="drawerSize"><el-form v-loading="channelFormLoading" label-position="top"><div class="form-grid"><el-form-item label="渠道名称"><el-input v-model="form.name" placeholder="例如 OpenAI 主线路" /></el-form-item><el-form-item label="渠道类型"><el-select :model-value="form.type" filterable placement="bottom-start" :fallback-placements="['bottom-start', 'top-start']" placeholder="选择渠道类型" :disabled="editingGeminiSubscription" @update:model-value="changeChannelType"><el-option v-for="item in activeTypes" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.code" /></el-select></el-form-item><el-form-item label="API 根地址"><el-input v-if="geminiSubscription" :model-value="geminiSubscriptionBaseURL" readonly /><el-input v-else v-model="form.baseUrl" :placeholder="selectedChannelType?.config.baseUrl || 'https://api.openai.com/v1'" /></el-form-item><el-form-item v-if="!editingId && !geminiSubscription" label="首个推理密钥（可选）"><el-input v-model="form.apiKey" type="password" show-password :placeholder="codexChannel ? '可选：填写 Codex 账号 access token（非 sk API Key）' : 'sk-... 或上游密钥；本地服务（如 Ollama）可留空'" autocomplete="new-password" /><span v-if="codexChannel">可留空，保存渠道后在「上游密钥」中通过平台登录添加账号；手动填写的 access token 过期后需重新填写。</span></el-form-item><el-form-item v-if="supportsOrganizationIdentityFields" label="组织 ID"><el-input v-model="form.organizationId" clearable /></el-form-item><el-form-item v-if="geminiSubscription" label="Google Cloud 项目 ID" required><el-input v-model="form.projectId" placeholder="输入经 Google 账号授权的项目 ID" clearable /></el-form-item><el-form-item v-else-if="supportsOrganizationIdentityFields" label="项目 ID"><el-input v-model="form.projectId" clearable /></el-form-item><el-form-item label="状态"><el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-alert v-if="geminiSubscription && !editingId" type="info" :closable="false" title="请在高级配置中填写必需的渠道代理。保存后，在「上游密钥」中使用 Google 账号登录。" /><ChannelRouteCoverageSettings v-model:priority="form.priority" v-model:weight="form.weight" v-model:backup-base-urls="form.advancedConfig.backupBaseUrls" v-model:health-check-model-id="form.healthCheckModelId" v-model:auto-disable-enabled="form.autoDisableEnabled" :editing="Boolean(editingId)" :models="healthCheckModelOptions" :fixed-base-url="geminiSubscription" /><el-form-item label="渠道分组"><el-select v-model="form.groupIds" multiple filterable clearable placeholder="不选择表示未分组"><el-option v-for="item in store.channelGroups" :key="item.id" :label="`${item.name} (${item.code})`" :value="item.id" /></el-select></el-form-item><ChannelAdvancedSettings v-model:config="form.advancedConfig" v-model:proxy-url="form.proxyUrl" :proxy-required="geminiSubscription" :testing-proxy="testingProxy" @test-proxy="testProxy" /></el-form><template #footer><el-button @click="drawerOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存渠道</el-button></template></el-drawer>
 
     <el-drawer v-model="groupDrawerOpen" :title="editingGroup ? '编辑渠道分组' : '添加渠道分组'" :size="drawerSize"><el-form v-loading="groupFormLoading" label-position="top"><div class="form-grid"><el-form-item label="分组名称"><el-input v-model="groupForm.name" placeholder="例如 高优先级" /></el-form-item><el-form-item label="分组代码"><el-input v-model="groupForm.code" :disabled="Boolean(editingGroup)" placeholder="例如 premium" /></el-form-item><el-form-item label="状态"><el-switch v-model="groupForm.status" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="停用" /></el-form-item></div><el-form-item label="说明"><el-input v-model="groupForm.description" maxlength="255" show-word-limit /></el-form-item><el-form-item label="包含渠道"><el-select v-model="groupForm.channelIds" multiple filterable clearable placeholder="选择渠道"><el-option v-for="item in store.channels" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="groupDrawerOpen = false">取消</el-button><el-button type="primary" :loading="groupSaving" @click="saveGroup">保存分组</el-button></template></el-drawer>
 

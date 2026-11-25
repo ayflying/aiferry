@@ -43,8 +43,11 @@ func (s *sChannel) StartChannelLogin(ctx context.Context, channelID uint64) (Cha
 	if err != nil {
 		return ChannelLoginSession{}, err
 	}
-	if config.Login.Adapter == channeltype.AdapterLoginCodexDevice {
+	switch config.Login.Adapter {
+	case channeltype.AdapterLoginCodexDevice:
 		return s.startCodexLogin(ctx, channel)
+	case channeltype.AdapterLoginGeminiOAuth:
+		return s.startGeminiLogin(ctx, channel)
 	}
 	endpoint, err := loginEndpoint(channel.BaseUrl, config, "auth/state")
 	if err != nil {
@@ -80,8 +83,11 @@ func (s *sChannel) PollChannelLogin(ctx context.Context, channelID uint64, state
 	if err != nil {
 		return ChannelLoginResult{}, err
 	}
-	if config.Login.Adapter == channeltype.AdapterLoginCodexDevice {
+	switch config.Login.Adapter {
+	case channeltype.AdapterLoginCodexDevice:
 		return s.pollCodexLogin(ctx, channel, state)
+	case channeltype.AdapterLoginGeminiOAuth:
+		return s.pollGeminiLogin(ctx, channel, state)
 	}
 	endpoint, err := loginEndpoint(channel.BaseUrl, config, "auth/token")
 	if err != nil {
@@ -123,7 +129,7 @@ func (s *sChannel) loginContext(ctx context.Context, channelID uint64) (entity.C
 	if err != nil {
 		return entity.Channels{}, channeltype.Config{}, err
 	}
-	if config.Login.Adapter != channeltype.AdapterLoginExternalLink && config.Login.Adapter != channeltype.AdapterLoginCodexDevice {
+	if config.Login.Adapter != channeltype.AdapterLoginExternalLink && config.Login.Adapter != channeltype.AdapterLoginCodexDevice && config.Login.Adapter != channeltype.AdapterLoginGeminiOAuth {
 		return entity.Channels{}, channeltype.Config{}, gerror.Newf("渠道类型 %s 不支持登录，请手工填写密钥", channel.Type)
 	}
 	return channel, config, nil

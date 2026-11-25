@@ -2,14 +2,15 @@ package channel
 
 import (
 	"context"
+	"net/http"
+	"strings"
+
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/tidwall/gjson"
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/modelmetadata"
 	"github.com/yunloli/aiferry/internal/model/do"
 	"github.com/yunloli/aiferry/internal/model/entity"
-	"net/http"
-	"strings"
 )
 
 func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]DiscoveredModel, error) {
@@ -17,31 +18,7 @@ func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]Disc
 	if err != nil {
 		return nil, err
 	}
-	_, config, err := s.types.GetByCode(ctx, channel.Type)
-	if err != nil {
-		return nil, err
-	}
-	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Models.Path)
-	if err != nil {
-		return nil, err
-	}
-	credential, err := s.CredentialForTest(ctx, channelID, 0)
-	if err != nil && config.Models.AuthType != "management_key" && config.Models.AuthType != "none" {
-		return nil, err
-	}
-	body, err := s.fetchUpstreamJSON(ctx, channel, credential.APIKeyCipher, upstreamJSONRequest{
-		Method:       config.Models.Method,
-		Endpoint:     endpoint,
-		AuthType:     config.Models.AuthType,
-		HeaderName:   config.Models.HeaderName,
-		HeaderPrefix: config.Models.HeaderPrefix,
-		BodyLimit:    4 << 20,
-		RequestError: "create model discovery request",
-		FetchError:   "fetch upstream models",
-		ReadError:    "read upstream models",
-		InvalidError: "upstream model query returned invalid JSON",
-		StatusError:  upstreamModelQueryError,
-	})
+	names, metadata, err := s.fetchDiscoveredModels(ctx, channel)
 	if err != nil {
 		return nil, err
 	}
@@ -58,14 +35,6 @@ func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]Disc
 		}
 	}
 
-	names, err := modelNamesFromJSON(body, config.Models.ListPath, config.Models.IDPath)
-	if err != nil {
-		return nil, err
-	}
-	metadata, err := modelMetadataFromJSON(body, config.Models.ListPath, config.Models.IDPath)
-	if err != nil {
-		return nil, err
-	}
 	if err = modelmetadata.SaveUpstream(ctx, channelID, metadata); err != nil {
 		return nil, err
 	}
@@ -84,6 +53,50 @@ func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]Disc
 		})
 	}
 	return models, nil
+}
+
+func (s *sChannel) fetchDiscoveredModels(ctx context.Context, channel entity.Channels) ([]string, map[string]modelmetadata.Metadata, error) {
+	if channel.Type == GeminiSubscriptionChannelType {
+		credential, err := s.CredentialForTest(ctx, channel.Id, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.discoverGeminiSubscriptionModels(ctx, channel, credential)
+	}
+	_, config, err := s.types.GetByCode(ctx, channel.Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	endpoint, err := resolveEndpointURL(channel.BaseUrl, config.Models.Path)
+	if err != nil {
+		return nil, nil, err
+	}
+	credential, err := s.CredentialForTest(ctx, channel.Id, 0)
+	if err != nil && config.Models.AuthType != "management_key" && config.Models.AuthType != "none" {
+		return nil, nil, err
+	}
+	body, err := s.fetchUpstreamJSON(ctx, channel, credential.APIKeyCipher, upstreamJSONRequest{
+		Method:       config.Models.Method,
+		Endpoint:     endpoint,
+		AuthType:     config.Models.AuthType,
+		HeaderName:   config.Models.HeaderName,
+		HeaderPrefix: config.Models.HeaderPrefix,
+		BodyLimit:    4 << 20,
+		RequestError: "create model discovery request",
+		FetchError:   "fetch upstream models",
+		ReadError:    "read upstream models",
+		InvalidError: "upstream model query returned invalid JSON",
+		StatusError:  upstreamModelQueryError,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	names, err := modelNamesFromJSON(body, config.Models.ListPath, config.Models.IDPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	metadata, err := modelMetadataFromJSON(body, config.Models.ListPath, config.Models.IDPath)
+	return names, metadata, err
 }
 
 func modelNamesFromJSON(body []byte, listPath, idPath string) ([]string, error) {
