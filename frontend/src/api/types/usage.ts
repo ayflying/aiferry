@@ -114,6 +114,8 @@ export interface BillingDetails {
   currency: string
   charged: boolean
   reconstructed?: boolean
+  /** 实际取价的模型名：正常是路由模型（对外公开名），该名未配价格时回退到上游模型。 */
+  pricedModel?: string
   rule?: BillingRuleSnapshot
   items: BillingItem[]
   subtotal: string

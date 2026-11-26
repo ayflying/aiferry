@@ -177,6 +177,7 @@ function billingSummary() {
             <el-descriptions-item label="计费方式">{{ billingModeLabel }}</el-descriptions-item>
             <el-descriptions-item label="币种">{{ currencyLabel }}</el-descriptions-item>
             <el-descriptions-item label="价格来源">{{ billingSourceLabel }}</el-descriptions-item>
+            <el-descriptions-item v-if="billingDetails.pricedModel" label="实际计价模型"><span class="mono">{{ billingDetails.pricedModel }}</span></el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="命中规则">{{ billingDetails.rule.name || `规则 #${billingDetails.rule.id}` }} · P{{ billingDetails.rule.priority }} · {{ billingDetails.rule.source === 'sync' ? '上游同步' : '人工规则' }}</el-descriptions-item>
             <el-descriptions-item v-if="billingDetails.rule" label="规则条件"><span class="detail-value mono">{{ billingDetails.rule.conditions }}</span></el-descriptions-item>
             <el-descriptions-item label="模型价格小计"><strong class="cost-value">{{ formatPreciseCost(isSuccess ? billingDetails.subtotal : 0, billingDetails.currency) }}</strong></el-descriptions-item>

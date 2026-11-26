@@ -415,15 +415,15 @@ func (s *sRelay) recordAudioUsage(ctx context.Context, requestID string, key api
 	}
 	// 音频接口上游不返回 token usage：TTS 按字符计价的规则在定价层处理，
 	// 这里把 TTS 二进制响应的 tokens 留空；若模型已定价但估算不出成本，则按免费记录，不阻塞响应。
-	// 与对话转发同一口径：用量与计费按路由模型（对外公开名）计算。
+	// 与对话转发同一口径：用量与计费按路由模型（对外公开名）计算，未配价格时回退上游名。
 	billingModel := routedModelName(candidate, requestedModel)
-	billingDetails := s.prices.EstimateBreakdown(billingModel, upstreamEndpoint, result.tokens, startedAt)
+	billingDetails := s.estimateBillableBreakdown(candidate, requestedModel, upstreamEndpoint, result.tokens, startedAt, false)
 	recordStatus := result.status
 	recordError := result.errorMessage
 	if recordStatus < http.StatusOK || recordStatus >= http.StatusMultipleChoices {
-		billingDetails = s.prices.EstimateFailureBreakdown(billingModel, upstreamEndpoint, result.tokens, startedAt)
+		billingDetails = s.estimateBillableBreakdown(candidate, requestedModel, upstreamEndpoint, result.tokens, startedAt, true)
 	}
-	if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && billingDetails == nil && s.requiresBalanceCheck(billingModel) {
+	if result.status >= http.StatusOK && result.status < http.StatusMultipleChoices && billingDetails == nil && s.candidateRequiresBalanceCheck(candidate, requestedModel) {
 		// 已定价模型无法估算音频成本时记录 0 成本，避免误判为不可计费而中断已成功的请求。
 		g.Log().Debugf(ctx, "audio usage %s: no billing breakdown for priced model %s", requestID, billingModel)
 	}

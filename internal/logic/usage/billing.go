@@ -31,14 +31,18 @@ type BillingRuleSnapshot struct {
 }
 
 type BillingBreakdown struct {
-	BillingMode   string               `json:"billingMode"`
-	Currency      string               `json:"currency"`
-	Charged       bool                 `json:"charged"`
-	Reconstructed bool                 `json:"reconstructed,omitempty"`
-	Rule          *BillingRuleSnapshot `json:"rule,omitempty"`
-	Items         []BillingItem        `json:"items"`
-	Subtotal      string               `json:"subtotal"`
-	Total         string               `json:"total"`
+	BillingMode   string `json:"billingMode"`
+	Currency      string `json:"currency"`
+	Charged       bool   `json:"charged"`
+	Reconstructed bool   `json:"reconstructed,omitempty"`
+	// PricedModel 记录本次实际取价的模型名。请求按映射后的对外名统计，
+	// 但对外名可能还没配价格，此时会回退到上游模型的价格；把它落进账单快照，
+	// 事后核对金额时就不用再猜是按哪个模型算的。
+	PricedModel string               `json:"pricedModel,omitempty"`
+	Rule        *BillingRuleSnapshot `json:"rule,omitempty"`
+	Items       []BillingItem        `json:"items"`
+	Subtotal    string               `json:"subtotal"`
+	Total       string               `json:"total"`
 }
 
 func EstimateBreakdown(tokens TokenUsage, rates PriceRates) *BillingBreakdown {

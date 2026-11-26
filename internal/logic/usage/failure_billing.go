@@ -11,6 +11,7 @@ import (
 type FailedBillingDetails struct {
 	BillingMode string
 	Currency    string
+	PricedModel string
 	Rule        *BillingRuleSnapshot
 	Items       []BillingItem
 	Subtotal    string
@@ -49,6 +50,7 @@ func NewFailedBillingDetails(input *FailedBillingDetails) *BillingBreakdown {
 	return &BillingBreakdown{
 		BillingMode: mode,
 		Currency:    currency,
+		PricedModel: input.PricedModel,
 		Rule:        rule,
 		Charged:     false,
 		Items:       items,

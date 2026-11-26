@@ -35,9 +35,10 @@ func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.A
 	// 上游实际模型只写进 upstream_model 供排查。客户端可以按上游原始名直接请求
 	// （双入口路由），若沿用请求里的原始字符串，同一模型会拆成两个名字统计，
 	// 也会让人误以为费用按被路由的上游模型计算。
+	// 公开名可能还没配价格，此时按上游名价格兜底，并把实际取价的模型写进账单快照。
 	billingModel := routedModelName(candidate, requestedModel)
-	billingDetails := s.prices.EstimateBreakdown(billingModel, upstreamEndpoint, result.tokens, startedAt)
-	cost, chargeable := pricedUsageCost(s.requiresBalanceCheck(billingModel), billingDetails)
+	billingDetails := s.estimateBillableBreakdown(candidate, requestedModel, upstreamEndpoint, result.tokens, startedAt, false)
+	cost, chargeable := pricedUsageCost(s.candidateRequiresBalanceCheck(candidate, requestedModel), billingDetails)
 	recordStatus := result.status
 	recordError := result.errorMessage
 	// 流式响应被截断时上游可能已经报了 200，但客户端拿到的不是完整回答：
@@ -52,7 +53,7 @@ func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.A
 	}
 	// 失败请求保留当时的套餐和费率（包括无 usage 的零数量项），所有费用归零且不扣款。
 	if !billable {
-		billingDetails = s.prices.EstimateFailureBreakdown(billingModel, upstreamEndpoint, result.tokens, startedAt)
+		billingDetails = s.estimateBillableBreakdown(candidate, requestedModel, upstreamEndpoint, result.tokens, startedAt, true)
 		estimatedCost, failureDetails := failedUsageBilling(billingDetails)
 		cost, billingDetails = estimatedCost, failureDetails
 	}
@@ -145,7 +146,7 @@ func (s *sRelay) missingBillableUsage(candidate Candidate, endpoint string, resu
 	if result.status < 200 || result.status >= 300 {
 		return false
 	}
-	if !s.requiresBalanceCheck(candidate.PublicName) {
+	if !s.candidateRequiresBalanceCheck(candidate, candidate.PublicName) {
 		return false
 	}
 	upstreamEndpoint := result.upstreamEndpoint
@@ -154,7 +155,7 @@ func (s *sRelay) missingBillableUsage(candidate Candidate, endpoint string, resu
 	}
 	// 这里是对「刚刚拿到的这份响应」做实时判断，用当前时刻折算生效时段即可；
 	// 真正落账的金额在 record 里按请求起始时刻重算。
-	return s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, time.Now()) == nil
+	return s.estimateBillableBreakdown(candidate, candidate.PublicName, upstreamEndpoint, result.tokens, time.Now(), false) == nil
 }
 
 // routedModelName 返回用量日志与计费应使用的模型名，也就是「路由模型」：
@@ -167,16 +168,55 @@ func routedModelName(candidate Candidate, requestedModel string) string {
 	return requestedModel
 }
 
+// priceModelNames 返回取价时可以尝试的模型名，按优先级排列：先是路由模型（对外公开名），
+// 再是上游实际模型。上游名只作兜底——公开名通常才是价格表里的模型，但映射出来的公开名
+// 可能还没维护价格，此时用上游名价格兜底，避免整类请求被静默算成免费。
+func priceModelNames(candidate Candidate, requestedModel string) []string {
+	primary := routedModelName(candidate, requestedModel)
+	names := []string{primary}
+	if upstream := strings.TrimSpace(candidate.UpstreamName); upstream != "" && upstream != primary {
+		names = append(names, upstream)
+	}
+	return names
+}
+
+// estimateBillableBreakdown 按 priceModelNames 的顺序取第一个可算出的账单，
+// 并把实际取价的模型写进快照的 PricedModel，便于事后核对金额来源。
+func (s *sRelay) estimateBillableBreakdown(candidate Candidate, requestedModel, endpoint string, tokens usage.TokenUsage, at time.Time, failure bool) *usage.BillingBreakdown {
+	for _, name := range priceModelNames(candidate, requestedModel) {
+		breakdown := s.prices.EstimateBreakdown(name, endpoint, tokens, at)
+		if failure {
+			breakdown = s.prices.EstimateFailureBreakdown(name, endpoint, tokens, at)
+		}
+		if breakdown != nil {
+			breakdown.PricedModel = name
+			return breakdown
+		}
+	}
+	return nil
+}
+
+// candidateRequiresBalanceCheck 判断该候选是否已定价（含上游名兜底）：
+// 只有确实能算钱时才做余额预检，免费模型不因余额不足被拒。
+func (s *sRelay) candidateRequiresBalanceCheck(candidate Candidate, requestedModel string) bool {
+	for _, name := range priceModelNames(candidate, requestedModel) {
+		if s.requiresBalanceCheck(name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *sRelay) requiresBalanceCheck(modelName string) bool {
 	return s.prices.IsPriced(modelName)
 }
 
-// candidatesRequireBalanceCheck 只要有一个候选的公开名已定价就需要余额预检：
+// candidatesRequireBalanceCheck 只要有一个候选已定价就需要余额预检：
 // 请求可以写映射后的公开名，也可以写上游原始名，实际计费与预检都按
-// candidate.PublicName 判定，避免用上游原始名绕过余额预检。
+// 公开名（未配价格时回退上游名）判定，避免用上游原始名绕过余额预检。
 func (s *sRelay) candidatesRequireBalanceCheck(candidates []Candidate) bool {
 	for _, candidate := range candidates {
-		if s.requiresBalanceCheck(candidate.PublicName) {
+		if s.candidateRequiresBalanceCheck(candidate, candidate.PublicName) {
 			return true
 		}
 	}
@@ -204,6 +244,7 @@ func failedUsageBilling(billingDetails *usage.BillingBreakdown) (*decimal.Decima
 	details := usage.NewFailedBillingDetails(&usage.FailedBillingDetails{
 		BillingMode: billingDetails.BillingMode,
 		Currency:    billingDetails.Currency,
+		PricedModel: billingDetails.PricedModel,
 		Rule:        billingDetails.Rule,
 		Items:       billingDetails.Items,
 	})

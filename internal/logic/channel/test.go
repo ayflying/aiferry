@@ -52,7 +52,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 	if err != nil {
 		return TestResult{}, err
 	}
-	if testChargesUser(userID, channel.CreatedByUserId) && s.prices.IsPriced(model.PublicName) {
+	if testChargesUser(userID, channel.CreatedByUserId) && s.modelIsPriced(model) {
 		if err := s.users.CheckBalance(ctx, userID); err != nil {
 			return TestResult{}, err
 		}
