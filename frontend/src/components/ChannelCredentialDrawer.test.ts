@@ -81,7 +81,7 @@ describe('添加上游密钥', () => {
     const rowSlots = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.({ row: { id: 7, index: 1, keyPrefix: 'Google #1', status: 1, hasManagementKey: true } })) })
     const wrapper = shallowMount(ChannelCredentialDrawer, {
       props: { modelValue: true, channel: { ...channel, type: 'gemini_subscription' }, loginAdapter: 'gemini_oauth', managementKeySupported: true },
-      global: { stubs: { ChannelLoginDialog: false, ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElRadioGroup: RadioGroup, ElTable: Slot, ElTableColumn: rowSlots, ElTooltip: Slot } },
+      global: { stubs: { ChannelLoginDialog: false, ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElRadioGroup: RadioGroup, ElTable: Slot, ElTableColumn: rowSlots, ElTooltip: Slot, ElForm: Slot, ElFormItem: Slot } },
     })
     expect(wrapper.find('button[aria-label="删除 Google #1"]').exists()).toBe(true)
     expect(wrapper.find('button[aria-label="查看 Google #1"]').exists()).toBe(false)
@@ -90,14 +90,50 @@ describe('添加上游密钥', () => {
     const dialog = wrapper.find('[data-title="添加 Google 账号"]')
     expect(dialog.exists()).toBe(true)
     expect(dialog.findComponent({ name: 'ElRadioGroup' }).exists()).toBe(false)
-    expect(dialog.findComponent({ name: 'ElInput' }).exists()).toBe(false)
+    const project = dialog.findComponent({ name: 'ElInput' })
+    expect(project.attributes('required')).toBeDefined()
+    project.vm.$emit('update:modelValue', '  ')
+    await flushPromises()
+    expect(button(wrapper, '打开 Google 登录页').attributes('disabled')).toBeDefined()
+    await button(wrapper, '打开 Google 登录页').trigger('click')
     expect(api.post).not.toHaveBeenCalled()
+    project.vm.$emit('update:modelValue', ' google-project ')
+    await flushPromises()
     await button(wrapper, '打开 Google 登录页').trigger('click')
     await flushPromises()
-    expect(api.post).toHaveBeenCalledWith('/channels/35/credentials/login')
+    expect(api.post).toHaveBeenCalledWith('/channels/35/credentials/login', { projectId: 'google-project' })
     await vi.advanceTimersByTimeAsync(3000)
     expect(api.post).toHaveBeenCalledWith('/channels/35/credentials/login/poll', { state: 'google-state' })
     expect(wrapper.emitted('changed')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it.each([true, false, undefined])('账号是否可重新登录由 canRelogin=%j 决定', async (canRelogin) => {
+    const row = { id: 7, index: 1, keyPrefix: 'Google #1', projectId: 'saved-project', canRelogin }
+    const rowSlots = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.({ row })) })
+    const wrapper = shallowMount(ChannelCredentialDrawer, {
+      props: { modelValue: true, channel: { ...channel, type: 'gemini_subscription' } },
+      global: { stubs: { ChannelLoginDialog: false, ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElTable: Slot, ElTableColumn: rowSlots, ElTooltip: Slot } },
+    })
+    const action = wrapper.find('button[aria-label="重新登录账号 #1"]')
+    expect(action.exists()).toBe(canRelogin === true)
+    if (canRelogin) {
+      vi.spyOn(window, 'open').mockReturnValue(null)
+      api.post.mockResolvedValue({ state: 'relogin-state', authUrl: 'https://accounts.google.com/' })
+      await action.trigger('click')
+      const dialog = wrapper.find('[data-title="重新登录 · 账号 #1"]')
+      expect(dialog.exists()).toBe(true)
+      expect(dialog.findComponent({ name: 'ElInput' }).exists()).toBe(false)
+      expect(api.post).not.toHaveBeenCalled()
+      await button(wrapper, '开始重新登录').trigger('click')
+      await flushPromises()
+      await button(wrapper, '重新发起登录').trigger('click')
+      await flushPromises()
+      expect(api.post.mock.calls).toEqual([
+        ['/channels/35/credentials/login', { credentialId: 7 }],
+        ['/channels/35/credentials/login', { credentialId: 7 }],
+      ])
+    }
     wrapper.unmount()
   })
 

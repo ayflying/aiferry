@@ -244,8 +244,12 @@ export interface ChannelLoginResult {
   uid: string
 }
 
+export type ChannelLoginInput = { projectId: string; credentialId?: never } | { credentialId: number; projectId?: never }
+
 export interface ChannelCredential {
   id: number
+  canRelogin?: boolean
+  projectId?: string
   /** 固定序号：按创建顺序编号（含已删密钥占位），与用量明细「渠道 #N」一致；删除不重排。 */
   index: number
   keyPrefix: string
@@ -412,7 +416,7 @@ export interface ChannelInput {
   managementKey?: string
   proxyUrl?: string
   organizationId: string
-  projectId: string
+  projectId?: string
   status: number
   priority: number
   weight: number

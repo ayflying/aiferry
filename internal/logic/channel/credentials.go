@@ -31,6 +31,8 @@ type CredentialView struct {
 	// 历史调用日志仍保留，但被删密钥的外键引用会置空。
 	Index                  uint       `json:"index"`
 	KeyPrefix              string     `json:"keyPrefix"`
+	CanRelogin             bool       `json:"canRelogin"`
+	ProjectID              string     `json:"projectId,omitempty"`
 	Remark                 string     `json:"remark"`
 	HasManagementKey       bool       `json:"hasManagementKey"`
 	Status                 int        `json:"status"`
@@ -161,6 +163,7 @@ func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]Cre
 			return nil, err
 		}
 		view := credentialView(row, channelTypeConfig.Costs)
+		s.populateCredentialLoginView(&view, channel, channelTypeConfig.Login.Adapter, row)
 		view.Index = indexes[row.Id]
 		views = append(views, view)
 	}
@@ -380,24 +383,45 @@ func (s *sChannel) invalidateCredentialBinding(ctx context.Context, apiKeyID, ch
 // 始终用同一把密钥，新对话重新随机——键级绑定是「这个 API Key 的所有对话共用一把」，
 // 与「新对话随机一把」相反，因此有会话标识时不再走绑定表。
 func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID, modelID uint64, excluded map[uint64]struct{}) (RouteCredential, error) {
-	if credential, ok := s.selectCredentialForConversation(ctx, channelID, modelID, excluded); ok {
-		return credential, nil
-	}
-	credentials, err := s.availableCredentials(ctx, channelID, excluded)
+	eligible, err := routeCredentialEligibility(ctx, channelID, modelID)
 	if err != nil {
 		return RouteCredential{}, err
 	}
-	// 按 (channel, model) 组合分数/冷却过滤：排除冷却中的组合。
+	if eligible != nil && len(eligible) == 0 {
+		return RouteCredential{}, &CredentialUnavailableError{ChannelID: channelID, Reason: "没有已启用、且已同步此 Gemini 模型的账号"}
+	}
+	credentials, err := s.availableCredentials(ctx, channelID, nil)
+	if err != nil {
+		return RouteCredential{}, err
+	}
+	credentials = filterEligibleCredentials(credentials, eligible)
 	comboHealth := s.comboHealthByCredential(ctx, channelID, modelID)
+	ignoreCooldown := ctx.Value(withoutCredentialComboCooldownKey{}) == true
 	available := make([]credentialRow, 0, len(credentials))
 	for _, credential := range credentials {
-		if ch, ok := comboHealth[credential.Id]; ok && ch.cooling {
+		if comboHealth[credential.Id].cooling && !ignoreCooldown {
 			continue
 		}
 		available = append(available, credential)
 	}
+	if credential, ok := s.selectCredentialForConversation(ctx, channelID, modelID, available, excluded, comboHealth); ok {
+		return credential, nil
+	}
+	afterExclusion := 0
+	for _, credential := range credentials {
+		if _, skip := excluded[credential.Id]; !skip {
+			afterExclusion++
+		}
+	}
+	usable := available[:0]
+	for _, credential := range available {
+		if _, skip := excluded[credential.Id]; !skip {
+			usable = append(usable, credential)
+		}
+	}
+	available = usable
 	if len(available) == 0 {
-		return RouteCredential{}, s.credentialUnavailableError(ctx, channelID, len(credentials), len(excluded))
+		return RouteCredential{}, s.credentialUnavailableError(ctx, channelID, afterExclusion, len(excluded))
 	}
 	var binding entity.ApiKeyChannelCredentials
 	if excluded == nil {

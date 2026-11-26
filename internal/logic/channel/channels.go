@@ -179,6 +179,7 @@ func (s *sChannel) Create(ctx context.Context, input adminapi.ChannelInput) (uin
 		if err := validateGeminiSubscriptionInput(baseURL, input, false); err != nil {
 			return 0, err
 		}
+		input.ProjectID = "" // 新渠道的项目只在账号授权时配置。
 	}
 	if typeConfig.Login.Adapter == channeltype.AdapterLoginCodexDevice {
 		if apiKey != "" {
@@ -279,6 +280,8 @@ func (s *sChannel) Update(ctx context.Context, id uint64, input adminapi.Channel
 		if err := validateGeminiSubscriptionInput(baseURL, input, current.ProxyUrlCipher != ""); err != nil {
 			return err
 		}
+		// 旧凭据仍可能依赖原渠道项目，编辑渠道不能覆盖它。
+		input.ProjectID = current.ProjectId
 	}
 	if input.APIKey != nil && strings.HasPrefix(strings.TrimSpace(*input.APIKey), codexCredentialPrefix) {
 		return gerror.New("不允许手工导入内部登录凭据")

@@ -33,6 +33,14 @@ const credentialAffinityTTL = 24 * time.Hour
 // 解析（客户端会话头、metadata.user_id 或首条用户消息指纹），渠道层只消费。
 type conversationAffinityContextKey struct{}
 
+type withoutCredentialComboCooldownKey struct{}
+
+// WithoutCredentialComboCooldown is for relay's last-resort probe only. It
+// never disables account model eligibility or credential-level cooldown.
+func WithoutCredentialComboCooldown(ctx context.Context) context.Context {
+	return context.WithValue(ctx, withoutCredentialComboCooldownKey{}, true)
+}
+
 // WithConversationAffinity 把会话标识放进 ctx，SelectCredential 据此固定密钥。
 // 空白标识直接返回原 ctx：没有会话标识的请求（管理端测试、单轮调用）保持原有
 // 按键级绑定的行为，不引入新的随机性。
@@ -122,28 +130,11 @@ func selectConversationCredential(available []credentialRow, affinityID uint64, 
 	return weightedSelect(usable, comboHealth), true
 }
 
-// selectCredentialForConversation 是 selectConversationCredential 的取数外壳。
-// 返回 false 表示「本请求没有会话标识，或会话路径下没有可用密钥」，由调用方
-// 回到原有逻辑（那里会给出与过滤条件一致的不可用诊断文案）。
-func (s *sChannel) selectCredentialForConversation(ctx context.Context, channelID, modelID uint64, excluded map[uint64]struct{}) (RouteCredential, bool) {
+// selectCredentialForConversation receives the same model-eligible and uncooled
+// pool as API-key affinity; only per-request exclusions are applied here.
+func (s *sChannel) selectCredentialForConversation(ctx context.Context, channelID, modelID uint64, available []credentialRow, excluded map[uint64]struct{}, comboHealth map[uint64]comboHealth) (RouteCredential, bool) {
 	conversationKey := conversationAffinityFromContext(ctx)
-	if conversationKey == "" {
-		return RouteCredential{}, false
-	}
-	rows, err := s.availableCredentials(ctx, channelID, nil)
-	if err != nil {
-		g.Log().Warningf(ctx, "读取会话密钥池失败 channel=%d: %v", channelID, err)
-		return RouteCredential{}, false
-	}
-	comboHealth := s.comboHealthByCredential(ctx, channelID, modelID)
-	available := make([]credentialRow, 0, len(rows))
-	for _, row := range rows {
-		if state, ok := comboHealth[row.Id]; ok && state.cooling {
-			continue
-		}
-		available = append(available, row)
-	}
-	if len(available) == 0 {
+	if conversationKey == "" || len(available) == 0 {
 		return RouteCredential{}, false
 	}
 	key := credentialAffinityKey(conversationKey, channelID, modelID)

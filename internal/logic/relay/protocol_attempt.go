@@ -185,13 +185,6 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		upstreamURL = s.rerankUpstreamURL(ctx, candidate)
 	}
 	geminiSubscription := candidate.ChannelType == channel.GeminiSubscriptionChannelType
-	if geminiSubscription {
-		upstreamURL = channel.GeminiSubscriptionBaseURL + channel.GeminiSubscriptionStreamPath
-		body, err = buildGeminiSubscriptionBody(body, candidate)
-		if err != nil {
-			return attemptResult{status: http.StatusBadRequest, body: openAIError("invalid_request_error", err.Error()), errorMessage: err.Error()}, false, nil
-		}
-	}
 	forcedStream := false
 	if candidate.ChannelType == "codex" {
 		body, err = channel.ApplyCodexBody(body)
@@ -222,6 +215,19 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if stream && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
+	var geminiToken string
+	if geminiSubscription {
+		var accountProject string
+		geminiToken, accountProject, err = s.channels.GeminiSubscriptionAuthorization(ctx, candidate.ChannelID, candidate.ChannelCredentialID, candidate.APIKeyCipher, candidate.ProjectID)
+		if err != nil {
+			return attemptResult{}, false, err
+		}
+		upstreamURL = geminiSubscriptionURL
+		body, err = buildGeminiSubscriptionBody(body, candidate.UpstreamName, accountProject)
+		if err != nil {
+			return attemptResult{status: http.StatusBadRequest, body: openAIError("invalid_request_error", err.Error()), errorMessage: err.Error()}, false, nil
+		}
+	}
 	requestCtx := ctx
 	cancel := func() {}
 	if !stream {
@@ -243,7 +249,12 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if plan.ClientEndpoint() == "/rerank" {
 		endpointName = "rerank"
 	}
-	if err = s.applyEndpointAuthHeaders(ctx, req, candidate, endpointName); err != nil {
+	if geminiSubscription {
+		err = applyGeminiSubscriptionToken(req, geminiToken)
+	} else {
+		err = s.applyEndpointAuthHeaders(ctx, req, candidate, endpointName)
+	}
+	if err != nil {
 		return attemptResult{}, false, err
 	}
 	req.Header.Set("Content-Type", "application/json")

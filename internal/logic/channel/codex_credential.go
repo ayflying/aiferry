@@ -2,17 +2,13 @@ package channel
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/yunloli/aiferry/internal/dao"
-	"github.com/yunloli/aiferry/internal/model/do"
 )
 
 const codexCredentialPrefix = "aiferry:codex:v1:"
@@ -25,6 +21,7 @@ type codexCredential struct {
 	AccessToken  string `json:"accessToken"`
 	RefreshToken string `json:"refreshToken"`
 	AccountID    string `json:"accountId"`
+	Subject      string `json:"subject,omitempty"`
 	ExpiresAt    int64  `json:"expiresAt"`
 }
 
@@ -92,7 +89,7 @@ func newCodexCredential(tokens codexTokenResponse) (codexCredential, error) {
 	if err != nil {
 		return codexCredential{}, err
 	}
-	return codexCredential{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, AccountID: account, ExpiresAt: expiry}, nil
+	return codexCredential{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, AccountID: account, Subject: codexTokenSubject(tokens.IDToken), ExpiresAt: expiry}, nil
 }
 
 func encodeCodexCredential(credential codexCredential) string {
@@ -110,41 +107,82 @@ func decodeCodexCredential(plain string) (codexCredential, error) {
 
 func codexAccountHash(accountID string) string { return upstreamKeyHash("codex-account:" + accountID) }
 
-func (s *sChannel) createCodexCredential(ctx context.Context, channelID uint64, credential codexCredential) (uint64, error) {
-	// 登录已在用户拥有的渠道上下文中进行；同账号再次登录更新旧凭据，避免一份套餐
-	// 因多次登录被查询合并多次，也允许失效刷新令牌通过重新授权恢复。
+// Subject and account ID are independently checked on reauthorization: a
+// shared ChatGPT workspace does not establish the identity of its member.
+func codexTokenSubject(token string) string {
+	claims, err := codexJWTClaims(token)
+	if err != nil {
+		return ""
+	}
+	var subject string
+	if json.Unmarshal(claims["sub"], &subject) != nil {
+		return ""
+	}
+	return strings.TrimSpace(subject)
+}
+
+func (s *sChannel) decodeCodexLoginTarget(row credentialRow) (codexCredential, error) {
+	plain, err := s.app.Secrets.Decrypt(row.ApiKeyCipher)
+	if err != nil {
+		return codexCredential{}, gerror.New("读取 Codex 登录凭据失败")
+	}
+	credential, err := decodeCodexCredential(plain)
+	if err != nil || credential.ChannelID != row.ChannelId || codexAccountHash(credential.AccountID) != row.KeyHash || credential.Seal == "" || credential.RefreshToken == "" {
+		return codexCredential{}, gerror.New("原 Codex 凭据缺少可核实的登录身份")
+	}
+	seal, err := s.app.Secrets.Decrypt(credential.Seal)
+	if err != nil || seal != fmt.Sprintf("codex:%d:%s", row.ChannelId, credential.AccountID) {
+		return codexCredential{}, gerror.New("原 Codex 凭据登录身份无效")
+	}
+	if credential.Subject == "" {
+		credential.Subject = codexTokenSubject(credential.AccessToken)
+	}
+	if credential.Subject == "" {
+		return codexCredential{}, gerror.New("原 Codex 凭据缺少可核实的登录身份")
+	}
+	return credential, nil
+}
+
+func (s *sChannel) readCodexLoginTarget(ctx context.Context, channelID, targetID uint64) (credentialRow, codexCredential, error) {
+	row, err := s.credentialByID(ctx, channelID, targetID)
+	if err != nil {
+		return row, codexCredential{}, gerror.New("Codex 登录凭据不存在")
+	}
+	credential, err := s.decodeCodexLoginTarget(row)
+	return row, credential, err
+}
+
+func (s *sChannel) saveCodexCredential(ctx context.Context, channelID, targetID uint64, credential codexCredential) (uint64, error) {
+	var row credentialRow
+	if targetID != 0 {
+		currentRow, current, err := s.readCodexLoginTarget(ctx, channelID, targetID)
+		if err != nil {
+			return 0, err
+		}
+		if current.AccountID != credential.AccountID || current.Subject != credential.Subject {
+			return 0, gerror.New("Codex 授权账号与原凭据不一致，原凭据未更改")
+		}
+		row = currentRow
+	}
 	credential.ChannelID = channelID
 	seal, err := s.app.Secrets.Encrypt(fmt.Sprintf("codex:%d:%s", channelID, credential.AccountID))
 	if err != nil {
 		return 0, err
 	}
 	credential.Seal = seal
-	hash := codexAccountHash(credential.AccountID)
-	var row credentialRow
-	if err := dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{ChannelId: channelID, KeyHash: hash}).Scan(&row); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, gerror.Wrap(err, "读取 Codex 账号凭据失败")
-	}
 	cipher, err := s.app.Secrets.Encrypt(encodeCodexCredential(credential))
 	if err != nil {
 		return 0, err
 	}
-	data := do.ChannelCredentials{ApiKeyCipher: cipher, KeyHash: hash, KeyPrefix: "Codex " + maskedCredentialPrefix(credential.AccountID), Status: 1}
-	id := row.Id
-	if id == 0 {
-		data.ChannelId = channelID
-		inserted, e := dao.ChannelCredentials.Ctx(ctx).Data(data).InsertAndGetId()
-		if e != nil {
-			return 0, gerror.New("保存 Codex 登录凭据失败，请重试")
-		}
-		id = uint64(inserted)
+	id := targetID
+	if targetID != 0 {
+		err = replaceLoginCredential(ctx, row, cipher)
 	} else {
-		if _, err = dao.ChannelCredentials.Ctx(ctx).Where(do.ChannelCredentials{Id: id}).Data(data).Update(); err != nil {
-			return 0, gerror.New("更新 Codex 登录凭据失败")
-		}
+		id, err = insertLoginCredential(ctx, channelID, codexAccountHash(credential.AccountID), "Codex "+maskedCredentialPrefix(credential.AccountID), cipher)
 	}
-	s.invalidateCredentialCache(ctx)
-	s.InvalidateListCache(ctx)
-	// 凭据已持久化后不再把路由缓存清理故障伪装成登录失败；登录结果必须可幂等返回。
-	_ = s.invalidateRoutes(ctx)
+	if err != nil {
+		return 0, err
+	}
+	s.invalidateLoginCredentials(ctx)
 	return id, nil
 }

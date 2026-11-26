@@ -66,6 +66,9 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var starts, polls, exchanges, refreshes atomic.Int32
+	var loginAccount, loginSubject atomic.Value
+	loginAccount.Store("acct-integration")
+	loginSubject.Store("user-integration")
 	var raceCipher string
 	client := &http.Client{Transport: codexRoundTrip(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Scheme != "https" || r.URL.Host != "auth.openai.com" || r.Method != http.MethodPost {
@@ -96,11 +99,15 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 				}
 				body = `{"access_token":"access-refreshed","refresh_token":"refresh-rotated","expires_in":3600}`
 			} else {
-				exchanges.Add(1)
+				exchange := exchanges.Add(1)
+				access := "access-initial"
+				if exchange > 1 {
+					access = fmt.Sprintf("access-relogin-%d", exchange)
+				}
 				if !strings.Contains(string(payload), "code=fixture-code") || !strings.Contains(string(payload), "code_verifier=fixture-verifier") {
 					t.Errorf("unexpected exchange payload")
 				}
-				body = fmt.Sprintf(`{"access_token":"access-initial","refresh_token":"refresh-initial","id_token":%q,"expires_in":3600}`, codexTestJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-integration"}}`))
+				body = fmt.Sprintf(`{"access_token":%q,"refresh_token":"refresh-initial","id_token":%q,"expires_in":3600}`, access, codexTestJWT(fmt.Sprintf(`{"sub":%q,"https://api.openai.com/auth":{"chatgpt_account_id":%q}}`, loginSubject.Load(), loginAccount.Load())))
 			}
 		default:
 			t.Errorf("unexpected auth path: %s", r.URL.Path)
@@ -131,7 +138,11 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 				callErr = svc.Update(r.Context(), id, adminapi.ChannelInput{Name: "must-not-change", Type: "codex", BaseURL: "https://chatgpt.com/backend-api/codex", APIKey: &key})
 				value = map[string]bool{"updated": callErr == nil}
 			} else if r.GetRouter("action").String() == "start" {
-				value, callErr = svc.StartChannelLogin(r.Context(), id)
+				var input adminapi.ChannelLoginStartInput
+				if target := r.Get("state").Uint64(); target != 0 {
+					input.CredentialID = &target
+				}
+				value, callErr = svc.StartChannelLogin(r.Context(), id, input)
 			} else {
 				value, callErr = svc.PollChannelLogin(r.Context(), id, r.Get("state").String())
 			}
@@ -307,5 +318,36 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 	_, survived, err := svc.latestCodexCredential(ctx, 10, credential.AccountID)
 	if err != nil || survived.AccessToken != "new-login-must-survive" {
 		t.Fatalf("CAS overwrote relogin: %v", err)
+	}
+	if _, err = db.Exec(ctx, "UPDATE channel_credentials SET status=0, remark='preserved' WHERE id=?", completed.CredentialID); err != nil {
+		t.Fatal(err)
+	}
+	relogin := func(account, subject string, out *ChannelLoginResult) int {
+		t.Helper()
+		loginAccount.Store(account)
+		loginSubject.Store(subject)
+		var nextSession ChannelLoginSession
+		if call(10, "start", fmt.Sprint(completed.CredentialID), "codex-owner", &nextSession) != 200 {
+			t.Fatal("could not start explicit relogin of disabled credential")
+		}
+		return call(10, "poll", nextSession.State, "codex-owner", out)
+	}
+	for _, identity := range [][2]string{{"acct-integration", "other-user"}, {"acct-other", "user-integration"}} {
+		if got := relogin(identity[0], identity[1], nil); got < 400 {
+			t.Fatal("accepted relogin for a different workspace or user")
+		}
+	}
+	if row, _, err := svc.latestCodexCredential(ctx, 10, credential.AccountID); err != nil || row.ApiKeyCipher != raceCipher {
+		t.Fatal("failed relogin changed existing credential")
+	}
+	var relogged ChannelLoginResult
+	if got := relogin("acct-integration", "user-integration", &relogged); got != 200 || relogged.CredentialID != completed.CredentialID {
+		t.Fatalf("relogin: %d %+v", got, relogged)
+	}
+	if row, next, err := svc.latestCodexCredential(ctx, 10, credential.AccountID); err != nil || row.Status != 0 || row.Remark != "preserved" || !strings.HasPrefix(next.AccessToken, "access-relogin-") {
+		t.Fatal("relogin did not replace token while preserving row metadata")
+	}
+	if count, err := db.GetValue(ctx, "SELECT COUNT(*) FROM channel_credentials WHERE channel_id=10"); err != nil || count.Int() != 1 {
+		t.Fatal("relogin unexpectedly inserted a credential")
 	}
 }

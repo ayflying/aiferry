@@ -48,12 +48,10 @@ type (
 		//   - "有可用密钥"：渠道级过滤解释不了——密钥是被本次请求的排除集合挡下的
 		//     （组合冷却由 SelectCredential 直接给出原因，不会落到这里）。
 		CredentialSkipReason(ctx context.Context, channelID uint64) (string, error)
+		// SetCredentialRemark 修改指定渠道下的一把密钥，不能通过其它渠道ID修改它。
+		// 备注不参与路由选择，无需刷新路由或产生集群配置版本变更。
+		SetCredentialRemark(ctx context.Context, channelID uint64, credentialID uint64, input adminapi.ChannelCredentialRemarkInput) error
 		CreateCredential(ctx context.Context, channelID uint64, input adminapi.ChannelCredentialInput) (uint64, error)
-		// StartChannelLogin 向渠道类型声明的登录接口申请一次性登录地址，供管理员在
-		// 浏览器完成平台官方登录流程（微信扫码/账号密码/SSO 由平台登录页决定）。
-		StartChannelLogin(ctx context.Context, channelID uint64) (ChannelLoginSession, error)
-		// PollChannelLogin 轮询一次登录结果；成功后把令牌写入渠道凭据。
-		PollChannelLogin(ctx context.Context, channelID uint64, state string) (ChannelLoginResult, error)
 		ListCredentials(ctx context.Context, channelID uint64) ([]CredentialView, error)
 		// RevealCredential 解密并返回单把上游密钥明文，仅供管理端「显示密钥」用。
 		// 调用方（控制器）必须先通过邮箱验证窗口检查；明文只经 HTTPS 响应下发，
@@ -71,13 +69,31 @@ type (
 		// 组合分数越低被选中的概率越低（低分加权），但不直接归零，仍为恢复探测保留窗口。
 		// 绑定亲和优先：若 apiKey 已绑定某券且它当前可选（未被排除、未冷却），直接复用，绑定亲和
 		// 不得绕过冷却。
+		//
+		// 会话粘性优先于键级绑定：请求带会话标识时（见 credential_affinity.go），同一段对话
+		// 始终用同一把密钥，新对话重新随机——键级绑定是「这个 API Key 的所有对话共用一把」，
+		// 与「新对话随机一把」相反，因此有会话标识时不再走绑定表。
 		SelectCredential(ctx context.Context, apiKeyID uint64, channelID uint64, modelID uint64, excluded map[uint64]struct{}) (RouteCredential, error)
 		CredentialForTest(ctx context.Context, channelID uint64, credentialID uint64) (RouteCredential, error)
+		// GeminiSubscriptionAuthorization returns the token and project from the same
+		// credential version. legacyProject is used only when an older credential has
+		// no project in its sealed payload. Use only with the official Gemini endpoint.
+		GeminiSubscriptionAuthorization(ctx context.Context, channelID uint64, credentialID uint64, cipher string, legacyProject string) (token string, project string, err error)
+		// GeminiSubscriptionAccessToken resolves the credential for callers which do
+		// not construct a project-scoped request (including old integration callers).
+		GeminiSubscriptionAccessToken(ctx context.Context, channelID uint64, credentialID uint64, cipher string) (string, error)
 		StartHealthChecks(ctx context.Context)
-		// StartWorkBuddyCheckins 启动 WorkBuddy 每日自动签到后台任务。
-		StartWorkBuddyCheckins(ctx context.Context)
 		InvalidateListCache(ctx context.Context)
-		DiscoverModels(ctx context.Context, channelID uint64) ([]DiscoveredModel, error)
+		// StartChannelLogin 向渠道类型声明的登录接口申请一次性登录地址。服务端只负责取地址
+		// 与轮询换票，登录动作在平台自己的页面上完成，因此不依赖登录所在设备的本地组件
+		// （这正是桌面端 native 模块无法在服务端复现、而外链登录可以的原因）。
+		StartChannelLogin(ctx context.Context, channelID uint64, input adminapi.ChannelLoginStartInput) (ChannelLoginSession, error)
+		// PollChannelLogin 轮询一次登录结果；拿到令牌后立即写入渠道凭据并返回新凭据 id。
+		PollChannelLogin(ctx context.Context, channelID uint64, state string) (ChannelLoginResult, error)
+		// AcceptGeminiOAuthCallback 仅记录一次 Google 回调，不在公开路由换票或保存渠道凭据。
+		// 凭据写入必须由发起者通过已认证渠道的 PollChannelLogin 完成。
+		AcceptGeminiOAuthCallback(ctx context.Context, state string, code string, oauthError string) error
+		DiscoverModels(ctx context.Context, channelID uint64, credentialID uint64) ([]DiscoveredModel, error)
 		GetModelMetadata(ctx context.Context, publicName string) (modelmetadata.View, error)
 		PutModelMetadata(ctx context.Context, publicName string, metadata *modelmetadata.Metadata) (modelmetadata.View, error)
 		SelectModels(ctx context.Context, channelID uint64, input adminapi.ModelSelectionInput) ([]ModelView, error)
@@ -93,8 +109,8 @@ type (
 		CreatePriceRule(ctx context.Context, modelID uint64, input adminapi.PriceRuleInput) (uint64, error)
 		UpdatePriceRule(ctx context.Context, id uint64, input adminapi.PriceRuleInput) error
 		DeletePriceRule(ctx context.Context, id uint64) error
-		// ProxyURLs 解密渠道代理配置并拆成多行地址列表；未配置或解密结果为空行时
-		// 返回 nil（直连）。
+		// ProxyURLs 是渠道出口策略的唯一解密入口：只有未配置密文才允许无代理。
+		// 已配置但解密为空、损坏或任一代理非法时必须失败关闭，绝不把配置故障解释为直连。
 		ProxyURLs(proxyURLCipher string) ([]string, error)
 		// ProxiesForCredential 构造该密钥的代理轮换计划。渠道未配置代理时直接返回
 		// 空计划（直连）；只有 1 个代理时序号无关（模运算恒为 0），跳过序号查询——
@@ -125,6 +141,14 @@ type (
 		// 管理端「测试代理」按钮专用，不绑定渠道、不需要已保存；
 		// 多行配置由前端拆行后逐个调用。
 		TestProxy(_ context.Context, proxyURL string) ProxyTestResult
+		// HTTPClientForChannel 供管理请求使用，同样在发送前刷新出口策略，避免长时间
+		// 运行的定时任务或登录会话持有配置代理之前的渠道快照。
+		HTTPClientForChannel(ctx context.Context, channel entity.Channels) (*http.Client, error)
+		// GeminiSubscriptionHTTPClient 对登录、续期和模型同步应用当前渠道出口策略。
+		GeminiSubscriptionHTTPClient(ctx context.Context, channel entity.Channels, credentialID uint64) (*http.Client, error)
+		// CurrentProxyCipher 在真正发请求前读取当前出口策略，不信任路由缓存或异步任务
+		// 中的旧快照。数据库不可用、渠道已删除都必须失败关闭，不能被解释成无代理。
+		CurrentProxyCipher(ctx context.Context, channelID uint64) (string, error)
 		// QueryQuota 查询渠道上游的套餐额度（如智谱 GLM Coding Plan 的积分窗口）。
 		// credentialID 为 0 时并发查询全部密钥并合并视图，结果按渠道缓存一分钟，
 		// 重复点击不会重复请求上游，refresh 为 true 时绕过缓存强制查询；
@@ -142,6 +166,12 @@ type (
 		// VideoAdapterFor 返回渠道类型声明的视频适配器（openai / minimax / volcengine_ark）。
 		// 类型不存在或配置缺失时回退为 openai（标准 /videos 端点）。
 		VideoAdapterFor(ctx context.Context, channelTypeCode string) (string, error)
+		// StartWorkBuddyCheckins 启动每日自动签到任务。与健康检查一致，由 app 层在
+		// 服务启动时调用一次；ctx 结束时协程自行退出。
+		//
+		// 启动后先等一个短延迟跑首轮：一是避开启动初期的模型/渠道同步风暴，二是让
+		// 服务重启或发版当天就能补签，不必等到下一个整点。之后按小时粒度检查。
+		StartWorkBuddyCheckins(ctx context.Context)
 	}
 )
 

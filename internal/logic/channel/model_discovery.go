@@ -13,12 +13,30 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
-func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]DiscoveredModel, error) {
+func (s *sChannel) DiscoverModels(ctx context.Context, channelID, credentialID uint64) ([]DiscoveredModel, error) {
 	channel, err := s.GetOwned(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
-	names, metadata, err := s.fetchDiscoveredModels(ctx, channel)
+	var (
+		names    []string
+		metadata map[string]modelmetadata.Metadata
+	)
+	if channel.Type == GeminiSubscriptionChannelType {
+		if credentialID == 0 {
+			return nil, gerror.New("请指定要同步模型的 Gemini 账号")
+		}
+		row, credentialErr := s.credentialByID(ctx, channelID, credentialID)
+		if credentialErr != nil {
+			return nil, credentialErr
+		}
+		if row.Status != 1 || row.AutoDisabledAt != nil {
+			return nil, gerror.New("请先启用要同步模型的 Gemini 账号")
+		}
+		names, metadata, err = s.discoverGeminiSubscriptionModels(ctx, channel, RouteCredential{ID: row.Id, APIKeyCipher: row.ApiKeyCipher})
+	} else {
+		names, metadata, err = s.fetchDiscoveredModels(ctx, channel)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +53,12 @@ func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]Disc
 		}
 	}
 
-	if err = modelmetadata.SaveUpstream(ctx, channelID, metadata); err != nil {
+	if channel.Type == GeminiSubscriptionChannelType {
+		err = saveGeminiCredentialCatalog(ctx, channelID, credentialID, metadata)
+	} else {
+		err = modelmetadata.SaveUpstream(ctx, channelID, metadata)
+	}
+	if err != nil {
 		return nil, err
 	}
 	s.InvalidateListCache(ctx)
@@ -56,13 +79,6 @@ func (s *sChannel) DiscoverModels(ctx context.Context, channelID uint64) ([]Disc
 }
 
 func (s *sChannel) fetchDiscoveredModels(ctx context.Context, channel entity.Channels) ([]string, map[string]modelmetadata.Metadata, error) {
-	if channel.Type == GeminiSubscriptionChannelType {
-		credential, err := s.CredentialForTest(ctx, channel.Id, 0)
-		if err != nil {
-			return nil, nil, err
-		}
-		return s.discoverGeminiSubscriptionModels(ctx, channel, credential)
-	}
 	_, config, err := s.types.GetByCode(ctx, channel.Type)
 	if err != nil {
 		return nil, nil, err

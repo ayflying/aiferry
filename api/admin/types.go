@@ -45,6 +45,13 @@ type ChannelCredentialStatusInput struct {
 	Status int `json:"status" v:"in:0,1"`
 }
 
+// ChannelLoginStartInput 省略 CredentialID 为新增账号，指定它则只对该凭据重新登录。
+// ProjectID 只用于新增 Gemini 订阅账号。
+type ChannelLoginStartInput struct {
+	ProjectID    string  `json:"projectId"`
+	CredentialID *uint64 `json:"credentialId"`
+}
+
 // ChannelLoginSessionView 是一次外链登录的发起结果：authUrl 交给管理员在浏览器里打开
 // 完成登录，state 用于随后轮询换票。
 type ChannelLoginSessionView struct {

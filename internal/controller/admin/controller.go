@@ -162,7 +162,13 @@ func (c *Controller) testChannelProxy(r *ghttp.Request) {
 }
 
 func (c *Controller) discoverModels(r *ghttp.Request) {
-	data, err := c.channels.DiscoverModels(r.Context(), routeID(r))
+	var input struct {
+		CredentialID uint64 `json:"credentialId"`
+	}
+	if !parse(r, &input) {
+		return
+	}
+	data, err := c.channels.DiscoverModels(r.Context(), routeID(r), input.CredentialID)
 	respond(r, data, err)
 }
 

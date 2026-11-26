@@ -38,16 +38,30 @@ type ChannelLoginResult struct {
 // StartChannelLogin 向渠道类型声明的登录接口申请一次性登录地址。服务端只负责取地址
 // 与轮询换票，登录动作在平台自己的页面上完成，因此不依赖登录所在设备的本地组件
 // （这正是桌面端 native 模块无法在服务端复现、而外链登录可以的原因）。
-func (s *sChannel) StartChannelLogin(ctx context.Context, channelID uint64) (ChannelLoginSession, error) {
+func (s *sChannel) StartChannelLogin(ctx context.Context, channelID uint64, input adminapi.ChannelLoginStartInput) (ChannelLoginSession, error) {
 	channel, config, err := s.loginContext(ctx, channelID)
 	if err != nil {
 		return ChannelLoginSession{}, err
 	}
+	var credentialID uint64
+	if input.CredentialID != nil {
+		credentialID = *input.CredentialID
+		if credentialID == 0 {
+			return ChannelLoginSession{}, gerror.New("重新登录需要有效的凭据 ID")
+		}
+	}
+	project := strings.TrimSpace(input.ProjectID)
+	if project != "" && (config.Login.Adapter != channeltype.AdapterLoginGeminiOAuth || credentialID != 0) {
+		return ChannelLoginSession{}, gerror.New("仅新增 Gemini 账号时可以填写项目 ID")
+	}
 	switch config.Login.Adapter {
 	case channeltype.AdapterLoginCodexDevice:
-		return s.startCodexLogin(ctx, channel)
+		return s.startCodexLogin(ctx, channel, credentialID)
 	case channeltype.AdapterLoginGeminiOAuth:
-		return s.startGeminiLogin(ctx, channel)
+		return s.startGeminiLogin(ctx, channel, credentialID, project)
+	}
+	if credentialID != 0 {
+		return ChannelLoginSession{}, gerror.New("该渠道的外链登录无法验证原凭据账号，不支持重新登录")
 	}
 	endpoint, err := loginEndpoint(channel.BaseUrl, config, "auth/state")
 	if err != nil {

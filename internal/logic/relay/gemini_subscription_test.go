@@ -29,6 +29,13 @@ func TestGeminiSubscriptionRejectsTokenUseOnOtherEndpoints(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "https://upstream.invalid", nil)
 	err := relay.applyEndpointAuthHeaders(context.Background(), req, Candidate{ChannelType: channel.GeminiSubscriptionChannelType}, "")
 	if err == nil || req.Header.Get("Authorization") != "" {
-		t.Fatalf("auth applied to untrusted endpoint: %v", err)
+		t.Fatalf("generic auth applied to untrusted endpoint: %v", err)
+	}
+	if err = applyGeminiSubscriptionToken(req, "fixture-token"); err == nil || req.Header.Get("Authorization") != "" {
+		t.Fatalf("dedicated auth applied to untrusted endpoint: %v", err)
+	}
+	allowed := httptest.NewRequest(http.MethodPost, geminiSubscriptionURL, nil)
+	if err = applyGeminiSubscriptionToken(allowed, "fixture-token"); err != nil || allowed.Header.Get("Authorization") != "Bearer fixture-token" {
+		t.Fatalf("dedicated auth denied pinned request: %v", err)
 	}
 }

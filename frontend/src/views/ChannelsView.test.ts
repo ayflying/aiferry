@@ -7,6 +7,7 @@ import ChannelAdvancedSettings from '../components/ChannelAdvancedSettings.vue'
 import ChannelCredentialDrawer from '../components/ChannelCredentialDrawer.vue'
 import ChannelRouteCoverageSettings from '../components/ChannelRouteCoverageSettings.vue'
 import ChannelListPanel from '../components/ChannelListPanel.vue'
+import ChannelModelMappingDialog from '../components/ChannelModelMappingDialog.vue'
 import ChannelsView from './ChannelsView.vue'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), error: vi.fn() }))
@@ -168,7 +169,7 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     return shallowMount(ChannelsView, { global: { renderStubDefaultSlot: true, stubs: { ElDrawer: { template: '<section><slot /><slot name="footer" /></section>' } } } })
   }
 
-  it('Gemini 订阅锁定预设地址、隐藏手工密钥，并要求明确项目与代理后才提交', async () => {
+  it('Gemini 订阅锁定预设地址、隐藏手工密钥，仅要求渠道代理，项目由账号绑定', async () => {
     mocks.get.mockImplementation((path: string) => Promise.resolve(path === '/channel-types' ? [geminiType] : []))
     const wrapper = mountForm()
     wrapper.findComponent(ChannelListPanel).vm.$emit('create')
@@ -179,12 +180,9 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     expect(wrapper.findComponent(ChannelRouteCoverageSettings).props('fixedBaseUrl')).toBe(true)
     const advanced = wrapper.findComponent(ChannelAdvancedSettings)
     expect(advanced.props('proxyRequired')).toBe(true)
-    const project = inputs.find(input => input.attributes('placeholder') === '输入经 Google 账号授权的项目 ID')!
+    expect(wrapper.findAllComponents({ name: 'ElFormItem' }).some(item => item.attributes('label')?.includes('项目 ID'))).toBe(false)
     const save = wrapper.findAllComponents({ name: 'ElButton' }).find(item => item.text() === '保存渠道')!
     inputs.find(input => input.attributes('placeholder') === '例如 OpenAI 主线路')!.vm.$emit('update:modelValue', 'Gemini fixture')
-    save.vm.$emit('click')
-    expect(mocks.error).toHaveBeenLastCalledWith(expect.stringContaining('Google Cloud 项目 ID'), '信息不完整')
-    project.vm.$emit('update:modelValue', ' test-project ')
     advanced.vm.$emit('update:proxyUrl', ' \n ')
     save.vm.$emit('click')
     expect(mocks.error).toHaveBeenLastCalledWith(expect.stringContaining('代理地址'), '信息不完整')
@@ -194,7 +192,8 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     await flushPromises()
     const [path, payload] = mocks.post.mock.lastCall!
     expect(path).toBe('/channels')
-    expect(payload).toMatchObject({ type: geminiType.code, baseUrl: geminiBaseUrl, projectId: 'test-project', proxyUrl: 'http://proxy.test:8080' })
+    expect(payload).toMatchObject({ type: geminiType.code, baseUrl: geminiBaseUrl, proxyUrl: 'http://proxy.test:8080' })
+    expect(payload).not.toHaveProperty('projectId')
     expect(payload).not.toHaveProperty('apiKey')
     expect(payload).not.toHaveProperty('managementKey')
     openCredentials(wrapper, geminiChannel)
@@ -211,15 +210,15 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     const wrapper = mountForm()
     wrapper.findComponent(ChannelListPanel).vm.$emit('edit', geminiChannel)
     await flushPromises()
-    const input = wrapper.findAllComponents({ name: 'ElInput' }).find(item => item.attributes('placeholder') === '输入经 Google 账号授权的项目 ID')!
-    expect(input.props('modelValue')).toBe('test-project')
+    expect(wrapper.findAllComponents({ name: 'ElFormItem' }).some(item => item.attributes('label')?.includes('项目 ID'))).toBe(false)
     expect(wrapper.findComponent({ name: 'ElSelect' }).props('disabled')).toBe(true)
     const save = wrapper.findAllComponents({ name: 'ElButton' }).find(item => item.text() === '保存渠道')!
     save.vm.$emit('click')
     await flushPromises()
     const [path, payload] = mocks.put.mock.lastCall!
     expect(path).toBe(`/channels/${geminiChannel.id}`)
-    expect(payload).toMatchObject({ baseUrl: geminiBaseUrl, projectId: 'test-project' })
+    expect(payload).toMatchObject({ baseUrl: geminiBaseUrl })
+    expect(payload).not.toHaveProperty('projectId')
     expect(payload).not.toHaveProperty('proxyUrl')
     wrapper.findComponent(ChannelListPanel).vm.$emit('edit', geminiChannel)
     await flushPromises()
@@ -227,6 +226,54 @@ describe('管理员直接进入渠道列表的密钥入口', () => {
     save.vm.$emit('click')
     expect(mocks.put).toHaveBeenCalledTimes(1)
     expect(mocks.error).toHaveBeenLastCalledWith(expect.stringContaining('代理地址'), '信息不完整')
+    wrapper.unmount()
+  })
+
+  it('Gemini 选定账号后才发现模型，重试沿用该账号且保留已保存的渠道模型', async () => {
+    const available = { id: 31, index: 1, status: 1, keyPrefix: 'Google', projectId: 'account-project' }
+    mocks.get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/credentials')
+      ? [available, { ...available, id: 32, status: 0 }, { ...available, id: 33, autoDisabled: true }]
+      : path.endsWith('/models') ? [{ id: 5, publicName: 'saved', upstreamName: 'gemini-old', enabled: 1 }] : []))
+    mocks.post.mockRejectedValueOnce(new Error('模型接口失败')).mockResolvedValueOnce([{ name: 'gemini-new', selected: false }])
+    const wrapper = mountView()
+    wrapper.findComponent(ChannelListPanel).vm.$emit('discover', geminiChannel)
+    await flushPromises()
+    const dialog = wrapper.findComponent(ChannelModelMappingDialog)
+    expect(dialog.props('requireDiscoveryAccount')).toBe(true)
+    expect(dialog.props('discoveryAccounts')).toEqual([available])
+    expect(dialog.props('selectedModelNames')).toEqual(['gemini-old'])
+    expect(mocks.post).not.toHaveBeenCalled()
+    dialog.vm.$emit('discover-account', 31)
+    await flushPromises()
+    expect(mocks.post).toHaveBeenLastCalledWith('/channels/35/models/discover', { credentialId: 31 })
+    expect(dialog.props('discoveryError')).toContain('模型接口失败')
+    dialog.vm.$emit('retry')
+    await flushPromises()
+    expect(mocks.post).toHaveBeenLastCalledWith('/channels/35/models/discover', { credentialId: 31 })
+    expect(dialog.props('discoveryError')).toBe('')
+    expect(dialog.props('discoveredModels').map(model => model.name)).toEqual(['gemini-old', 'gemini-new'])
+    expect(dialog.props('selectedModelNames')).toEqual(['gemini-old'])
+    expect(dialog.props('modelMappings')).toEqual([{ id: 5, upstreamName: 'gemini-old', publicName: 'saved' }])
+    dialog.vm.$emit('update:selectedModelNames', ['gemini-old', 'gemini-new'])
+    dialog.vm.$emit('save')
+    await flushPromises()
+    expect(mocks.put).toHaveBeenCalledWith('/channels/35/models/selection', { models: [
+      { upstreamName: 'gemini-old', publicName: 'saved' },
+      { upstreamName: 'gemini-new', publicName: 'gemini-new' },
+    ] })
+    wrapper.unmount()
+  })
+
+  it('已保存模型加载失败时，不允许覆盖渠道模型配置', async () => {
+    mocks.get.mockImplementation((path: string) => path.endsWith('/models')
+      ? Promise.reject(new Error('暂时不可用')) : Promise.resolve([]))
+    const wrapper = mountView()
+    wrapper.findComponent(ChannelListPanel).vm.$emit('discover', geminiChannel)
+    await flushPromises()
+    const dialog = wrapper.findComponent(ChannelModelMappingDialog)
+    expect(dialog.props('savedModelsError')).toBe('暂时不可用')
+    dialog.vm.$emit('save')
+    expect(mocks.put).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

@@ -55,7 +55,7 @@ func (s *Service) Mark(ctx context.Context, kind, ref string) error {
 
 // fingerprintTables 是需要纳入指纹巡检的配置表，与快照下发范围保持一致。
 var fingerprintTables = []string{
-	"channels", "channel_credentials", "channel_models", "channel_model_credentials",
+	"channels", "channel_credentials", "channel_models", "channel_model_credentials", "gemini_credential_models",
 	"channel_groups", "channel_group_members", "channel_types", "model_prices",
 	"model_price_rules", "model_metadata", "price_sources", "system_settings", "api_keys",
 	"api_key_models", "api_key_channel_groups", "api_key_channel_credentials", "users", "user_channel_groups",

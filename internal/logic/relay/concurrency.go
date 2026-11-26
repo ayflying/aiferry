@@ -132,16 +132,14 @@ type credentialPicker func(excluded map[uint64]struct{}) (channel.RouteCredentia
 // 未配置并发限制（limit<=0）时只做挑选，不占用额度，行为与历史完全一致。
 // waitWindow 是额度全部占满时在本渠道排队的时长，由调用方按候选位置决定：中间候选为 0
 // （并发满即切换下一个候选），最后一个候选为 keyConcurrencyWaitWindow。
-// ignoreComboCooldown 为真时不做「模型 × 密钥」组合冷却过滤：渠道层在 modelID 为 0 时
-// 会跳过该过滤（见 channel.SelectCredential），仅供「本次请求的全部候选都在组合冷却中」
-// 的兜底轮使用，以免为这一罕见场景扩宽渠道服务接口。
+// 兜底轮只忽略组合冷却，不能绕过账号级模型资格。
 func (s *sRelay) acquireKeySlot(ctx context.Context, apiKeyID uint64, candidate Candidate, excluded map[uint64]struct{}, ignoreComboCooldown bool, waitWindow time.Duration) (channel.RouteCredential, func(), error) {
+	pickCtx := channel.WithCredentialRouteChannelType(ctx, candidate.ChannelType)
+	if ignoreComboCooldown {
+		pickCtx = channel.WithoutCredentialComboCooldown(pickCtx)
+	}
 	pick := func(pickExcluded map[uint64]struct{}) (channel.RouteCredential, error) {
-		modelID := candidate.ChannelModelID
-		if ignoreComboCooldown {
-			modelID = 0
-		}
-		return s.channels.SelectCredential(ctx, apiKeyID, candidate.ChannelID, modelID, pickExcluded)
+		return s.channels.SelectCredential(pickCtx, apiKeyID, candidate.ChannelID, candidate.ChannelModelID, pickExcluded)
 	}
 	return acquireKeySlotWith(ctx, s.slots, candidate.ChannelID, candidate.ConcurrencyLimit, waitWindow, excluded, pick)
 }

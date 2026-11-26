@@ -19,6 +19,8 @@ const geminiLoginTTL = 10 * time.Minute
 type geminiLoginSession struct {
 	ChannelID   uint64
 	UserID      uint64
+	TargetID    uint64
+	ProjectID   string
 	ExpiresAt   time.Time
 	RedirectURI string
 	Verifier    string
@@ -44,7 +46,7 @@ func validGeminiLoginState(state string) bool {
 	return err == nil
 }
 
-func (s *sChannel) startGeminiLogin(ctx context.Context, channel entity.Channels) (ChannelLoginSession, error) {
+func (s *sChannel) startGeminiLogin(ctx context.Context, channel entity.Channels, targetID uint64, project string) (ChannelLoginSession, error) {
 	user, ok := auth.CurrentUser(ctx)
 	if !ok {
 		return ChannelLoginSession{}, gerror.New("未登录")
@@ -59,7 +61,21 @@ func (s *sChannel) startGeminiLogin(ctx context.Context, channel entity.Channels
 	if s.app.Redis == nil {
 		return ChannelLoginSession{}, gerror.New("Gemini 登录需要可用的会话缓存")
 	}
-	if _, err = s.GeminiSubscriptionHTTPClient(ctx, channel, 0); err != nil {
+	if targetID == 0 {
+		if !geminiProjectIDPattern.MatchString(project) {
+			return ChannelLoginSession{}, gerror.New("新增 Gemini 账号需要有效的项目 ID")
+		}
+	} else {
+		_, current, readErr := s.readGeminiLoginTarget(ctx, cfg, channel.Id, targetID)
+		if readErr != nil {
+			return ChannelLoginSession{}, readErr
+		}
+		project = geminiCredentialProject(current, channel.ProjectId)
+		if project == "" {
+			return ChannelLoginSession{}, gerror.New("原 Gemini 凭据及渠道均未配置项目 ID，无法重新授权")
+		}
+	}
+	if _, err = s.GeminiSubscriptionHTTPClient(ctx, channel, targetID); err != nil {
 		return ChannelLoginSession{}, err
 	}
 	state, err := randomCodexState()
@@ -70,7 +86,7 @@ func (s *sChannel) startGeminiLogin(ctx context.Context, channel entity.Channels
 	if err != nil {
 		return ChannelLoginSession{}, err
 	}
-	session := geminiLoginSession{ChannelID: channel.Id, UserID: user.Id, ExpiresAt: time.Now().Add(geminiLoginTTL), RedirectURI: cfg.redirectURI, Verifier: verifier}
+	session := geminiLoginSession{ChannelID: channel.Id, UserID: user.Id, TargetID: targetID, ProjectID: project, ExpiresAt: time.Now().Add(geminiLoginTTL), RedirectURI: cfg.redirectURI, Verifier: verifier}
 	if err = s.saveGeminiLogin(ctx, cfg, state, session); err != nil {
 		return ChannelLoginSession{}, err
 	}
@@ -201,7 +217,7 @@ func (s *sChannel) pollGeminiLogin(ctx context.Context, channel entity.Channels,
 			return ChannelLoginResult{}, gerror.New("Gemini 授权已换票但未能保存会话，请重新登录")
 		}
 	}
-	id, err := s.saveGeminiCredential(ctx, cfg, channel.Id, *session.Credential)
+	id, err := s.saveGeminiCredential(ctx, cfg, channel.Id, session.TargetID, *session.Credential)
 	if err != nil {
 		return ChannelLoginResult{}, err
 	}
@@ -218,7 +234,7 @@ func (s *sChannel) exchangeGeminiLogin(ctx context.Context, cfg geminiOAuthConfi
 		session.Failed, session.Verifier = true, ""
 		return gerror.New("Google 授权已取消或被拒绝，请重新发起登录")
 	}
-	client, err := s.GeminiSubscriptionHTTPClient(ctx, channel, 0)
+	client, err := s.GeminiSubscriptionHTTPClient(ctx, channel, session.TargetID)
 	if err != nil {
 		return err
 	}
@@ -250,6 +266,6 @@ func (s *sChannel) exchangeGeminiLogin(ctx context.Context, cfg geminiOAuthConfi
 		return err
 	}
 	session.Failed = false
-	session.Credential = &geminiSubscriptionCredential{Subject: subject, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresAt: expiry}
+	session.Credential = &geminiSubscriptionCredential{Subject: subject, ProjectID: session.ProjectID, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresAt: expiry}
 	return nil
 }

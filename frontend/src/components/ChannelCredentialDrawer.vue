@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { CircleAlert, Coins, Copy, Eye, Gauge, KeyRound, LogIn, Plus, Settings2, Trash2 } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
@@ -25,16 +25,37 @@ const loading = ref(false)
 const adding = ref(false)
 const addDialogVisible = ref(false)
 const addMode = ref<'manual' | 'login'>('manual')
+const loginProjectId = ref('')
+const reloginTarget = ref<ChannelCredential>()
 function openAddCredential() {
+  loginProjectId.value = ''
+  reloginTarget.value = undefined
+  if (googleLoginOnly.value) {
+    openLogin()
+    return
+  }
   credentialValue.value = ''
   credentialManagementValue.value = ''
   credentialRemark.value = ''
   addMode.value = loginSupported.value ? 'login' : 'manual'
   addDialogVisible.value = true
 }
+function openRelogin(item: ChannelCredential) {
+  if (item.canRelogin !== true || loginStarting.value) return
+  loginProjectId.value = ''
+  reloginTarget.value = item
+  openLogin()
+}
 function beginCredentialLogin() {
-  addDialogVisible.value = false
-  void startLogin()
+  if (reloginTarget.value) {
+    void startLogin({ credentialId: reloginTarget.value.id })
+  } else if (googleLoginOnly.value) {
+    const projectId = loginProjectId.value.trim()
+    if (projectId) void startLogin({ projectId })
+  } else {
+    addDialogVisible.value = false
+    void startLogin()
+  }
 }
 const querying = ref(false)
 const credentialValue = ref('')
@@ -115,7 +136,7 @@ const loginSupported = computed(() => props.loginSupported === true || props.log
 const codexChannel = computed(() => props.channel?.type === 'codex' || props.loginAdapter === 'codex_device')
 const {
   visible: loginDialogVisible, starting: loginStarting, session: loginSession,
-  error: loginError, elapsed: loginElapsed, expiresIn: loginExpiresIn, start: startLogin,
+  error: loginError, elapsed: loginElapsed, expiresIn: loginExpiresIn, open: openLogin, start: startLogin,
 } = useChannelLogin(() => props.channel?.id, () => props.modelValue, async () => {
   await load(true)
   emit('changed')
@@ -478,7 +499,7 @@ function stopCodeCountdown() {
 <template>
   <el-drawer v-model="visible" :title="`上游密钥 · ${channel?.name || ''}`" :size="drawerSize" destroy-on-close>
     <div class="credential-toolbar">
-      <el-button type="primary" :icon="Plus" @click="openAddCredential">{{ googleLoginOnly ? '添加账号' : '添加密钥' }}</el-button>
+      <el-button type="primary" :icon="Plus" :disabled="loginStarting" @click="openAddCredential">{{ googleLoginOnly ? '添加账号' : '添加密钥' }}</el-button>
       <el-button :icon="Coins" :loading="querying" :disabled="!querySupported" @click="queryCosts">{{ queryLabel }}</el-button>
     </div>
 
@@ -525,7 +546,7 @@ function stopCodeCountdown() {
           <span v-if="!hasNumber(row.lastCostUsed) && !hasNumber(row.lastCostRemaining) && !hasNumber(row.lastCostUsage)" class="muted">尚未查询</span>
         </template></div></template></el-table-column>
         <el-table-column label="启用" width="76" align="center"><template #default="{ row }"><el-switch :model-value="row.status === 1" @update:model-value="setStatus(row, $event)" /></template></el-table-column>
-        <el-table-column label="操作" width="150" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip v-if="!googleLoginOnly" content="查看完整密钥"><button class="icon-button" type="button" :aria-label="`查看 ${row.keyPrefix}`" :disabled="secretLoading[row.id]" @click="openSecret(row)"><Eye :size="16" /></button></el-tooltip><el-tooltip v-if="!googleLoginOnly && props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询全部账号的套餐额度"><button class="icon-button" type="button" :aria-label="`查询全部账号的套餐额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
+        <el-table-column label="操作" width="150" align="center"><template #default="{ row }"><div class="row-actions"><el-tooltip v-if="!googleLoginOnly" content="查看完整密钥"><button class="icon-button" type="button" :aria-label="`查看 ${row.keyPrefix}`" :disabled="secretLoading[row.id]" @click="openSecret(row)"><Eye :size="16" /></button></el-tooltip><el-tooltip v-if="!googleLoginOnly && props.managementKeySupported" content="设置/清除该账号的管理密钥"><button class="icon-button" type="button" :aria-label="`设置 ${row.keyPrefix} 管理密钥`" @click="setManagementKey(row)"><Settings2 :size="16" /></button></el-tooltip><el-tooltip v-if="props.quotaSupported" content="查询全部账号的套餐额度"><button class="icon-button" type="button" :aria-label="`查询全部账号的套餐额度`" @click="emit('query-quota', row)"><Gauge :size="16" /></button></el-tooltip><el-tooltip v-if="row.canRelogin === true" content="重新登录"><button class="icon-button" type="button" :aria-label="`重新登录账号 #${row.index}`" :disabled="loginStarting" @click="openRelogin(row)"><LogIn :size="16" /></button></el-tooltip><el-tooltip content="删除上游密钥"><button class="icon-button danger" type="button" :aria-label="`删除 ${row.keyPrefix}`" @click="remove(row)"><Trash2 :size="16" /></button></el-tooltip></div></template></el-table-column>
       </el-table>
       <div v-if="!loading && !rows.length" class="credential-empty"><CircleAlert :size="18" /><span>{{ googleLoginOnly ? '当前渠道还没有账号，请点「添加账号」完成 Google 登录' : codexChannel ? '当前渠道还没有账号，请点「添加密钥」选择平台登录或手动填写账号 access token' : loginSupported ? '当前渠道还没有上游密钥，请点「添加密钥」选择平台登录或手动填写 API Key' : '当前渠道没有可管理的上游密钥' }}</span></div>
     </div>
@@ -572,25 +593,25 @@ function stopCodeCountdown() {
         <el-button type="primary" :loading="verifyingCode" @click="verifyRevealCode">验证并查看</el-button>
       </template>
     </el-dialog>
-    <el-dialog v-model="addDialogVisible" :title="googleLoginOnly ? '添加 Google 账号' : '添加上游密钥'" width="min(560px, 94vw)" append-to-body>
-      <el-radio-group v-if="loginSupported && !googleLoginOnly" v-model="addMode" style="margin-bottom: 16px">
+    <el-dialog v-if="!googleLoginOnly" v-model="addDialogVisible" title="添加上游密钥" width="min(560px, 94vw)" append-to-body>
+      <el-radio-group v-if="loginSupported" v-model="addMode" style="margin-bottom: 16px">
         <el-radio-button value="login">平台登录</el-radio-button>
         <el-radio-button value="manual">{{ codexChannel ? '手动填写 access token' : '手动填写 API Key' }}</el-radio-button>
       </el-radio-group>
-      <template v-if="!googleLoginOnly && addMode === 'manual'">
+      <template v-if="addMode === 'manual'">
         <el-input v-model="credentialValue" type="password" show-password autocomplete="new-password" :placeholder="codexChannel ? '填写 Codex 账号 access token（非 sk API Key）' : '填写上游 API Key'" @keyup.enter="addCredential" />
         <p v-if="codexChannel">手动填写的 access token 过期后需重新填写；也可切换「平台登录」添加账号。</p>
         <el-input v-if="!googleLoginOnly && props.managementKeySupported" v-model="credentialManagementValue" type="password" show-password autocomplete="new-password" :placeholder="props.managementKeyPair ? '管理密钥（可选，格式 AK:SK）' : '管理密钥（可选）'" style="margin-top: 12px" />
         <el-input v-model="credentialRemark" type="textarea" :rows="2" maxlength="500" show-word-limit aria-label="新密钥备注" placeholder="备注（可选，最多 500 字符）" style="margin-top: 12px" />
       </template>
-      <el-alert v-else type="info" :closable="false" :title="googleLoginOnly ? '请使用有权访问所填 Google Cloud 项目的 Google 账号登录。授权完成后，凭据会自动保存到当前渠道。' : '通过平台官方登录添加密钥。完成登录后，凭据会自动保存到当前渠道，可在密钥行中添加备注。'" />
+      <el-alert v-else type="info" :closable="false" title="通过平台官方登录添加密钥。完成登录后，凭据会自动保存到当前渠道，可在密钥行中添加备注。" />
       <template #footer>
         <el-button :disabled="adding" @click="addDialogVisible = false">取消</el-button>
-        <el-button v-if="!googleLoginOnly && addMode === 'manual'" type="primary" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">添加密钥</el-button>
-        <el-button v-else type="primary" :icon="LogIn" :loading="loginStarting" @click="beginCredentialLogin">{{ googleLoginOnly ? '打开 Google 登录页' : '打开平台登录页' }}</el-button>
+        <el-button v-if="addMode === 'manual'" type="primary" :loading="adding" :disabled="!credentialValue.trim()" @click="addCredential">添加密钥</el-button>
+        <el-button v-else type="primary" :icon="LogIn" :loading="loginStarting" @click="beginCredentialLogin">打开平台登录页</el-button>
       </template>
     </el-dialog>
-    <ChannelLoginDialog v-model="loginDialogVisible" :session="loginSession" :error="loginError" :elapsed="loginElapsed" :expires-in="loginExpiresIn" :starting="loginStarting" @restart="startLogin" />
+    <ChannelLoginDialog v-model="loginDialogVisible" :session="loginSession" :error="loginError" :elapsed="loginElapsed" :expires-in="loginExpiresIn" :starting="loginStarting" v-model:project-id="loginProjectId" :project-required="googleLoginOnly && !reloginTarget" :relogin-account="reloginTarget && `账号 #${reloginTarget.index}`" @restart="beginCredentialLogin" />
 
   </el-drawer>
 </template>

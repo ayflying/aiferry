@@ -57,7 +57,12 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 			return TestResult{}, err
 		}
 	}
-	credential, err := s.CredentialForTest(ctx, channel.Id, input.ChannelCredentialID)
+	var credential RouteCredential
+	if channel.Type == GeminiSubscriptionChannelType {
+		credential, err = s.geminiCredentialForModelTest(ctx, channel.Id, input.ChannelCredentialID, model.UpstreamName)
+	} else {
+		credential, err = s.CredentialForTest(ctx, channel.Id, input.ChannelCredentialID)
+	}
 	if err != nil {
 		return TestResult{}, err
 	}

@@ -21,15 +21,7 @@ func (s *sRelay) applyUpstreamAuthHeaders(ctx context.Context, req *http.Request
 
 func (s *sRelay) applyEndpointAuthHeaders(ctx context.Context, req *http.Request, candidate Candidate, endpointName string) error {
 	if candidate.ChannelType == channel.GeminiSubscriptionChannelType {
-		if req.Method != http.MethodPost || req.URL.String() != channel.GeminiSubscriptionBaseURL+channel.GeminiSubscriptionStreamPath {
-			return gerror.New("Gemini 订阅凭据只允许发送到指定文本生成端点")
-		}
-		token, err := s.channels.GeminiSubscriptionAccessToken(ctx, candidate.ChannelID, candidate.ChannelCredentialID, candidate.APIKeyCipher)
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		return nil
+		return gerror.New("Gemini 订阅凭据必须通过专用文本生成链路使用")
 	}
 	spec, err := s.channels.UpstreamAuthSpecForChannelType(ctx, candidate.ChannelType)
 	if err != nil {

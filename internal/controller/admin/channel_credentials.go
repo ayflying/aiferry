@@ -14,7 +14,7 @@ func (c *Controller) registerChannelCredentialRoutes(group *ghttp.RouterGroup) {
 	group.GET("/channels/{id}/credentials", c.listChannelCredentials)
 	group.POST("/channels/{id}/credentials", c.createChannelCredential)
 	// 外链登录：先申请一次性登录地址，管理员在浏览器完成平台官方登录后再轮询换票，
-	// 成功时令牌作为新的渠道凭据落库。
+	// 成功时新增凭据，或更新发起时明确指定的原凭据。
 	group.POST("/channels/{id}/credentials/login", c.startChannelLogin)
 	group.POST("/channels/{id}/credentials/login/poll", c.pollChannelLogin)
 	group.PUT("/channels/{id}/credentials/{credentialId}/remark", c.updateChannelCredentialRemark)
@@ -105,7 +105,11 @@ func (c *Controller) createChannelCredential(r *ghttp.Request) {
 // startChannelLogin 申请一次性登录地址。登录动作在平台自己的登录页完成，
 // 管理端拿到 authUrl 后展示给管理员（新窗口打开或扫码），再轮询 poll 接口。
 func (c *Controller) startChannelLogin(r *ghttp.Request) {
-	session, err := c.channels.StartChannelLogin(r.Context(), routeID(r))
+	var input adminapi.ChannelLoginStartInput
+	if !parse(r, &input) {
+		return
+	}
+	session, err := c.channels.StartChannelLogin(r.Context(), routeID(r), input)
 	if err != nil {
 		respond(r, nil, err)
 		return

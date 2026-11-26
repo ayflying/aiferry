@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Info, Plus, RefreshCw, Trash2 } from '@lucide/vue'
 
-import type { DiscoveredModel, TimeWindow } from '../api/types'
+import type { ChannelCredential, DiscoveredModel, TimeWindow } from '../api/types'
 import { timeWindowListIsEmpty } from '../lib/time-window'
 import { splitPublicModelNames } from '../lib/models'
 import ChannelModelWindowPanel from './ChannelModelWindowPanel.vue'
@@ -15,6 +15,11 @@ const props = defineProps<{
   discovering: boolean
   discoveryError: string
   discoveryUnsupported?: boolean
+  requireDiscoveryAccount?: boolean
+  discoveryAccounts?: ChannelCredential[]
+  discoveryCredentialId?: number
+  discoveryAccountsError?: string
+  savedModelsError?: string
   applying: boolean
   discoveredModels: DiscoveredModel[]
   selectedModelNames: string[]
@@ -32,6 +37,7 @@ const emit = defineEmits<{
   'update:closedWindows': [value: Record<string, TimeWindow[]>]
   'add-custom-model': [name: string]
   retry: []
+  'discover-account': [credentialId: number]
   addMapping: []
   removeMapping: [id: number]
   save: []
@@ -99,7 +105,18 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
 
 <template>
   <el-dialog :model-value="modelValue" :title="`模型映射 · ${channelName}`" width="min(760px, 94vw)" @update:model-value="emit('update:modelValue', $event)">
+    <el-form v-if="requireDiscoveryAccount" label-position="top">
+      <el-form-item label="用于发现模型的账号">
+        <el-select :model-value="discoveryCredentialId" aria-label="用于发现模型的账号" placeholder="选择账号以获取模型列表" :disabled="discovering || applying || !discoveryAccounts?.length" filterable @update:model-value="emit('discover-account', $event)">
+          <el-option v-for="account in discoveryAccounts" :key="account.id" :value="account.id" :label="`#${account.index} ${account.remark || account.keyPrefix}${account.projectId ? ` · ${account.projectId}` : ''}`" />
+        </el-select>
+        <span class="mapping-hint">账号仅用于获取模型列表，保存的模型配置仍适用于整个渠道。</span>
+      </el-form-item>
+    </el-form>
     <div v-loading="discovering" class="model-selection">
+      <div v-if="savedModelsError" class="discovery-error" role="alert"><strong>已保存的模型加载失败</strong><span>{{ savedModelsError }}，请重试后再编辑保存。</span><el-button :icon="RefreshCw" size="small" @click="emit('retry')">重新尝试</el-button></div>
+      <div v-else-if="discoveryAccountsError" class="discovery-error" role="alert"><strong>账号列表加载失败</strong><span>{{ discoveryAccountsError }}</span><el-button :icon="RefreshCw" size="small" @click="emit('retry')">重新尝试</el-button></div>
+      <div v-else-if="requireDiscoveryAccount && !discovering && !discoveryAccounts?.length" class="discovery-unsupported"><Info :size="14" /><span>没有可用账号。可在「上游密钥」中添加或启用账号，也可在下方手动添加模型。</span></div>
       <div v-if="discoveryError" class="discovery-error" role="alert"><strong>模型发现失败</strong><span>{{ discoveryError }}</span><el-button :icon="RefreshCw" size="small" @click="emit('retry')">重新尝试</el-button></div>
     <div v-else-if="discoveryUnsupported" class="discovery-unsupported"><Info :size="14" /><span>该渠道不提供模型发现接口，可直接在下方搜索框输入模型 ID，点「添加」手动加入。</span></div>
       <el-tabs v-model="activeTab" class="model-tabs">
@@ -128,7 +145,7 @@ function updateMapping(id: number, field: 'upstreamName' | 'publicName', value: 
         </el-tab-pane>
       </el-tabs>
     </div>
-    <template #footer><el-button @click="emit('update:modelValue', false)">取消</el-button><el-button type="primary" :loading="applying" :disabled="discovering" @click="emit('save')">保存模型配置</el-button></template>
+    <template #footer><el-button @click="emit('update:modelValue', false)">取消</el-button><el-button type="primary" :loading="applying" :disabled="discovering || Boolean(savedModelsError)" @click="emit('save')">保存模型配置</el-button></template>
   </el-dialog>
 </template>
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -17,6 +16,31 @@ import (
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
+// Gemini probes use a matching synced account, but an explicit probe can still
+// exercise combo cooldown recovery (which is intentionally a relay-only filter).
+func (s *sChannel) geminiCredentialForModelTest(ctx context.Context, channelID, credentialID uint64, upstreamName string) (RouteCredential, error) {
+	eligible, err := geminiCredentialIDsForUpstream(ctx, channelID, upstreamName)
+	if err != nil {
+		return RouteCredential{}, err
+	}
+	if credentialID != 0 {
+		if _, ok := eligible[credentialID]; ok {
+			return s.CredentialForTest(ctx, channelID, credentialID)
+		}
+	} else if len(eligible) > 0 {
+		rows, err := s.availableCredentials(ctx, channelID, nil)
+		if err != nil {
+			return RouteCredential{}, err
+		}
+		available := filterEligibleCredentials(rows, eligible)
+		if len(available) > 0 {
+			selected := weightedSelect(available, nil)
+			return RouteCredential{ID: selected.Id, APIKeyCipher: selected.ApiKeyCipher}, nil
+		}
+	}
+	return RouteCredential{}, gerror.New("请先为可用的 Gemini 账号同步此模型")
+}
+
 func (s *sChannel) testGeminiSubscriptionModel(ctx context.Context, ch entity.Channels, credential RouteCredential, model entity.ChannelModels, stream bool) (TestResult, string, usage.TokenUsage, error) {
 	const path = "/chat/completions" // Bill and record the public protocol, not the vendor's RPC path.
 	_, payload, _ := testPayload("chat", model.UpstreamName, false, channeltype.Config{}, adminapi.SystemResilienceSettingsInput{})
@@ -24,11 +48,11 @@ func (s *sChannel) testGeminiSubscriptionModel(ctx context.Context, ch entity.Ch
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, gerror.Wrap(err, "encode Gemini subscription model test")
 	}
-	body, err = geminisub.BuildRequest(body, model.UpstreamName, strings.TrimSpace(ch.ProjectId))
+	client, token, project, err := s.geminiSubscriptionClientAuthorization(ctx, ch, credential)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, err
 	}
-	client, token, err := s.geminiSubscriptionClientToken(ctx, ch, credential)
+	body, err = geminisub.BuildRequest(body, model.UpstreamName, project)
 	if err != nil {
 		return TestResult{}, path, usage.TokenUsage{}, err
 	}

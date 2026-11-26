@@ -2,12 +2,25 @@ package relay
 
 import (
 	"io"
+	"net/http"
 
+	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/yunloli/aiferry/internal/logic/channel"
 	"github.com/yunloli/aiferry/internal/logic/geminisub"
 )
 
-func buildGeminiSubscriptionBody(body []byte, candidate Candidate) ([]byte, error) {
-	return geminisub.BuildRequest(body, candidate.UpstreamName, candidate.ProjectID)
+const geminiSubscriptionURL = channel.GeminiSubscriptionBaseURL + channel.GeminiSubscriptionStreamPath
+
+func applyGeminiSubscriptionToken(req *http.Request, token string) error {
+	if req.Method != http.MethodPost || req.URL.String() != geminiSubscriptionURL || token == "" {
+		return gerror.New("Gemini 订阅凭据只允许发送到指定文本生成端点")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return nil
+}
+
+func buildGeminiSubscriptionBody(body []byte, model, project string) ([]byte, error) {
+	return geminisub.BuildRequest(body, model, project)
 }
 
 // Convert at the wire boundary so the existing relay still handles usage, client

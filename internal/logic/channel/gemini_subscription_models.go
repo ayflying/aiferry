@@ -22,27 +22,23 @@ const (
 )
 
 func (s *sChannel) discoverGeminiSubscriptionModels(ctx context.Context, ch entity.Channels, credential RouteCredential) ([]string, map[string]modelmetadata.Metadata, error) {
-	project := strings.TrimSpace(ch.ProjectId)
-	if project == "" {
-		return nil, nil, gerror.New("Gemini subscription model discovery requires a project ID")
-	}
-	client, token, err := s.geminiSubscriptionClientToken(ctx, ch, credential)
+	client, token, project, err := s.geminiSubscriptionClientAuthorization(ctx, ch, credential)
 	if err != nil {
 		return nil, nil, err
 	}
 	return s.fetchGeminiSubscriptionModels(ctx, client, project, token)
 }
 
-func (s *sChannel) geminiSubscriptionClientToken(ctx context.Context, ch entity.Channels, credential RouteCredential) (*http.Client, string, error) {
+func (s *sChannel) geminiSubscriptionClientAuthorization(ctx context.Context, ch entity.Channels, credential RouteCredential) (*http.Client, string, string, error) {
 	client, err := s.GeminiSubscriptionHTTPClient(ctx, ch, credential.ID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	token, err := s.GeminiSubscriptionAccessToken(ctx, ch.Id, credential.ID, credential.APIKeyCipher)
+	token, project, err := s.GeminiSubscriptionAuthorization(ctx, ch.Id, credential.ID, credential.APIKeyCipher, ch.ProjectId)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	return client, token, nil
+	return client, token, project, nil
 }
 
 func (s *sChannel) fetchGeminiSubscriptionModels(ctx context.Context, client *http.Client, project, token string) ([]string, map[string]modelmetadata.Metadata, error) {

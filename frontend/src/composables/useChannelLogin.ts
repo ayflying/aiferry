@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { apiPost } from '../api/client'
-import type { ChannelLoginResult, ChannelLoginSession } from '../api/types'
+import type { ChannelLoginInput, ChannelLoginResult, ChannelLoginSession } from '../api/types'
 import { showError, showSuccess } from '../lib/error'
 
 /** 一次只保留一个登录会话；轮询串行执行，并按服务端给定的间隔和有效期结束。 */
@@ -29,7 +29,15 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
     error.value = '登录地址已超时，请点「重新发起登录」重新获取地址'
   }
 
-  async function start() {
+  function open() {
+    stop()
+    session.value = null
+    error.value = ''
+    elapsed.value = 0
+    visible.value = true
+  }
+
+  async function start(input?: ChannelLoginInput) {
     const id = channelID()
     if (!id || !active() || starting.value) return
     stop()
@@ -40,7 +48,8 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
     error.value = ''
     session.value = null
     try {
-      const result = await apiPost<ChannelLoginSession>(`/channels/${id}/credentials/login`)
+      const path = `/channels/${id}/credentials/login`
+      const result = input ? await apiPost<ChannelLoginSession>(path, input) : await apiPost<ChannelLoginSession>(path)
       if (token !== generation || id !== channelID() || !active()) {
         loginWindow?.close()
         return
@@ -63,7 +72,7 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
           if (status.status === 'completed') {
             stop()
             visible.value = false
-            showSuccess('登录成功，凭据已写入该渠道')
+            showSuccess(input?.credentialId ? '重新登录成功，账号凭据已更新' : '登录成功，凭据已写入该渠道')
             await completed()
           } else {
             pollTimer = setTimeout(() => { void poll() }, interval)
@@ -88,7 +97,7 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
   watch(visible, (open) => { if (!open) { stop(); session.value = null } })
   watch([channelID, active], () => { stop(); visible.value = false; session.value = null }, { flush: 'sync' })
   onBeforeUnmount(stop)
-  return { visible, starting, session, error, elapsed, expiresIn, start }
+  return { visible, starting, session, error, elapsed, expiresIn, open, start }
 }
 
 function positiveSeconds(value: number | undefined, fallback: number) {

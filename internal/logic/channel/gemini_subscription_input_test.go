@@ -6,7 +6,7 @@ import (
 	adminapi "github.com/yunloli/aiferry/api/admin"
 )
 
-func TestGeminiSubscriptionInputRequiresExplicitProxyAndProject(t *testing.T) {
+func TestGeminiSubscriptionInputRequiresProxyButNotChannelProject(t *testing.T) {
 	proxy, blank, token := "http://127.0.0.1:10808", " ", "manual-key"
 	for _, tc := range []struct {
 		name          string
@@ -19,7 +19,7 @@ func TestGeminiSubscriptionInputRequiresExplicitProxyAndProject(t *testing.T) {
 		{"keep", GeminiSubscriptionBaseURL, adminapi.ChannelInput{ProjectID: "example"}, true, true},
 		{"missing", GeminiSubscriptionBaseURL, adminapi.ChannelInput{ProjectID: "example"}, false, false},
 		{"remove", GeminiSubscriptionBaseURL, adminapi.ChannelInput{ProjectID: "example", ProxyURL: &blank}, true, false},
-		{"no project", GeminiSubscriptionBaseURL, adminapi.ChannelInput{ProxyURL: &proxy}, false, false},
+		{"no channel project", GeminiSubscriptionBaseURL, adminapi.ChannelInput{ProxyURL: &proxy}, false, true},
 		{"manual key", GeminiSubscriptionBaseURL, adminapi.ChannelInput{ProjectID: "example", ProxyURL: &proxy, APIKey: &token}, false, false},
 		{"unknown host", "https://example.invalid", adminapi.ChannelInput{ProjectID: "example", ProxyURL: &proxy}, false, false},
 	} {

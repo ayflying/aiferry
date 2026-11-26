@@ -18,6 +18,7 @@ import (
 type codexLoginState struct {
 	ChannelID    uint64              `json:"channelId"`
 	UserID       uint64              `json:"userId"`
+	TargetID     uint64              `json:"targetId,omitempty"`
 	DeviceAuthID string              `json:"deviceAuthId"`
 	UserCode     string              `json:"userCode"`
 	Interval     int                 `json:"interval"`
@@ -34,13 +35,18 @@ func randomCodexState() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (s *sChannel) startCodexLogin(ctx context.Context, channel entity.Channels) (ChannelLoginSession, error) {
+func (s *sChannel) startCodexLogin(ctx context.Context, channel entity.Channels, targetID uint64) (ChannelLoginSession, error) {
 	if s.app.Redis == nil {
 		return ChannelLoginSession{}, gerror.New("登录授权需要可用的会话缓存")
 	}
 	current, ok := auth.CurrentUser(ctx)
 	if !ok {
 		return ChannelLoginSession{}, gerror.New("未登录")
+	}
+	if targetID != 0 {
+		if _, _, err := s.readCodexLoginTarget(ctx, channel.Id, targetID); err != nil {
+			return ChannelLoginSession{}, err
+		}
 	}
 	client, err := s.HTTPClientForChannel(ctx, channel)
 	if err != nil {
@@ -71,7 +77,7 @@ func (s *sChannel) startCodexLogin(ctx context.Context, channel entity.Channels)
 	if err != nil {
 		return ChannelLoginSession{}, err
 	}
-	session := codexLoginState{ChannelID: channel.Id, UserID: current.Id, DeviceAuthID: reply.DeviceAuthID, UserCode: reply.UserCode, Interval: interval, ExpiresAt: time.Now().Add(codexLoginTTL).Unix()}
+	session := codexLoginState{ChannelID: channel.Id, UserID: current.Id, TargetID: targetID, DeviceAuthID: reply.DeviceAuthID, UserCode: reply.UserCode, Interval: interval, ExpiresAt: time.Now().Add(codexLoginTTL).Unix()}
 	if err = s.saveCodexLogin(ctx, state, session); err != nil {
 		return ChannelLoginSession{}, err
 	}
@@ -179,7 +185,7 @@ func (s *sChannel) pollCodexLogin(ctx context.Context, channel entity.Channels, 
 }
 
 func (s *sChannel) completeCodexLogin(ctx context.Context, state string, session codexLoginState) (ChannelLoginResult, error) {
-	id, err := s.createCodexCredential(ctx, session.ChannelID, *session.Credential)
+	id, err := s.saveCodexCredential(ctx, session.ChannelID, session.TargetID, *session.Credential)
 	if err != nil {
 		_ = s.app.Redis.Expire(ctx, "aiferry:codex-login-poll:"+state, time.Duration(session.Interval)*time.Second).Err()
 		return ChannelLoginResult{}, err

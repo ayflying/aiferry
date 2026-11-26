@@ -88,6 +88,17 @@ CREATE TABLE IF NOT EXISTS channel_models (
 	deleted_at             TEXT
 );
 
+CREATE TABLE IF NOT EXISTS gemini_credential_models (
+	channel_id            INTEGER NOT NULL,
+	channel_credential_id INTEGER NOT NULL,
+	upstream_name         TEXT    NOT NULL,
+	metadata              TEXT    NOT NULL,
+	PRIMARY KEY (channel_credential_id, upstream_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gemini_credential_models_route
+ON gemini_credential_models (channel_id, upstream_name);
+
 CREATE TABLE IF NOT EXISTS channel_model_credentials (
 	id                  INTEGER PRIMARY KEY,
 	channel_id          INTEGER NOT NULL DEFAULT 0,
