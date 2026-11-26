@@ -94,6 +94,10 @@ function openLoginUrl() {
       <el-alert v-if="error" type="error" :closable="false" show-icon :title="error" />
     </template>
     <el-alert v-else-if="!session && reloginAccount" type="info" :closable="false" show-icon title="请使用原账号登录。授权后将更新此账号的凭据，不会添加新账号。" />
+    <template v-else-if="googleAdd && !session && !starting">
+      <el-alert v-if="error" type="error" :closable="false" show-icon :title="error" />
+      <el-alert v-else type="info" :closable="false" show-icon title="点击「发起 Google 登录」，完成授权后返回此窗口选择项目。" />
+    </template>
     <template v-else>
       <el-alert type="info" :closable="false" show-icon :title="session?.userCode ? '复制下方用户码，在平台官方登录页输入用户码并完成设备授权。' : googleAdd ? '请在 Google 登录页完成授权，再返回此窗口。' : '请在浏览器打开平台官方登录页并完成授权。登录地址是一次性的，请尽快完成。'" />
       <div v-if="session?.userCode" class="login-row">
@@ -112,7 +116,7 @@ function openLoginUrl() {
     </template>
     <template #footer>
       <el-button @click="emit('update:modelValue', false)">关闭</el-button>
-      <el-button v-if="!showProjectForm || error" :type="showProjectForm ? 'default' : 'primary'" :loading="starting" :disabled="confirmingProject" @click="beginLogin">{{ session || !reloginAccount ? '重新发起登录' : '开始重新登录' }}</el-button>
+      <el-button v-if="!showProjectForm || error" :type="showProjectForm ? 'default' : 'primary'" :loading="starting" :disabled="confirmingProject" @click="beginLogin">{{ session || error ? '重新发起登录' : reloginAccount ? '开始重新登录' : googleAdd ? '发起 Google 登录' : '发起登录' }}</el-button>
       <el-button v-if="showProjectForm" type="primary" :loading="projectBusy" :disabled="!projectId" @click="submitProject">{{ projectStep ? '确认项目' : '使用此项目登录' }}</el-button>
     </template>
   </el-dialog>

@@ -135,11 +135,9 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
       loginWindow?.close()
       if (token === generation) {
         stop()
-        showError(cause, '发起登录失败')
-        if (visible.value && (allowManualRetry || input?.projectId)) {
-          manualRetryAvailable.value = true
-          error.value = errorMessage(cause)
-        }
+        // 发起请求失败时 Google 尚未授权，手填项目不能解决服务端配置问题。
+        if (visible.value) error.value = errorMessage(cause)
+        else showError(cause, '发起登录失败')
       }
     } finally {
       if (token === generation) starting.value = false

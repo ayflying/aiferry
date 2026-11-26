@@ -30,7 +30,6 @@ function openAddCredential() {
   reloginTarget.value = undefined
   if (googleLoginOnly.value) {
     openLogin()
-    void startLogin({}, true)
     return
   }
   credentialValue.value = ''
