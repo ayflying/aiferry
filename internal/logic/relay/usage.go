@@ -31,8 +31,13 @@ func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.A
 	if upstreamEndpoint == "" {
 		upstreamEndpoint = endpoint
 	}
-	billingDetails := s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, startedAt)
-	cost, chargeable := pricedUsageCost(s.requiresBalanceCheck(candidate.PublicName), billingDetails)
+	// 计费与用量日志一律以「路由模型」为准：配置了映射的渠道用对外公开名，
+	// 上游实际模型只写进 upstream_model 供排查。客户端可以按上游原始名直接请求
+	// （双入口路由），若沿用请求里的原始字符串，同一模型会拆成两个名字统计，
+	// 也会让人误以为费用按被路由的上游模型计算。
+	billingModel := routedModelName(candidate, requestedModel)
+	billingDetails := s.prices.EstimateBreakdown(billingModel, upstreamEndpoint, result.tokens, startedAt)
+	cost, chargeable := pricedUsageCost(s.requiresBalanceCheck(billingModel), billingDetails)
 	recordStatus := result.status
 	recordError := result.errorMessage
 	// 流式响应被截断时上游可能已经报了 200，但客户端拿到的不是完整回答：
@@ -47,7 +52,7 @@ func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.A
 	}
 	// 失败请求保留当时的套餐和费率（包括无 usage 的零数量项），所有费用归零且不扣款。
 	if !billable {
-		billingDetails = s.prices.EstimateFailureBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, startedAt)
+		billingDetails = s.prices.EstimateFailureBreakdown(billingModel, upstreamEndpoint, result.tokens, startedAt)
 		estimatedCost, failureDetails := failedUsageBilling(billingDetails)
 		cost, billingDetails = estimatedCost, failureDetails
 	}
@@ -94,7 +99,7 @@ func (s *sRelay) recordUsage(ctx context.Context, requestID string, key apikey.A
 			ProtocolConversion:   result.protocolConversion,
 			ClientIP:             clientIP,
 			IPLocation:           location,
-			RequestedModel:       requestedModel,
+			RequestedModel:       billingModel,
 			UpstreamModel:        candidate.UpstreamName,
 			ReasoningEffort:      candidate.ReasoningEffort,
 			HealthScoreAtRequest: healthScore,
@@ -150,6 +155,16 @@ func (s *sRelay) missingBillableUsage(candidate Candidate, endpoint string, resu
 	// 这里是对「刚刚拿到的这份响应」做实时判断，用当前时刻折算生效时段即可；
 	// 真正落账的金额在 record 里按请求起始时刻重算。
 	return s.prices.EstimateBreakdown(candidate.PublicName, upstreamEndpoint, result.tokens, time.Now()) == nil
+}
+
+// routedModelName 返回用量日志与计费应使用的模型名，也就是「路由模型」：
+// 渠道把上游模型映射成对外公开名后，公开名才是用户和价格表里的那个模型，
+// 上游实际名只作为诊断字段记录。候选缺公开名时退回请求里的原始字符串。
+func routedModelName(candidate Candidate, requestedModel string) string {
+	if name := strings.TrimSpace(candidate.PublicName); name != "" {
+		return name
+	}
+	return requestedModel
 }
 
 func (s *sRelay) requiresBalanceCheck(modelName string) bool {
