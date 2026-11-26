@@ -39,7 +39,14 @@ function openLoginUrl() {
     <template v-if="!session && projectRequired">
       <el-form label-position="top" @submit.prevent="beginLogin">
         <el-form-item label="Google Cloud 项目 ID" required>
-          <el-input :model-value="projectId" :disabled="starting" required clearable placeholder="例如 my-cloud-project" @update:model-value="emit('update:projectId', $event)" />
+          <template #label>
+            <span class="project-label">
+              Google Cloud 项目 ID
+              <el-link href="https://console.cloud.google.com/cloud-resource-manager" target="_blank" rel="noopener noreferrer" type="primary">查看项目 ID</el-link>
+            </span>
+          </template>
+          <el-input :model-value="projectId" :disabled="starting" required clearable placeholder="例如 my-cloud-project" aria-describedby="gemini-project-id-help" @update:model-value="emit('update:projectId', $event)" />
+          <small id="gemini-project-id-help" class="project-help">用准备授权的 Google 账号打开项目列表，复制「项目 ID」，不要填项目名称或项目编号。</small>
         </el-form-item>
       </el-form>
       <el-alert type="info" :closable="false" show-icon title="请使用有权访问此项目的 Google 账号登录。授权后，此项目仅用于新添加的账号。" />
@@ -69,6 +76,8 @@ function openLoginUrl() {
 </template>
 
 <style scoped>
+.project-label { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.project-help { display: block; margin-top: 4px; color: var(--el-text-color-secondary); line-height: 1.5; }
 .login-row { display: flex; gap: 8px; margin-top: 12px; }
 .user-code { font-family: 'JetBrains Mono', monospace; }
 .login-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; color: #5b6a77; font-size: 12px; }
