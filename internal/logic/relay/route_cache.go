@@ -11,6 +11,7 @@ import (
 	"github.com/yunloli/aiferry/internal/dao"
 	"github.com/yunloli/aiferry/internal/logic/apikey"
 	channelconfig "github.com/yunloli/aiferry/internal/logic/channel"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 	"github.com/yunloli/aiferry/internal/model/entity"
 )
 
@@ -214,6 +215,9 @@ func filterCandidates(candidates []Candidate, key apikey.AuthKey, adminRoles []s
 	copy(pool, candidates)
 	available := pool[:0]
 	for _, candidate := range pool {
+		if channeltype.IsRetiredCode(candidate.ChannelType) {
+			continue
+		}
 		if !keyAllowsGroupPolicy(key, candidate.CreatedByUserID, candidate.GroupIDs, key.UserChannelGroupIDs) {
 			continue
 		}

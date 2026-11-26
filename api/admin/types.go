@@ -46,9 +46,7 @@ type ChannelCredentialStatusInput struct {
 }
 
 // ChannelLoginStartInput 省略 CredentialID 为新增账号，指定它则只对该凭据重新登录。
-// 新增 Gemini 订阅账号时，省略 ProjectID 为登录后选项目，指定它则直接使用该项目。
 type ChannelLoginStartInput struct {
-	ProjectID    string  `json:"projectId"`
 	CredentialID *uint64 `json:"credentialId"`
 }
 
@@ -62,26 +60,16 @@ type ChannelLoginSessionView struct {
 	ExpiresInSeconds int    `json:"expiresInSeconds,omitempty"`
 }
 
-// ChannelLoginPollInput 轮询登录结果；ProjectID 仅用于确认 Gemini 选项目会话。
+// ChannelLoginPollInput 轮询登录结果。
 type ChannelLoginPollInput struct {
-	State     string `json:"state" v:"required#登录状态不能为空"`
-	ProjectID string `json:"projectId"`
+	State string `json:"state" v:"required#登录状态不能为空"`
 }
 
-// ChannelLoginProject 是 Google 项目选择项，不包含项目资源详情或访问令牌。
-type ChannelLoginProject struct {
-	ProjectID   string `json:"projectId"`
-	DisplayName string `json:"displayName"`
-}
-
-// ChannelLoginResultView 登录结果：pending 等待授权，project_required 等待确认项目，
-// completed 表示令牌已写入渠道凭据。
+// ChannelLoginResultView 登录结果：pending 等待授权，completed 表示凭据已保存。
 type ChannelLoginResultView struct {
-	Status         string                `json:"status"`
-	CredentialID   uint64                `json:"credentialId"`
-	UID            string                `json:"uid"`
-	Projects       []ChannelLoginProject `json:"projects,omitempty"`
-	ProjectMessage string                `json:"projectMessage,omitempty"`
+	Status       string `json:"status"`
+	CredentialID uint64 `json:"credentialId"`
+	UID          string `json:"uid"`
 }
 
 // CredentialRevealVerifyInput 校验查看上游密钥明文的邮箱验证码。

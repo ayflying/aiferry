@@ -121,7 +121,7 @@ export interface ChannelTypeProtocolConfig {
 
 /** 渠道类型的登录方式声明；adapter 决定登录形态（external_link = 浏览器外链 SSO）。 */
 export interface ChannelTypeLoginConfig {
-  adapter: 'none' | 'external_link' | 'codex_device' | 'gemini_oauth'
+  adapter: 'none' | 'external_link' | 'codex_device'
   platform?: string
   prefixPath?: string
 }
@@ -237,26 +237,18 @@ export interface ChannelLoginSession {
   expiresInSeconds?: number
 }
 
-export interface ChannelLoginProject {
-  projectId: string
-  displayName: string
-}
-
-/** 登录轮询结果：授权等待、Google 项目确认、或凭据写入完成。 */
+/** 登录轮询结果：等待授权或凭据写入完成。 */
 export type ChannelLoginResult =
   | { status: 'pending' }
-  | { status: 'project_required'; projects?: ChannelLoginProject[]; projectMessage?: string }
   | { status: 'completed'; credentialId: number; uid: string }
 
-export type ChannelLoginInput =
-  | { projectId?: never; credentialId?: never }
-  | { projectId: string; credentialId?: never }
-  | { credentialId: number; projectId?: never }
+export interface ChannelLoginInput {
+  credentialId: number
+}
 
 export interface ChannelCredential {
   id: number
   canRelogin?: boolean
-  projectId?: string
   /** 固定序号：按创建顺序编号（含已删密钥占位），与用量明细「渠道 #N」一致；删除不重排。 */
   index: number
   keyPrefix: string

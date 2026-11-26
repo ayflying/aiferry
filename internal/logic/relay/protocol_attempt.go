@@ -33,15 +33,7 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 		message := "Codex 官方渠道仅支持 Responses；Chat 请求需要启用协议转换"
 		return attemptResult{status: http.StatusBadRequest, body: openAIError("invalid_request_error", message), errorMessage: message}, false, nil
 	}
-	geminiSubscription := candidate.ChannelType == channel.GeminiSubscriptionChannelType
-	if geminiSubscription && endpoint != protocol.ChatCompletionsEndpoint {
-		message := "Gemini 订阅首版仅支持 Chat Completions 文本对话"
-		return attemptResult{status: http.StatusBadRequest, body: openAIError("invalid_request_error", message), errorMessage: message}, false, nil
-	}
-	primary := protocol.DirectPlan(endpoint)
-	if !geminiSubscription {
-		primary = s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled, settings)
-	}
+	primary := s.preferredProtocolPlan(ctx, endpoint, candidate, conversionEnabled, settings)
 	primaryStartedAt := time.Now()
 	result, handled, attemptErr := s.attemptWithProtocol(ctx, writer, incomingHeaders, originalBody, candidate, stream, userID, apiKeyID, settings, advancedConfig, primary, sensitiveDataRestorer)
 	// 历史说明：0.6.20 曾在这里做「首跳 11128 后扰动重发一次」的自愈重试；0.6.25 起
@@ -54,7 +46,7 @@ func (s *sRelay) attempt(ctx context.Context, writer http.ResponseWriter, incomi
 	needsFallback := protocol.ShouldFallback(result.status, result.body) || s.missingBillableUsage(candidate, endpoint, result)
 	// 关闭协议转换时不做端点回退：AlternatePlan 给出的备选端点必然要求转换，
 	// 继续回退等于绕过开关。此时把上游的原始失败结果交还给客户端。
-	if handled || attemptErr != nil || !needsFallback || !conversionEnabled || candidate.ChannelType == "codex" || geminiSubscription {
+	if handled || attemptErr != nil || !needsFallback || !conversionEnabled || candidate.ChannelType == "codex" {
 		return result, handled, attemptErr
 	}
 	fallback, ok := protocol.AlternatePlan(endpoint, primary)
@@ -184,7 +176,6 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if plan.ClientEndpoint() == "/rerank" {
 		upstreamURL = s.rerankUpstreamURL(ctx, candidate)
 	}
-	geminiSubscription := candidate.ChannelType == channel.GeminiSubscriptionChannelType
 	forcedStream := false
 	if candidate.ChannelType == "codex" {
 		body, err = channel.ApplyCodexBody(body)
@@ -215,19 +206,6 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if stream && plan.UpstreamEndpoint() == protocol.ChatCompletionsEndpoint {
 		body, _ = sjson.SetBytes(body, "stream_options.include_usage", true)
 	}
-	var geminiToken string
-	if geminiSubscription {
-		var accountProject string
-		geminiToken, accountProject, err = s.channels.GeminiSubscriptionAuthorization(ctx, candidate.ChannelID, candidate.ChannelCredentialID, candidate.APIKeyCipher, candidate.ProjectID)
-		if err != nil {
-			return attemptResult{}, false, err
-		}
-		upstreamURL = geminiSubscriptionURL
-		body, err = buildGeminiSubscriptionBody(body, candidate.UpstreamName, accountProject)
-		if err != nil {
-			return attemptResult{status: http.StatusBadRequest, body: openAIError("invalid_request_error", err.Error()), errorMessage: err.Error()}, false, nil
-		}
-	}
 	requestCtx := ctx
 	cancel := func() {}
 	if !stream {
@@ -238,22 +216,13 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if err != nil {
 		return attemptResult{}, false, gerror.Wrap(err, "create upstream request")
 	}
-	if geminiSubscription {
-		// 专用端点只需要网关生成的头，不向 Google 转交客户端身份信息。
-		req.Header.Set("Accept", "text/event-stream")
-	} else {
-		copyRequestHeaders(req.Header, incomingHeaders)
-	}
+	copyRequestHeaders(req.Header, incomingHeaders)
 	// 鉴权头与组织/项目头由渠道类型声明统一决定，与模型测试共用同一实现。
 	endpointName := ""
 	if plan.ClientEndpoint() == "/rerank" {
 		endpointName = "rerank"
 	}
-	if geminiSubscription {
-		err = applyGeminiSubscriptionToken(req, geminiToken)
-	} else {
-		err = s.applyEndpointAuthHeaders(ctx, req, candidate, endpointName)
-	}
+	err = s.applyEndpointAuthHeaders(ctx, req, candidate, endpointName)
 	if err != nil {
 		return attemptResult{}, false, err
 	}
@@ -283,13 +252,6 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 		// 强制流式车道（OpenCode 免费层指纹校验，或渠道类型声明只接受流式）：
 		// 客户端要非流式 JSON，但请求体已被改成 stream=true，上游回的是 SSE。
 		// 把分片聚合成 chat.completion 后再走非流式回包/计费。
-		if geminiSubscription && resp.StatusCode >= 200 && resp.StatusCode < 300 && readErr == nil {
-			responseBody, readErr = aggregateGeminiSubscription(bytes.NewReader(responseBody), candidate)
-			if readErr != nil {
-				return attemptResult{}, false, gerror.Wrap(readErr, "转换 Gemini 订阅响应")
-			}
-			resp.Header.Set("Content-Type", "application/json")
-		}
 		forcedStreamAggregate := forcedStream && !stream && resp.StatusCode >= 200 && resp.StatusCode < 300 && readErr == nil
 		if forcedStreamAggregate {
 			var failure *streamFailure
@@ -426,13 +388,7 @@ func (s *sRelay) attemptWithProtocol(ctx context.Context, writer http.ResponseWr
 	if firstByteTimeout <= 0 {
 		return result, false, upstreamTimeoutError{phase: "stream first-byte"}
 	}
-	var streamBody io.Reader = newStreamTimeoutReader(resp.Body, firstByteTimeout, time.Duration(settings.StreamIdleTimeoutSeconds)*time.Second)
-	if geminiSubscription {
-		converted := geminiSubscriptionStream(streamBody, candidate)
-		defer converted.Close()
-		streamBody = converted
-		result.headers.Set("Content-Type", "text/event-stream")
-	}
+	streamBody := newStreamTimeoutReader(resp.Body, firstByteTimeout, time.Duration(settings.StreamIdleTimeoutSeconds)*time.Second)
 	scanner := bufio.NewScanner(streamBody)
 	scanner.Buffer(make([]byte, 64*1024), 8<<20)
 	for scanner.Scan() {

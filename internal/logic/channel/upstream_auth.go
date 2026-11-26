@@ -82,9 +82,6 @@ func (s *sChannel) ApplyUpstreamAuthHeaders(req *http.Request, in UpstreamAuthIn
 		if err != nil {
 			return err
 		}
-		if strings.HasPrefix(key, geminiCredentialPrefix) {
-			return gerror.New("Gemini OAuth 凭据只能用于订阅专用请求")
-		}
 		if strings.HasPrefix(key, codexCredentialPrefix) {
 			credential, err := decodeCodexCredential(key)
 			if err != nil {
@@ -140,7 +137,17 @@ func (s *sChannel) upstreamAuthKey(cipher string, tolerate bool) (string, error)
 		}
 		return "", gerror.New("channel credential is required")
 	}
-	return s.app.Secrets.Decrypt(cipher)
+	if isRetiredCredential(cipher) {
+		return "", gerror.New("该登录凭据已停用，无法转发")
+	}
+	key, err := s.app.Secrets.Decrypt(cipher)
+	if err != nil {
+		return "", err
+	}
+	if isRetiredCredential(key) {
+		return "", gerror.New("该登录凭据已停用，无法转发")
+	}
+	return key, nil
 }
 
 // setUpstreamAuthHeader 按渠道类型声明的头名与前缀写入密钥；密钥为空则跳过。

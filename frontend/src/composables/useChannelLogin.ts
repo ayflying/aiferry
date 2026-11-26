@@ -3,7 +3,7 @@ import { apiPost } from '../api/client'
 import type { ChannelLoginInput, ChannelLoginResult, ChannelLoginSession } from '../api/types'
 import { errorMessage, showError, showSuccess } from '../lib/error'
 
-/** 一次只保留一个登录会话；等待授权时串行轮询，选择项目时等用户主动确认。 */
+/** 一次只保留一个登录会话；等待授权时串行轮询。 */
 export function useChannelLogin(channelID: () => number | undefined, active: () => boolean, completed: () => Promise<void>) {
   const visible = ref(false)
   const starting = ref(false)
@@ -11,9 +11,6 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
   const error = ref('')
   const elapsed = ref(0)
   const expiresIn = ref(300)
-  const projectStep = shallowRef<Extract<ChannelLoginResult, { status: 'project_required' }> | null>(null)
-  const confirmingProject = ref(false)
-  const manualRetryAvailable = ref(false)
   let generation = 0
   let pollTimer: ReturnType<typeof setTimeout> | undefined
   let expiryTimer: ReturnType<typeof setTimeout> | undefined
@@ -29,14 +26,11 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
     generation += 1
     stopPolling()
     starting.value = false
-    confirmingProject.value = false
   }
 
   function resetSession() {
     stop()
     session.value = null
-    projectStep.value = null
-    manualRetryAvailable.value = false
     error.value = ''
     elapsed.value = 0
   }
@@ -57,33 +51,9 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
     await completed()
   }
 
-  function pollLogin(id: number, state: string, projectId?: string) {
-    return apiPost<ChannelLoginResult>(`/channels/${id}/credentials/login/poll`, projectId ? { state, projectId } : { state })
-  }
-
-  async function confirmProject(rawProjectId: string) {
+  async function start(input?: ChannelLoginInput) {
     const id = channelID()
-    const state = session.value?.state
-    const projectId = rawProjectId.trim()
-    if (!id || !state || !visible.value || !active() || !projectId || !projectStep.value || confirmingProject.value) return
-    const token = generation
-    confirmingProject.value = true
-    error.value = ''
-    try {
-      const status = await pollLogin(id, state, projectId)
-      if (token !== generation) return
-      if (status.status === 'completed') await finish()
-      else error.value = '项目尚未保存，请再次确认。'
-    } catch (cause) {
-      if (token === generation) error.value = errorMessage(cause)
-    } finally {
-      if (token === generation) confirmingProject.value = false
-    }
-  }
-
-  async function start(input?: ChannelLoginInput, allowManualRetry = false) {
-    const id = channelID()
-    if (!id || !active() || starting.value || confirmingProject.value) return
+    if (!id || !active() || starting.value) return
     resetSession()
     const token = generation
     const loginWindow = window.open('about:blank', '_blank')
@@ -107,26 +77,19 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
         if (token !== generation) return
         if (Date.now() >= deadline) { expire(); return }
         try {
-          const status = await pollLogin(id, result.state)
+          const status = await apiPost<ChannelLoginResult>(`/channels/${id}/credentials/login/poll`, { state: result.state })
           if (token !== generation) return
           if (Date.now() >= deadline) { expire(); return }
           if (status.status === 'completed') {
             await finish(input?.credentialId)
-          } else if (status.status === 'project_required') {
-            stopPolling()
-            projectStep.value = status
           } else {
             pollTimer = setTimeout(() => { void poll() }, interval)
           }
         } catch (cause) {
           if (token !== generation) return
           stop()
-          manualRetryAvailable.value = allowManualRetry
-          if (allowManualRetry) error.value = errorMessage(cause)
-          else {
-            showError(cause, '登录轮询失败')
-            error.value = '轮询失败，可点「重新发起登录」重试'
-          }
+          showError(cause, '登录轮询失败')
+          error.value = '轮询失败，可点「重新发起登录」重试'
         }
       }
       pollTimer = setTimeout(() => { void poll() }, interval)
@@ -135,7 +98,6 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
       loginWindow?.close()
       if (token === generation) {
         stop()
-        // 发起请求失败时 Google 尚未授权，手填项目不能解决服务端配置问题。
         if (visible.value) error.value = errorMessage(cause)
         else showError(cause, '发起登录失败')
       }
@@ -150,7 +112,7 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
     else resetSession()
   }, { flush: 'sync' })
   onBeforeUnmount(stop)
-  return { visible, starting, session, error, elapsed, expiresIn, projectStep, confirmingProject, manualRetryAvailable, open, start, confirmProject }
+  return { visible, starting, session, error, elapsed, expiresIn, open, start }
 }
 
 function positiveSeconds(value: number | undefined, fallback: number) {

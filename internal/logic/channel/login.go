@@ -27,7 +27,7 @@ type ChannelLoginSession struct {
 	ExpiresInSeconds int
 }
 
-// ChannelLoginResult 是一次登录轮询的结果；Gemini 选项目时还未保存凭据。
+// ChannelLoginResult 是一次登录轮询的结果。
 type ChannelLoginResult = adminapi.ChannelLoginResultView
 
 // StartChannelLogin 向渠道类型声明的登录接口申请一次性登录地址。服务端只负责取地址
@@ -45,15 +45,8 @@ func (s *sChannel) StartChannelLogin(ctx context.Context, channelID uint64, inpu
 			return ChannelLoginSession{}, gerror.New("重新登录需要有效的凭据 ID")
 		}
 	}
-	project := strings.TrimSpace(input.ProjectID)
-	if project != "" && (config.Login.Adapter != channeltype.AdapterLoginGeminiOAuth || credentialID != 0) {
-		return ChannelLoginSession{}, gerror.New("仅新增 Gemini 账号时可以填写项目 ID")
-	}
-	switch config.Login.Adapter {
-	case channeltype.AdapterLoginCodexDevice:
+	if config.Login.Adapter == channeltype.AdapterLoginCodexDevice {
 		return s.startCodexLogin(ctx, channel, credentialID)
-	case channeltype.AdapterLoginGeminiOAuth:
-		return s.startGeminiLogin(ctx, channel, credentialID, project)
 	}
 	if credentialID != 0 {
 		return ChannelLoginSession{}, gerror.New("该渠道的外链登录无法验证原凭据账号，不支持重新登录")
@@ -82,7 +75,7 @@ func (s *sChannel) StartChannelLogin(ctx context.Context, channelID uint64, inpu
 	return session, nil
 }
 
-// PollChannelLogin 轮询一次登录结果；Gemini 项目选择会话需要显式确认项目后才写入渠道凭据。
+// PollChannelLogin 轮询一次登录结果。
 func (s *sChannel) PollChannelLogin(ctx context.Context, channelID uint64, input adminapi.ChannelLoginPollInput) (ChannelLoginResult, error) {
 	state := strings.TrimSpace(input.State)
 	if state == "" {
@@ -92,15 +85,8 @@ func (s *sChannel) PollChannelLogin(ctx context.Context, channelID uint64, input
 	if err != nil {
 		return ChannelLoginResult{}, err
 	}
-	project := strings.TrimSpace(input.ProjectID)
-	if project != "" && config.Login.Adapter != channeltype.AdapterLoginGeminiOAuth {
-		return ChannelLoginResult{}, gerror.New("仅 Gemini 项目选择会话可以确认项目 ID")
-	}
-	switch config.Login.Adapter {
-	case channeltype.AdapterLoginCodexDevice:
+	if config.Login.Adapter == channeltype.AdapterLoginCodexDevice {
 		return s.pollCodexLogin(ctx, channel, state)
-	case channeltype.AdapterLoginGeminiOAuth:
-		return s.pollGeminiLogin(ctx, channel, state, project)
 	}
 	endpoint, err := loginEndpoint(channel.BaseUrl, config, "auth/token")
 	if err != nil {
@@ -142,7 +128,7 @@ func (s *sChannel) loginContext(ctx context.Context, channelID uint64) (entity.C
 	if err != nil {
 		return entity.Channels{}, channeltype.Config{}, err
 	}
-	if config.Login.Adapter != channeltype.AdapterLoginExternalLink && config.Login.Adapter != channeltype.AdapterLoginCodexDevice && config.Login.Adapter != channeltype.AdapterLoginGeminiOAuth {
+	if config.Login.Adapter != channeltype.AdapterLoginExternalLink && config.Login.Adapter != channeltype.AdapterLoginCodexDevice {
 		return entity.Channels{}, channeltype.Config{}, gerror.Newf("渠道类型 %s 不支持登录，请手工填写密钥", channel.Type)
 	}
 	return channel, config, nil

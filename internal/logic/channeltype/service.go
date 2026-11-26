@@ -39,7 +39,6 @@ const (
 	AdapterLoginNone         = "none"
 	AdapterLoginExternalLink = "external_link"
 	AdapterLoginCodexDevice  = "codex_device"
-	AdapterLoginGeminiOAuth  = "gemini_oauth"
 
 	ValueTypeCost  = "cost"
 	ValueTypeUsage = "usage"
@@ -350,7 +349,15 @@ func (s *sChannelType) invalidateCustomType(ctx context.Context, code string) {
 	_ = s.redis.Del(ctx, customTypeCacheKey(code)).Err()
 }
 
+// IsRetiredCode 防止残存渠道或路由缓存将旧订阅转成普通 API 请求。
+func IsRetiredCode(code string) bool {
+	return strings.EqualFold(strings.TrimSpace(code), "gemini_subscription")
+}
+
 func (s *sChannelType) GetByCode(ctx context.Context, code string) (entity.ChannelTypes, Config, error) {
+	if IsRetiredCode(code) {
+		return entity.ChannelTypes{}, Config{}, gerror.New("该渠道类型已停用")
+	}
 	if item, exists := s.builtins.ChannelTypeByCode(code); exists {
 		row := builtinEntity(item)
 		parsed, err := ParseConfig([]byte(row.ConfigJson))
@@ -393,15 +400,15 @@ func (s *sChannelType) Create(ctx context.Context, input adminapi.ChannelTypeInp
 	if !codePattern.MatchString(code) {
 		return 0, gerror.New("channel type code must start with a lowercase letter and contain only lowercase letters, numbers, underscores, or hyphens")
 	}
+	if IsRetiredCode(code) {
+		return 0, gerror.New("该渠道类型代码已停用")
+	}
 	if _, exists := s.builtins.ChannelTypeByCode(code); exists {
 		return 0, gerror.New("渠道类型代码已由本地内置配置占用")
 	}
 	config, err := ParseConfig(input.Config)
 	if err != nil {
 		return 0, err
-	}
-	if config.Login.Adapter == AdapterLoginGeminiOAuth {
-		return 0, gerror.New("Gemini OAuth 仅用于内置 Gemini 订阅渠道")
 	}
 	encoded, _ := json.Marshal(config)
 	id, err := dao.ChannelTypes.Ctx(ctx).Data(do.ChannelTypes{
@@ -431,9 +438,6 @@ func (s *sChannelType) Update(ctx context.Context, id uint64, input adminapi.Cha
 	config, err := ParseConfig(input.Config)
 	if err != nil {
 		return err
-	}
-	if config.Login.Adapter == AdapterLoginGeminiOAuth {
-		return gerror.New("Gemini OAuth 仅用于内置 Gemini 订阅渠道")
 	}
 	encoded, _ := json.Marshal(config)
 	if _, err = dao.ChannelTypes.Ctx(ctx).Where(dao.ChannelTypes.Columns().Id, id).Data(do.ChannelTypes{

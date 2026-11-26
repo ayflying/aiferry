@@ -19,7 +19,8 @@ const modelsListCacheTTL = 60 * time.Second
 
 func (s *sRelay) Models(ctx context.Context, key apikey.AuthKey) (ModelList, error) {
 	version := s.routeCacheVersion(ctx)
-	cacheKey := fmt.Sprintf("aiferry:models:list:metadata-v1:%d:%d", key.Id, version)
+	// 旧缓存可能含仅能由已停用渠道提供的模型。
+	cacheKey := fmt.Sprintf("aiferry:models:list:metadata-v2:%d:%d", key.Id, version)
 	if cached, err := s.app.Redis.Get(ctx, cacheKey).Bytes(); err == nil {
 		var list ModelList
 		if json.Unmarshal(cached, &list) == nil {

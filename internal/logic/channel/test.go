@@ -57,12 +57,7 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 			return TestResult{}, err
 		}
 	}
-	var credential RouteCredential
-	if channel.Type == GeminiSubscriptionChannelType {
-		credential, err = s.geminiCredentialForModelTest(ctx, channel.Id, input.ChannelCredentialID, model.UpstreamName)
-	} else {
-		credential, err = s.CredentialForTest(ctx, channel.Id, input.ChannelCredentialID)
-	}
+	credential, err := s.CredentialForTest(ctx, channel.Id, input.ChannelCredentialID)
 	if err != nil {
 		return TestResult{}, err
 	}
@@ -88,12 +83,6 @@ func (s *sChannel) TestModel(ctx context.Context, input adminapi.ModelTestInput,
 		return TestResult{}, err
 	}
 	baseURLs := advancedConfig.UpstreamBaseURLs(channel.BaseUrl)
-	if channel.Type == GeminiSubscriptionChannelType {
-		if input.Endpoint != "auto" && input.Endpoint != "chat" {
-			return TestResult{}, gerror.New("Gemini subscription only supports chat model tests")
-		}
-		endpoints, baseURLs = []string{"chat"}, []string{GeminiSubscriptionBaseURL}
-	}
 	var (
 		result      TestResult
 		billingErr  error
@@ -210,9 +199,6 @@ func buildTestRequest(ctx context.Context, url string, channelType string, paylo
 }
 
 func (s *sChannel) testModelEndpoint(ctx context.Context, channel entity.Channels, credential RouteCredential, typeConfig channeltype.Config, settings adminapi.SystemResilienceSettingsInput, model entity.ChannelModels, config AdvancedConfig, baseURL, endpoint string, stream bool) (TestResult, string, usage.TokenUsage, error) {
-	if channel.Type == GeminiSubscriptionChannelType {
-		return s.testGeminiSubscriptionModel(ctx, channel, credential, model, stream)
-	}
 	path, payload, streamed := testPayload(endpoint, model.UpstreamName, stream, typeConfig, settings)
 	if typeConfig.Audio.Adapter == channeltype.AudioAdapterChat && (endpoint == "tts" || endpoint == "asr") {
 		path, payload = chatAdapterPayload(endpoint, model.UpstreamName, payload)

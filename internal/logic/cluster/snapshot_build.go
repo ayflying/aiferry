@@ -22,7 +22,6 @@ func buildSnapshot(ctx context.Context, database gdb.DB, version int64) (*Snapsh
 		{"channel_credentials", "id", &snapshot.ChannelCredentials},
 		{"channel_models", "id", &snapshot.ChannelModels},
 		{"channel_model_credentials", "id", &snapshot.ChannelModelCredentials},
-		{"gemini_credential_models", "channel_credential_id, upstream_name", &snapshot.GeminiCredentialModels},
 		{"channel_groups", "id", &snapshot.ChannelGroups},
 		{"channel_group_members", "channel_group_id, channel_id", &snapshot.ChannelGroupMembers},
 		{"channel_types", "id", &snapshot.ChannelTypes},

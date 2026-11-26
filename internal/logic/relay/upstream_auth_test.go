@@ -44,6 +44,12 @@ func TestApplyUpstreamAuthHeadersFollowsChannelType(t *testing.T) {
 		t.Fatalf("unknown channel type should fall back to bearer: %v", fallback.Header)
 	}
 
+	// 旧版缓存里的已停用渠道不能降级为通用 Bearer，即使凭据可解密。
+	retired, _ := http.NewRequest(http.MethodPost, "https://upstream.example/v1/chat/completions", nil)
+	if err = relay.applyUpstreamAuthHeaders(context.Background(), retired, Candidate{ChannelType: "gemini_subscription", APIKeyCipher: cipher}); err == nil || retired.Header.Get("Authorization") != "" {
+		t.Fatalf("retired channel should be rejected before applying auth: %v", err)
+	}
+
 	// 无密钥（如已签名下载地址）不应中断转发。
 	empty, _ := http.NewRequest(http.MethodGet, "https://cdn.example/v1/videos/1/content", nil)
 	if err = relay.applyUpstreamAuthHeaders(context.Background(), empty, Candidate{ChannelType: "custom_openai"}); err != nil {

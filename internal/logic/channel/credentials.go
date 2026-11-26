@@ -32,7 +32,6 @@ type CredentialView struct {
 	Index                  uint       `json:"index"`
 	KeyPrefix              string     `json:"keyPrefix"`
 	CanRelogin             bool       `json:"canRelogin"`
-	ProjectID              string     `json:"projectId,omitempty"`
 	Remark                 string     `json:"remark"`
 	HasManagementKey       bool       `json:"hasManagementKey"`
 	Status                 int        `json:"status"`
@@ -84,9 +83,6 @@ func (s *sChannel) CreateCredential(ctx context.Context, channelID uint64, input
 	_, typeConfig, err := s.types.GetByCode(ctx, channel.Type)
 	if err != nil {
 		return 0, err
-	}
-	if channel.Type == GeminiSubscriptionChannelType || typeConfig.Login.Adapter == channeltype.AdapterLoginGeminiOAuth {
-		return 0, gerror.New("Gemini 订阅渠道不接受手工密钥，请使用 Google OAuth 登录")
 	}
 	remark, err := normalizeCredentialRemark(input.Remark)
 	if err != nil {
@@ -163,7 +159,7 @@ func (s *sChannel) ListCredentials(ctx context.Context, channelID uint64) ([]Cre
 			return nil, err
 		}
 		view := credentialView(row, channelTypeConfig.Costs)
-		s.populateCredentialLoginView(&view, channel, channelTypeConfig.Login.Adapter, row)
+		s.populateCredentialLoginView(&view, channelTypeConfig.Login.Adapter, row)
 		view.Index = indexes[row.Id]
 		views = append(views, view)
 	}
@@ -184,12 +180,15 @@ func (s *sChannel) RevealCredential(ctx context.Context, channelID, credentialID
 	if strings.TrimSpace(credential.ApiKeyCipher) == "" {
 		return "", gerror.New("该密钥未保存密文，无法恢复明文")
 	}
+	if isRetiredCredential(credential.ApiKeyCipher) {
+		return "", gerror.New("该登录凭据已停用，无法显示")
+	}
 	plainText, err := s.app.Secrets.Decrypt(credential.ApiKeyCipher)
 	if err != nil {
 		return "", gerror.Wrap(err, "decrypt channel credential")
 	}
-	if strings.HasPrefix(plainText, geminiCredentialPrefix) {
-		return "", gerror.New("Gemini OAuth 登录凭据不可显示，请通过登录重新授权")
+	if isRetiredCredential(plainText) {
+		return "", gerror.New("该登录凭据已停用，无法显示")
 	}
 	if strings.HasPrefix(plainText, codexCredentialPrefix) {
 		credential, err := decodeCodexCredential(plainText)
@@ -383,18 +382,10 @@ func (s *sChannel) invalidateCredentialBinding(ctx context.Context, apiKeyID, ch
 // 始终用同一把密钥，新对话重新随机——键级绑定是「这个 API Key 的所有对话共用一把」，
 // 与「新对话随机一把」相反，因此有会话标识时不再走绑定表。
 func (s *sChannel) SelectCredential(ctx context.Context, apiKeyID, channelID, modelID uint64, excluded map[uint64]struct{}) (RouteCredential, error) {
-	eligible, err := routeCredentialEligibility(ctx, channelID, modelID)
-	if err != nil {
-		return RouteCredential{}, err
-	}
-	if eligible != nil && len(eligible) == 0 {
-		return RouteCredential{}, &CredentialUnavailableError{ChannelID: channelID, Reason: "没有已启用、且已同步此 Gemini 模型的账号"}
-	}
 	credentials, err := s.availableCredentials(ctx, channelID, nil)
 	if err != nil {
 		return RouteCredential{}, err
 	}
-	credentials = filterEligibleCredentials(credentials, eligible)
 	comboHealth := s.comboHealthByCredential(ctx, channelID, modelID)
 	ignoreCooldown := ctx.Value(withoutCredentialComboCooldownKey{}) == true
 	available := make([]credentialRow, 0, len(credentials))
@@ -692,7 +683,7 @@ func (s *sChannel) ensureCredentialMetadata(ctx context.Context, row *credential
 
 func (s *sChannel) newCredentialData(value string) (do.ChannelCredentials, error) {
 	trimmed := strings.TrimSpace(value)
-	if strings.HasPrefix(trimmed, codexCredentialPrefix) || strings.HasPrefix(trimmed, geminiCredentialPrefix) {
+	if strings.HasPrefix(trimmed, codexCredentialPrefix) || isRetiredCredential(trimmed) {
 		return do.ChannelCredentials{}, gerror.New("不允许手工导入内部登录凭据，请使用平台登录")
 	}
 	cipherText, err := s.app.Secrets.Encrypt(strings.TrimSpace(value))

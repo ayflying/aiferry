@@ -1,22 +1,6 @@
 {
   "channelTypes": [
     {
-      "id": 9000000000000026,
-      "name": "Gemini 订阅（实验）",
-      "code": "gemini_subscription",
-      "config": {
-        "baseUrl": "https://cloudcode-pa.googleapis.com",
-        "models": { "method": "POST", "path": "/v1internal:fetchAvailableModels", "listPath": "models", "idPath": "id", "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " },
-        "costs": { "adapter": "none" },
-        "pricing": { "adapter": "none" },
-        "login": { "adapter": "gemini_oauth" },
-        "protocol": { "chatCompletionsOnly": true },
-        "endpoints": {
-          "chatCompletions": { "method": "POST", "path": "/v1internal:streamGenerateContent?alt=sse", "requestBody": "json", "supportsStream": true, "authType": "channel_key", "headerName": "Authorization", "headerPrefix": "Bearer " }
-        }
-      }
-    },
-    {
       "id": 9000000000000025,
       "name": "官方 Codex 套餐",
       "code": "codex",

@@ -16,15 +16,6 @@ const channel = { id: 35, name: 'WorkBuddy' } as Channel
 function mountDrawer(loginSupported = true) {
   return shallowMount(ChannelCredentialDrawer, { props: { modelValue: true, channel, loginSupported }, global: { stubs: { ChannelLoginDialog: false, ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElRadioGroup: RadioGroup } } })
 }
-const googleSession = { state: 'google-state', authUrl: 'https://accounts.google.com/o/oauth2/v2/auth', intervalSeconds: 3, expiresInSeconds: 30 }
-function mountGeminiDrawer() {
-  const rowSlots = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.({ row: { id: 7, index: 1, keyPrefix: 'Google #1', status: 1, hasManagementKey: true } })) })
-  const Select = defineComponent({ name: 'ElSelect', props: { modelValue: String, filterable: Boolean }, setup: (_, { slots }) => () => h('div', slots.default?.()) })
-  return shallowMount(ChannelCredentialDrawer, {
-    props: { modelValue: true, channel: { ...channel, type: 'gemini_subscription' }, loginAdapter: 'gemini_oauth', managementKeySupported: true },
-    global: { stubs: { ChannelLoginDialog: false, ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElRadioGroup: RadioGroup, ElTable: Slot, ElTableColumn: rowSlots, ElTooltip: Slot, ElForm: Slot, ElFormItem: Slot, ElSelect: Select } },
-  })
-}
 function button(wrapper: ReturnType<typeof mountDrawer>, label: string) {
   const result = wrapper.findAll('button').find(item => item.text() === label)
   if (!result) throw new Error(`未找到按钮：${label}`)
@@ -82,135 +73,18 @@ describe('添加上游密钥', () => {
     wrapper.unmount()
   })
 
-  it('Gemini 先打开 Google 授权，仅在授权后选择项目并显式确认', async () => {
-    const replace = vi.fn()
-    const open = vi.spyOn(window, 'open').mockReturnValue({ opener: {}, closed: false, location: { replace } } as unknown as Window)
-    api.get.mockResolvedValue([{ id: 7, index: 1, keyPrefix: 'Google #1', status: 1, hasManagementKey: true }])
-    api.post.mockResolvedValueOnce(googleSession)
-      .mockResolvedValueOnce({ status: 'project_required', projects: [{ projectId: 'google-project', displayName: '工程项目' }] })
-      .mockResolvedValueOnce({ status: 'completed' })
-    const wrapper = mountGeminiDrawer()
-    expect(wrapper.find('button[aria-label="删除 Google #1"]').exists()).toBe(true)
-    expect(wrapper.find('button[aria-label="查看 Google #1"]').exists()).toBe(false)
-    expect(wrapper.find('button[aria-label="设置 Google #1 管理密钥"]').exists()).toBe(false)
-    await button(wrapper, '添加账号').trigger('click')
-    expect(open).not.toHaveBeenCalled()
-    expect(api.post).not.toHaveBeenCalled()
-    await button(wrapper, '发起 Google 登录').trigger('click')
-    expect(open).toHaveBeenCalledWith('about:blank', '_blank')
-    expect(api.post).toHaveBeenCalledExactlyOnceWith('/channels/35/credentials/login', {})
-    await flushPromises()
-    expect(replace).toHaveBeenCalledWith(googleSession.authUrl)
-    const dialog = wrapper.get('[data-title="添加 Google 账号"]')
-    expect(dialog.findComponent({ name: 'ElRadioGroup' }).exists()).toBe(false)
-    expect(dialog.findComponent({ name: 'ElSelect' }).exists()).toBe(false)
-    expect(button(wrapper, '打开 Google 登录页').attributes('disabled')).toBeUndefined()
-
-    await vi.advanceTimersByTimeAsync(3000)
-    const select = dialog.getComponent({ name: 'ElSelect' })
-    expect(select.props()).toMatchObject({ modelValue: '', filterable: true })
-    expect(dialog.getComponent({ name: 'ElOption' }).props()).toMatchObject({ label: '工程项目 (google-project)', value: 'google-project' })
-    expect(button(wrapper, '确认项目').attributes('disabled')).toBeDefined()
-    expect(button(wrapper, '手动输入项目 ID').exists()).toBe(true)
-    select.vm.$emit('update:modelValue', 'google-project')
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(api.post.mock.calls).toEqual([
-      ['/channels/35/credentials/login', {}],
-      ['/channels/35/credentials/login/poll', { state: 'google-state' }],
-    ])
-    await button(wrapper, '确认项目').trigger('click')
-    await flushPromises()
-    expect(api.post).toHaveBeenLastCalledWith('/channels/35/credentials/login/poll', { state: 'google-state', projectId: 'google-project' })
-    expect(wrapper.emitted('changed')).toHaveLength(1)
-    expect(wrapper.find('[data-title="添加 Google 账号"]').exists()).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('未配置 Google 授权时只在发起后显示配置错误，不进入项目手填', async () => {
-    const close = vi.fn()
-    vi.spyOn(window, 'open').mockReturnValue({ close } as unknown as Window)
-    api.post.mockRejectedValueOnce(new Error('Gemini OAuth 未配置'))
-    const wrapper = mountGeminiDrawer()
-    await button(wrapper, '添加账号').trigger('click')
-    expect(api.post).not.toHaveBeenCalled()
-    await button(wrapper, '发起 Google 登录').trigger('click')
-    await flushPromises()
-    const dialog = wrapper.get('[data-title="添加 Google 账号"]')
-    expect(dialog.getComponent({ name: 'ElAlert' }).props('title')).toBe('Gemini OAuth 未配置')
-    expect(dialog.findComponent({ name: 'ElInput' }).exists()).toBe(false)
-    expect(button(wrapper, '重新发起登录').exists()).toBe(true)
-    expect(close).toHaveBeenCalledOnce()
-    wrapper.unmount()
-  })
-
-  it('项目列表不可用时允许手动填写，确认报错后保留原项目与弹窗', async () => {
-    vi.spyOn(window, 'open').mockReturnValue(null)
-    api.post.mockResolvedValueOnce(googleSession)
-      .mockResolvedValueOnce({ status: 'project_required', projectMessage: '无法读取项目列表' })
-      .mockRejectedValueOnce(new Error('目前无法保存该项目'))
-      .mockResolvedValueOnce({ status: 'completed' })
-    const wrapper = mountGeminiDrawer()
-    await button(wrapper, '添加账号').trigger('click')
-    await button(wrapper, '发起 Google 登录').trigger('click')
-    await flushPromises()
-    await vi.advanceTimersByTimeAsync(3000)
-    const dialog = wrapper.get('[data-title="添加 Google 账号"]')
-    expect(dialog.getComponent({ name: 'ElAlert' }).props('description')).toBe('无法读取项目列表')
-    expect(dialog.getComponent({ name: 'ElLink' }).props('href')).toBe('https://console.cloud.google.com/cloud-resource-manager')
-    const input = dialog.getComponent({ name: 'ElInput' })
-    input.vm.$emit('update:modelValue', '  ')
-    await flushPromises()
-    expect(button(wrapper, '确认项目').attributes('disabled')).toBeDefined()
-    input.vm.$emit('update:modelValue', ' manual-project ')
-    await flushPromises()
-    await button(wrapper, '确认项目').trigger('click')
-    await flushPromises()
-    expect(api.post).toHaveBeenLastCalledWith('/channels/35/credentials/login/poll', { state: 'google-state', projectId: 'manual-project' })
-    expect(dialog.findAllComponents({ name: 'ElAlert' })[1]?.props('title')).toBe('目前无法保存该项目')
-    expect(input.props('modelValue')).toBe(' manual-project ')
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(api.post).toHaveBeenCalledTimes(3)
-    await button(wrapper, '确认项目').trigger('click')
-    await flushPromises()
-    expect(wrapper.emitted('changed')).toHaveLength(1)
-    wrapper.unmount()
-  })
-
-  it('整个 Google 授权失败时，手填项目可发起新的最小权限登录', async () => {
-    vi.spyOn(window, 'open').mockReturnValue(null)
-    api.post.mockResolvedValueOnce(googleSession)
-      .mockRejectedValueOnce(new Error('Google 授权未完成'))
-      .mockResolvedValueOnce({ ...googleSession, state: 'manual-state' })
-      .mockResolvedValueOnce({ status: 'completed' })
-    const wrapper = mountGeminiDrawer()
-    await button(wrapper, '添加账号').trigger('click')
-    await button(wrapper, '发起 Google 登录').trigger('click')
-    await flushPromises()
-    await vi.advanceTimersByTimeAsync(3000)
-    const dialog = wrapper.get('[data-title="添加 Google 账号"]')
-    dialog.getComponent({ name: 'ElInput' }).vm.$emit('update:modelValue', ' manual-project ')
-    await flushPromises()
-    await button(wrapper, '使用此项目登录').trigger('click')
-    await flushPromises()
-    expect(api.post).toHaveBeenLastCalledWith('/channels/35/credentials/login', { projectId: 'manual-project' })
-    await vi.advanceTimersByTimeAsync(3000)
-    expect(api.post).toHaveBeenLastCalledWith('/channels/35/credentials/login/poll', { state: 'manual-state' })
-    expect(wrapper.emitted('changed')).toHaveLength(1)
-    wrapper.unmount()
-  })
-
-  it.each([true, false, undefined])('账号是否可重新登录由 canRelogin=%j 决定', async (canRelogin) => {
-    const row = { id: 7, index: 1, keyPrefix: 'Google #1', projectId: 'saved-project', canRelogin }
+  it.each([true, false, undefined])('Codex 账号是否可重新登录由 canRelogin=%j 决定', async (canRelogin) => {
+    const row = { id: 7, index: 1, keyPrefix: 'Codex #1', canRelogin }
     const rowSlots = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.({ row })) })
     const wrapper = shallowMount(ChannelCredentialDrawer, {
-      props: { modelValue: true, channel: { ...channel, type: 'gemini_subscription' } },
+      props: { modelValue: true, channel: { ...channel, type: 'codex' } },
       global: { stubs: { ChannelLoginDialog: false, ElDrawer: Slot, ElDialog: Dialog, ElButton: Button, ElTable: Slot, ElTableColumn: rowSlots, ElTooltip: Slot } },
     })
     const action = wrapper.find('button[aria-label="重新登录账号 #1"]')
     expect(action.exists()).toBe(canRelogin === true)
     if (canRelogin) {
       vi.spyOn(window, 'open').mockReturnValue(null)
-      api.post.mockResolvedValue({ state: 'relogin-state', authUrl: 'https://accounts.google.com/' })
+      api.post.mockResolvedValue({ state: 'relogin-state', authUrl: 'https://auth.openai.com/codex/device' })
       await action.trigger('click')
       const dialog = wrapper.find('[data-title="重新登录 · 账号 #1"]')
       expect(dialog.exists()).toBe(true)

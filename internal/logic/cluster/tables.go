@@ -47,8 +47,6 @@ var snapshotTables = []tableSpec{
 	table("channel_model_credentials", []string{"id"},
 		[]string{"health_score", "cooldown_until", "last_error"}, false,
 		func(s *Snapshot) []entity.ChannelModelCredentials { return s.ChannelModelCredentials }),
-	table("gemini_credential_models", []string{"channel_credential_id", "upstream_name"}, nil, true,
-		func(s *Snapshot) []SnapshotGeminiCredentialModel { return s.GeminiCredentialModels }),
 	table("channel_groups", []string{"id"}, nil, true,
 		func(s *Snapshot) []entity.ChannelGroups { return s.ChannelGroups }),
 	table("channel_group_members", []string{"channel_group_id", "channel_id"}, nil, true,

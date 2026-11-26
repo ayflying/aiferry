@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	"github.com/yunloli/aiferry/internal/logic/channel"
+	"github.com/yunloli/aiferry/internal/logic/channeltype"
 )
 
 // applyUpstreamAuthHeaders 用渠道类型声明的鉴权规则写入上游鉴权头与基础头。
@@ -20,8 +21,9 @@ func (s *sRelay) applyUpstreamAuthHeaders(ctx context.Context, req *http.Request
 }
 
 func (s *sRelay) applyEndpointAuthHeaders(ctx context.Context, req *http.Request, candidate Candidate, endpointName string) error {
-	if candidate.ChannelType == channel.GeminiSubscriptionChannelType {
-		return gerror.New("Gemini 订阅凭据必须通过专用文本生成链路使用")
+	// 旧版路由缓存可能仍含已停用渠道，不能让它们走通用 Bearer 鉴权。
+	if channeltype.IsRetiredCode(candidate.ChannelType) {
+		return gerror.New("渠道类型已停用")
 	}
 	spec, err := s.channels.UpstreamAuthSpecForChannelType(ctx, candidate.ChannelType)
 	if err != nil {

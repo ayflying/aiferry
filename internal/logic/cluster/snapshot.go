@@ -43,14 +43,6 @@ type SnapshotModelMetadata struct {
 	UpdatedAt time.Time `json:"updatedAt" orm:"updated_at"`
 }
 
-// SnapshotGeminiCredentialModel 镜像主节点同步得到的单账号模型目录。
-type SnapshotGeminiCredentialModel struct {
-	ChannelID    uint64 `json:"channelId" orm:"channel_id"`
-	CredentialID uint64 `json:"credentialId" orm:"channel_credential_id"`
-	UpstreamName string `json:"upstreamName" orm:"upstream_name"`
-	Metadata     string `json:"metadata" orm:"metadata"`
-}
-
 // Snapshot 是主节点下发给子节点的全量配置快照。
 //
 // 设计取舍：整包下发而不是增量补丁。配置表规模是「数十个渠道 + 千级模型」，
@@ -66,7 +58,6 @@ type Snapshot struct {
 	ChannelCredentials       []entity.ChannelCredentials       `json:"channelCredentials"`
 	ChannelModels            []SnapshotChannelModel            `json:"channelModels"`
 	ChannelModelCredentials  []entity.ChannelModelCredentials  `json:"channelModelCredentials"`
-	GeminiCredentialModels   []SnapshotGeminiCredentialModel   `json:"geminiCredentialModels,omitempty"`
 	ChannelGroups            []entity.ChannelGroups            `json:"channelGroups"`
 	ChannelGroupMembers      []entity.ChannelGroupMembers      `json:"channelGroupMembers"`
 	ChannelTypes             []entity.ChannelTypes             `json:"channelTypes"`

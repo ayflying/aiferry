@@ -42,12 +42,7 @@ func (s *sRelay) doViaProxy(ctx context.Context, req *http.Request, candidate Ca
 		}
 		candidate.ProxyURLCipher = current
 	}
-	if candidate.ChannelType == channel.GeminiSubscriptionChannelType {
-		if err := channel.RequireGeminiSubscriptionProxy(candidate.ProxyURLCipher); err != nil {
-			return nil, err
-		}
-	}
-	if candidate.ChannelType == "codex" || candidate.ChannelType == channel.GeminiSubscriptionChannelType {
+	if candidate.ChannelType == "codex" {
 		originalDo := do
 		do = func(client *http.Client) (*http.Response, error) {
 			return originalDo(channel.CodexHTTPClient(client))

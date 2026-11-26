@@ -15,6 +15,18 @@ func TestRouteCacheKeyIncludesVersion(t *testing.T) {
 	}
 }
 
+func TestFilterCandidatesDropsRetiredSubscriptionButKeepsGeminiAPI(t *testing.T) {
+	key := apikey.AuthKey{UserId: 10}
+	candidates := []Candidate{
+		{ChannelID: 1, CreatedByUserID: 10, ChannelType: "gemini_subscription"},
+		{ChannelID: 2, CreatedByUserID: 10, ChannelType: "gemini"},
+	}
+	filtered := filterCandidates(candidates, key, nil)
+	if len(filtered) != 1 || filtered[0].ChannelID != 2 {
+		t.Fatalf("unexpected candidates after retirement: %+v", filtered)
+	}
+}
+
 func TestFilterCandidatesAppliesCreatorAndGroupPolicy(t *testing.T) {
 	key := apikey.AuthKey{
 		UserId:              10,

@@ -74,6 +74,24 @@ func TestApplyUpstreamAuthHeadersUsesChannelKey(t *testing.T) {
 	}
 }
 
+func TestApplyUpstreamAuthHeadersRejectsRetiredCredential(t *testing.T) {
+	svc, secrets := newUpstreamAuthTestService(t, `{}`)
+	legacy := "aiferry:gemini-oauth:v1:sealed-fixture"
+	wrapped, err := secrets.Encrypt(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cipher := range []string{legacy, wrapped} {
+		req, err := http.NewRequest(http.MethodGet, "https://upstream.example/v1/models", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = svc.ApplyUpstreamAuthHeaders(req, UpstreamAuthInput{Spec: DefaultUpstreamAuthSpec(), CredentialCipher: cipher}); err == nil || req.Header.Get("Authorization") != "" {
+			t.Fatal("retired credential must fail before adding upstream authorization")
+		}
+	}
+}
+
 func TestApplyUpstreamAuthHeadersHonorsCustomHeaderAndManagementKey(t *testing.T) {
 	svc, secrets := newUpstreamAuthTestService(t, `{"models":{"path":"/models","idPath":"id","authType":"management_key","headerName":"x-api-key","headerPrefix":""},"costs":{"adapter":"none"}}`)
 	cipher, err := secrets.Encrypt("mgmt-key")

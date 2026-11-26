@@ -12,7 +12,7 @@ func TestLoadBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.ChannelTypes) != 25 {
+	if len(registry.ChannelTypes) != 24 {
 		t.Fatalf("unexpected built-in registry: %+v", registry)
 	}
 	for code, id := range map[string]uint64{
@@ -25,7 +25,6 @@ func TestLoadBuiltins(t *testing.T) {
 		"volcengine_ark_agent": 9000000000000020, "volcengine_ark_video": 9000000000000021,
 		"commandcode": 9000000000000022, "opencode_zen": 9000000000000023,
 		"workbuddy": 9000000000000024, "codex": 9000000000000025,
-		"gemini_subscription": 9000000000000026,
 	} {
 		if item, exists := registry.ChannelTypeByCode(code); !exists || item.ID != id {
 			t.Fatalf("built-in channel type is missing: %s %+v", code, item)

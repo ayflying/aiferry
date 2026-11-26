@@ -46,7 +46,7 @@ func ParseConfig(raw []byte) (Config, error) {
 	if err := normalizeBaseURL(&config.BaseURL); err != nil {
 		return Config{}, err
 	}
-	if err := normalizeModelConfig(&config.Models, strings.EqualFold(strings.TrimSpace(config.Login.Adapter), AdapterLoginGeminiOAuth)); err != nil {
+	if err := normalizeModelConfig(&config.Models); err != nil {
 		return Config{}, err
 	}
 	if err := normalizeCostConfig(&config.Costs); err != nil {
@@ -122,7 +122,7 @@ func normalizeLoginConfig(config *LoginConfig) error {
 	case "", AdapterLoginNone:
 		*config = LoginConfig{}
 		return nil
-	case AdapterLoginCodexDevice, AdapterLoginGeminiOAuth:
+	case AdapterLoginCodexDevice:
 		// 独立授权流程不使用外链登录的平台与路径参数。
 		*config = LoginConfig{Adapter: config.Adapter}
 		return nil
@@ -141,7 +141,7 @@ func normalizeLoginConfig(config *LoginConfig) error {
 		}
 		return nil
 	default:
-		return gerror.Newf("unsupported login adapter %q (expected none, %s, %s or %s)", config.Adapter, AdapterLoginExternalLink, AdapterLoginCodexDevice, AdapterLoginGeminiOAuth)
+		return gerror.Newf("unsupported login adapter %q (expected none, %s or %s)", config.Adapter, AdapterLoginExternalLink, AdapterLoginCodexDevice)
 	}
 }
 
@@ -320,7 +320,7 @@ func ParsePricingConfig(config PricingConfig) (PricingConfig, error) {
 	return config, nil
 }
 
-func normalizeModelConfig(config *ModelConfig, geminiOAuth bool) error {
+func normalizeModelConfig(config *ModelConfig) error {
 	config.Method = normalizeMethod(config.Method)
 	config.Path = strings.TrimSpace(config.Path)
 	config.ListPath = strings.TrimSpace(config.ListPath)
@@ -330,8 +330,8 @@ func normalizeModelConfig(config *ModelConfig, geminiOAuth bool) error {
 	if config.Path == "" || config.IDPath == "" {
 		return gerror.New("models.path and models.idPath are required")
 	}
-	if config.Method != httpMethodGet && !(geminiOAuth && config.Method == httpMethodPost) {
-		return gerror.New("only GET model discovery is supported outside the Gemini OAuth adapter")
+	if config.Method != httpMethodGet {
+		return gerror.New("only GET model discovery is supported")
 	}
 	if !validAuth(config.AuthType) {
 		return gerror.New("unsupported models.authType")
