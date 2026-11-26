@@ -25,6 +25,8 @@ type Cache interface {
 	GetDel(ctx context.Context, key string) String
 	Set(ctx context.Context, key string, value any, ttl time.Duration) Status
 	SetNX(ctx context.Context, key string, value any, ttl time.Duration) Boolean
+	// CompareAndDelete 仅在值仍和 expected 相同时删除条目（用于安全释放租约）。
+	CompareAndDelete(ctx context.Context, key, expected string) Boolean
 	Del(ctx context.Context, keys ...string) Int
 	Exists(ctx context.Context, key string) Int
 	Incr(ctx context.Context, key string) Int

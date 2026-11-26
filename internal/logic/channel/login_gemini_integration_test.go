@@ -64,7 +64,8 @@ func TestGeminiOAuthOwnerCallbackAndProxyPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application := &app.Service{Redis: store, Secrets: secret.New(), HTTP: &http.Client{}}
+	fixtureClient, proxyURL, exchanges, searches := geminiPickerProxyFixture(t)
+	application := &app.Service{Redis: store, Secrets: secret.New(), HTTP: fixtureClient}
 	svc := &sChannel{app: application, types: channeltype.New(registry, nil)}
 	authentication := auth.New(application, nil)
 	for session, user := range map[string]int{"gemini-owner": 1, "gemini-other": 2} {
@@ -94,7 +95,7 @@ func TestGeminiOAuthOwnerCallbackAndProxyPolicy(t *testing.T) {
 			case "reveal":
 				result, err = svc.RevealCredential(r.Context(), id, r.Get("state").Uint64())
 			default:
-				result, err = svc.PollChannelLogin(r.Context(), id, r.Get("state").String())
+				result, err = svc.PollChannelLogin(r.Context(), id, adminapi.ChannelLoginPollInput{State: r.Get("state").String(), ProjectID: r.Get("selected").String()})
 			}
 			if err != nil {
 				r.Response.WriteStatus(400, err.Error())
@@ -107,9 +108,13 @@ func TestGeminiOAuthOwnerCallbackAndProxyPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = server.Shutdown() })
-	call := func(id int, action, state, session string, out any) int {
+	call := func(id int, action, state, session string, out any, selected ...string) int {
 		t.Helper()
-		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/%d/%s?state=%s&projectId=%s", server.GetListenedPort(), id, action, url.QueryEscape(state), url.QueryEscape(state)), nil)
+		query := url.Values{"state": {state}, "projectId": {state}}
+		if len(selected) > 0 {
+			query.Set("selected", selected[0])
+		}
+		req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/%d/%s?%s", server.GetListenedPort(), id, action, query.Encode()), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +131,7 @@ func TestGeminiOAuthOwnerCallbackAndProxyPolicy(t *testing.T) {
 		}
 		return resp.StatusCode
 	}
-	if call(10, "start", "account-project", "gemini-owner", nil) != 400 || call(20, "start", "account-project", "gemini-owner", nil) != 400 || call(11, "start", "", "gemini-owner", nil) != 400 || call(11, "import", "", "gemini-owner", nil) != 400 {
+	if call(10, "start", "account-project", "gemini-owner", nil) != 400 || call(20, "start", "account-project", "gemini-owner", nil) != 400 || call(11, "import", "", "gemini-owner", nil) != 400 {
 		t.Fatal("start/import accepted missing proxy, wrong owner, or raw credential")
 	}
 	var session ChannelLoginSession
@@ -174,6 +179,9 @@ func TestGeminiOAuthOwnerCallbackAndProxyPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("project picker", func(t *testing.T) {
+		testGeminiProjectPicker(t, ctx, db, svc, cfg, call, proxyURL, exchanges, searches)
+	})
 	credential := geminiSubscriptionCredential{Subject: "fixture-subject", ProjectID: "account-project", AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresAt: time.Now().Add(time.Hour).Unix()}
 	id, err := svc.saveGeminiCredential(ctx, cfg, 11, 0, credential)
 	if err != nil {

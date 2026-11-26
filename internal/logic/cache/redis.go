@@ -38,6 +38,17 @@ func (c *redisCache) SetNX(ctx context.Context, key string, value any, ttl time.
 	return boolCmd(created, err)
 }
 
+var compareAndDeleteScript = redis.NewScript(`
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0`)
+
+func (c *redisCache) CompareAndDelete(ctx context.Context, key, expected string) Boolean {
+	deleted, err := compareAndDeleteScript.Run(ctx, c.client, []string{key}, expected).Int64()
+	return boolCmd(deleted == 1, err)
+}
+
 func (c *redisCache) Del(ctx context.Context, keys ...string) Int {
 	if len(keys) == 0 {
 		return intCmd(0, nil)

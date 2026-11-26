@@ -88,8 +88,8 @@ type (
 		// 与轮询换票，登录动作在平台自己的页面上完成，因此不依赖登录所在设备的本地组件
 		// （这正是桌面端 native 模块无法在服务端复现、而外链登录可以的原因）。
 		StartChannelLogin(ctx context.Context, channelID uint64, input adminapi.ChannelLoginStartInput) (ChannelLoginSession, error)
-		// PollChannelLogin 轮询一次登录结果；拿到令牌后立即写入渠道凭据并返回新凭据 id。
-		PollChannelLogin(ctx context.Context, channelID uint64, state string) (ChannelLoginResult, error)
+		// PollChannelLogin 轮询一次登录结果；Gemini 项目选择会话需要显式确认项目后才写入渠道凭据。
+		PollChannelLogin(ctx context.Context, channelID uint64, input adminapi.ChannelLoginPollInput) (ChannelLoginResult, error)
 		// AcceptGeminiOAuthCallback 仅记录一次 Google 回调，不在公开路由换票或保存渠道凭据。
 		// 凭据写入必须由发起者通过已认证渠道的 PollChannelLogin 完成。
 		AcceptGeminiOAuthCallback(ctx context.Context, state string, code string, oauthError string) error

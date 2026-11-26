@@ -60,6 +60,23 @@ func TestSQLiteCacheSetNX(t *testing.T) {
 	}
 }
 
+func TestSQLiteCacheCompareAndDelete(t *testing.T) {
+	ctx := context.Background()
+	store := openTestCache(t)
+	if err := store.Set(ctx, "lock", "new-owner", time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := store.CompareAndDelete(ctx, "lock", "old-owner").Result(); err != nil || deleted {
+		t.Fatalf("old owner deleted renewed lease: %v, %v", deleted, err)
+	}
+	if deleted, err := store.CompareAndDelete(ctx, "lock", "new-owner").Result(); err != nil || !deleted {
+		t.Fatalf("current owner could not delete lease: %v, %v", deleted, err)
+	}
+	if n, err := store.Exists(ctx, "lock").Result(); err != nil || n != 0 {
+		t.Fatalf("released lease still present: %d, %v", n, err)
+	}
+}
+
 func TestSQLiteCacheIncrExistsDelTTL(t *testing.T) {
 	ctx := context.Background()
 	store := openTestCache(t)

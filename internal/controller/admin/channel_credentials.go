@@ -126,16 +126,8 @@ func (c *Controller) pollChannelLogin(r *ghttp.Request) {
 	if !parse(r, &input) {
 		return
 	}
-	result, err := c.channels.PollChannelLogin(r.Context(), routeID(r), input.State)
-	if err != nil {
-		respond(r, nil, err)
-		return
-	}
-	respond(r, adminapi.ChannelLoginResultView{
-		Status:       result.Status,
-		CredentialID: result.CredentialID,
-		UID:          result.UID,
-	}, nil)
+	result, err := c.channels.PollChannelLogin(r.Context(), routeID(r), input)
+	respond(r, result, err)
 }
 
 func (c *Controller) updateChannelCredentialRemark(r *ghttp.Request) {

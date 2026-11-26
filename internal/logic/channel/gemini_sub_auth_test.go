@@ -26,7 +26,7 @@ func TestGeminiOAuthPKCEAndCallbackConfig(t *testing.T) {
 	if challenge != base64.RawURLEncoding.EncodeToString(hash[:]) || len(verifier) != 43 {
 		t.Fatal("invalid S256 challenge")
 	}
-	u, err := url.Parse(cfg.authorizationURL("state-fixture", challenge))
+	u, err := url.Parse(cfg.authorizationURL("state-fixture", challenge, false))
 	if err != nil {
 		t.Fatal(err)
 	}

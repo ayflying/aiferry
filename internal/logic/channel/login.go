@@ -27,13 +27,8 @@ type ChannelLoginSession struct {
 	ExpiresInSeconds int
 }
 
-// ChannelLoginResult 是一次登录轮询的结果。Status 为 pending 表示还在等待用户
-// 完成登录；completed 表示已拿到令牌并写入渠道凭据。
-type ChannelLoginResult struct {
-	Status       string
-	CredentialID uint64
-	UID          string
-}
+// ChannelLoginResult 是一次登录轮询的结果；Gemini 选项目时还未保存凭据。
+type ChannelLoginResult = adminapi.ChannelLoginResultView
 
 // StartChannelLogin 向渠道类型声明的登录接口申请一次性登录地址。服务端只负责取地址
 // 与轮询换票，登录动作在平台自己的页面上完成，因此不依赖登录所在设备的本地组件
@@ -87,9 +82,9 @@ func (s *sChannel) StartChannelLogin(ctx context.Context, channelID uint64, inpu
 	return session, nil
 }
 
-// PollChannelLogin 轮询一次登录结果；拿到令牌后立即写入渠道凭据并返回新凭据 id。
-func (s *sChannel) PollChannelLogin(ctx context.Context, channelID uint64, state string) (ChannelLoginResult, error) {
-	state = strings.TrimSpace(state)
+// PollChannelLogin 轮询一次登录结果；Gemini 项目选择会话需要显式确认项目后才写入渠道凭据。
+func (s *sChannel) PollChannelLogin(ctx context.Context, channelID uint64, input adminapi.ChannelLoginPollInput) (ChannelLoginResult, error) {
+	state := strings.TrimSpace(input.State)
 	if state == "" {
 		return ChannelLoginResult{}, gerror.New("登录 state 不能为空")
 	}
@@ -97,11 +92,15 @@ func (s *sChannel) PollChannelLogin(ctx context.Context, channelID uint64, state
 	if err != nil {
 		return ChannelLoginResult{}, err
 	}
+	project := strings.TrimSpace(input.ProjectID)
+	if project != "" && config.Login.Adapter != channeltype.AdapterLoginGeminiOAuth {
+		return ChannelLoginResult{}, gerror.New("仅 Gemini 项目选择会话可以确认项目 ID")
+	}
 	switch config.Login.Adapter {
 	case channeltype.AdapterLoginCodexDevice:
 		return s.pollCodexLogin(ctx, channel, state)
 	case channeltype.AdapterLoginGeminiOAuth:
-		return s.pollGeminiLogin(ctx, channel, state)
+		return s.pollGeminiLogin(ctx, channel, state, project)
 	}
 	endpoint, err := loginEndpoint(channel.BaseUrl, config, "auth/token")
 	if err != nil {

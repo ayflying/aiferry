@@ -25,13 +25,12 @@ const loading = ref(false)
 const adding = ref(false)
 const addDialogVisible = ref(false)
 const addMode = ref<'manual' | 'login'>('manual')
-const loginProjectId = ref('')
 const reloginTarget = ref<ChannelCredential>()
 function openAddCredential() {
-  loginProjectId.value = ''
   reloginTarget.value = undefined
   if (googleLoginOnly.value) {
     openLogin()
+    void startLogin({}, true)
     return
   }
   credentialValue.value = ''
@@ -42,7 +41,6 @@ function openAddCredential() {
 }
 function openRelogin(item: ChannelCredential) {
   if (item.canRelogin !== true || loginStarting.value) return
-  loginProjectId.value = ''
   reloginTarget.value = item
   openLogin()
 }
@@ -50,8 +48,7 @@ function beginCredentialLogin() {
   if (reloginTarget.value) {
     void startLogin({ credentialId: reloginTarget.value.id })
   } else if (googleLoginOnly.value) {
-    const projectId = loginProjectId.value.trim()
-    if (projectId) void startLogin({ projectId })
+    void startLogin({}, true)
   } else {
     addDialogVisible.value = false
     void startLogin()
@@ -137,6 +134,7 @@ const codexChannel = computed(() => props.channel?.type === 'codex' || props.log
 const {
   visible: loginDialogVisible, starting: loginStarting, session: loginSession,
   error: loginError, elapsed: loginElapsed, expiresIn: loginExpiresIn, open: openLogin, start: startLogin,
+  projectStep: loginProjectStep, confirmingProject, manualRetryAvailable, confirmProject,
 } = useChannelLogin(() => props.channel?.id, () => props.modelValue, async () => {
   await load(true)
   emit('changed')
@@ -611,7 +609,13 @@ function stopCodeCountdown() {
         <el-button v-else type="primary" :icon="LogIn" :loading="loginStarting" @click="beginCredentialLogin">打开平台登录页</el-button>
       </template>
     </el-dialog>
-    <ChannelLoginDialog v-model="loginDialogVisible" :session="loginSession" :error="loginError" :elapsed="loginElapsed" :expires-in="loginExpiresIn" :starting="loginStarting" v-model:project-id="loginProjectId" :project-required="googleLoginOnly && !reloginTarget" :relogin-account="reloginTarget && `账号 #${reloginTarget.index}`" @restart="beginCredentialLogin" />
+    <ChannelLoginDialog
+      v-model="loginDialogVisible" :session="loginSession" :error="loginError" :elapsed="loginElapsed"
+      :expires-in="loginExpiresIn" :starting="loginStarting" :google-add="googleLoginOnly && !reloginTarget"
+      :project-step="loginProjectStep" :confirming-project="confirmingProject" :manual-retry-available="manualRetryAvailable"
+      :relogin-account="reloginTarget && `账号 #${reloginTarget.index}`" @restart="beginCredentialLogin"
+      @confirm-project="confirmProject" @retry-with-project="startLogin({ projectId: $event }, true)"
+    />
 
   </el-drawer>
 </template>

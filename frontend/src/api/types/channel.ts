@@ -237,14 +237,21 @@ export interface ChannelLoginSession {
   expiresInSeconds?: number
 }
 
-/** 登录轮询结果：pending 表示等待用户完成登录，completed 表示令牌已写入凭据。 */
-export interface ChannelLoginResult {
-  status: 'pending' | 'completed'
-  credentialId: number
-  uid: string
+export interface ChannelLoginProject {
+  projectId: string
+  displayName: string
 }
 
-export type ChannelLoginInput = { projectId: string; credentialId?: never } | { credentialId: number; projectId?: never }
+/** 登录轮询结果：授权等待、Google 项目确认、或凭据写入完成。 */
+export type ChannelLoginResult =
+  | { status: 'pending' }
+  | { status: 'project_required'; projects?: ChannelLoginProject[]; projectMessage?: string }
+  | { status: 'completed'; credentialId: number; uid: string }
+
+export type ChannelLoginInput =
+  | { projectId?: never; credentialId?: never }
+  | { projectId: string; credentialId?: never }
+  | { credentialId: number; projectId?: never }
 
 export interface ChannelCredential {
   id: number

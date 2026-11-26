@@ -49,10 +49,14 @@ func (cfg geminiOAuthConfig) validateRedirectURI() error {
 	return nil
 }
 
-func (cfg geminiOAuthConfig) authorizationURL(state, challenge string) string {
+func (cfg geminiOAuthConfig) authorizationURL(state, challenge string, picker bool) string {
+	scope := geminiOAuthScope
+	if picker {
+		scope += " " + geminiProjectReadOnlyScope
+	}
 	return geminiOAuthAuthorizeURL + "?" + url.Values{
 		"client_id": {cfg.clientID}, "redirect_uri": {cfg.redirectURI},
-		"response_type": {"code"}, "scope": {geminiOAuthScope}, "access_type": {"offline"},
+		"response_type": {"code"}, "scope": {scope}, "access_type": {"offline"},
 		"prompt": {"consent"}, "state": {state}, "code_challenge": {challenge}, "code_challenge_method": {"S256"},
 	}.Encode()
 }
@@ -115,7 +119,7 @@ func geminiOAuthSubject(ctx context.Context, client *http.Client, accessToken st
 	return reply.Subject, nil
 }
 
-// 只允许由上面的两个内部入口发送指定请求；不输出响应内容或可能包含代理凭据的错误。
+// 仅供固定 Google API 的内部调用；不输出响应内容或可能包含代理凭据的错误。
 func geminiOAuthRequest(ctx context.Context, client *http.Client, endpoint string, form url.Values, bearer string, dest any) error {
 	ctx, cancel := context.WithTimeout(ctx, geminiOAuthRequestTimeout)
 	defer cancel()

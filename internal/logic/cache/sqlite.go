@@ -114,6 +114,16 @@ func (c *sqliteCache) SetNX(ctx context.Context, key string, value any, ttl time
 	return boolCmd(created, err)
 }
 
+func (c *sqliteCache) CompareAndDelete(ctx context.Context, key, expected string) Boolean {
+	result, err := c.db.Exec(ctx,
+		"DELETE FROM cache_entries WHERE key = ? AND value = ? AND (expires_at = 0 OR expires_at > ?)", key, expected, nowUnix())
+	if err != nil {
+		return boolCmd(false, err)
+	}
+	deleted, err := result.RowsAffected()
+	return boolCmd(deleted == 1, err)
+}
+
 func (c *sqliteCache) Del(ctx context.Context, keys ...string) Int {
 	if len(keys) == 0 {
 		return intCmd(0, nil)

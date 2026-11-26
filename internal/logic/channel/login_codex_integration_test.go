@@ -144,7 +144,7 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 				}
 				value, callErr = svc.StartChannelLogin(r.Context(), id, input)
 			} else {
-				value, callErr = svc.PollChannelLogin(r.Context(), id, r.Get("state").String())
+				value, callErr = svc.PollChannelLogin(r.Context(), id, adminapi.ChannelLoginPollInput{State: r.Get("state").String()})
 			}
 			if callErr != nil {
 				t.Logf("fixture login %s channel=%d: %v", r.GetRouter("action").String(), id, callErr)
@@ -253,7 +253,7 @@ func TestCodexLoginPersistenceAndIsolation(t *testing.T) {
 		t.Fatalf("complete: %d %+v", status, completed)
 	}
 	var repeated ChannelLoginResult
-	if status := call(10, "poll", session.State, "codex-owner", &repeated); status != 200 || repeated != completed || exchanges.Load() != 1 || polls.Load() != 2 {
+	if status := call(10, "poll", session.State, "codex-owner", &repeated); status != 200 || repeated.Status != completed.Status || repeated.CredentialID != completed.CredentialID || repeated.UID != completed.UID || exchanges.Load() != 1 || polls.Load() != 2 {
 		t.Fatalf("completion not idempotent: %d %+v", status, repeated)
 	}
 	for _, item := range []struct {
