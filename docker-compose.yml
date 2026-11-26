@@ -39,6 +39,12 @@ services:
       AIFERRY_ROLE: ${AIFERRY_ROLE:-master}
       AIFERRY_CLUSTER_SECRET: ${AIFERRY_CLUSTER_SECRET:-}
       AIFERRY_NODE_NAME: ${AIFERRY_NODE_NAME:-}
+      # Gemini 订阅渠道（可选）：自有 Google OAuth 客户端，三项留空即不提供该渠道的登录。
+      # 栈的环境变量列表只用于替换本文件的 ${VAR}，变量必须在这里显式列出，容器内才读得到；
+      # 只加进栈的环境变量列表而不列出时，添加账号会报「Gemini OAuth 未配置」。
+      AIFERRY_GEMINI_OAUTH_CLIENT_ID: ${AIFERRY_GEMINI_OAUTH_CLIENT_ID:-}
+      AIFERRY_GEMINI_OAUTH_CLIENT_SECRET: ${AIFERRY_GEMINI_OAUTH_CLIENT_SECRET:-}
+      AIFERRY_GEMINI_OAUTH_REDIRECT_URI: ${AIFERRY_GEMINI_OAUTH_REDIRECT_URI:-}
     ports:
       - "${AIFERRY_PORT:-38517}:8080"
     volumes:

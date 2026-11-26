@@ -8,7 +8,7 @@
 
 ## 配置与验证
 
-1. 在 AiFerry 的主节点配置 `AIFERRY_GEMINI_OAUTH_CLIENT_ID`、`AIFERRY_GEMINI_OAUTH_CLIENT_SECRET` 与 `AIFERRY_GEMINI_OAUTH_REDIRECT_URI`。回调地址必须是 AiFerry 对外 HTTPS 地址加 `/api/oauth/gemini-subscription/callback`，与 Google 控制台登记值完全一致。不要把密钥写入仓库；所有需要续期或转发的节点应使用同一 OAuth 客户端配置。更换客户端配置后应重新授权。
+1. 在 AiFerry 的主节点配置 `AIFERRY_GEMINI_OAUTH_CLIENT_ID`、`AIFERRY_GEMINI_OAUTH_CLIENT_SECRET` 与 `AIFERRY_GEMINI_OAUTH_REDIRECT_URI`。回调地址必须是 AiFerry 对外 HTTPS 地址加 `/api/oauth/gemini-subscription/callback`，与 Google 控制台登记值完全一致。不要把密钥写入仓库；所有需要续期或转发的节点应使用同一 OAuth 客户端配置。更换客户端配置后应重新授权。仓库的 `docker-compose.yml` 与 `docker-compose.worker.yml` 已在 `environment` 段显式透传这三项；线上编排若是旧版副本，必须补上这三行再重建容器。只把变量加进栈的环境变量列表、编排里没有列出时，容器读不到，表现为「添加账号 → 发起 Google 登录」后登录页一闪即关，弹窗提示「Gemini OAuth 未配置」。
 2. 反向代理访问日志不得记录回调查询字符串，浏览器回调含一次性授权码与状态值。
 3. 新建「Gemini 订阅（实验）」渠道，只在渠道上填写代理。代理需从 AiFerry 进程所在环境可达；容器内 `127.0.0.1` 不是 Windows 宿主机。换票、读取项目列表、续期、模型同步及转发都使用渠道代理，不回退直连。
 4. 在「上游密钥 → 添加 Google 账号」由账号所有者亲自完成 Google 授权，然后从下拉框选择已有的 Google Cloud 项目并确认绑定。未授权读取项目列表、列表为空或读取失败时，可手动填写该账号有权使用的项目 ID；如果取消了整个 Google 授权，可用手填的 ID 重新发起授权，不再请求项目列表权限。AiFerry 不创建项目，也不绑定账单。项目出现在列表里不代表上游可用：为每个账号分别同步模型，只有同步结果包含目标模型的账号才可转发。从 `0.7.27` 升级的旧账号沿用原渠道项目 ID，需重新同步一次模型才能参与转发。
