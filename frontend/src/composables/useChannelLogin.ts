@@ -4,14 +4,23 @@ import type { ChannelLoginInput, ChannelLoginResult, ChannelLoginSession } from 
 import { errorMessage, showError, showSuccess } from '../lib/error'
 
 /** 一次只保留一个登录会话；等待授权时串行轮询。 */
-export function useChannelLogin(channelID: () => number | undefined, active: () => boolean, completed: () => Promise<void>) {
+export function useChannelLogin(
+  channelID: () => number | undefined,
+  active: () => boolean,
+  completed: () => Promise<void>,
+  // 回调落在管理员本机、服务端收不到时（Antigravity 桥接），改用「提交回调地址」而不是轮询。
+  callbackRequired: () => boolean = () => false,
+) {
   const visible = ref(false)
   const starting = ref(false)
+  const completing = ref(false)
   const session = shallowRef<ChannelLoginSession | null>(null)
   const error = ref('')
   const elapsed = ref(0)
   const expiresIn = ref(300)
   let generation = 0
+  // 发起这次登录的凭据行；提交回调地址时必须用同一行，否则会落到别的账号上。
+  let activeCredentialID: number | undefined
   let pollTimer: ReturnType<typeof setTimeout> | undefined
   let expiryTimer: ReturnType<typeof setTimeout> | undefined
   let elapsedTimer: ReturnType<typeof setInterval> | undefined
@@ -55,6 +64,7 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
     const id = channelID()
     if (!id || !active() || starting.value) return
     resetSession()
+    activeCredentialID = input?.credentialId
     const token = generation
     const loginWindow = window.open('about:blank', '_blank')
     if (loginWindow) loginWindow.opener = null
@@ -68,11 +78,14 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
       }
       session.value = result
       expiresIn.value = positiveSeconds(result.expiresInSeconds, 300)
-      const interval = positiveSeconds(result.intervalSeconds, result.userCode ? 5 : 2) * 1000
       const deadline = Date.now() + expiresIn.value * 1000
       visible.value = true
       expiryTimer = setTimeout(expire, expiresIn.value * 1000)
       elapsedTimer = setInterval(() => { elapsed.value = Math.floor((Date.now() - (deadline - expiresIn.value * 1000)) / 1000) }, 1000)
+      if (loginWindow && !loginWindow.closed) loginWindow.location.replace(result.authUrl)
+      // 回调打在管理员本机，服务端等不到「自动完成」，这类渠道改为等待提交回调地址。
+      if (callbackRequired()) return
+      const interval = positiveSeconds(result.intervalSeconds, result.userCode ? 5 : 2) * 1000
       const poll = async () => {
         if (token !== generation) return
         if (Date.now() >= deadline) { expire(); return }
@@ -93,7 +106,6 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
         }
       }
       pollTimer = setTimeout(() => { void poll() }, interval)
-      if (loginWindow && !loginWindow.closed) loginWindow.location.replace(result.authUrl)
     } catch (cause) {
       loginWindow?.close()
       if (token === generation) {
@@ -106,13 +118,31 @@ export function useChannelLogin(channelID: () => number | undefined, active: () 
     }
   }
 
+  /** 提交浏览器授权后的回调地址，完成桥接自管的登录（回调不经过服务端）。 */
+  async function complete(callbackUrl: string) {
+    const id = channelID()
+    const current = session.value
+    if (!id || !current || !active() || completing.value) return
+    completing.value = true
+    error.value = ''
+    try {
+      await apiPost<ChannelLoginResult>(`/channels/${id}/credentials/login/complete`, { state: current.state, callbackUrl, credentialId: activeCredentialID })
+      await finish()
+    } catch (cause) {
+      error.value = errorMessage(cause)
+      showError(cause, '提交授权回调地址失败')
+    } finally {
+      completing.value = false
+    }
+  }
+
   watch(visible, (open) => { if (!open) resetSession() }, { flush: 'sync' })
   watch([channelID, active], () => {
     if (visible.value) visible.value = false
     else resetSession()
   }, { flush: 'sync' })
   onBeforeUnmount(stop)
-  return { visible, starting, session, error, elapsed, expiresIn, open, start }
+  return { visible, starting, completing, session, error, elapsed, expiresIn, open, start, complete }
 }
 
 function positiveSeconds(value: number | undefined, fallback: number) {

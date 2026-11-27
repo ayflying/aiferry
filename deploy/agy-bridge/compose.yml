@@ -17,6 +17,10 @@ services:
       <<: *proxy-env
       AGY_BRIDGE_PRIVATE_DOCKER: "1"
       AGY_BRIDGE_LISTEN: "0.0.0.0:8091"
+      # 官方桌面客户端的 OAuth 客户端凭据：源码不保存，只从 .env 注入，
+      # 仅在「发起账号登录」时使用；缺失时对话与额度查询照常工作。
+      AGY_BRIDGE_OAUTH_CLIENT_ID: ${AGY_BRIDGE_OAUTH_CLIENT_ID:-}
+      AGY_BRIDGE_OAUTH_CLIENT_SECRET: ${AGY_BRIDGE_OAUTH_CLIENT_SECRET:-}
     tmpfs:
       - /tmp:mode=1777,size=256m
     volumes:

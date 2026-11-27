@@ -1,6 +1,6 @@
 # AiFerry 私用 Antigravity 文本渠道
 
-自建 Google OAuth 已停用。桥接只调用已安装、未经修改的官方 `agy`，由 `agy` 自己管理账号授权；不复制 Google 令牌，不调用内部模型发现接口。实现参考 [dsh-agy-link](https://github.com/amlyczz/dsh-agy-link) 的命令行模式及 [Google 无头模式文档](https://antigravity.google/docs/cli/headless/)。
+官方 `agy` 只由桥接调用，且必须是未修改的官方二进制。官方 CLI 从 1.1.15 起在未登录时不再打印授权地址，只报 `You are not logged into Antigravity`，所以「在容器里交互式跑一遍 CLI 完成登录」这条路已经不通；桥接改为按官方客户端的方式自己跑标准 OAuth 2.0 + PKCE，见下文「登录」。实现参考 [dsh-agy-link](https://github.com/amlyczz/dsh-agy-link) 与 [Google 无头模式文档](https://antigravity.google/docs/cli/headless/)。
 
 ## 编排与登录
 
@@ -10,17 +10,32 @@
 
 **全局代理**：编排通过 `GLOBAL_PROXY` 一处配置，同时注入桥接容器的 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`。桥接下载官方 CLI 与渠道未配代理时的对话出网都读它；留空即直连。渠道配置了代理时仍以渠道为准（优先级：请求头 > 账号固定配置 > 全局代理）。`NO_PROXY` 必须排除内网段与回环，否则容器间通信（主服务连 MySQL/Redis/Casdoor）也会被代理拦下。
 
-容器健康后（首次启动要先下载约 270MB 的 CLI，`start_period` 给了 180 秒），使用支持交互的终端，在该容器内以 UID `10001` 运行卷里的官方 `agy` 完成登录（Arkade 的逐命令控制台不等于交互终端）。默认账号：
-
-```sh
-docker exec -it --user 10001 --workdir /tmp aiferry-agy-bridge-1 /home/agy/state/cli/antigravity
-```
+容器健康后（首次启动要先下载约 270MB 的 CLI，`start_period` 给了 180 秒）即可发起登录，见下一节。
 
 查看当前生效的官方 CLI 版本（需桥接令牌，不消耗模型额度）：
 
 ```sh
 docker exec --user 10001 aiferry-agy-bridge-1 sh -c 'curl -s -H "Authorization: Bearer $(cat /home/agy/state/bridge.token)" http://127.0.0.1:8091/v1/version'
 ```
+
+## 登录（网页授权）
+
+官方 CLI 不再自己输出授权地址，桥接因此内置了与官方客户端一致的 OAuth 2.0 + PKCE 流程（固定的回环回调与那组 scope）。授权在管理员自己的浏览器里完成，令牌只写进桥接卷，AiFerry 不保存 Google 凭据。
+
+客户端凭据不写进源码：桥接从编排的环境变量 `AGY_BRIDGE_OAUTH_CLIENT_ID` 与 `AGY_BRIDGE_OAUTH_CLIENT_SECRET` 读取官方桌面客户端的 OAuth 客户端凭据，写法见 [.env.example](../.env.example)。这两项缺失时只影响「发起新登录」，已有登录态的对话与额度查询照常可用。
+
+在 AiFerry 渠道 → 上游密钥 → 选择「平台登录」后：
+
+1. 点「发起登录」，桥接生成授权地址；
+2. 在浏览器打开该地址，用要接入的那个 Google 账号完成授权；
+3. 浏览器会跳到 `http://localhost:51121/oauth-callback?code=...` 并提示「无法访问」——这是预期现象，回调落在管理员本机，不经过桥接容器；
+4. 把地址栏里的完整地址（也可以只粘 `code` 参数）粘回对话框提交。
+
+桥接拿到授权码后换取 refresh/access token，按官方 CLI 的原生格式写入该账号 HOME 的 `.gemini/antigravity-cli/antigravity-oauth-token`（权限 0600），随后官方 CLI 就能直接用这份登录态。
+
+为什么必须由人转交一次：这个客户端注册的回调固定是 `http://localhost:51121/oauth-callback`，Google 严格校验回环 host，既改不了也不能替换成服务器域名。授权会话 10 分钟有效、一次性使用，并且只能由发起它的那个桥接账号兑现（state 与账号绑定）。
+
+需要的 scope 是 `cloud-platform`、`userinfo.email`、`userinfo.profile`、`cclog`、`experimentsandconfigs`；**不要加 `openid`**，否则 Google 会把这个客户端路由到会卡住的 firstparty/nativeapp 同意流程。
 
 ## 多账号（与 WorkBuddy 渠道一致）
 

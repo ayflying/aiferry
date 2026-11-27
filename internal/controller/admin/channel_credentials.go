@@ -17,6 +17,7 @@ func (c *Controller) registerChannelCredentialRoutes(group *ghttp.RouterGroup) {
 	// 成功时新增凭据，或更新发起时明确指定的原凭据。
 	group.POST("/channels/{id}/credentials/login", c.startChannelLogin)
 	group.POST("/channels/{id}/credentials/login/poll", c.pollChannelLogin)
+	group.POST("/channels/{id}/credentials/login/complete", c.completeChannelLogin)
 	group.PUT("/channels/{id}/credentials/{credentialId}/remark", c.updateChannelCredentialRemark)
 	group.PUT("/channels/{id}/credentials/{credentialId}/status", c.updateChannelCredentialStatus)
 	group.PUT("/channels/{id}/credentials/{credentialId}/management-key", c.updateChannelCredentialManagementKey)
@@ -127,6 +128,17 @@ func (c *Controller) pollChannelLogin(r *ghttp.Request) {
 		return
 	}
 	result, err := c.channels.PollChannelLogin(r.Context(), routeID(r), input)
+	respond(r, result, err)
+}
+
+// completeChannelLogin 提交浏览器授权后的回调地址，完成桥接自管的登录。
+// 回调落在管理员本机，平台收不到，只能由管理员把地址粘回来。
+func (c *Controller) completeChannelLogin(r *ghttp.Request) {
+	var input adminapi.ChannelLoginCompleteInput
+	if !parse(r, &input) {
+		return
+	}
+	result, err := c.channels.CompleteChannelLogin(r.Context(), routeID(r), input)
 	respond(r, result, err)
 }
 

@@ -120,15 +120,17 @@ const queryLabel = computed(() => {
   return `查询${channelQueryValueLabel(props.channel?.costQueryType, props.channel?.costQueryMode)}`
 })
 
-const loginSupported = computed(() => props.loginSupported === true || props.loginAdapter === 'codex_device')
+const loginSupported = computed(() => props.loginSupported === true || props.loginAdapter === 'codex_device' || props.loginAdapter === 'antigravity_bridge')
 const codexChannel = computed(() => props.channel?.type === 'codex' || props.loginAdapter === 'codex_device')
+// 回调落在管理员本机的登录方式：只能提交回调地址，不能靠服务端轮询完成。
+const callbackLogin = computed(() => props.loginAdapter === 'antigravity_bridge')
 const {
-  visible: loginDialogVisible, starting: loginStarting, session: loginSession,
-  error: loginError, elapsed: loginElapsed, expiresIn: loginExpiresIn, open: openLogin, start: startLogin,
+  visible: loginDialogVisible, starting: loginStarting, completing: loginCompleting, session: loginSession,
+  error: loginError, elapsed: loginElapsed, expiresIn: loginExpiresIn, open: openLogin, start: startLogin, complete: completeLogin,
 } = useChannelLogin(() => props.channel?.id, () => props.modelValue, async () => {
   await load(true)
   emit('changed')
-})
+}, () => callbackLogin.value)
 watch(() => props.modelValue, (open) => {
   if (open) void load(true)
   else {
@@ -601,8 +603,10 @@ function stopCodeCountdown() {
     </el-dialog>
     <ChannelLoginDialog
       v-model="loginDialogVisible" :session="loginSession" :error="loginError" :elapsed="loginElapsed"
-      :expires-in="loginExpiresIn" :starting="loginStarting"
+      :expires-in="loginExpiresIn" :starting="loginStarting" :completing="loginCompleting"
+      :callback-required="callbackLogin"
       :relogin-account="reloginTarget && `账号 #${reloginTarget.index}`" @restart="beginCredentialLogin"
+      @complete="completeLogin"
     />
 
   </el-drawer>

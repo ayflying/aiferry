@@ -126,6 +126,10 @@ func normalizeLoginConfig(config *LoginConfig) error {
 		// 独立授权流程不使用外链登录的平台与路径参数。
 		*config = LoginConfig{Adapter: config.Adapter}
 		return nil
+	case AdapterLoginAntigravityBridge:
+		// 桥接自己跑 OAuth：授权地址与回调地址都由桥接处理，不需要平台与路径参数。
+		*config = LoginConfig{Adapter: config.Adapter}
+		return nil
 	case AdapterLoginExternalLink:
 		config.Platform = strings.ToLower(strings.TrimSpace(config.Platform))
 		if config.Platform == "" {
@@ -141,7 +145,7 @@ func normalizeLoginConfig(config *LoginConfig) error {
 		}
 		return nil
 	default:
-		return gerror.Newf("unsupported login adapter %q (expected none, %s or %s)", config.Adapter, AdapterLoginExternalLink, AdapterLoginCodexDevice)
+		return gerror.Newf("unsupported login adapter %q (expected none, %s, %s or %s)", config.Adapter, AdapterLoginExternalLink, AdapterLoginCodexDevice, AdapterLoginAntigravityBridge)
 	}
 }
 

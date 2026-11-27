@@ -65,6 +65,16 @@ type ChannelLoginPollInput struct {
 	State string `json:"state" v:"required#登录状态不能为空"`
 }
 
+// ChannelLoginCompleteInput 提交浏览器授权后拿到的回调地址或授权码。
+// 只适用于由桥接自己完成 OAuth 的渠道类型：回调落在管理员本机，
+// 桥接容器收不到，必须由人把这一段转交过去。CredentialID 必须与发起时一致，
+// 因为完成换票要用同一个桥接账号的令牌去认证。
+type ChannelLoginCompleteInput struct {
+	State        string  `json:"state" v:"required#登录状态不能为空"`
+	CallbackURL  string  `json:"callbackUrl" v:"required#授权回调地址不能为空"`
+	CredentialID *uint64 `json:"credentialId"`
+}
+
 // ChannelLoginResultView 登录结果：pending 等待授权，completed 表示凭据已保存。
 type ChannelLoginResultView struct {
 	Status       string `json:"status"`

@@ -107,7 +107,7 @@ const credentialManagementKeyPair = computed(() => {
   return config?.quota?.adapter === 'volcengine_afp'
 })
 const credentialLoginAdapter = computed(() => store.channelTypes.find((item) => item.code === credentialChannel.value?.type)?.config.login?.adapter)
-const credentialLoginSupported = computed(() => ['external_link', 'codex_device'].includes(credentialLoginAdapter.value || ''))
+const credentialLoginSupported = computed(() => ['external_link', 'codex_device', 'antigravity_bridge'].includes(credentialLoginAdapter.value || ''))
 const healthCheckModelOptions = computed(() => [...healthCheckModels.value]
   .filter((item) => item.enabled === 1)
   .sort((left, right) => left.publicName.localeCompare(right.publicName) || left.upstreamName.localeCompare(right.upstreamName)))

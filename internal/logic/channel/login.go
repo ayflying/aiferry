@@ -48,6 +48,11 @@ func (s *sChannel) StartChannelLogin(ctx context.Context, channelID uint64, inpu
 	if config.Login.Adapter == channeltype.AdapterLoginCodexDevice {
 		return s.startCodexLogin(ctx, channel, credentialID)
 	}
+	if config.Login.Adapter == channeltype.AdapterLoginAntigravityBridge {
+		// 桥接登录不需要预选凭据：账号由用来认证的那把桥接令牌决定；
+		// 重新登录时按 credentialID 精确取那一行的令牌。
+		return s.startAntigravityBridgeLogin(ctx, channel, credentialID)
+	}
 	if credentialID != 0 {
 		return ChannelLoginSession{}, gerror.New("该渠道的外链登录无法验证原凭据账号，不支持重新登录")
 	}
@@ -87,6 +92,11 @@ func (s *sChannel) PollChannelLogin(ctx context.Context, channelID uint64, input
 	}
 	if config.Login.Adapter == channeltype.AdapterLoginCodexDevice {
 		return s.pollCodexLogin(ctx, channel, state)
+	}
+	if config.Login.Adapter == channeltype.AdapterLoginAntigravityBridge {
+		// 回环回调落在管理员本机，桥接等不到「自动完成」，所以没有可轮询的状态：
+		// 管理员提交回调地址后才算完成，见 CompleteChannelLogin。
+		return ChannelLoginResult{}, gerror.New("该渠道的登录需要提交浏览器授权后的回调地址，不能轮询等结果")
 	}
 	endpoint, err := loginEndpoint(channel.BaseUrl, config, "auth/token")
 	if err != nil {
@@ -128,7 +138,9 @@ func (s *sChannel) loginContext(ctx context.Context, channelID uint64) (entity.C
 	if err != nil {
 		return entity.Channels{}, channeltype.Config{}, err
 	}
-	if config.Login.Adapter != channeltype.AdapterLoginExternalLink && config.Login.Adapter != channeltype.AdapterLoginCodexDevice {
+	switch config.Login.Adapter {
+	case channeltype.AdapterLoginExternalLink, channeltype.AdapterLoginCodexDevice, channeltype.AdapterLoginAntigravityBridge:
+	default:
 		return entity.Channels{}, channeltype.Config{}, gerror.Newf("渠道类型 %s 不支持登录，请手工填写密钥", channel.Type)
 	}
 	return channel, config, nil

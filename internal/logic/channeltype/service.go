@@ -32,8 +32,8 @@ const (
 	// AdapterAntigravityUsage 查询 Google Antigravity（官方 agy CLI）订阅额度。
 	// 桥接把 CLI 的 /usage 翻译成与 OpenCode Go 相同的形状，解析器直接复用。
 	AdapterAntigravityUsage = "antigravity_usage"
-	AdapterVolcAFP     = "volcengine_afp"
-	AdapterWorkBuddy   = "workbuddy_credits"
+	AdapterVolcAFP          = "volcengine_afp"
+	AdapterWorkBuddy        = "workbuddy_credits"
 	// AdapterQiniuUsage remains supported for custom types created before 0.5.18.
 	AdapterQiniuUsage  = "qiniu_usage"
 	AdapterNewAPIRatio = "newapi_ratio"
@@ -42,6 +42,10 @@ const (
 	AdapterLoginNone         = "none"
 	AdapterLoginExternalLink = "external_link"
 	AdapterLoginCodexDevice  = "codex_device"
+	// AdapterLoginAntigravityBridge 表示登录由 Antigravity 桥接自己跑官方客户端的
+	// 标准 OAuth 2.0 + PKCE：平台只把授权地址交给管理员、把浏览器回调地址转交桥接，
+	// 既不接触 Google 令牌，也不把令牌存进本平台的凭据表。
+	AdapterLoginAntigravityBridge = "antigravity_bridge"
 
 	ValueTypeCost  = "cost"
 	ValueTypeUsage = "usage"
@@ -167,9 +171,14 @@ type Config struct {
 //	管理员在浏览器打开（微信扫码、账号密码、企业 SSO 均由平台登录页自行决定），
 //	服务端只轮询换票，因此不依赖登录时所在设备的任何本地组件。
 //
+//	antigravity_bridge —— 登录由 Antigravity 桥接自己跑官方客户端的 OAuth 2.0 +
+//	PKCE：平台把桥接生成的授权地址交给管理员，管理员授权后回调落在管理员本机，
+//	需把该回调地址粘回平台转交桥接。令牌只写进桥接的卷，平台不保存 Google 凭据。
+//
 // adapter 留空或 "none" 表示该渠道类型不支持登录，凭据只能手工填写密钥。
 type LoginConfig struct {
-	// Adapter 登录适配器：external_link 外链登录或 codex_device 设备授权。
+	// Adapter 登录适配器：external_link 外链登录、codex_device 设备授权，
+	// 或 antigravity_bridge（由 Antigravity 桥接自己完成网页 OAuth）。
 	Adapter string `json:"adapter"`
 	// Platform 传给平台登录接口的 platform 参数（如 workbuddy）。
 	Platform string `json:"platform"`

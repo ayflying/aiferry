@@ -19,10 +19,12 @@ type bridge struct {
 	usage    func(account, string) func(context.Context) (usagePayload, error)
 	cli      *cliManager
 	slots    map[string]chan struct{}
+	// logins 保存在内存里的授权会话，供 /v1/login/* 使用。
+	logins *loginSessions
 }
 
 func newBridge(accounts []account, model string, run func(account, string) runner, usage func(account, string) func(context.Context) (usagePayload, error), cli *cliManager) http.Handler {
-	b := &bridge{accounts: accounts, model: model, run: run, usage: usage, cli: cli, slots: make(map[string]chan struct{}, len(accounts))}
+	b := &bridge{accounts: accounts, model: model, run: run, usage: usage, cli: cli, slots: make(map[string]chan struct{}, len(accounts)), logins: newLoginSessions()}
 	for _, acc := range accounts {
 		b.slots[acc.name] = make(chan struct{}, 1)
 	}
@@ -31,6 +33,8 @@ func newBridge(accounts []account, model string, run func(account, string) runne
 	mux.HandleFunc("GET /v1/quota", b.quota)
 	mux.HandleFunc("GET /v1/version", b.version)
 	mux.HandleFunc("POST /v1/chat/completions", b.chat)
+	mux.HandleFunc("POST /v1/login/start", b.loginStart)
+	mux.HandleFunc("POST /v1/login/complete", b.loginComplete)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		acc, ok := resolve(b.accounts, r.Header.Get("Authorization"))
 		if !ok {
