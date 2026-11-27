@@ -39,7 +39,11 @@ func serve() error {
 		// 未显式指定时以单账号令牌文件所在目录为状态目录，兼容纯本机部署。
 		stateDir = filepath.Dir(os.Getenv("AGY_BRIDGE_TOKEN_FILE"))
 	}
-	accounts, err := loadAccounts(stateDir)
+	// 首次登录自动登记账号：AiFerry 在渠道下没有令牌时会自己生成一把再发起登录，
+	// 桥接在 /v1/login/start 收到未知令牌时据此建账号，用户不必手工准备令牌。
+	// 只对这一个端点生效，且需要在编排里显式打开。
+	autoAccount := os.Getenv("AGY_BRIDGE_AUTO_ACCOUNT") == "1"
+	accounts, err := loadAccounts(stateDir, autoAccount)
 	if err != nil {
 		return err
 	}
@@ -87,7 +91,7 @@ func serve() error {
 		return err
 	}
 	s := &http.Server{
-		Addr: addr, Handler: newBridge(accounts, model, accountRunner(binary, work, path, model), accountUsage(binary, dir), manager),
+		Addr: addr, Handler: newBridge(accounts, model, accountRunner(binary, work, path, model), accountUsage(binary, dir), manager, stateDir, autoAccount),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 110 * time.Second, IdleTimeout: 30 * time.Second,
 	}
 	return s.ListenAndServe()

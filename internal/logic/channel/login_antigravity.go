@@ -3,6 +3,8 @@ package channel
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -36,15 +38,24 @@ func antigravityLoginEndpoint(baseURL, action string) (string, error) {
 }
 
 // antigravityBridgeToken 取该渠道的一把桥接令牌。令牌既是调用桥接的凭据，
-// 也是「给哪个 Google 账号登录」的声明；没有它无法发起登录。credentialID 非零时
-// 精确取点选的那一行，保证多账号下「重新登录」不会作用到别的账号。
-func (s *sChannel) antigravityBridgeToken(ctx context.Context, channelID, credentialID uint64) (string, error) {
+// 也是「给哪个 Google 账号登录」的声明。credentialID 非零时精确取点选的那一行，
+// 保证多账号下「重新登录」不会作用到别的账号；为零且渠道还没有任何令牌时，
+// 自动生成一把——用户点「平台登录」即可，不需要先手工准备令牌。
+func (s *sChannel) antigravityBridgeToken(ctx context.Context, channelID, credentialID uint64, provision bool) (string, error) {
 	rows, err := s.availableCredentials(ctx, channelID, nil)
 	if err != nil {
 		return "", err
 	}
 	if len(rows) == 0 {
-		return "", gerror.New("请先在该渠道填入一把桥接令牌，再发起网页授权登录")
+		// 发起登录时允许自动补一把；提交回调时不允许——那时必须沿用发起时的
+		// 那把令牌，否则桥接会拿着新账号找不到这次授权的 state。
+		if !provision {
+			return "", gerror.New("该渠道已没有可用的桥接令牌，请重新发起登录")
+		}
+		if credentialID != 0 {
+			return "", gerror.New("指定的凭据不存在或当前不可用，请刷新后重试")
+		}
+		return s.provisionAntigravityToken(ctx, channelID)
 	}
 	selected := rows[0]
 	if credentialID != 0 {
@@ -68,6 +79,34 @@ func (s *sChannel) antigravityBridgeToken(ctx context.Context, channelID, creden
 		return "", gerror.New("该渠道的桥接令牌为空，请重新填写")
 	}
 	return token, nil
+}
+
+// provisionAntigravityToken 给还没有任何令牌的渠道自动生成一把桥接令牌并落库。
+//
+// 桥接开启 AGY_BRIDGE_AUTO_ACCOUNT 后，会在第一次收到这把令牌调 /v1/login/start 时
+// 自动登记账号，所以「新建渠道 → 点平台登录 → 网页授权」全程不需要用户接触令牌，
+// 也不需要管理员去服务器上找卷里的令牌再粘回来。
+func (s *sChannel) provisionAntigravityToken(ctx context.Context, channelID uint64) (string, error) {
+	token, err := randomBridgeToken()
+	if err != nil {
+		return "", gerror.Wrap(err, "生成桥接令牌失败")
+	}
+	if _, err = s.CreateCredential(ctx, channelID, adminapi.ChannelCredentialInput{
+		APIKey: token,
+		Remark: "网页授权自动创建",
+	}); err != nil {
+		return "", gerror.Wrap(err, "写入桥接令牌失败")
+	}
+	return token, nil
+}
+
+// randomBridgeToken 生成 32 字节随机令牌（64 位十六进制），满足桥接「至少 32 字节」的要求。
+func randomBridgeToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 // callAntigravityBridge 调用桥接的登录端点。代理走该渠道已有配置，
@@ -127,7 +166,7 @@ func bridgeLoginMessage(body []byte) string {
 
 // startAntigravityBridgeLogin 让桥接生成一次授权，返回管理员要在浏览器打开的地址。
 func (s *sChannel) startAntigravityBridgeLogin(ctx context.Context, channel entity.Channels, credentialID uint64) (ChannelLoginSession, error) {
-	token, err := s.antigravityBridgeToken(ctx, channel.Id, credentialID)
+	token, err := s.antigravityBridgeToken(ctx, channel.Id, credentialID, true)
 	if err != nil {
 		return ChannelLoginSession{}, err
 	}
@@ -151,7 +190,7 @@ func (s *sChannel) startAntigravityBridgeLogin(ctx context.Context, channel enti
 
 // completeAntigravityBridgeLogin 把管理员粘回来的回调地址转交桥接完成换票。
 func (s *sChannel) completeAntigravityBridgeLogin(ctx context.Context, channel entity.Channels, credentialID uint64, state, callbackURL string) (ChannelLoginResult, error) {
-	token, err := s.antigravityBridgeToken(ctx, channel.Id, credentialID)
+	token, err := s.antigravityBridgeToken(ctx, channel.Id, credentialID, false)
 	if err != nil {
 		return ChannelLoginResult{}, err
 	}

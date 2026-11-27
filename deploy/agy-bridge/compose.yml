@@ -21,6 +21,10 @@ services:
       # 仅在「发起账号登录」时使用；缺失时对话与额度查询照常工作。
       AGY_BRIDGE_OAUTH_CLIENT_ID: ${AGY_BRIDGE_OAUTH_CLIENT_ID:-}
       AGY_BRIDGE_OAUTH_CLIENT_SECRET: ${AGY_BRIDGE_OAUTH_CLIENT_SECRET:-}
+      # 首次登录自动登记账号：AiFerry 在渠道还没有令牌时会自己生成一把再发起登录，
+      # 桥接只在 /v1/login/start 收到未知令牌时建账号，其余端点仍只认已有令牌。
+      # 这样「添加账号」是一次点击，不需要管理员去卷里找令牌再手工粘贴。
+      AGY_BRIDGE_AUTO_ACCOUNT: ${AGY_BRIDGE_AUTO_ACCOUNT:-1}
     tmpfs:
       - /tmp:mode=1777,size=256m
     volumes:

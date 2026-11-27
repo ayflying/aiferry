@@ -51,7 +51,7 @@ func TestBridge(t *testing.T) {
 			return payload, nil
 		}
 	}
-	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t))
+	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t), "", false)
 	for _, tt := range []struct {
 		name, auth, body string
 		status           int
@@ -99,7 +99,7 @@ func TestProxyHeaderRequiresAuthAndOverridesAccountProxy(t *testing.T) {
 			return payload, nil
 		}
 	}
-	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t))
+	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t), "", false)
 
 	r := httptest.NewRequest("GET", "/v1/quota", nil)
 	r.Header.Set(proxyHeader, "http://other:2")
@@ -142,7 +142,7 @@ func TestStreamDoesNotEndSuccessfullyAfterFailure(t *testing.T) {
 	usageFor := func(account, string) func(context.Context) (usagePayload, error) {
 		return func(context.Context) (usagePayload, error) { return usagePayload{}, context.Canceled }
 	}
-	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t))
+	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t), "", false)
 	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"example","stream":true,"messages":[{"role":"user","content":"ping"}]}`))
 	r.Header.Set("Authorization", "Bearer "+testToken)
 	w := httptest.NewRecorder()

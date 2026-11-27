@@ -31,6 +31,8 @@ docker exec --user 10001 aiferry-agy-bridge-1 sh -c 'curl -s -H "Authorization: 
 3. 浏览器会跳到 `http://localhost:51121/oauth-callback?code=...` 并提示「无法访问」——这是预期现象，回调落在管理员本机，不经过桥接容器；
 4. 把地址栏里的完整地址（也可以只粘 `code` 参数）粘回对话框提交。
 
+渠道下还没有任何桥接令牌时**不需要手工准备**：AiFerry 会自动生成一把随机令牌并写进该渠道的凭据（备注「网页授权自动创建」），桥接在开启 `AGY_BRIDGE_AUTO_ACCOUNT` 时对 `/v1/login/start` 收到的未知令牌自动登记账号，于是「新建渠道 → 点平台登录 → 网页授权」全程不需要管理员接触令牌。自动登记只对这一个端点开放，模型与额度端点仍然只认已存在的令牌。
+
 桥接拿到授权码后换取 refresh/access token，按官方 CLI 的原生格式写入该账号 HOME 的 `.gemini/antigravity-cli/antigravity-oauth-token`（权限 0600），随后官方 CLI 就能直接用这份登录态。
 
 为什么必须由人转交一次：这个客户端注册的回调固定是 `http://localhost:51121/oauth-callback`，Google 严格校验回环 host，既改不了也不能替换成服务器域名。授权会话 10 分钟有效、一次性使用，并且只能由发起它的那个桥接账号兑现（state 与账号绑定）。

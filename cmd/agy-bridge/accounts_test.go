@@ -61,7 +61,7 @@ func TestLoadAccounts(t *testing.T) {
 	if err := writeFile(root+"/bridge.token", strings.Repeat("a", 64)); err != nil {
 		t.Fatal(err)
 	}
-	accounts, err := loadAccounts(root)
+	accounts, err := loadAccounts(root, false)
 	if err != nil || len(accounts) != 1 || accounts[0].name != "default" {
 		t.Fatalf("single-account load = %+v / %v", accounts, err)
 	}
@@ -71,7 +71,7 @@ func TestLoadAccounts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := loadAccounts(root); err == nil || !strings.Contains(err.Error(), "weak") {
+	if _, err := loadAccounts(root, false); err == nil || !strings.Contains(err.Error(), "weak") {
 		t.Fatalf("weak token accepted: %v", err)
 	}
 	if err := writeFile(root+"/accounts/weak/token", strings.Repeat("d", 64)); err != nil {
@@ -80,7 +80,7 @@ func TestLoadAccounts(t *testing.T) {
 	// 非法目录名与空令牌目录被忽略，不参与认证。
 	_ = writeFile(root+"/accounts/../escape/token", strings.Repeat("e", 64))
 	_ = writeFile(root+"/accounts/empty/token", "")
-	accounts, err = loadAccounts(root)
+	accounts, err = loadAccounts(root, false)
 	if err != nil || len(accounts) != 4 {
 		t.Fatalf("accounts = %+v / %v", accounts, err)
 	}

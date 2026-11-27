@@ -7,12 +7,15 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
 // bridge 是 OpenAI 兼容网关：按 Authorization 里的桥接令牌识别账号，
 // 再以该账号的登录状态调用官方 agy。每个账号同一时刻只处理一个请求。
 type bridge struct {
+	// mu 保护 accounts 与 slots：首次登录允许按需登记新账号，二者会同时增长。
+	mu       sync.RWMutex
 	accounts []account
 	model    string
 	run      func(account, string) runner
@@ -21,10 +24,13 @@ type bridge struct {
 	slots    map[string]chan struct{}
 	// logins 保存在内存里的授权会话，供 /v1/login/* 使用。
 	logins *loginSessions
+	// stateDir 与 autoAccount 只在「首次登录自动登记账号」时用到。
+	stateDir    string
+	autoAccount bool
 }
 
-func newBridge(accounts []account, model string, run func(account, string) runner, usage func(account, string) func(context.Context) (usagePayload, error), cli *cliManager) http.Handler {
-	b := &bridge{accounts: accounts, model: model, run: run, usage: usage, cli: cli, slots: make(map[string]chan struct{}, len(accounts)), logins: newLoginSessions()}
+func newBridge(accounts []account, model string, run func(account, string) runner, usage func(account, string) func(context.Context) (usagePayload, error), cli *cliManager, stateDir string, autoAccount bool) http.Handler {
+	b := &bridge{accounts: accounts, model: model, run: run, usage: usage, cli: cli, slots: make(map[string]chan struct{}, len(accounts)), logins: newLoginSessions(), stateDir: stateDir, autoAccount: autoAccount}
 	for _, acc := range accounts {
 		b.slots[acc.name] = make(chan struct{}, 1)
 	}
@@ -36,10 +42,19 @@ func newBridge(accounts []account, model string, run func(account, string) runne
 	mux.HandleFunc("POST /v1/login/start", b.loginStart)
 	mux.HandleFunc("POST /v1/login/complete", b.loginComplete)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		acc, ok := resolve(b.accounts, r.Header.Get("Authorization"))
+		authorization := r.Header.Get("Authorization")
+		acc, ok := b.resolveAccount(authorization)
 		if !ok {
-			fail(w, 401, "invalid bridge token")
-			return
+			// /v1/login/start 是「新渠道第一次登录」的入口：AiFerry 在渠道还没有
+			// 令牌时会自己生成一把再调这里，桥接据此登记账号，用户不必手工准备令牌。
+			// 只在这一个端点、且显式开启时才放行，其余端点仍然只认已存在的令牌。
+			if b.autoAccount && r.URL.Path == "/v1/login/start" {
+				acc, ok = b.registerAccount(authorization)
+			}
+			if !ok {
+				fail(w, 401, "invalid bridge token")
+				return
+			}
 		}
 		// 令牌认证通过后才读取代理头；账号固定代理为兜底，请求头优先。
 		proxy := acc.proxy
@@ -48,6 +63,36 @@ func newBridge(accounts []account, model string, run func(account, string) runne
 		}
 		mux.ServeHTTP(w, r.WithContext(withAccount(r.Context(), acc, proxy)))
 	})
+}
+
+// resolveAccount 加读锁查账号，避免与自动登记并发读写切片。
+func (b *bridge) resolveAccount(authorization string) (account, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return resolve(b.accounts, authorization)
+}
+
+// registerAccount 为一把未知令牌建立账号目录并加入运行期账号表。
+// 落盘失败或无卷可写时返回 false，调用方按无效令牌处理。
+func (b *bridge) registerAccount(authorization string) (account, bool) {
+	acc, err := createAccountDir(b.stateDir, authorization)
+	if err != nil {
+		return account{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, exists := b.slots[acc.name]; !exists {
+		b.accounts = append(b.accounts, acc)
+		b.slots[acc.name] = make(chan struct{}, 1)
+	}
+	return acc, true
+}
+
+// slot 取账号的并发槽位；账号在运行期可能新增，必须加锁读取。
+func (b *bridge) slot(name string) chan struct{} {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.slots[name]
 }
 
 type accountKey struct{}
@@ -82,8 +127,8 @@ func (b *bridge) version(w http.ResponseWriter, _ *http.Request) {
 func (b *bridge) quota(w http.ResponseWriter, r *http.Request) {
 	acc, proxy := currentAccount(r.Context())
 	select {
-	case b.slots[acc.name] <- struct{}{}:
-		defer func() { <-b.slots[acc.name] }()
+	case b.slot(acc.name) <- struct{}{}:
+		defer func() { <-b.slot(acc.name) }()
 	default:
 		fail(w, 429, "bridge already processing a request for this account")
 		return
@@ -150,8 +195,8 @@ func (b *bridge) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	acc, proxy := currentAccount(r.Context())
 	select {
-	case b.slots[acc.name] <- struct{}{}:
-		defer func() { <-b.slots[acc.name] }()
+	case b.slot(acc.name) <- struct{}{}:
+		defer func() { <-b.slot(acc.name) }()
 	default:
 		fail(w, 429, "bridge already processing a request for this account")
 		return

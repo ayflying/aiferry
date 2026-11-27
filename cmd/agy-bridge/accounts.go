@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,10 @@ type account struct {
 
 const accountDirName = "accounts"
 
+// errNoAccounts 表示卷里一把令牌都没有。开启首次登录自动登记时这不是错误：
+// 全新部署可以先起来，等 AiFerry 发起第一次登录再落盘账号。
+var errNoAccounts = errors.New("no bridge account found: create accounts/<name>/token with a strong token")
+
 // loadAccounts 从 stateDir 读取全部账号：
 //
 //	<stateDir>/bridge.token                 单账号写法（兼容旧部署），视为默认账号
@@ -35,7 +40,8 @@ const accountDirName = "accounts"
 //	<stateDir>/accounts/<名字>/proxy        可选：该账号固定代理地址
 //
 // 两种写法可以并存；令牌不足 32 字节的目录直接报错，避免弱令牌进入认证环节。
-func loadAccounts(stateDir string) ([]account, error) {
+// allowEmpty 为真时允许一个账号都没有（自动登记模式），否则返回 errNoAccounts。
+func loadAccounts(stateDir string, allowEmpty bool) ([]account, error) {
 	var accounts []account
 	if single := strings.TrimSpace(readFile(filepath.Join(stateDir, "bridge.token"))); single != "" {
 		item, err := newAccount("default", single, filepath.Join(stateDir, "account-home"), "")
@@ -71,8 +77,8 @@ func loadAccounts(stateDir string) ([]account, error) {
 		}
 		accounts = append(accounts, item)
 	}
-	if len(accounts) == 0 {
-		return nil, errors.New("no bridge account found: create accounts/<name>/token with a strong token")
+	if len(accounts) == 0 && !allowEmpty {
+		return nil, errNoAccounts
 	}
 	return accounts, nil
 }
@@ -98,6 +104,30 @@ func validAccountName(name string) bool {
 		}
 	}
 	return true
+}
+
+// createAccountDir 为一个还不认识的令牌在卷里建立账号目录并落盘令牌。
+//
+// 存在的意义：AiFerry 在渠道下没有任何桥接令牌时，会自己生成一把再发起登录，
+// 让「添加账号」变成一次点击，而不是让用户先去服务器上找令牌再手工粘贴。
+// 账号目录名取令牌摘要前缀：既唯一、又不含任何用户输入，天然没有路径穿越风险。
+// 调用方必须保证只在 /v1/login/start 且显式开启自动登记时才走这里。
+func createAccountDir(stateDir, authorization string) (account, error) {
+	raw := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+	if len(raw) < 32 {
+		return account{}, errors.New("bridge token must be at least 32 bytes")
+	}
+	sum := sha256.Sum256([]byte("Bearer " + raw))
+	name := fmt.Sprintf("auto-%x", sum[:6])
+	dir := filepath.Join(stateDir, accountDirName, name)
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(home, 0700); err != nil {
+		return account{}, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "token"), []byte(raw), 0600); err != nil {
+		return account{}, err
+	}
+	return newAccount(name, raw, home, "")
 }
 
 // resolve 按 Authorization 头找出令牌匹配的账号；没有匹配返回 false。

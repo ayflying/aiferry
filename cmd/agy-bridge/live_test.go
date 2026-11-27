@@ -48,7 +48,7 @@ func TestLiveOfficialCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	const model = "gemini-4-hydrogen-low"
-	h := newBridge([]account{liveAccount(t)}, model, accountRunner(path, t.TempDir(), policy, model), accountUsage(path, t.TempDir()), testCLI(t))
+	h := newBridge([]account{liveAccount(t)}, model, accountRunner(path, t.TempDir(), policy, model), accountUsage(path, t.TempDir()), testCLI(t), "", false)
 	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"`+model+`","stream":true,"max_completion_tokens":16,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"Reply with exactly OK. Do not use tools."}]}`))
 	r.Header.Set("Authorization", "Bearer test")
 	w := httptest.NewRecorder()
@@ -63,7 +63,7 @@ func TestLiveOfficialCLI(t *testing.T) {
 // 5 小时与每周窗口（2026-11-27 实测约 8 秒）。
 func TestLiveUsage(t *testing.T) {
 	path := liveCLI(t)
-	h := newBridge([]account{liveAccount(t)}, "unused", nil, accountUsage(path, t.TempDir()), testCLI(t))
+	h := newBridge([]account{liveAccount(t)}, "unused", nil, accountUsage(path, t.TempDir()), testCLI(t), "", false)
 	r := httptest.NewRequest("GET", "/v1/quota", nil)
 	r.Header.Set("Authorization", "Bearer test")
 	w := httptest.NewRecorder()
