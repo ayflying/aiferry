@@ -25,9 +25,14 @@ func allowedListen(addr string, privateDocker bool) bool {
 }
 
 func serve() error {
-	token, err := os.ReadFile(os.Getenv("AGY_BRIDGE_TOKEN_FILE"))
-	if err != nil || len(strings.TrimSpace(string(token))) < 32 {
-		return errors.New("AGY_BRIDGE_TOKEN_FILE must contain a strong bridge token")
+	stateDir := os.Getenv("AGY_BRIDGE_STATE_DIR")
+	if stateDir == "" {
+		// 未显式指定时以单账号令牌文件所在目录为状态目录，兼容纯本机部署。
+		stateDir = filepath.Dir(os.Getenv("AGY_BRIDGE_TOKEN_FILE"))
+	}
+	accounts, err := loadAccounts(stateDir)
+	if err != nil {
+		return err
 	}
 	model := strings.TrimSpace(os.Getenv("AGY_BRIDGE_MODEL"))
 	if model == "" {
@@ -62,6 +67,9 @@ func serve() error {
 	if err := os.Mkdir(work, 0700); err != nil {
 		return err
 	}
-	s := &http.Server{Addr: addr, Handler: newBridge(strings.TrimSpace(string(token)), model, cliRunner(binary, work, path, model)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 110 * time.Second, IdleTimeout: 30 * time.Second}
+	s := &http.Server{
+		Addr: addr, Handler: newBridge(accounts, model, accountRunner(binary, work, path, model), accountUsage(binary, dir)),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 110 * time.Second, IdleTimeout: 30 * time.Second,
+	}
 	return s.ListenAndServe()
 }

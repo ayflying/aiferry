@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,32 +10,79 @@ import (
 	"time"
 )
 
-type runner func(context.Context, string, func(string) error) (usage, error)
-
+// bridge 是 OpenAI 兼容网关：按 Authorization 里的桥接令牌识别账号，
+// 再以该账号的登录状态调用官方 agy。每个账号同一时刻只处理一个请求。
 type bridge struct {
-	token [32]byte
-	model string
-	run   runner
-	slot  chan struct{}
+	accounts []account
+	model    string
+	run      func(account, string) runner
+	usage    func(account, string) func(context.Context) (usagePayload, error)
+	slots    map[string]chan struct{}
 }
 
-func newBridge(token, model string, run runner) http.Handler {
-	b := &bridge{sha256.Sum256([]byte("Bearer " + token)), model, run, make(chan struct{}, 1)}
+func newBridge(accounts []account, model string, run func(account, string) runner, usage func(account, string) func(context.Context) (usagePayload, error)) http.Handler {
+	b := &bridge{accounts: accounts, model: model, run: run, usage: usage, slots: make(map[string]chan struct{}, len(accounts))}
+	for _, acc := range accounts {
+		b.slots[acc.name] = make(chan struct{}, 1)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", b.models)
+	mux.HandleFunc("GET /v1/quota", b.quota)
 	mux.HandleFunc("POST /v1/chat/completions", b.chat)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		actual := sha256.Sum256([]byte(r.Header.Get("Authorization")))
-		if subtle.ConstantTimeCompare(b.token[:], actual[:]) != 1 {
+		acc, ok := resolve(b.accounts, r.Header.Get("Authorization"))
+		if !ok {
 			fail(w, 401, "invalid bridge token")
 			return
 		}
-		mux.ServeHTTP(w, r)
+		// 令牌认证通过后才读取代理头；账号固定代理为兜底，请求头优先。
+		proxy := acc.proxy
+		if fromHeader := r.Header.Get(proxyHeader); fromHeader != "" {
+			proxy = fromHeader
+		}
+		mux.ServeHTTP(w, r.WithContext(withAccount(r.Context(), acc, proxy)))
 	})
+}
+
+type accountKey struct{}
+
+// withAccount 把已认证的账号与本次请求的代理放进上下文，供各处理器取用。
+func withAccount(ctx context.Context, acc account, proxy string) context.Context {
+	return context.WithValue(ctx, accountKey{}, struct {
+		account account
+		proxy   string
+	}{acc, proxy})
+}
+
+func currentAccount(ctx context.Context) (account, string) {
+	value, _ := ctx.Value(accountKey{}).(struct {
+		account account
+		proxy   string
+	})
+	return value.account, value.proxy
 }
 
 func (b *bridge) models(w http.ResponseWriter, _ *http.Request) {
 	reply(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": b.model, "object": "model", "owned_by": "agy"}}})
+}
+
+// quota 用官方 CLI 的 /usage 查询该账号的订阅额度，输出 OpenCode Go 同款形状。
+// 不经过对话槽位串行化：额度查询不占模型并发，但同一账号仍限一个并发查询。
+func (b *bridge) quota(w http.ResponseWriter, r *http.Request) {
+	acc, proxy := currentAccount(r.Context())
+	select {
+	case b.slots[acc.name] <- struct{}{}:
+		defer func() { <-b.slots[acc.name] }()
+	default:
+		fail(w, 429, "bridge already processing a request for this account")
+		return
+	}
+	payload, err := b.usage(acc, proxy)(r.Context())
+	if err != nil {
+		fail(w, 502, "agy failed to report subscription usage")
+		return
+	}
+	reply(w, payload)
 }
 
 type chatRequest struct {
@@ -92,11 +137,12 @@ func (b *bridge) chat(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "expected plain-text conversation ending in a user message")
 		return
 	}
+	acc, proxy := currentAccount(r.Context())
 	select {
-	case b.slot <- struct{}{}:
-		defer func() { <-b.slot }()
+	case b.slots[acc.name] <- struct{}{}:
+		defer func() { <-b.slots[acc.name] }()
 	default:
-		fail(w, 429, "bridge already processing a request")
+		fail(w, 429, "bridge already processing a request for this account")
 		return
 	}
 	now := time.Now()
@@ -105,11 +151,11 @@ func (b *bridge) chat(w http.ResponseWriter, r *http.Request) {
 		return map[string]any{"id": id, "object": object, "created": now.Unix(), "model": b.model, "choices": []any{choice}}
 	}
 	if p.Stream {
-		b.stream(w, r, prompt, packet)
+		b.stream(w, r, b.run(acc, proxy), prompt, packet)
 		return
 	}
 	var text strings.Builder
-	u, err := b.run(r.Context(), prompt, func(s string) error {
+	u, err := b.run(acc, proxy)(r.Context(), prompt, func(s string) error {
 		if text.Len()+len(s) > 2<<20 {
 			return fmt.Errorf("response too large")
 		}
@@ -125,7 +171,7 @@ func (b *bridge) chat(w http.ResponseWriter, r *http.Request) {
 	reply(w, res)
 }
 
-func (b *bridge) stream(w http.ResponseWriter, r *http.Request, prompt string, packet func(string, map[string]any) map[string]any) {
+func (b *bridge) stream(w http.ResponseWriter, r *http.Request, run runner, prompt string, packet func(string, map[string]any) map[string]any) {
 	flush, ok := w.(http.Flusher)
 	if !ok {
 		fail(w, 500, "streaming not available")
@@ -151,7 +197,7 @@ func (b *bridge) stream(w http.ResponseWriter, r *http.Request, prompt string, p
 	chunk := func(delta map[string]string, finish any) map[string]any {
 		return packet("chat.completion.chunk", map[string]any{"index": 0, "delta": delta, "finish_reason": finish})
 	}
-	u, err := b.run(r.Context(), prompt, func(s string) error {
+	u, err := run(r.Context(), prompt, func(s string) error {
 		if !started {
 			if err := send(chunk(map[string]string{"role": "assistant"}, nil)); err != nil {
 				return err

@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=bridge-build /out/agy-bridge /usr/local/bin/agy-bridge
 COPY deploy/agy-bridge/start.sh /usr/local/bin/start-agy-bridge
 RUN sed -i 's/\r$//' /usr/local/bin/start-agy-bridge && chmod 0755 /usr/local/bin/start-agy-bridge
-ENV HOME=/home/agy/state AGY_BRIDGE_TOKEN_FILE=/home/agy/state/bridge.token
+ENV HOME=/home/agy/state AGY_BRIDGE_STATE_DIR=/home/agy/state AGY_BRIDGE_TOKEN_FILE=/home/agy/state/bridge.token
 USER 10001:10001
 WORKDIR /tmp
 RUN agy --version | grep -F '1.5.18'

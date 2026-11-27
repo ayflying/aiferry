@@ -97,7 +97,7 @@ export interface ChannelTypeEndpointConfig {
 }
 
 export interface ChannelTypeQuotaConfig {
-  adapter: 'none' | 'zhipu_coding_plan' | 'opencode_go_usage' | 'volcengine_afp' | 'workbuddy_credits' | 'codex_usage'
+  adapter: 'none' | 'zhipu_coding_plan' | 'opencode_go_usage' | 'volcengine_afp' | 'workbuddy_credits' | 'codex_usage' | 'antigravity_usage'
   method: string
   path: string
   authType: 'none' | 'channel_key' | 'management_key'

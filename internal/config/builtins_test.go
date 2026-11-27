@@ -12,7 +12,7 @@ func TestLoadBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.ChannelTypes) != 24 {
+	if len(registry.ChannelTypes) != 25 {
 		t.Fatalf("unexpected built-in registry: %+v", registry)
 	}
 	for code, id := range map[string]uint64{
@@ -25,6 +25,7 @@ func TestLoadBuiltins(t *testing.T) {
 		"volcengine_ark_agent": 9000000000000020, "volcengine_ark_video": 9000000000000021,
 		"commandcode": 9000000000000022, "opencode_zen": 9000000000000023,
 		"workbuddy": 9000000000000024, "codex": 9000000000000025,
+		"gemini_antigravity": 9000000000000026,
 	} {
 		if item, exists := registry.ChannelTypeByCode(code); !exists || item.ID != id {
 			t.Fatalf("built-in channel type is missing: %s %+v", code, item)
@@ -108,6 +109,52 @@ func TestOpenCodeGoBuiltinDeclaresUsageQuota(t *testing.T) {
 	}
 	if !strings.Contains(string(config.Quota), `https://opencode.ai/zen/go/v1/usage`) {
 		t.Fatalf("OpenCode Go quota path must be the absolute usage URL, got %s", config.Quota)
+	}
+}
+
+func TestGeminiAntigravityBuiltinDeclaresBridgeQuota(t *testing.T) {
+	registry, err := LoadBuiltins(filepath.Join("..", "..", "manifest", "builtins.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, exists := registry.ChannelTypeByCode("gemini_antigravity")
+	if !exists || item.ID != 9000000000000026 {
+		t.Fatalf("gemini_antigravity builtin = %+v, exists=%v", item, exists)
+	}
+	var config struct {
+		BaseURL string `json:"baseUrl"`
+		Quota   struct {
+			Adapter string `json:"adapter"`
+			Path    string `json:"path"`
+		} `json:"quota"`
+		Protocol struct {
+			ChatCompletionsOnly bool `json:"chatCompletionsOnly"`
+		} `json:"protocol"`
+	}
+	if err = json.Unmarshal(item.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	// 根地址指向 Docker 内网的官方 agy 桥接；额度走桥接的 /quota（按根地址拼接）。
+	if config.BaseURL != "http://agy-bridge:8091/v1" {
+		t.Fatalf("gemini_antigravity base URL = %q", config.BaseURL)
+	}
+	if config.Quota.Adapter != "antigravity_usage" || config.Quota.Path != "/quota" {
+		t.Fatalf("gemini_antigravity quota config = %+v, want antigravity_usage adapter at /quota", config.Quota)
+	}
+	// 桥接只有 Chat Completions 端点：不得按模型名把请求转投 /responses。
+	if !config.Protocol.ChatCompletionsOnly {
+		t.Fatal("gemini_antigravity must be chatCompletionsOnly")
+	}
+	// 官方 Gemini 类型保持原样：直连 Google API 没有 /quota，不能被顺手加上额度按钮。
+	official, _ := registry.ChannelTypeByCode("gemini")
+	var officialConfig struct {
+		Quota json.RawMessage `json:"quota"`
+	}
+	if err = json.Unmarshal(official.Config, &officialConfig); err != nil {
+		t.Fatal(err)
+	}
+	if len(officialConfig.Quota) != 0 {
+		t.Fatalf("official gemini must not declare quota config, got %s", officialConfig.Quota)
 	}
 }
 

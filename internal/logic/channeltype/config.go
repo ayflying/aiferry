@@ -185,6 +185,22 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 		config.HeaderName = "Authorization"
 		config.HeaderPrefix = "Bearer "
 		return nil
+	case AdapterAntigravityUsage:
+		// Antigravity 桥接的额度端点挂在渠道根地址之下（http://agy-bridge:8091/v1
+		// + /quota），由 quota 解析层按「根地址 + 相对路径」拼接，不走 host 根解析。
+		// 鉴权固定为渠道密钥（桥接令牌），字段与 OpenCode Go 一样由后端覆盖。
+		config.Method = httpMethodGet
+		config.Path = strings.TrimSpace(config.Path)
+		if config.Path == "" {
+			config.Path = "/quota"
+		}
+		if err := validatePathField("quota.path", config.Path); err != nil {
+			return err
+		}
+		config.AuthType = AuthChannelKey
+		config.HeaderName = "Authorization"
+		config.HeaderPrefix = "Bearer "
+		return nil
 	case AdapterVolcAFP:
 		// V4 签名接口：固定 POST + 管理密钥鉴权，path 仅用于校验留空兼容。
 		config.Method = httpMethodGet
@@ -223,7 +239,7 @@ func normalizeQuotaConfig(config *QuotaConfig) error {
 		}
 		return nil
 	default:
-		return gerror.Newf("unsupported quota adapter %q (expected none, %s, %s, %s, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterOpenCodeGo, AdapterVolcAFP, AdapterWorkBuddy, AdapterCodexUsage)
+		return gerror.Newf("unsupported quota adapter %q (expected none, %s, %s, %s, %s, %s or %s)", config.Adapter, AdapterZhipuQuota, AdapterOpenCodeGo, AdapterAntigravityUsage, AdapterVolcAFP, AdapterWorkBuddy, AdapterCodexUsage)
 	}
 	config.Method = strings.ToUpper(strings.TrimSpace(config.Method))
 	if config.Method == "" {

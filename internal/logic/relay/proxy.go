@@ -55,5 +55,21 @@ func (s *sRelay) doViaProxy(ctx context.Context, req *http.Request, candidate Ca
 	if err != nil {
 		return nil, err
 	}
+	// Antigravity 桥接自己不出网，真正的出口是容器里的官方 agy 进程；把该密钥
+	// 当前选中的代理地址用内部请求头交给桥接，桥接据此给 agy 设置代理环境，
+	// 使「密钥 ↔ 代理」配对在桥接链路上同样成立（与直连渠道行为一致）。
+	// 该头只在令牌认证通过后由桥接读取，且不会出现在桥接的任何响应里。
+	// 写在 do 闭包内而不是提前写死：DoViaProxies 代理层失败顺延下一个代理
+	// 重试时，头里必须是顺延后的地址，否则桥接仍会拿失效的代理去打。
+	if channel.IsAntigravityChannel(candidate.ChannelType) {
+		originalDo := do
+		do = func(client *http.Client) (*http.Response, error) {
+			req.Header.Del(channel.AntigravityProxyHeader)
+			if current := proxies.Current(); current != "" {
+				req.Header.Set(channel.AntigravityProxyHeader, current)
+			}
+			return originalDo(client)
+		}
+	}
 	return s.channels.DoViaProxies(proxies, resetRequestBody(req), do)
 }

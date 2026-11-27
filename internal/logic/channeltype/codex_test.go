@@ -38,6 +38,28 @@ func TestCodexBuiltin(t *testing.T) {
 	}
 }
 
+func TestAntigravityConfigNormalization(t *testing.T) {
+	cfg, err := ParseConfig([]byte(`{"quota":{"adapter":" Antigravity_Usage "}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 默认 GET + /quota + 渠道密钥 Bearer；路径按渠道根地址拼接（由 quota 解析层处理）。
+	if cfg.Quota.Adapter != AdapterAntigravityUsage || cfg.Quota.Method != "GET" || cfg.Quota.Path != "/quota" || cfg.Quota.AuthType != AuthChannelKey || cfg.Quota.HeaderPrefix != "Bearer " {
+		t.Fatalf("antigravity quota defaults = %+v", cfg.Quota)
+	}
+	// 鉴权由后端强制覆盖为渠道密钥：即使配置写成 management_key 也会被纠正而不是报错。
+	if raw := `{"quota":{"adapter":"antigravity_usage","authType":"management_key"}}`; true {
+		cfg, err := ParseConfig([]byte(raw))
+		if err != nil || cfg.Quota.AuthType != AuthChannelKey {
+			t.Fatalf("antigravity quota auth must be forced to channel key: %+v / %v", cfg.Quota, err)
+		}
+	}
+	// 路径不以 / 开头且不是完整地址：拒绝，避免拼出错地址。
+	if _, err := ParseConfig([]byte(`{"quota":{"adapter":"antigravity_usage","path":"quota"}}`)); err == nil {
+		t.Fatal("relative quota path without leading slash accepted")
+	}
+}
+
 func TestCodexConfigNormalization(t *testing.T) {
 	cfg, err := ParseConfig([]byte(`{"login":{"adapter":" Codex_Device ","platform":"unused","prefixPath":"unused"},"quota":{"adapter":" Codex_Usage "}}`))
 	if err != nil {

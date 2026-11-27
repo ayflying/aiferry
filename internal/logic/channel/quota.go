@@ -115,11 +115,20 @@ func (s *sChannel) queryCredentialQuota(ctx context.Context, channel entity.Chan
 			Cipher: credential.ApiKeyCipher,
 		})
 	}
-	endpoint, err := resolveQuotaURL(channel.BaseUrl, config.Path)
+	endpoint, err := s.resolveQuotaEndpoint(channel, config)
 	if err != nil {
 		return QuotaView{}, err
 	}
 	return s.fetchQuotaWithCredential(ctx, channel, config, endpoint, credential.ApiKeyCipher)
+}
+
+// resolveQuotaEndpoint 按适配器选择地址解析规则：Antigravity 桥接的额度端点在
+// 渠道根地址之下（根地址 + 相对路径），其余适配器沿用 host 根解析或完整地址直连。
+func (s *sChannel) resolveQuotaEndpoint(channel entity.Channels, config channeltype.QuotaConfig) (string, error) {
+	if config.Adapter == channeltype.AdapterAntigravityUsage {
+		return resolveAntigravityQuotaURL(channel.BaseUrl, config.Path)
+	}
+	return resolveQuotaURL(channel.BaseUrl, config.Path)
 }
 
 func (s *sChannel) readQuotaCache(ctx context.Context, channelID uint64) (QuotaView, bool) {
@@ -160,7 +169,7 @@ func (s *sChannel) fetchQuota(ctx context.Context, channel entity.Channels, conf
 	if config.Adapter == channeltype.AdapterWorkBuddy {
 		return s.fetchWorkBuddyCredits(ctx, channel, config)
 	}
-	endpoint, err := resolveQuotaURL(channel.BaseUrl, config.Path)
+	endpoint, err := s.resolveQuotaEndpoint(channel, config)
 	if err != nil {
 		return QuotaView{}, err
 	}
@@ -455,6 +464,9 @@ func parseQuotaResponse(adapter string, body []byte) (QuotaView, error) {
 	}
 	if adapter == channeltype.AdapterOpenCodeGo {
 		return parseOpenCodeGoUsage(body)
+	}
+	if adapter == channeltype.AdapterAntigravityUsage {
+		return parseAntigravityUsage(body)
 	}
 	if adapter == channeltype.AdapterWorkBuddy {
 		return parseWorkBuddyCredits(body)

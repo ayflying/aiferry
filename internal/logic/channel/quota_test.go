@@ -246,6 +246,48 @@ func TestParseOpenCodeGoUsageRejectsEmpty(t *testing.T) {
 	}
 }
 
+func TestParseAntigravityUsageReusesOpenCodeGoShape(t *testing.T) {
+	// 桥接把官方 CLI 的 /usage 翻译成 OpenCode Go 同款形状；解析器复用，模式标记改为本适配器。
+	body := []byte(`{"usage":{"rolling":{"status":"ok","percent":63.21,"resetsAt":"2026-11-27T07:46:35Z"},"weekly":{"status":"ok","percent":16.19,"resetsAt":"2026-12-04T02:46:35Z"}}}`)
+	view, err := parseQuotaResponse("antigravity_usage", body)
+	if err != nil {
+		t.Fatalf("parseQuotaResponse error: %v", err)
+	}
+	if view.Mode != "antigravity_usage" || len(view.Windows) != 2 {
+		t.Fatalf("view = %+v", view)
+	}
+	if view.Windows[0].Kind != QuotaWindowFiveHour || view.Windows[0].UsedPercent != 63.21 || view.Windows[0].NextResetAt == nil {
+		t.Fatalf("five hour window = %+v", view.Windows[0])
+	}
+	if view.Windows[1].Kind != QuotaWindowWeekly || view.Windows[1].UsedPercent != 16.19 || view.Windows[1].NextResetAt == nil {
+		t.Fatalf("weekly window = %+v", view.Windows[1])
+	}
+	// 免费层没有 5 小时窗口时只剩每周窗口，不报错也不填充空行。
+	view, err = parseQuotaResponse("antigravity_usage", []byte(`{"usage":{"weekly":{"status":"ok","percent":8,"resetsAt":"2026-12-01T00:00:00Z"}}}`))
+	if err != nil || len(view.Windows) != 1 || view.Windows[0].Kind != QuotaWindowWeekly {
+		t.Fatalf("weekly-only view = %+v / %v", view, err)
+	}
+	if _, err = parseQuotaResponse("antigravity_usage", []byte(`{}`)); err == nil {
+		t.Fatal("empty usage payload must fail instead of returning an empty view")
+	}
+}
+
+func TestResolveAntigravityQuotaURLKeepsBasePath(t *testing.T) {
+	// 桥接端点挂在渠道根地址之下：必须保留 /v1，不能按 host 根解析把它丢掉。
+	endpoint, err := resolveAntigravityQuotaURL("http://agy-bridge:8091/v1", "/quota")
+	if err != nil || endpoint != "http://agy-bridge:8091/v1/quota" {
+		t.Fatalf("endpoint = %q, err %v", endpoint, err)
+	}
+	// 配置了完整地址时直连（桥接跑在别的地址上）。
+	endpoint, err = resolveAntigravityQuotaURL("http://agy-bridge:8091/v1", "http://elsewhere:9000/v1/quota")
+	if err != nil || endpoint != "http://elsewhere:9000/v1/quota" {
+		t.Fatalf("absolute endpoint = %q, err %v", endpoint, err)
+	}
+	if _, err = resolveAntigravityQuotaURL("", "/quota"); err == nil {
+		t.Fatal("missing base URL must fail")
+	}
+}
+
 func TestResolveQuotaURL(t *testing.T) {
 	// 完整 URL 直连（OpenCode Go）：原样返回，不拼 baseUrl。
 	endpoint, err := resolveQuotaURL("https://opencode.ai/zen/go/v1", "https://opencode.ai/zen/go/v1/usage")

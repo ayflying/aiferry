@@ -79,6 +79,11 @@ describe('channel type config helpers', () => {
     expect(quotaDetailVisible({ quota: { adapter: 'codex_usage' } })).toBe(true)
     expect(QUOTA_ADAPTER_OPTIONS).toContainEqual({ value: 'codex_usage', label: 'Codex 套餐用量' })
     expect(quotaSummary({ quota: { adapter: 'codex_usage' } })).toBe('Codex 套餐用量')
+    // Antigravity 桥接的额度端点固定为 GET /quota + 桥接令牌 Bearer，字段同样只读。
+    expect(quotaDetailLocked({ quota: { adapter: 'antigravity_usage' } })).toBe(true)
+    expect(quotaDetailVisible({ quota: { adapter: 'antigravity_usage' } })).toBe(true)
+    expect(QUOTA_ADAPTER_OPTIONS).toContainEqual({ value: 'antigravity_usage', label: 'Antigravity 订阅额度' })
+    expect(quotaSummary({ quota: { adapter: 'antigravity_usage' } })).toBe('Antigravity 订阅额度')
     expect(quotaDetailLocked({ quota: { adapter: 'zhipu_coding_plan' } })).toBe(false)
   })
 

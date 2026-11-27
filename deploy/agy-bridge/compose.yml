@@ -1,7 +1,7 @@
 name: agy-bridge
 services:
   agy-bridge:
-    image: ${BRIDGE_IMAGE:-docker.io/ayflying/aiferry:0.7.35-agy-bridge}
+    image: ${BRIDGE_IMAGE:-docker.io/ayflying/aiferry:0.7.36-agy-bridge}
     restart: unless-stopped
     init: true
     read_only: true

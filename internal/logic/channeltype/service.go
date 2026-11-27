@@ -29,6 +29,9 @@ const (
 	AdapterZhipuQuota  = "zhipu_coding_plan"
 	AdapterOpenCodeGo  = "opencode_go_usage"
 	AdapterCodexUsage  = "codex_usage"
+	// AdapterAntigravityUsage 查询 Google Antigravity（官方 agy CLI）订阅额度。
+	// 桥接把 CLI 的 /usage 翻译成与 OpenCode Go 相同的形状，解析器直接复用。
+	AdapterAntigravityUsage = "antigravity_usage"
 	AdapterVolcAFP     = "volcengine_afp"
 	AdapterWorkBuddy   = "workbuddy_credits"
 	// AdapterQiniuUsage remains supported for custom types created before 0.5.18.

@@ -32,40 +32,42 @@ type agyEvent struct {
 	} `json:"result"`
 }
 
-func cliRunner(binary, dir, guardPath, model string) runner {
-	return func(ctx context.Context, prompt string, emit func(string) error) (usage, error) {
-		// 用户输入只能进入 JSON 标准输入，不能改写 CLI 参数或触发斜杠命令。
-		data, err := json.Marshal(map[string]any{"event": "user", "message": map[string]string{"content": prompt}})
-		if err != nil {
-			return usage{}, err
-		}
-		ctx, cancel := context.WithTimeout(ctx, 95*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, binary, "--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands", "--sandbox", "--settings", guardPath, "--print-timeout", "85s", "--model", model)
-		cmd.Dir = dir
-		cmd.Stdin = bytes.NewReader(append(data, '\n'))
-		cmd.WaitDelay = 2 * time.Second
-		out, err := cmd.StdoutPipe()
-		if err != nil {
-			return usage{}, err
-		}
-		if err = cmd.Start(); err != nil {
-			return usage{}, err
-		}
-		// 即使 CLI 的子进程还持有管道，取消请求也必须解除扫描阻塞。
-		stopClose := context.AfterFunc(ctx, func() { _ = out.Close() })
-		defer stopClose()
-		u, err := readEvents(out, emit)
-		if err != nil {
-			cancel()
-			_ = out.Close()
-		}
-		waitErr := cmd.Wait()
-		if err != nil {
-			return usage{}, err
-		}
-		return u, waitErr
+type runner func(context.Context, string, func(string) error) (usage, error)
+
+// runCLI 以给定环境启动一次官方 agy 对话。用户输入只能进入 JSON 标准输入，
+// 不能改写 CLI 参数或触发斜杠命令。
+func runCLI(ctx context.Context, binary, dir, guardPath, model string, env []string, prompt string, emit func(string) error) (usage, error) {
+	data, err := json.Marshal(map[string]any{"event": "user", "message": map[string]string{"content": prompt}})
+	if err != nil {
+		return usage{}, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, 95*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands", "--sandbox", "--settings", guardPath, "--print-timeout", "85s", "--model", model)
+	cmd.Dir = dir
+	cmd.Env = env
+	cmd.Stdin = bytes.NewReader(append(data, '\n'))
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return usage{}, err
+	}
+	if err = cmd.Start(); err != nil {
+		return usage{}, err
+	}
+	// 即使 CLI 的子进程还持有管道，取消请求也必须解除扫描阻塞。
+	stopClose := context.AfterFunc(ctx, func() { _ = out.Close() })
+	defer stopClose()
+	u, err := readEvents(out, emit)
+	if err != nil {
+		cancel()
+		_ = out.Close()
+	}
+	waitErr := cmd.Wait()
+	if err != nil {
+		return usage{}, err
+	}
+	return u, waitErr
 }
 
 func readEvents(r io.Reader, emit func(string) error) (usage, error) {
