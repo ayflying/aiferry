@@ -1,17 +1,22 @@
 name: agy-bridge
+# 全局出口代理：桥接下载官方 CLI 与渠道未配代理时的对话出网都读 HTTPS_PROXY。
+# 留空即直连；NO_PROXY 必须排除内网与回环，否则主服务连 MySQL/Redis 也会走代理。
+x-proxy-env: &proxy-env
+  HTTPS_PROXY: ${GLOBAL_PROXY:-}
+  HTTP_PROXY: ${GLOBAL_PROXY:-}
+  NO_PROXY: localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 services:
   agy-bridge:
-    image: ${BRIDGE_IMAGE:-docker.io/ayflying/aiferry-bridge:0.7.37}
+    image: ${BRIDGE_IMAGE:-docker.io/ayflying/aiferry-bridge:0.7.38}
     restart: unless-stopped
     init: true
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
+      <<: *proxy-env
       AGY_BRIDGE_PRIVATE_DOCKER: "1"
       AGY_BRIDGE_LISTEN: "0.0.0.0:8091"
-      # 官方 CLI 从 Google 清单服务下载；宿主机直连不通时在此配置出口代理。
-      AGY_BRIDGE_PROXY: ${AGY_BRIDGE_PROXY:-}
     tmpfs:
       - /tmp:mode=1777,size=256m
     volumes:

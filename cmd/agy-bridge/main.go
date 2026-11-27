@@ -54,10 +54,9 @@ func serve() error {
 	if cliDir == "" {
 		cliDir = filepath.Join(stateDir, "cli")
 	}
-	// 更新器没有「本次请求的代理」可用，下载出口用固定配置；对话请求仍按
-	// 账号或请求头走各自的代理。
-	updateProxy := os.Getenv("AGY_BRIDGE_PROXY")
-	manager := newCLIManager(cliDir, func() string { return updateProxy })
+	// 更新器没有「本次请求的代理」可用，下载出口用编排配置的全局代理；
+	// 对话请求仍按「请求头 > 账号配置 > 全局代理」的顺序选代理。
+	manager := newCLIManager(cliDir, globalProxy)
 	installCtx, cancelInstall := context.WithTimeout(context.Background(), 10*time.Minute)
 	err = manager.ensure(installCtx)
 	cancelInstall()

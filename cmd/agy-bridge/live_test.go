@@ -79,7 +79,7 @@ func TestLiveUsage(t *testing.T) {
 // 只能核对落盘文件与官方发布包一致。
 func TestLiveCLIUpdate(t *testing.T) {
 	liveCLI(t)
-	m := newCLIManager(filepath.Join(t.TempDir(), "cli"), func() string { return os.Getenv("AGY_BRIDGE_PROXY") })
+	m := newCLIManager(filepath.Join(t.TempDir(), "cli"), globalProxy)
 	if err := m.ensure(t.Context()); err != nil {
 		t.Fatalf("cli updater failed: %v", err)
 	}

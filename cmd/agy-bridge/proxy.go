@@ -48,17 +48,34 @@ func proxyFunc(proxy string) (func(*http.Request) (*url.URL, error), error) {
 }
 
 // proxyEnv 把代理地址换算成官方 agy 进程的环境变量。CLI 自己遵循标准的
-// HTTPS_PROXY / HTTP_PROXY / NO_PROXY 约定，因此不改它的任何行为；
-// 本机回环地址（桥接自身、容器内的健康检查）永远不走代理。
+// HTTPS_PROXY / HTTP_PROXY / NO_PROXY 约定，因此不改它的任何行为。
+// NO_PROXY 继承编排里配置的内网例外（主服务要连 MySQL/Redis/Casdoor），
+// 再固定加上回环地址：桥接自身与容器内健康检查永远不走代理。
 func proxyEnv(proxy string) ([]string, error) {
 	parsed, err := parseProxyURL(proxy)
 	if err != nil || parsed == nil {
 		return nil, err
 	}
+	noProxy := "localhost,127.0.0.1,::1"
+	if extra := strings.TrimSpace(os.Getenv("NO_PROXY")); extra != "" {
+		noProxy += "," + extra
+	}
 	return []string{
 		"HTTPS_PROXY=" + proxy, "HTTP_PROXY=" + proxy, "https_proxy=" + proxy, "http_proxy=" + proxy,
-		"NO_PROXY=localhost,127.0.0.1,::1", "no_proxy=localhost,127.0.0.1,::1",
+		"NO_PROXY=" + noProxy, "no_proxy=" + noProxy,
 	}, nil
+}
+
+// globalProxy 是编排里配置的全局出口：优先读桥接专用变量 AGY_BRIDGE_PROXY，
+// 没有时退回标准的 HTTPS_PROXY / HTTP_PROXY，这样编排只配一份代理就能同时
+// 覆盖「桥接下载官方 CLI」与「渠道未配代理时的对话出网」。没配置即直连。
+func globalProxy() string {
+	for _, name := range []string{"AGY_BRIDGE_PROXY", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // baseEnv 是官方 agy 进程允许继承的全部环境：只保留网络出口与语言/时区类变量，
@@ -75,8 +92,9 @@ func baseEnv(home string) []string {
 	return env
 }
 
-// accountRunner 构造「以该账号身份调用官方 CLI」的执行器：HOME 指向账号目录，
-// 代理来自账号固定配置或请求头（请求头优先，便于 AiFerry 按密钥配对代理时如实生效）。
+// accountRunner 构造「以该账号身份调用官方 CLI」的执行器：HOME 指向账号目录。
+// 代理优先级：请求头（AiFerry 按密钥选中的代理）> 账号固定配置 > 编排全局代理；
+// 三处都没配即直连。
 func accountRunner(binary, work, guardPath, model string) func(account, string) runner {
 	return func(acc account, requestProxy string) runner {
 		return func(ctx context.Context, prompt string, emit func(string) error) (usage, error) {
@@ -84,6 +102,9 @@ func accountRunner(binary, work, guardPath, model string) func(account, string) 
 			proxy := requestProxy
 			if proxy == "" {
 				proxy = acc.proxy
+			}
+			if proxy == "" {
+				proxy = globalProxy()
 			}
 			proxyVariables, err := proxyEnv(proxy)
 			if err != nil {
