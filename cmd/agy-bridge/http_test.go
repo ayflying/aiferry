@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -11,6 +12,16 @@ import (
 // testAccount 构造一个仅用于测试的账号（HOME 指向临时目录，不调用真实 CLI）。
 // 令牌满足生产要求的最低强度，避免测试与真实校验规则脱节。
 const testToken = "test-token-0123456789abcdef0123456789abcdef"
+
+// testCLI 构造一个只读的 CLI 管理器：单测不触网、不装 CLI，只让 /v1/version 有值可读。
+func testCLI(t *testing.T) *cliManager {
+	t.Helper()
+	m := newCLIManager(t.TempDir(), func() string { return "" })
+	if err := os.WriteFile(m.record(), []byte(`{"version":"test"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
 
 func testAccount(t *testing.T, name string) account {
 	t.Helper()
@@ -40,7 +51,7 @@ func TestBridge(t *testing.T) {
 			return payload, nil
 		}
 	}
-	h := newBridge([]account{acc}, "example", run, usageFor)
+	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t))
 	for _, tt := range []struct {
 		name, auth, body string
 		status           int
@@ -88,7 +99,7 @@ func TestProxyHeaderRequiresAuthAndOverridesAccountProxy(t *testing.T) {
 			return payload, nil
 		}
 	}
-	h := newBridge([]account{acc}, "example", run, usageFor)
+	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t))
 
 	r := httptest.NewRequest("GET", "/v1/quota", nil)
 	r.Header.Set(proxyHeader, "http://other:2")
@@ -131,7 +142,7 @@ func TestStreamDoesNotEndSuccessfullyAfterFailure(t *testing.T) {
 	usageFor := func(account, string) func(context.Context) (usagePayload, error) {
 		return func(context.Context) (usagePayload, error) { return usagePayload{}, context.Canceled }
 	}
-	h := newBridge([]account{acc}, "example", run, usageFor)
+	h := newBridge([]account{acc}, "example", run, usageFor, testCLI(t))
 	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"example","stream":true,"messages":[{"role":"user","content":"ping"}]}`))
 	r.Header.Set("Authorization", "Bearer "+testToken)
 	w := httptest.NewRecorder()

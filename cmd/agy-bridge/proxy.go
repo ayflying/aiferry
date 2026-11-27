@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -12,10 +13,9 @@ import (
 // 只在 Docker 内网、且通过令牌认证之后才会被读取；桥接不回显它。
 const proxyHeader = "X-AiFerry-Proxy"
 
-// proxyEnv 把代理地址换算成官方 agy 进程的环境变量。CLI 自己遵循标准的
-// HTTPS_PROXY / HTTP_PROXY / NO_PROXY 约定，因此不改它的任何行为；
-// 本机回环地址（桥接自身、容器内的健康检查）永远不走代理。
-func proxyEnv(proxy string) ([]string, error) {
+// parseProxyURL 校验代理地址并返回解析结果；空地址返回 nil 表示直连。
+// 子进程环境变量与桥接自身的 HTTP 客户端共用这一套规则，避免两处各写一遍。
+func parseProxyURL(proxy string) (*url.URL, error) {
 	proxy = strings.TrimSpace(proxy)
 	if proxy == "" {
 		return nil, nil
@@ -28,6 +28,32 @@ func proxyEnv(proxy string) ([]string, error) {
 	case "http", "https", "socks5", "socks5h":
 	default:
 		return nil, errors.New("unsupported proxy scheme")
+	}
+	return parsed, nil
+}
+
+// proxyFunc 把代理地址换算成 http.Transport 需要的形式，供桥接自己访问
+// 官方清单与下载地址时使用；回环地址永远不走代理。
+func proxyFunc(proxy string) (func(*http.Request) (*url.URL, error), error) {
+	parsed, err := parseProxyURL(proxy)
+	if err != nil {
+		return nil, err
+	}
+	return func(r *http.Request) (*url.URL, error) {
+		if r.URL.Hostname() == "localhost" || r.URL.Hostname() == "127.0.0.1" {
+			return nil, nil
+		}
+		return parsed, nil
+	}, nil
+}
+
+// proxyEnv 把代理地址换算成官方 agy 进程的环境变量。CLI 自己遵循标准的
+// HTTPS_PROXY / HTTP_PROXY / NO_PROXY 约定，因此不改它的任何行为；
+// 本机回环地址（桥接自身、容器内的健康检查）永远不走代理。
+func proxyEnv(proxy string) ([]string, error) {
+	parsed, err := parseProxyURL(proxy)
+	if err != nil || parsed == nil {
+		return nil, err
 	}
 	return []string{
 		"HTTPS_PROXY=" + proxy, "HTTP_PROXY=" + proxy, "https_proxy=" + proxy, "http_proxy=" + proxy,

@@ -17,17 +17,19 @@ type bridge struct {
 	model    string
 	run      func(account, string) runner
 	usage    func(account, string) func(context.Context) (usagePayload, error)
+	cli      *cliManager
 	slots    map[string]chan struct{}
 }
 
-func newBridge(accounts []account, model string, run func(account, string) runner, usage func(account, string) func(context.Context) (usagePayload, error)) http.Handler {
-	b := &bridge{accounts: accounts, model: model, run: run, usage: usage, slots: make(map[string]chan struct{}, len(accounts))}
+func newBridge(accounts []account, model string, run func(account, string) runner, usage func(account, string) func(context.Context) (usagePayload, error), cli *cliManager) http.Handler {
+	b := &bridge{accounts: accounts, model: model, run: run, usage: usage, cli: cli, slots: make(map[string]chan struct{}, len(accounts))}
 	for _, acc := range accounts {
 		b.slots[acc.name] = make(chan struct{}, 1)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", b.models)
 	mux.HandleFunc("GET /v1/quota", b.quota)
+	mux.HandleFunc("GET /v1/version", b.version)
 	mux.HandleFunc("POST /v1/chat/completions", b.chat)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		acc, ok := resolve(b.accounts, r.Header.Get("Authorization"))
@@ -64,6 +66,11 @@ func currentAccount(ctx context.Context) (account, string) {
 
 func (b *bridge) models(w http.ResponseWriter, _ *http.Request) {
 	reply(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": b.model, "object": "model", "owned_by": "agy"}}})
+}
+
+// version 回显桥接与卷内官方 CLI 的版本号，排查「协议不兼容」时先看这里。
+func (b *bridge) version(w http.ResponseWriter, _ *http.Request) {
+	reply(w, map[string]string{"bridge": bridgeVersion, "agy": b.cli.currentVersion()})
 }
 
 // quota 用官方 CLI 的 /usage 查询该账号的订阅额度，输出 OpenCode Go 同款形状。

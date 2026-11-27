@@ -22,6 +22,7 @@
 - 本机基础测试不等于生产验收；提交推送后检查 CI 结果。生产部署是独立操作，未经本次明确授权不更新容器。
 - 宿主机服务端口固定为 `38517`，容器内仍监听 `8080`。部署后验证 `http://127.0.0.1:38517/healthz`。
 - 生产 Compose 只能引用 `docker.io/ayflying/aiferry:<版本>`，不得包含 `build`。运行前执行 `docker compose pull aiferry`，再执行 `docker compose up -d --no-deps aiferry`。国内宿主机直连 `ghcr.io` 会反复超时，正式镜像只由 CI 推送到 Docker Hub；`ghcr.io/ayflying/aiferry` 仅残留集群隔离测试标签，不得作为生产部署来源。
+- 桥接是独立镜像仓库 `docker.io/ayflying/aiferry-bridge:<版本>`（版本号与主服务同步，另有 `latest`），不得再用 `aiferry:<版本>-agy-bridge` 这类标签后缀——仓库内自定义标签在部分镜像加速站拉不下来。桥接镜像不含任何官方 CLI：官方 `agy` 由容器启动时从 Google 官方清单拉到可写卷并定期自更新，升级 CLI 不需要重新构建桥接镜像。
 
 ## 版本与镜像
 

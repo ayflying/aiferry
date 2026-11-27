@@ -1,7 +1,7 @@
 name: agy-bridge
 services:
   agy-bridge:
-    image: ${BRIDGE_IMAGE:-docker.io/ayflying/aiferry:0.7.36-agy-bridge}
+    image: ${BRIDGE_IMAGE:-docker.io/ayflying/aiferry-bridge:0.7.37}
     restart: unless-stopped
     init: true
     read_only: true
@@ -10,9 +10,12 @@ services:
     environment:
       AGY_BRIDGE_PRIVATE_DOCKER: "1"
       AGY_BRIDGE_LISTEN: "0.0.0.0:8091"
+      # 官方 CLI 从 Google 清单服务下载；宿主机直连不通时在此配置出口代理。
+      AGY_BRIDGE_PROXY: ${AGY_BRIDGE_PROXY:-}
     tmpfs:
       - /tmp:mode=1777,size=256m
     volumes:
+      # agy-state 同时承载登录态与官方 CLI 二进制：CLI 不在镜像里，启动时自取最新。
       - agy-state:/home/agy/state
     healthcheck:
       # 401 表示网关已监听且鉴权生效，不读取密钥，也不消耗模型额度。
@@ -20,6 +23,8 @@ services:
       interval: 15s
       timeout: 5s
       retries: 4
+      # 启动时要先下载约 270MB 的官方 CLI，给足够的起步时间。
+      start_period: 180s
     networks:
       - aiferry
 
