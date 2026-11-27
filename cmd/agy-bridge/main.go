@@ -18,6 +18,12 @@ func main() {
 	}
 }
 
+// 默认只允许回环；独立容器须显式开启 IPv4 监听，且不得映射宿主端口。
+func allowedListen(addr string, privateDocker bool) bool {
+	host, _, err := net.SplitHostPort(addr)
+	return err == nil && (host == "127.0.0.1" || host == "::1" || (privateDocker && host == "0.0.0.0"))
+}
+
 func serve() error {
 	token, err := os.ReadFile(os.Getenv("AGY_BRIDGE_TOKEN_FILE"))
 	if err != nil || len(strings.TrimSpace(string(token))) < 32 {
@@ -39,9 +45,8 @@ func serve() error {
 	if addr == "" {
 		addr = "127.0.0.1:8091"
 	}
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil || (host != "127.0.0.1" && host != "::1") {
-		return errors.New("bridge must listen on loopback; use a private authenticated TLS proxy for remote access")
+	if !allowedListen(addr, os.Getenv("AGY_BRIDGE_PRIVATE_DOCKER") == "1") {
+		return errors.New("bridge must listen on loopback unless private Docker mode is explicitly enabled")
 	}
 	// 不从 AiFerry 源码目录或宿主机业务目录启动代理。
 	dir, err := os.MkdirTemp("", "aiferry-agy-")

@@ -1,0 +1,32 @@
+name: agy-bridge
+services:
+  agy-bridge:
+    image: ${BRIDGE_IMAGE:-docker.io/ayflying/aiferry:0.7.35-agy-bridge}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      AGY_BRIDGE_PRIVATE_DOCKER: "1"
+      AGY_BRIDGE_LISTEN: "0.0.0.0:8091"
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+    volumes:
+      - agy-state:/home/agy/state
+    healthcheck:
+      # 401 表示网关已监听且鉴权生效，不读取密钥，也不消耗模型额度。
+      test: ["CMD-SHELL", "test \"$$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8091/v1/models)\" = 401"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+    networks:
+      - aiferry
+
+volumes:
+  agy-state:
+
+networks:
+  aiferry:
+    external: true
+    name: aiferry_default

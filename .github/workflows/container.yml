@@ -111,3 +111,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+
+      - name: 构建独立 agy 桥接镜像
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.agy-bridge
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.DOCKERHUB_IMAGE }}:${{ steps.version.outputs.value }}-agy-bridge
+          provenance: false
+
+      - name: 验证并推送桥接镜像
+        if: github.ref == 'refs/heads/main'
+        env:
+          BRIDGE_IMAGE: ${{ env.DOCKERHUB_IMAGE }}:${{ steps.version.outputs.value }}-agy-bridge
+        shell: bash
+        run: |
+          docker network create aiferry_default
+          trap 'docker compose -f deploy/agy-bridge/compose.yml down -v; docker network rm aiferry_default' EXIT
+          docker compose -f deploy/agy-bridge/compose.yml config --images | grep -Fx "$BRIDGE_IMAGE"
+          docker compose -f deploy/agy-bridge/compose.yml up -d --pull never --wait --wait-timeout 70
+          docker push "$BRIDGE_IMAGE"
